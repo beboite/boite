@@ -489,6 +489,64 @@ describe('claude driver', () => {
     });
   });
 
+  test('one Edit writes its card three times, and the hooks never ship the original file', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('threads.subscribe', { threadId });
+    const written: MessagePart[] = [];
+    client.on('message.part', (event) => {
+      if (event.threadId === threadId && event.part.type === 'tool') written.push(event.part);
+    });
+
+    const originalFile = 'x'.repeat(100_000);
+    const input = { file_path: 'a.ts', old_string: 'x', new_string: 'y' };
+    const signal = new AbortController().signal;
+    scripted((fake, options) => {
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      const post = options.hooks!.PostToolUse![0]!.hooks[0]!;
+      const base = { session_id: 'sess-edit', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_edit', tool_name: 'Edit', tool_input: input };
+      void (async () => {
+        // The CLI's order: the streamed block, the assistant frame, the two hooks, the result.
+        fake.emit(init('sess-edit'));
+        fake.emit(streamEvent('sess-edit', { type: 'message_start', message: { id: 'msg_1' } }));
+        fake.emit(streamEvent('sess-edit', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_edit', name: 'Edit', input: {} } }));
+        fake.emit(streamEvent('sess-edit', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } }));
+        fake.emit(assistant('sess-edit', [{ type: 'tool_use', id: 'toolu_edit', name: 'Edit', input }]));
+        await waitFor(() => written.length >= 2);
+        await pre({ ...base, hook_event_name: 'PreToolUse' }, 'toolu_edit', { signal });
+        await post({ ...base, hook_event_name: 'PostToolUse', tool_response: { filePath: 'a.ts', originalFile, structuredPatch: [] } }, 'toolu_edit', { signal });
+        fake.emit(toolResult('sess-edit', 'toolu_edit', 'The file a.ts has been updated.'));
+        fake.emit(success('sess-edit'));
+        fake.end();
+      })();
+    });
+
+    expect(await runTurn(client, threadId, 'edit it')).toBe('done');
+    expect(written).toHaveLength(3);
+    expect(written.some((part) => JSON.stringify(part).includes(originalFile))).toBe(false);
+    const thread = await client.call('threads.get', { threadId });
+    const tool = thread.messages.at(-1)?.parts.find((part) => part.type === 'tool');
+    expect(tool).toMatchObject({ toolId: 'toolu_edit', status: 'done', output: 'The file a.ts has been updated.', input });
+  });
+
+  test('a PreToolUse with no assistant frame before it still draws the card', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake, options) => {
+      const pre = options.hooks!.PreToolUse![0]!.hooks[0]!;
+      void (async () => {
+        fake.emit(init('sess-hook'));
+        await pre({ hook_event_name: 'PreToolUse', session_id: 'sess-hook', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'toolu_only', tool_name: 'Bash', tool_input: { command: 'ls' } }, 'toolu_only', { signal: new AbortController().signal });
+        fake.emit(toolResult('sess-hook', 'toolu_only', 'a.ts'));
+        fake.emit(success('sess-hook'));
+        fake.end();
+      })();
+    });
+    expect(await runTurn(client, threadId, 'list')).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.at(-1)?.parts.find((part) => part.type === 'tool')).toMatchObject({ toolId: 'toolu_only', name: 'Bash', input: { command: 'ls' }, output: 'a.ts', status: 'done' });
+  });
+
   test('Edit, Write and MultiEdit inputs become diff documents on their tool parts', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

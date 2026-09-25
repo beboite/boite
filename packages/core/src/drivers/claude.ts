@@ -586,6 +586,12 @@ class ClaudeTurn {
     this.emitTool(toolId, entry);
   }
 
+  /** The tool's card already carries its parsed input. */
+  hasParsedTool(toolId: string): boolean {
+    const entry = this.tools.get(toolId);
+    return entry !== undefined && entry.inputText === null;
+  }
+
   finishTool(toolId: string, output: string, status: ToolStatus): void {
     const entry = this.tools.get(toolId) ?? this.newTool(toolId);
     entry.output = output;
@@ -1175,15 +1181,24 @@ class ClaudeSession {
   /** No matcher: this hook sees every tool call, which is what makes it the single gate. */
   private readonly preToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     // A subagent's tool calls are its own conversation: no card on the main message.
+    // The assistant frame already drew the parsed input: the hook only draws a
+    // call no frame announced, so one call is not written twice.
     if (input.hook_event_name === 'PreToolUse' && input.agent_id === undefined) {
-      this.head()?.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+      const turn = this.head();
+      if (turn !== null && !turn.hasParsedTool(input.tool_use_id)) {
+        turn.upsertTool(input.tool_use_id, input.tool_name, input.tool_input);
+      }
     }
     return {};
   };
 
+  /**
+   * Only the coordination context. The tool's result is the `tool_result` the
+   * CLI sends next, with its own text and error flag; `tool_response` here is
+   * the raw object, a whole `originalFile` for an Edit, that no card shows.
+   */
   private readonly postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
     if (input.hook_event_name === 'PostToolUse') {
-      if (input.agent_id === undefined) this.head()?.finishTool(input.tool_use_id, stringify(input.tool_response), 'done');
       const additionalContext = this.head()?.ctx.coordination?.();
       if (additionalContext) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
     }
