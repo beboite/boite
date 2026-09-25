@@ -269,7 +269,10 @@ its agents still work, a persistent agent's finished work (read in the agents
 inbox; its failures still notify) and a context compaction. Permission
 requests and questions notify whichever thread asks. A desktop toast follows
 the same rule, from `notifiesOnFinish` in the contracts. A click opens the
-conversation, preserving an existing page and its drafts. The worker only opens
+conversation, preserving an existing page and its drafts. With no page open,
+the worker opens `/?thread=<id>`: the page's own core opens that thread as it
+boots, in place of the new-thread draft, and does not wait for other
+remembered machines to connect. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.
 

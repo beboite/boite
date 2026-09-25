@@ -163,6 +163,23 @@ test('the app opens on a new thread in the project last worked in', async () => 
   expect(store.page).toBe('settings');
 });
 
+test('a notification link opens its thread on boot, with no landing draft first', async () => {
+  const drafted = vi.spyOn(store, 'startDraft');
+  try {
+    await mountOnFake('/?fake=1&open=landing&thread=t-scheduler');
+    expect(store.openThread?.id).toBe('t-scheduler');
+    expect(drafted).not.toHaveBeenCalled();
+    // A reload after the jump lands as usual instead of replaying the link.
+    expect(new URLSearchParams(window.location.search).get('thread')).toBeNull();
+  } finally { drafted.mockRestore(); }
+});
+
+test('a notification link to a thread that is gone lands on the usual draft', async () => {
+  await mountOnFake('/?fake=1&open=landing&thread=t-gone');
+  expect(store.openThread).toBeNull();
+  expect(store.draft).not.toBeNull();
+});
+
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
   await mountOnFake();
 

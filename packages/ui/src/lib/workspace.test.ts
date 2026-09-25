@@ -110,6 +110,34 @@ test('an empty local core yields to the remembered journal on the same computer'
   expect(w.machines[0]?.label).toBe('Studio');
   expect(a.threads.length).toBeGreaterThan(0);
 });
+test('a notification link reaches the page core before a remembered machine answers', async () => {
+  const { w, a } = await setup();
+  a.endpointUrl = window.location.origin;
+  upsertEnvironment({ url: 'http://offline.test', token: 'fake', paired: true, label: 'Offline' });
+  const boot = vi.spyOn(a, 'boot').mockResolvedValue();
+  // A remote that never answers, as an offline LAN host hangs.
+  vi.spyOn(w, 'add').mockReturnValue(new Promise<boolean>(() => {}));
+  void w.boot('t-scheduler');
+  await waitFor(() => boot.mock.calls.length === 1);
+  expect(boot).toHaveBeenCalledWith(false, 't-scheduler');
+});
+
+test('a notification link from another remembered machine opens there once it connects', async () => {
+  const { w, a, b } = await setup();
+  a.endpointUrl = 'http://remote.test';
+  b.endpointUrl = window.location.origin;
+  const id = b.threads[0]!.id;
+  upsertEnvironment({ url: window.location.origin, token: 'fake', paired: true, label: 'Page' });
+  vi.spyOn(a, 'boot').mockResolvedValue();
+  vi.spyOn(w, 'add').mockImplementation(async () => {
+    w.machines = [...w.machines, { id: window.location.origin, label: 'Page', store: b }];
+    return true;
+  });
+  await w.boot(id);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(id);
+});
+
 async function setup() {
   workspace = new Workspace();
   const a = primary,

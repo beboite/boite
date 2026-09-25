@@ -240,6 +240,11 @@ export function resumeAnchor(thread: Pick<Thread, 'messages' | 'turns'>): Messag
   return (open ?? thread.messages[thread.messages.length - 1])?.id ?? null;
 }
 
+/** Whether a core at this address served the page, the only core a notification's `?thread=` link can mean. */
+export function servesThisPage(url: string): boolean {
+  try { return new URL(url).origin === window.location.origin; } catch { return false; }
+}
+
 export class Store {
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
   #readingThreads = new Map<string, Thread>();
@@ -1081,7 +1086,8 @@ export class Store {
   }
 
   /** Picks the transport, connects, loads everything the UI opens on. */
-  async boot(preferLocal = false): Promise<void> {
+  /** `requested` is a thread a notification link asked for, opened in place of the landing draft. */
+  async boot(preferLocal = false, requested: ThreadId | null = null): Promise<void> {
     try {
       this.environments = readEnvironments();
       const params = new URLSearchParams(window.location.search);
@@ -1130,13 +1136,19 @@ export class Store {
         // stored core only once it has answered, never before.
         if (endpoint.fromLink && endpoint.grant === undefined) this.#rememberOnceReady(endpoint);
       }
+      // The fake core has no address and stands for the page's own.
+      const linked = requested !== null && (this.endpointUrl === null || servesThisPage(this.endpointUrl)) ? requested : null;
       const opens = this.#openGeneration;
       await this.connect();
       // `&open=recent` lands on the most recent thread instead of a draft, the
       // page most captures are about. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1' && params.get('open') === 'recent') await this.openWhereLeft();
       // A thread clicked while the lists arrived is still opening: it wins.
-      else if (this.#openGeneration === opens) await this.openLanding();
+      else if (this.#openGeneration === opens) {
+        if (linked !== null) await this.open(linked);
+        // A thread the link names that is gone lands as usual, unless a click came first.
+        if (this.#openGeneration === opens + (linked === null ? 0 : 1)) await this.openLanding();
+      }
       // `&panel=<kind>` opens that surface on the thread the page lands on, so
       // a capture of it needs no clicks. Fake core only, like `&long=1`.
       if (import.meta.env.DEV && params.get('fake') === '1') this.#openQueryPanel(params.get('panel'));

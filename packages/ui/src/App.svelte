@@ -233,14 +233,11 @@
   });
 
   onMount(() => {
+    // A notification tapped with no window open: taken off the address at
+    // once, so a reload during the boot does not jump there again.
     const requestedThread = new URLSearchParams(location.search).get('thread');
-    void workspace.boot().then(async () => {
-      if (requestedThread) {
-        const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url);
-        const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
-        if (machine) await workspace.select(machine.store, requestedThread);
-      }
-    });
+    if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
