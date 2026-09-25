@@ -66,7 +66,7 @@ The existing Stop action cancels the maintenance turn. Paired devices may call i
 | pi | `compact` RPC, completed by its response, whose `estimatedTokensAfter` is pi's own estimate of what is left; Stop closes the process because prompt abort does not cancel this RPC |
 | ACP | `/compact` only when the session advertised that command |
 | agy | none: print mode refuses the CLI's interactive-only commands, so the core refuses the call and the control stays disabled |
-| echo | `[compact]`, a deterministic test operation |
+| echo | `[compact]`, a deterministic test operation; the divider it draws says `manual`, while `[compact]` inside a prompt draws an `auto` one |
 
 The control is disabled while a turn runs, before a native session exists, or
 when an ACP agent has not advertised support. Compaction can make a provider
