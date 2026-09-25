@@ -35,6 +35,11 @@ then repeats every six hours. A manual check is available in the card. Checks
 and downloads run one at a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.
 
+No request has a total deadline, because an installer on a slow link may take
+minutes. Each one gets 15 seconds to connect and fails after 30 seconds without
+receiving a byte, so a link that stops sending gives the updater back instead of
+holding it until the app restarts. The release listing is requested gzipped.
+
 Downloads show bytes received and a percentage when a total is known. The shell
 checks the updater signature before offering installation, writes the verified
 payload to disk and releases the download buffer. Progress events are limited

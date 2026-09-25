@@ -21,8 +21,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-updater = "2.11"
-reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# Pinned to a minor: `configure_client` hands us its reqwest builder.
+tauri-plugin-updater = "~2.12"
+reqwest = { version = "0.13", default-features = false, features = ["json", "gzip"] }
+# The crypto provider reqwest's rustls needs, the one the updater plugin uses.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 semver = "1"
 sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
