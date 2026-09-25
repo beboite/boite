@@ -22,6 +22,7 @@
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
+  import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
@@ -36,8 +37,8 @@
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
-  // it. Each loads the moment it is asked for, and all of them once the app is
-  // idle, so a key pressed a second after boot finds them and the service
+  // it. Each loads the moment it is asked for, and the rest once the app has
+  // booted and is idle, so a key pressed a second later finds them and the service
   // worker has them for a phone that loses its link. The tour is the same case
   // taken further: a device draws it once, then only when asked.
   const deferredLoaders = {
@@ -73,8 +74,15 @@
       });
   }
   function needAll(): void {
-    for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);
+    const names = Object.keys(deferredLoaders) as (keyof Deferred)[];
+    for (const name of prefetchNames(names, { tourSeen: tourSeen(), owner: store.owner })) need(name);
   }
+  // Once the first load has landed rather than against it, and only on a link
+  // that can spare the bytes (lib/prefetch.ts).
+  $effect(() => {
+    if (!store.booted || !prefetchAllowed()) return;
+    return whenIdle(needAll);
+  });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
@@ -117,10 +125,6 @@
       ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
       : undefined;
     if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
-    // After the first paint, not in its way. Safari has no requestIdleCallback.
-    const idle = typeof requestIdleCallback === 'function'
-      ? requestIdleCallback(needAll, { timeout: 1500 })
-      : setTimeout(needAll, 300);
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -145,8 +149,6 @@
     };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
-      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(idle as number);
-      else clearTimeout(idle);
       stopViewport();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
