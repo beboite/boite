@@ -2852,13 +2852,16 @@ export class Store {
     }
   }
 
-  async saveSettings(patch: Partial<Settings>): Promise<void> {
+  /** False when nothing was saved, so a caller never reports a save the core refused. */
+  async saveSettings(patch: Partial<Settings>): Promise<boolean> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return false;
     try {
       this.settings = await client.call('settings.set', patch);
+      return true;
     } catch (error) {
       this.#fail(error);
+      return false;
     }
   }
 
