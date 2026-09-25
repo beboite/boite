@@ -5,6 +5,8 @@ import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { resumeAnchor, Store } from './store.svelte';
 import { strings } from './strings';
+import { confirm } from './confirm.svelte';
+import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
 test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
   const { store, client } = await ready();
@@ -1010,6 +1012,84 @@ test('a machine on a slow link keeps its connection when the lists take longer t
   } finally {
     store.client?.close();
     store.detach();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
+test('a link in the address becomes the stored core only after a hello, and an unknown core is asked about first', async () => {
+  vi.useFakeTimers();
+  const opened: string[] = [];
+  let answers = false;
+  class LinkSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(url: string) {
+      opened.push(url);
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string };
+      const answer = (body: Record<string, unknown>) =>
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), 10);
+      if (frame.method === 'hello') {
+        // A core that never says hello back, or one that does.
+        if (answers) answer({ result: { core: { protocolVersion: PROTOCOL_VERSION }, principal: 'owner' } });
+      } else answer({ error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
+    }
+    close(): void {
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', LinkSocket);
+  const paired = { url: 'https://my-core.example', token: 'session-key', paired: true };
+  const stores: Store[] = [];
+  const boot = (path: string): Promise<void> => {
+    window.history.replaceState(null, '', path);
+    const store = new Store();
+    stores.push(store);
+    return store.boot();
+  };
+  try {
+    localStorage.clear();
+    storeEndpoint(paired);
+
+    // A token link on this origin whose core stays silent: the paired core stays stored.
+    const silent = boot('/?token=fresh');
+    await vi.advanceTimersByTimeAsync(11_000);
+    await silent;
+    expect(readStoredEndpoint()).toEqual(paired);
+    stores.at(-1)?.client?.close();
+
+    // A core link to a stranger: asked about, refused, and the paired core is what opens.
+    opened.length = 0;
+    const refused = boot('/?core=https://other.example');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm.current?.title).toBe(strings.machines.linkTitle.replace('{host}', 'other.example'));
+    confirm.answer(false);
+    await vi.advanceTimersByTimeAsync(11_000);
+    await refused;
+    expect(opened[0]).toContain('my-core.example');
+    expect(opened.some((url) => url.includes('other.example'))).toBe(false);
+    expect(readStoredEndpoint()).toEqual(paired);
+    stores.at(-1)?.client?.close();
+
+    // The same token link once its core answers: stored then, with the key it carried.
+    answers = true;
+    const answered = boot('/?token=fresh');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await answered;
+    expect(stores.at(-1)?.connection).toBe('ready');
+    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: 'fresh' });
+  } finally {
+    for (const store of stores) {
+      store.client?.close();
+      store.detach();
+    }
+    window.history.replaceState(null, '', '/');
+    localStorage.clear();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   }

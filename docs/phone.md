@@ -118,9 +118,16 @@ The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this
 page. `?core=<url>` is the other form, for a UI served from somewhere else and
 pointed at a core elsewhere, and `?token=` opens a page on a token one already
-holds. The UI strips all three from the address bar on the first load, stores
-the endpoint in `localStorage`, and never stores a grant: what it keeps is the
-session key that came back.
+holds. The UI strips all three from the address bar on the first load and
+never stores a grant: what it keeps is the session key that came back.
+
+A link never replaces the stored core before its target has answered a hello.
+When `core=` names a core that is neither this page's origin nor one this device
+already holds a key for, the page first asks whether to connect to that host.
+Anyone can send a link that points at a core they run, and that core would see
+every prompt typed afterwards. Cancel opens the stored core as before. A
+`core=` link to a core the device already knows reuses the key it holds for it
+and asks nothing.
 
 ## The app on the phone
 

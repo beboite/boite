@@ -98,8 +98,10 @@ in-memory fake.
   thread instead, which is the page most captures and e2e tests look at.
 - `?grant=<grant>` is a pairing link: the page exchanges it once for a session
   key of its own and stores that. `?token=<token>` opens the page on a token
-  one already holds, and `?core=<url>` points it somewhere else. All three are
-  stripped from the address bar; the grant is never stored.
+  one already holds, and `?core=<url>` points it somewhere else, after asking
+  when that core is new to the device. All three are stripped from the address
+  bar; the grant is never stored, and the endpoint is stored only once it has
+  answered a hello.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
