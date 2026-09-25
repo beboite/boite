@@ -12,7 +12,8 @@ The image includes the built UI, Bun, Node.js, Git, ripgrep and pinned Claude
 Code, Codex, OpenCode and pi CLIs. It runs as UID 1000. Grok, Antigravity and
 Muse Code are not preinstalled, and neither is the Antigravity CLI. Antigravity
 has a managed installer on Linux; Grok, Muse Code and the Antigravity CLI have
-none there, so they need a custom image. Agent
+none there, so they need a custom image. The x64 image carries OpenCode's
+baseline build only, which also runs on CPUs without AVX2. Agent
 authentication is still required. No login is built into the image.
 
 Release workflows publish `ghcr.io/beboite/boite/boite-server` for Linux x64 and ARM64.
@@ -46,6 +47,11 @@ Clone projects into `/workspace` or replace its volume with a bind mount.
 Bind-mounted files must be writable by UID 1000. Paths entered in boite refer
 to the container. Do not mount the Docker socket or the host's complete home.
 
+The container has no CPU cap and a 4 GB memory cap by default. Set `BOITE_CPUS`
+in a local `.env` file to cap its CPUs, for example `BOITE_CPUS=2`; the value
+must not exceed the host's CPU count, or Docker refuses to start the container.
+`BOITE_MEM` sets the memory cap, for example `BOITE_MEM=2g`.
+
 For a Codex login, for example:
 
 ```sh
@@ -74,7 +80,9 @@ docker compose up -d
 docker compose ps
 ```
 
-The image health check polls `/health`. Compose restarts exited containers;
+The image health check polls `/health` on the port and host the running core
+wrote to `/data/core.json`, so a `--port` passed in `command:` is followed.
+Compose restarts exited containers;
 Docker does not automatically restart an unhealthy process.
 
 To pin a release, set `BOITE_IMAGE=ghcr.io/beboite/boite/boite-server:v<version>` in
@@ -133,9 +141,11 @@ bun run build:ui
 bun run build:core:linux
 ```
 
-That is `build:core` followed by `bun build --compile --target=bun-linux-x64`,
+That is `build:core` followed by `bun build --compile --target=bun-linux-x64-baseline`,
 which writes `packages/core/dist/boite-core-linux-x64`: one executable for x64
-glibc Linux that carries its own Bun. Cross-compiling works from Windows. Copy it
+glibc Linux that carries its own Bun, in the baseline build that also runs on
+CPUs without AVX2. The image's Bun comes from `oven/bun`, whose x64 build is the
+baseline one too. Cross-compiling works from Windows. Copy it
 to the server with `packages/ui/dist` beside it, renamed `ui`, since a compiled
 core looks for the UI next to its own executable. The build also writes
 `packages/core/dist/boite`, the shim behind the `boite` command an agent runs

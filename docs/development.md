@@ -218,14 +218,15 @@ BOITE_ECHO=1 bun run dev:core
 `BOITE_HOST_AGENTS=0` keeps a core away from the agents installed on the
 machine: the shipped providers still load but resolve no program, so no
 version check, quota read or model probe runs the developer's own CLIs. The
-test harness, the end to end suite and the bench set it; an opt-in live test
-(`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back off.
+test harness, the end to end suite, `bun run bench` and `bench/idle-rss.ts` set
+it; an opt-in live test (`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back
+off.
 
 ## Checks and tests
 
 ```bash
-bun run check    # contracts, core, UI and end-to-end test types
-bun run test     # bun test in packages/core, vitest in packages/ui
+bun run check    # contracts, core, UI, end-to-end test, bench and telemetry Worker types
+bun run test     # bun test in packages/core (parallel workers), vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
@@ -288,6 +289,9 @@ That script puts the compiled core in `src-tauri/binaries` for the bundler and
 beside the release shell executable for the end to end run, with `jobs-worker.js`
 and `guard-worker.js` next to each copy. Without the first the trace degrades
 from exact events to polling; without the second the focus guard never starts.
+On Windows the first staging downloads Bun's baseline runtime (a 40 MB archive)
+for the Bun version running it and keeps it under `node_modules/.cache`
+([releasing](releasing.md)).
 
 ## Captures
 
@@ -355,6 +359,7 @@ each one is skipped unless its variable is set. Run them from
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts` | the managed install for real: 468 MB from Google, the sha256 and every file size checked, `initialize` answered. No sign-in |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts` | the whole Google sign-in, in your browser, then one turn. Only a person runs this one |
 | `BOITE_BENCH_CLAUDE=1` | `bun run bench` | the Claude turn row of the bench |
+| `BOITE_BENCH_HOST_AGENTS=1` | `bun run bench/idle-rss.ts` | the steady idle point with the update check reading the agents installed on the machine, as a user's core would |
 
 One more is opt-in for a different reason. `BOITE_E2E_GUARD=1` runs
 `test/guard.e2e.test.ts`, which opens a real window and steals the keyboard focus
@@ -389,7 +394,7 @@ external access needs the trusted HTTPS origin described in [phone.md](phone.md)
 
 ```bash
 bun run bench               # against Boite Legacy, writes bench/results/<date>.md
-bun run bench/idle-rss.ts   # the core's idle working set against bare bun
+bun run bench/idle-rss.ts   # the core's idle memory against bare bun, at 4.5 s and 75 s (--fresh-only: 4.5 s)
 ```
 
 Both set their own fresh data directory. Quote a figure with the date of the run
@@ -406,7 +411,26 @@ does not retry or skip tests.
 `bun run check` includes `bun run check:architecture`. The architecture check
 uses Bun's parser and needs no installed workspace dependencies. CI runs it in
 the changes job on every pull request. `bun test scripts/architecture` verifies
-cycle detection, import resolution and the package boundaries.
+cycle detection, import resolution, the package boundaries and the size budget.
+
+The same check fails when a production `.ts`, `.js` or `.svelte` file passes
+900 lines. The files already above it are listed in
+`scripts/architecture/size-budget.json` with the most lines each may have. A
+file that grows past its entry fails; split it instead of raising the number.
+When a file shrinks, the check prints a note, and
+`bun run check:architecture --write-size-budget` lowers its entry to match, or
+removes it once the file is back under 900. That flag never raises an entry.
+
+The `exempt` entries of the same file have no ceiling, each with its reason:
+`packages/contracts/src/index.ts`, which every RPC method changes first,
+`lib/fake-client.ts`, which implements that contract, and the
+`lib/strings.*.ts` tables, which gain an entry with every UI sentence.
+
+`bun run check:architecture --rebaseline-size-budget` pins every file above 900
+at its size today, raising or adding entries, and prints each raise. It exists
+for one case: merging branches written before their files were pinned, on the
+tree that combines them, so the raises are reviewed in that diff. Everywhere
+else a file that outgrows its entry is split.
 
 `bun run audit:complexity` ranks production functions by cyclomatic complexity.
 Use `bun run audit:complexity --json` to save a comparison. It is advisory;

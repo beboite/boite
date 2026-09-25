@@ -9,8 +9,9 @@ services:
       - boite-workspace:/workspace
     restart: unless-stopped
     stop_grace_period: 30s
-    cpus: 4
-    mem_limit: 4g
+    # 0 is no CPU cap. Docker refuses to start a container whose cap exceeds the host's CPU count.
+    cpus: ${BOITE_CPUS:-0}
+    mem_limit: ${BOITE_MEM:-4g}
 
 volumes:
   boite-data:

@@ -31,6 +31,11 @@ const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
  * with the mute, so the clock starts when the session is in the mixer.
  */
 const MUTE_WINDOW_MS = 3000;
+/**
+ * How long a session the core muted takes to show in its mutedPids: one poll of
+ * the guard Worker (a second) and the message to the main thread, with margin.
+ */
+const INHERITED_WINDOW_MS = 2000;
 const SESSION_WINDOW_MS = 15000;
 
 /** `waitFor` that answers whether the condition came true instead of throwing. */
@@ -110,6 +115,17 @@ describeWindows('the audio sessions of the default endpoint', () => {
     if (!(await settles(mutedByCore, MUTE_WINDOW_MS))) {
       clearLeftoverMute(fixture.pid);
       await waitFor(mutedByCore, MUTE_WINDOW_MS);
+      // The core's report can still land just after the window on a loaded
+      // machine. Then the mute this lifted was the core's own, which it holds
+      // and never takes twice: put it back rather than read our own unmute as
+      // the core's failure. An inherited mute is taken again by the core
+      // itself, and the mixer already reads muted.
+      const retaken = sessionsOf(fixture.pid);
+      try {
+        for (const session of retaken) if (session.getMute() === false) session.mute(true);
+      } finally {
+        for (const session of retaken) session.release();
+      }
     }
     return { threadId, pid: fixture.pid, finished };
   }

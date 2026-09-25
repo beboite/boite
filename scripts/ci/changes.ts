@@ -16,6 +16,10 @@ export function affectedChecks(files: string[]) {
       checks.server = true;
     } else if (file.startsWith('packages/ui/')) {
       checks.web = checks.desktop = checks.server = true;
+    } else if (/^(bench\/|telemetry\/|scripts\/architecture\/)/.test(file)) {
+      // Nothing ships or runs them in CI: the web job's `bun run check` type-checks
+      // them, and the changes job already runs the architecture check and its tests.
+      checks.web = true;
     } else {
       // Core and contracts are used by both clients; unknown inputs stay safe.
       checks.core = checks.web = checks.desktop = checks.server = true;

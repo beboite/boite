@@ -61,7 +61,7 @@ jobs:
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
       - run: bun scripts/check-docs.ts
-      - run: bun test scripts/ci
+      - run: bun test scripts/ci ./bench ./apps/shell/scripts
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
@@ -153,6 +153,8 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run apps/shell/scripts/stage-sidecar.ts
+      - name: Check bundle size budgets
+        run: bun scripts/ci/budgets.ts
       - run: bun run test:shell --release
       - name: End-to-end tests
         if: needs.changes.outputs.e2e == 'true'

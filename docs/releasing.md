@@ -33,19 +33,28 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
-- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. The two worker
+- `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
+  Bun's baseline runtime, which needs no AVX2. The two worker
   files are not compiled into it: the core loads them by name from beside its own
   executable, so they travel with it.
-- On Windows the installed sidecar is not that executable. It is the Bun runtime
-  the build ran under, copied as `boite-core.exe`, with every file of the bundle
+- On Windows the installed sidecar is not that executable. It is Bun's baseline
+  runtime of the version the build ran under, copied as `boite-core.exe`, with every file of the bundle
   but the workers in a `core` directory beside it, and the shell starts it as
-  `boite-core.exe core/main.js`. The runtime carries its publisher's signature;
+  `boite-core.exe core/main.js`. The baseline build runs on x64 CPUs without
+  AVX2, where the default one stops at its first instruction. `stage-sidecar.ts`
+  downloads it once from the Bun release, checks the archive against the
+  release's `SHASUMS256.txt` and keeps it under `node_modules/.cache`, so the
+  first staging needs the network. The runtime carries its publisher's signature;
   an unsigned compiled core costs about 650 ms more at every start on Windows 11
-  ([performance.md](performance.md)). `stage-sidecar.ts` warns when the runtime's
-  signature is not valid, and it refuses a Bun other than the `packageManager`
-  pin, as do `packages/core/bin/compile.ts` and `build:core:linux`, since each
-  ships the Bun it runs under. `BOITE_ALLOW_BUN_MISMATCH=1` allows another one
-  for a build that is not shipped. `apps/shell/scripts/tauri.ts` adds
+  ([performance.md](performance.md)). The checksum comes from the same release,
+  so the signature is what vouches for the file: `stage-sidecar.ts` refuses a
+  runtime whose signature is not valid or whose signer is not Bun's publisher
+  (`O=Codeblog CORP`, `apps/shell/scripts/runtime-signature.ts`). It checks the
+  cached copy again at every staging and downloads it again when that copy
+  fails. It also refuses a Bun other than the `packageManager` pin, as do
+  `packages/core/bin/compile.ts` and `build:core:linux`, since each ships the
+  Bun it runs under. `BOITE_ALLOW_BUN_MISMATCH=1` allows another one for a build
+  that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
 - `stage:core` puts the sidecar, both workers and the two `boite` shims
@@ -204,7 +213,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 `%LOCALAPPDATA%\Boite` ends up holding:
 
 - `boite-shell.exe`, the window and the tray icon.
-- `boite-core.exe`, the sidecar it starts: the Bun runtime under the core's name.
+- `boite-core.exe`, the sidecar it starts: Bun's baseline runtime under the core's name.
   Run by hand with no script it is `bun`, so a subcommand goes after the bundle:
   `boite-core.exe core\main.js pair --owner`.
 - `core/`, the bundled core that runtime runs: `main.js` and its lazy chunks.
@@ -302,4 +311,12 @@ Run `bun run e2e` on the staged build, not on the sources alone: it is the only
 thing that drives the real shell executable over its debugging port, hidden.
 Then run `bun run bench` and `bun run bench/idle-rss.ts` fresh, so the resource
 figures in the release notes come from the build being released and carry its
-date.
+date. The idle bench reports two points for each process: `fresh`, 4.5 s after
+the spawn, and `steady`, 75 s after it, once the first automatic update check
+has run. Quote both, with the working set, private bytes and thread count it
+prints. The bench starts its cores with `BOITE_HOST_AGENTS=0`, so by default
+the check finds no provider and the steady point measures an empty check. For
+the notes, a person runs it with `BOITE_BENCH_HOST_AGENTS=1`, so the update
+check reads the providers installed on the machine as a user's core would, and
+says which providers those were. An agent never sets it: the check runs each
+agent's `--version`, and an agent's own updater can open a console window.

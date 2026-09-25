@@ -11,11 +11,12 @@
   "scripts": {
     "start": "bun run bin/core.ts",
     "dev": "bun run --watch src/main.ts",
-    "build": "bun run bin/clean.ts && bun build src/main.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext]",
+    "build": "bun run bin/clean.ts && bun build src/main.ts src/platform/windows/jobs-worker.ts src/platform/windows/guard-worker.ts --target bun --outdir dist --splitting --sourcemap=none --entry-naming [name].[ext] --minify-whitespace --minify-syntax",
     "build:exe": "bun run build && bun run bin/compile.ts",
-    "build:linux": "bun run build && bun ../../scripts/ci/bun-version.ts \"the Linux core\" && bun build --compile --target=bun-linux-x64 src/main.ts --outfile dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
+    "build:linux": "bun run build && bun ../../scripts/ci/bun-version.ts \"the Linux core\" && bun build --compile --target=bun-linux-x64-baseline --minify-whitespace --minify-syntax src/main.ts --outfile dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
     "check": "tsc -p tsconfig.json",
-    "test": "bun test --timeout 15000"
+    "test": "bun test --parallel --timeout 15000",
+    "test:serial": "bun test --timeout 15000"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

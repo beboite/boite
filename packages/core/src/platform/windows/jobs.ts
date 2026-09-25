@@ -532,7 +532,8 @@ function ensureWorker(port: number): void {
     // teardown posts one of its own to wake it.
     const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE };
     created.postMessage(start);
-    if (typeof created.unref === 'function') created.unref();
+    // Typed structurally: the bench type-checks this file under the DOM lib, whose Worker has no unref.
+    (created as { unref?: () => void }).unref?.();
     worker = created;
   } catch (error) {
     failWorker(error instanceof Error ? error.message : String(error));

@@ -158,3 +158,32 @@ compiled core beside it, then on one staged with the runtime and the bundle:
 | UI holding its data | 1245 | 716 |
 
 Linux and macOS keep the compiled core: nothing was measured there.
+
+## The x64 runtime is Bun's baseline build
+
+Bun publishes two x64 builds. The default one needs AVX2, so it stops with an
+illegal instruction on a pre-Haswell CPU and on many Celeron, Pentium and Atom
+laptops. The Windows sidecar, the compiled core on x64 Linux and Windows, and
+the server core are the baseline build, and the Docker image's `oven/bun` base
+already ships the baseline build for x64. On this core the choice costs nothing
+measurable. Bundle under each runtime, both runtimes copied away from the
+parent's own image, a fresh data directory, `BOITE_HOST_AGENTS=0`, 2026-09-25 on
+a Ryzen 7 9800X3D:
+
+| runtime | spawn to `/health`, median of 6 | echo turn round trip, median of 7 |
+| --- | ---: | ---: |
+| `bun-windows-x64` 1.4.2 | 245 ms | 162 ms |
+| `bun-windows-x64-baseline` 1.4.2 | 244 ms | 162 ms |
+
+The echo turn is `docker/smoke.ts create` run against that core with
+`BOITE_SMOKE_PROVIDERS=echo`: project, account, thread, one turn and its
+completion. Local dictation's whisper.cpp runtime needs no AVX2 either: its
+`whisper-bin-x64.zip` ships `ggml-cpu-*.dll` backends from plain x64 to Alder
+Lake, and ggml loads the one the CPU supports.
+
+The bundle and the compiled core minify whitespace and syntax and keep
+identifiers, so a logged stack still names its functions. On the Windows
+sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
+runs on the same day. The compiled core also carries bytecode, which saves
+parsing where no signature check dominates the start; on Windows the compiled
+core stayed at about 790 ms either way.
