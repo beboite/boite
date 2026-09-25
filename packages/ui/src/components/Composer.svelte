@@ -436,7 +436,7 @@
     const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
-    grown = el.value;
+    grown = el.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
   }
 
   // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
