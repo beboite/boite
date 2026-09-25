@@ -17,7 +17,15 @@ RUN bun run build:ui && bun run build:core
 
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS agents
 COPY docker/agents/package.json docker/agents/package-lock.json /opt/agents/
-RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force
+# npm installs both x64 OpenCode builds (185 MB each), and its postinstall picks
+# one by the build host's CPU, which always has AVX2. Keep the baseline build,
+# which runs on every x64 CPU, and drop both packages once it is in place.
+RUN cd /opt/agents && npm ci --omit=dev && npm cache clean --force \
+    && if [ -d node_modules/opencode-linux-x64-baseline ]; then \
+         mv -f node_modules/opencode-linux-x64-baseline/bin/opencode node_modules/opencode-ai/bin/opencode.exe \
+         && rm -rf node_modules/opencode-linux-x64 node_modules/opencode-linux-x64-baseline; \
+       fi \
+    && node_modules/.bin/opencode --version
 
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS runtime
 ARG BOITE_CHANNEL=stable
