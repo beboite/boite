@@ -524,7 +524,7 @@ export class FakeClient implements ObservableClient {
   /**
    * What the core's recovery does to a thread whose turn it ends: every
    * request still waiting is settled and dropped, the question with a null
-   * answer and the permission with a deny (`packages/core/src/threads.ts`).
+   * answer and the permission with a deny (`packages/core/src/threads/cards.ts`).
    */
   clearRequestsOf(threadId: ThreadId): void {
     for (const [questionId, pending] of [...this.#pendingQuestions]) {

@@ -37,7 +37,7 @@ async function code(call: Promise<unknown>): Promise<number | 'answered'> {
   }
 }
 
-test('a second retitle while the first is writing is refused, as threads.ts retitle', async () => {
+test('a second retitle while the first is writing is refused, as threads/retitle.ts', async () => {
   const client = await fake();
   const [first, second] = await Promise.allSettled([
     client.call('threads.retitle', { threadId: 't-trace' }),

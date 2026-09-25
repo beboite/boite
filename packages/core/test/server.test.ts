@@ -128,7 +128,7 @@ describe('server', () => {
     connection.attach({ send: (frame: string) => { frames.push(JSON.parse(frame)); return result; },
       close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
     const off = bus.onAny((name, payload) => connection.sendEvent(name, payload));
-    // The same two buffers threads.ts feeds for every delta.
+    // The same two buffers threads/turn-context.ts feeds for every delta.
     const stream = (text: string) => {
       journal.appendDelta('thr_dup', 'msg_dup', 0, text);
       bus.emit('message.delta', { threadId: 'thr_dup', messageId: 'msg_dup', partIndex: 0, text });
