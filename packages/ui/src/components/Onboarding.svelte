@@ -202,6 +202,8 @@
   .scrim.closing { animation-name: fade-out; pointer-events: none; }
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }
+  /* In the shell the scrim starts under the title bar, so the panel's room is that much shorter. */
+  .scrim.shell .panel { height: min(808px, calc(100dvh - 32px - var(--titlebar))); }
   /* One height for every step, so Next stays under the pointer from one screen to the next; a longer step scrolls. */
   .panel { display: flex; flex-direction: column; width: min(640px, 100%); height: min(808px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
