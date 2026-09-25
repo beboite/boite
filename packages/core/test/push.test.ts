@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import type { RpcEvents, Turn, TurnExecution } from '@boite/contracts';
 import { createECDH, randomBytes } from 'node:crypto';
 import { connect } from '../src/client.ts';
 import { validateSubscription } from '../src/push.ts';
@@ -89,6 +90,45 @@ test('a recreated push store retains its keys and delivers completed turns to th
     harness.core.sessions.revoke(paired.id);
     expect(harness.core.journal.getSetting('web-push.subscriptions')).toEqual({});
   } finally { await restarted.close(); }
+});
+
+test('a phone hears of a team\'s final answer and a persistent agent\'s failures, not of every turn under them', async () => {
+  const paired = session();
+  harness.core.push.subscribe(paired.id, subscription());
+  const deliveries: { threadId: string; body: string }[] = [];
+  harness.core.push.send = async (_target, payload) => { deliveries.push(JSON.parse(payload)); };
+  const client = await harness.connect();
+  const { threadId: rootId } = await echoThread(harness, client);
+  const root = harness.core.journal.getThread(rootId)!;
+  const child = { ...root, id: 'push_child', parentThreadId: rootId, status: 'running' as const };
+  const agent = { ...root, id: 'push_agent', projectId: null, agentSessionId: 'push_session' };
+  harness.core.journal.putThread(child);
+  harness.core.journal.putThread(agent);
+  const finish = (threadId: string, status: Turn['status'], operation?: TurnExecution['operation']) => {
+    const execution = { providerId: root.providerId, accountId: root.accountId, model: null, effort: null, permissionMode: root.permissionMode, sessionId: null, sessionGeneration: 0, selectionVersion: 0, ...(operation ? { operation } : {}) };
+    harness.core.bus.emit('turn.finished', { id: `turn_${deliveries.length}_${Math.random()}`, threadId, status, queuedAt: 1, startedAt: 1, finishedAt: 2, usage: null, error: null, execution });
+  };
+
+  finish(child.id, 'done');
+  finish(child.id, 'error');
+  // The parent handed the work out and yields while its agents still run.
+  finish(rootId, 'done');
+  finish(rootId, 'done', 'compact');
+  finish(agent.id, 'done');
+  // A child blocked on a question still reaches the phone.
+  harness.core.bus.emit('question.asked', { id: 'push_question', threadId: child.id } as RpcEvents['question.asked']);
+  await waitFor(() => deliveries.length === 1);
+
+  harness.core.journal.putThread({ ...child, status: 'idle' });
+  finish(rootId, 'done', 'delegation');
+  finish(agent.id, 'error');
+  await waitFor(() => deliveries.length === 3);
+  await Bun.sleep(50);
+  expect(deliveries.map(({ threadId, body }) => ({ threadId, body }))).toEqual([
+    { threadId: child.id, body: 'Needs your answer' },
+    { threadId: rootId, body: 'Done' },
+    { threadId: agent.id, body: 'The agent encountered an error' },
+  ]);
 });
 
 test('public HTTPS origin is validated, used for QR links and accepted by the socket', async () => {

@@ -670,6 +670,33 @@ export interface Turn {
   execution?: TurnExecution;
 }
 
+/** A thread status that means one of its turns is still under way. */
+export function threadActive(status: ThreadStatus): boolean {
+  return status === 'queued' || status === 'running' || status === 'waiting';
+}
+
+/**
+ * Whether a finished turn is worth a notification, for the core's Web Push and
+ * a client's own toast alike. A delegated agent's result goes to its parent,
+ * whose next turn reports it; a parent's turn that ends while `activeChildren`
+ * of its agents still work is not the answer yet; a persistent agent's work is
+ * read in the agents inbox, so only its failures notify; compacting the
+ * context is housekeeping. A stop is the user's own doing. Requests that wait
+ * for an answer are notified whatever the thread.
+ */
+export function notifiesOnFinish(
+  thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>,
+  turn: Pick<Turn, 'status' | 'execution'>,
+  activeChildren: number,
+): boolean {
+  if (turn.status !== 'done' && turn.status !== 'error') return false;
+  if (thread.parentThreadId) return false;
+  if (turn.execution?.operation === 'compact') return false;
+  if (turn.status === 'error') return true;
+  if (thread.agentSessionId) return false;
+  return activeChildren === 0;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'denied';

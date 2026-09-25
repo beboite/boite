@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { ThreadSummary, Turn } from '@boite/contracts';
 import {
+  finishNotifies,
   NOTIFICATIONS_STORAGE_KEY,
   onNotificationOpen,
   readNotifications,
@@ -26,6 +28,32 @@ describe('shouldNotify', () => {
 
   test('the switch off wins over everything', () => {
     expect(shouldNotify({ ...base, focused: false, openThreadId: null, enabled: false })).toBe(false);
+  });
+});
+
+describe('finishNotifies', () => {
+  const thread = (id: string, extra: Partial<ThreadSummary> = {}) => ({ id, status: 'idle', ...extra }) as ThreadSummary;
+  const turn = (threadId: string, status: Turn['status'], operation?: 'compact' | 'delegation') =>
+    ({ threadId, status, ...(operation ? { execution: { operation } } : {}) }) as Pick<Turn, 'threadId' | 'status' | 'execution'>;
+
+  test('a delegated agent never, its parent once the team is done', () => {
+    const busy = [thread('root'), thread('child', { parentThreadId: 'root', status: 'running' })];
+    expect(finishNotifies(busy, turn('child', 'done'))).toBe(false);
+    expect(finishNotifies(busy, turn('child', 'error'))).toBe(false);
+    expect(finishNotifies(busy, turn('root', 'done'))).toBe(false);
+    expect(finishNotifies(busy, turn('root', 'error'))).toBe(true);
+    const idle = [thread('root'), thread('child', { parentThreadId: 'root' })];
+    expect(finishNotifies(idle, turn('root', 'done', 'delegation'))).toBe(true);
+  });
+
+  test('a persistent agent only when it fails, compaction and stops never', () => {
+    const threads = [thread('agent', { agentSessionId: 's-1', projectId: null }), thread('plain')];
+    expect(finishNotifies(threads, turn('agent', 'done'))).toBe(false);
+    expect(finishNotifies(threads, turn('agent', 'error'))).toBe(true);
+    expect(finishNotifies(threads, turn('plain', 'done', 'compact'))).toBe(false);
+    expect(finishNotifies(threads, turn('plain', 'stopped'))).toBe(false);
+    expect(finishNotifies(threads, turn('plain', 'done'))).toBe(true);
+    expect(finishNotifies(threads, turn('unknown', 'done'))).toBe(true);
   });
 });
 
