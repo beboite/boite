@@ -335,10 +335,11 @@ core with the echo driver.
 A real core serves `packages/ui/dist`. `tests/e2e/ui.test.ts` and
 `tests/e2e/cli.test.ts` call `ensureProductionUi` (`tests/e2e/lib/prod-ui.ts`),
 which builds it again with `NODE_ENV=production` only when it is missing, older
-than the UI sources, or a development build. A child of `bun test` inherits
-`NODE_ENV=test`, and Vite then builds a development bundle that loads the fake
-client on `?fake=1`. `ui.test.ts` fails if the bundle the core serves imports
-the fake client or carries Svelte's development runtime.
+than the UI sources, `packages/contracts` or `bun.lock`, or a development
+build. A child of `bun test` inherits `NODE_ENV=test`, and Vite then builds a
+development bundle that loads the fake client on `?fake=1`. `ui.test.ts` fails
+if the bundle the core serves imports the fake client or carries Svelte's
+development runtime.
 
 `tests/e2e/model-switch.test.ts` changes an existing conversation from Echo to
 an ACP fixture over real RPC and stdio. It checks history continuity and writes

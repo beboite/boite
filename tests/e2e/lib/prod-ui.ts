@@ -1,11 +1,20 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const UI = join(import.meta.dir, '..', '..', '..', 'packages', 'ui');
+const ROOT = join(import.meta.dir, '..', '..', '..');
+const UI = join(ROOT, 'packages', 'ui');
 export const UI_DIST = join(UI, 'dist');
 const UI_INDEX = join(UI_DIST, 'index.html');
-/** What the build reads: a change to any of these makes a `dist` stale. */
-const UI_INPUTS = ['src', 'public', 'index.html', 'vite.config.ts', 'svelte.config.js', 'package.json'].map((name) => join(UI, name));
+/**
+ * What the build reads: a change to any of these makes a `dist` stale. The
+ * bundle inlines the runtime values of `@boite/contracts`, and the lockfile
+ * moves whenever an installed dependency the bundle carries does.
+ */
+const UI_INPUTS = [
+  ...['src', 'public', 'index.html', 'vite.config.ts', 'svelte.config.js', 'package.json'].map((name) => join(UI, name)),
+  ...['src', 'package.json'].map((name) => join(ROOT, 'packages', 'contracts', name)),
+  join(ROOT, 'bun.lock'),
+];
 
 /**
  * What only a development bundle carries: an import of the fake client, which
@@ -50,6 +59,11 @@ function builtScripts(): { name: string; text: string }[] {
   return readdirSync(assets).filter((name) => name.endsWith('.js')).map((name) => ({ name, text: readFileSync(join(assets, name), 'utf8') }));
 }
 
+/** Whether `dist` is a production build newer than everything it was built from. */
+export function productionUiIsFresh(): boolean {
+  return existsSync(UI_INDEX) && statSync(UI_INDEX).mtimeMs >= newestInput() && developmentMarkers(builtScripts()).length === 0;
+}
+
 /**
  * The production UI a real core serves, the one the user gets. Built again
  * only when `dist` is missing, older than its sources or a development build
@@ -58,8 +72,7 @@ function builtScripts(): { name: string; text: string }[] {
  */
 export function ensureProductionUi(): void {
   if (process.env.BOITE_E2E_PREBUILT_UI !== '1') {
-    const fresh = existsSync(UI_INDEX) && statSync(UI_INDEX).mtimeMs >= newestInput() && developmentMarkers(builtScripts()).length === 0;
-    if (!fresh) {
+    if (!productionUiIsFresh()) {
       const built = Bun.spawnSync({
         cmd: ['bun', 'run', '--cwd', UI, 'build'],
         env: { ...process.env, NODE_ENV: 'production' },
