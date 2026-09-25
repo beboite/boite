@@ -482,6 +482,12 @@ export class BoundPanel {
     this.#write({ ...current, isOpen: !current.isOpen });
   }
 
+  /** Shuts the panel, its surfaces kept: what Back does on a phone. */
+  hide(): void {
+    const current = this.state;
+    if (current.isOpen) this.#write({ ...current, isOpen: false });
+  }
+
   /**
    * One kind's own key: the panel opens on that surface, and shuts when that
    * surface is already the one showing.

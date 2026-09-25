@@ -6,6 +6,7 @@
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { experimentOn } from '../lib/experiments.svelte';
   import { cacheSpan, promptCacheState, PROMPT_CACHE_TICK_MS } from '../lib/prompt-cache';
   let { store }: { store: Store } = $props();
@@ -52,6 +53,7 @@
   function show() { clearTimeout(leave); place(); popup.show(); }
   function hideLater() { clearTimeout(leave); leave = setTimeout(() => { if (!root?.contains(document.activeElement)) popup.hide(); }, 180); }
   onDestroy(() => clearTimeout(leave));
+  $effect(() => { if (popup.open) return mobileOverlay(() => popup.hide()); });
   async function compact() {
     if (reason || submitting) return;
     submitting = true;

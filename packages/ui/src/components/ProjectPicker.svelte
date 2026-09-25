@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -46,6 +47,7 @@
       if (current === revision) error = failure instanceof Error ? failure.message : String(failure);
     } finally { if (current === revision) busy = false; }
   }
+  $effect(() => { if (overlay.open) return mobileOverlay(close); });
   function close() {
     ++revision;
     store.projectPickerOpen = false;

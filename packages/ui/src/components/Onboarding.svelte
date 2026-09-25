@@ -6,6 +6,7 @@
   import OnboardingScene from './OnboardingScene.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
@@ -37,6 +38,7 @@
   $effect(() => { if (!overlay.shown) closeTour(); });
   onMount(() => panel?.focus({ preventScroll: true }));
   function finish() { overlay.hide(); }
+  $effect(() => { if (overlay.open) return mobileOverlay(finish); });
   function go(next: number) {
     index = Math.min(screens.length - 1, Math.max(0, next));
     void tick().then(() => {

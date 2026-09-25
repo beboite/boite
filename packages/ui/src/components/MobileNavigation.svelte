@@ -4,6 +4,7 @@
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
+  import { mobileOverlay } from '../lib/mobile-history';
   import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 
@@ -25,10 +26,19 @@
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
+  /** The list a conversation was opened from: Back returns to it. The landing conversation has none, so Back leaves. */
+  let from = $state<'threads' | 'activity' | null>(null);
+  $effect(() => {
+    if (store.page !== 'chat' || screen !== 'chat' || !from) return;
+    const list = from;
+    return mobileOverlay(() => { from = null; screen = list; });
+  });
+
   function show(next: typeof screen) {
     store.showChat();
     store.sidebarOpen = false;
     search = '';
+    from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
   }
   async function pickProject(key: string) {

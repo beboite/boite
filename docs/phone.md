@@ -146,8 +146,13 @@ across connected machines; Activity puts waiting requests first, followed by
 running and queued turns. Settings is the third destination. The header names
 the machine, connection and project, and starts a new conversation.
 
-Model, effort and action menus open as bottom sheets. Back dismisses an open
-sheet. Controls have 44 px touch targets; `visualViewport` keeps the composer
+Model, effort and action menus open as bottom sheets. The browser's Back, the
+Android Back gesture and a mouse's back button close the top sheet, dialog,
+context popup or right panel first, then return from a conversation to the
+list it was opened from. Each of those owns one history entry
+(`lib/mobile-history.ts`); closing it by a button removes that entry, so Back
+never lands on something already closed. The conversation the app opens on has
+no list behind it, and Back from there leaves the app as before. Controls have 44 px touch targets; `visualViewport` keeps the composer
 above the keyboard, and the bottom navigation hides while the keyboard is open.
 Safe-area insets keep controls clear of the home indicator and screen cutouts.
 

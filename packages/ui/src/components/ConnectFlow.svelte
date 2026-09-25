@@ -4,6 +4,7 @@
   import type { Account, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { fill, strings } from '../lib/strings';
@@ -53,6 +54,8 @@
     overlay.show();
     void focusFirst();
   });
+
+  $effect(() => { if (overlay.open) return mobileOverlay(() => store.closeConnect()); });
 
   async function focusFirst() {
     await tick();

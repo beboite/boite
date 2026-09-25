@@ -144,3 +144,43 @@ test('returning to a long conversation preserves the reading position', async ()
   expect(restoredAnchor.id).toBe(anchor.id);
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
+
+test('Back returns from a conversation to the list and closes the context popup, the panel and the project picker first', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')`);
+  const back = async (gone: string) => {
+    await page.evaluate('history.back()');
+    await page.waitFor(`!document.querySelector(${JSON.stringify(gone)})`);
+    expect(await page.evaluate<string>('location.origin')).toBe(origin);
+  };
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
+  await page.click('[data-testid=context-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=context-popup]')`);
+  await back('[data-testid=context-popup]');
+  await page.click('[data-testid=panel-toggle]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
+  await back('[data-testid=right-panel]');
+  // The project sheet pops its own entry while the picker pushes one.
+  await page.click('[data-testid=mobile-project]');
+  await page.click('[data-value="add-project"]');
+  await page.waitFor(`document.querySelector('[data-testid=project-picker]')`);
+  await Bun.sleep(400);
+  await back('[data-testid=project-picker]');
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=chat]') && !document.querySelector('[data-testid=mobile-list]')`)).toBe(true);
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+  expect(await page.evaluate<string>('location.origin')).toBe(origin);
+  // Closing the panel by its button pops its own entry: the next Back still reaches the list.
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  await page.click('[data-testid=panel-toggle]');
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await Bun.sleep(300);
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+  expect(page.errors()).toEqual([]);
+}, 30_000);

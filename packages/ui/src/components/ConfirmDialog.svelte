@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
 
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -24,6 +25,8 @@
       target?.focus({ preventScroll: true });
     });
   });
+
+  $effect(() => { if (overlay.open) return mobileOverlay(() => confirm.answer(false)); });
 
   function onkeydown(event: KeyboardEvent) {
     if (!confirm.current) return;

@@ -28,6 +28,7 @@
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { mobileOverlay } from './lib/mobile-history';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -203,6 +204,11 @@
   $effect(() => {
     if (store.panelOpen && store.openThread) panelSlot.show();
     else panelSlot.hide();
+  });
+
+  // On a phone the panel covers the chat: Back shuts it.
+  $effect(() => {
+    if (panelSlot.open) return mobileOverlay(() => store.panel.hide());
   });
 
   // The tray menu is native: it speaks the UI's language only when told, at
