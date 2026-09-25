@@ -912,9 +912,9 @@ export class ThreadStore {
       // The turn's own messages, and only the ones still open: a caret left
       // blinking on a message nobody will ever write to again is the visible half
       // of this bug.
-      const streaming = this.core.journal
-        .listMessages(threadId)
-        .filter((message) => message.turnId === turn.id && message.state === 'streaming');
+      // Through the turn index: the rest of the thread, images included, is never parsed.
+      const streaming = Array.from(this.core.journal.walkTurnMessages(threadId, turn.id))
+        .filter((message) => message.state === 'streaming');
       const carrier = streaming.at(-1) ?? this.openRecoveryMessage(turn);
       const index = carrier.parts.length;
       const part: MessagePart = { type: 'error', message: reason };
