@@ -15,32 +15,46 @@ function dataDir(): string {
   return dir;
 }
 
+/** A core stand-in that answers `body` on /health and counts the requests it got. */
 function healthServer(body: unknown) {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json(body) });
+  const hits: string[] = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: (request) => {
+      hits.push(new URL(request.url).pathname);
+      return Response.json(body);
+    },
+  });
   cleanups.push(() => server.stop(true));
-  return server;
+  return { port: server.port, hits };
 }
 
-async function check(env: Record<string, string>): Promise<number> {
-  const child = Bun.spawn(['bun', SCRIPT], {
+async function check(env: Record<string, string>): Promise<{ code: number; stderr: string }> {
+  const child = Bun.spawn([process.execPath, SCRIPT], {
     env: { ...process.env, ...env },
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'pipe',
     windowsHide: true,
   });
-  return await child.exited;
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  return { code, stderr };
 }
 
 test('checks the port the running core wrote to core.json', async () => {
   const server = healthServer({ ok: true });
   const dir = dataDir();
   writeFileSync(join(dir, 'core.json'), JSON.stringify({ port: server.port, host: '0.0.0.0', token: 'x' }));
-  expect(await check({ BOITE_DATA_DIR: dir })).toBe(0);
+  expect((await check({ BOITE_DATA_DIR: dir })).code).toBe(0);
+  expect(server.hits).toEqual(['/health']);
 });
 
 test('fails when the core on that port is not healthy', async () => {
   const server = healthServer({ ok: false });
   const dir = dataDir();
   writeFileSync(join(dir, 'core.json'), JSON.stringify({ port: server.port, token: 'x' }));
-  expect(await check({ BOITE_DATA_DIR: dir })).not.toBe(0);
+  const result = await check({ BOITE_DATA_DIR: dir });
+  expect(result.code).not.toBe(0);
+  expect(server.hits).toEqual(['/health']);
+  expect(result.stderr).toContain('invalid core health response');
 });
