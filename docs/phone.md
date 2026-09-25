@@ -148,8 +148,8 @@ finds there open from a tap: the conversation's title in its header lists
 rename, regenerate title, pin, copy path and archive, and the `...` button of a
 row in the list offers pin, regenerate title and archive. The same title sheet
 holds the Agents and Terminal toggles, so the header row keeps only the title,
-the context ring and the Panel button, and a title of about 28 characters shows
-whole at 360 px in French. A draft's header shows its "New thread" label. Settings is the third destination. The header names
+the context ring and the Panel button: at 360 px in French, 192 px of a 193 px
+title stay visible, where 96 px did with the toggles in the row. A draft's header shows its "New thread" label. Settings is the third destination. The header names
 the machine, connection and project, and starts a new conversation.
 
 Model, effort and action menus open as bottom sheets. The browser's Back, the
