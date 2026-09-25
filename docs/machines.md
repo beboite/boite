@@ -36,11 +36,13 @@ it takes on a slow link; the connection is never dropped for it.
 A link can die without closing the socket: a phone's NAT mapping expires, the
 core's host sleeps, a tunnel changes path. The client notices by itself
 (`packages/ui/src/lib/client.ts`). On a remote host, 25 seconds without any
-frame sends a `hello`, which the core answers on an open connection with its
-info and nothing else. If no frame of any kind arrives within 15 seconds, the
-socket is replaced and the calls it carried fail with "connection lost; check
-the conversation before resending". A call that gets no answer in 120 seconds
-starts the same check on any host. Returning to the page, an `online` event or
+frame while no call waits for its answer sends a `hello`, which the core
+answers on an open connection with its info and nothing else. If no frame of
+any kind arrives within 15 seconds, the socket is replaced and the calls it
+carried fail with "connection lost; check the conversation before resending".
+While a call waits, silence may be its answer still downloading, one frame of
+up to 16 MB behind which the probe's answer would queue, so only that call's
+own 120 second timeout starts the check, on any host. Returning to the page, an `online` event or
 a page restored from the back/forward cache also send the `hello` first, and
 replace the socket only if it stays silent for 4 seconds, so a tab switch no
 longer drops a healthy connection or reloads the lists. A hidden page is not
