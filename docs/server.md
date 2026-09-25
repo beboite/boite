@@ -165,6 +165,14 @@ a fixed port:
 There is no TLS on the socket. Never bind a public address: the key a pairing
 link becomes travels in the first frame, and `ws://` carries it in the clear.
 
+Anything on that network can still knock, so the core bounds what an
+unauthenticated peer costs it. A socket gets 5 seconds to say hello, and a
+frame over 64 KB before hello closes it unread. At most 32 sockets may wait for
+their hello at once; the next upgrade gets a 503. An HTTP connection idle for
+60 seconds is closed. An authenticated socket reads frames up to 16 MB, the
+limit the attachments of one turn are sized for. The UI page is served with
+`frame-ancestors 'self'`, so no other site can frame it.
+
 A systemd user unit keeps it running, with `loginctl enable-linger <account>` so
 it starts at boot without a login:
 

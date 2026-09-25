@@ -185,6 +185,43 @@ describe('server', () => {
     const body = await response.text();
     if (existsSync(UI_DIST)) expect(body).toContain('<html');
     else expect(body).toBe(PLACEHOLDER_HTML);
+    // No other site may frame the owner's UI.
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
+    expect(response.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+  });
+
+  test('a socket before hello may not send a large frame, and only so many may wait at once', async () => {
+    const big = rawSocket();
+    await opened(big);
+    const closed = closeCode(big);
+    let answered = false;
+    big.addEventListener('message', () => { answered = true; });
+    big.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { token: harness.token, pad: 'x'.repeat(70_000) } }));
+    expect(await closed).toBe(RpcCloseCode.Unauthorized);
+    expect(answered).toBe(false);
+
+    // A core that waits longer for hello than this file's 200 ms, so the sockets stay pending.
+    const patient = await startTestCore({ helloTimeoutMs: 10_000 });
+    const waiting: WebSocket[] = [];
+    try {
+      const url = patient.url.replace('http', 'ws') + RPC_PATH;
+      for (let at = 0; at < 32; at += 1) waiting.push(new WebSocket(url));
+      await Promise.all(waiting.map(opened));
+      const refused = await fetch(`${patient.url}${RPC_PATH}`);
+      expect(refused.status).toBe(503);
+      // An authenticated client is not waiting: one hello frees a place.
+      const first = waiting[0] as WebSocket;
+      const hello = firstFrame(first);
+      first.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+        token: patient.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
+      } }));
+      expect((await hello).result).toBeDefined();
+      const next = await fetch(`${patient.url}${RPC_PATH}`);
+      expect(next.status).toBe(400);
+    } finally {
+      for (const socket of waiting) socket.close();
+      await patient.stop();
+    }
   });
 
   // Without `bun run build:ui` there is nothing to serve and nothing to assert;

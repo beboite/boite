@@ -14,6 +14,19 @@ import { handleFrame } from './server/frame.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+/** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
+const PREAUTH_FRAME_MAX_BYTES = 64 * 1024;
+/**
+ * Sockets waiting for their hello at once. A real client spends milliseconds
+ * there, so this only bounds a LAN peer opening them by the thousand.
+ */
+const PREAUTH_SOCKETS_MAX = 32;
+/**
+ * Seconds an HTTP connection may sit without a byte either way. No route here
+ * holds a request open: the coordination POST answers at once, and a ticketed
+ * file a paused video stops reading is fetched again by `Range`.
+ */
+const HTTP_IDLE_TIMEOUT_S = 60;
 
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
@@ -102,11 +115,20 @@ const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 function cacheHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
   if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
-  if (pathname === '/' || pathname === '/index.html' || pathname === '/manifest.webmanifest') {
-    return { 'cache-control': 'no-cache' };
-  }
+  if (pathname === '/' || pathname === '/index.html') return { 'cache-control': 'no-cache', ...NO_FOREIGN_FRAMES };
+  if (pathname === '/manifest.webmanifest') return { 'cache-control': 'no-cache' };
   return {};
 }
+
+/**
+ * The page is the owner's whole UI, so no other site may frame it and lay a
+ * decoy over Allow or Revoke. Ticketed files keep no such header: the panel
+ * frames them, from the same origin in a browser.
+ */
+const NO_FOREIGN_FRAMES = {
+  'content-security-policy': "frame-ancestors 'self'",
+  'x-frame-options': 'SAMEORIGIN',
+} as const;
 
 function staticFile(pathname: string): string | null {
   if (!existsSync(UI_DIST)) return null;
@@ -216,7 +238,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const server = Bun.serve<SocketData>({
     hostname: host,
     port: options.port ?? 0,
-    idleTimeout: 0,
+    // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
+    idleTimeout: HTTP_IDLE_TIMEOUT_S,
 
     fetch(request, self) {
       if (stopping) return new Response('core stopping', { status: 503 });
@@ -244,6 +267,12 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
+        let waiting = 0;
+        for (const open of connections) if (!open.authenticated) waiting += 1;
+        if (waiting >= PREAUTH_SOCKETS_MAX) {
+          core.log('warn', `refused a websocket: ${waiting} sockets are already waiting for their hello`);
+          return new Response('too many connections waiting for hello', { status: 503 });
+        }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
         if (self.upgrade(request, { data: { connection } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
@@ -252,7 +281,7 @@ export function startServer(options: ServerOptions): RunningServer {
       const file = staticFile(url.pathname);
       if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
       if (url.pathname === '/') {
-        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...NO_FOREIGN_FRAMES } });
       }
       return new Response('not found', { status: 404 });
     },
@@ -284,6 +313,11 @@ export function startServer(options: ServerOptions): RunningServer {
 
       message(socket, raw) {
         if (stopping) return;
+        const connection = socket.data.connection;
+        if (!connection.authenticated && raw.length > PREAUTH_FRAME_MAX_BYTES) {
+          connection.close(RpcCloseCode.Unauthorized, 'hello frame too large');
+          return;
+        }
         const frame = handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
         frames.add(frame);
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
