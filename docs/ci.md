@@ -92,6 +92,16 @@ workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
 when a failure needs a quiet run.
 
+Where the time goes, from `gh run view` on the 23 finished `ci` runs before
+2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows
+desktop job sets that length (12.8 minutes): 5.8 for the end-to-end suite, 3.5
+for the installer build and 1.1 for the Rust tests. Every other job a pull
+request waits on finishes in under 6 minutes; the Windows core job took 4.9, of
+which 4.1 were the serial core tests that parallel workers now shorten. The
+Intel macOS portable leg (16.2 minutes) runs only after a merge and on
+releases. Four of those runs failed: three in the Windows end-to-end suite and
+one in the Ubuntu core tests. Rerun the same query before quoting new numbers.
+
 The Windows job builds the installer and runs Rust tests in the release profile,
 sharing compiled dependencies. Successful main jobs save Cargo caches under a
 release-specific key. Failed or interrupted jobs do not save an incomplete cache
