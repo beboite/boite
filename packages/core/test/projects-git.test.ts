@@ -84,3 +84,18 @@ test('hasGitMarker answers from the disk within its deadline', async () => {
   mkdirSync(join(harness.dataDir, '.git'));
   expect(await hasGitMarker(harness.dataDir)).toBe(true);
 });
+
+test.skipIf(process.platform !== 'win32')('a folder added again in another case answers its fresh git check under the stored spelling', async () => {
+  const client = await harness.connect();
+  const path = join(harness.dataDir, 'Case');
+  mkdirSync(path, { recursive: true });
+  // No background check may answer in the test's place: only add() looks at the disk.
+  harness.core.projects.gitProbe = async () => null;
+  const first = await client.call('projects.add', { path });
+  expect(first.repository).toBe(false);
+  mkdirSync(join(path, '.git'));
+  const again = await client.call('projects.add', { path: path.toUpperCase() });
+  expect(again.id).toBe(first.id);
+  expect(again.repository).toBe(true);
+  expect(harness.core.projects.list().find((entry) => entry.id === first.id)?.repository).toBe(true);
+});

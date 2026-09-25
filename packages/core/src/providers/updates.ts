@@ -130,7 +130,11 @@ export class HarnessUpdates {
     core.providers.installs.onSettled((outcome) => this.installSettled(outcome));
   }
 
-  /** Arms the periodic check. The core's entry point calls it; a test core never does. */
+  /**
+   * Arms the periodic check. The core's entry point calls it, an e2e core
+   * included; `BOITE_HOST_AGENTS=0`, which that suite sets, leaves it no agent
+   * to read, so it runs no CLI and asks no registry. A unit test core never arms it.
+   */
   start(): void {
     this.refreshRestored();
     this.schedule(this.firstDelay());

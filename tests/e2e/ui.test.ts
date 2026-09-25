@@ -8,12 +8,12 @@ import { claudeProjectFolder } from '../../packages/core/src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from '../../packages/core/test/fixtures/claude-session.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
+import { developmentMarkers, ensureProductionUi } from './lib/prod-ui.ts';
 
 const TIMEOUT = 60_000;
 /** The reconnect has its own budget: a backoff that needs a minute is a bug. */
 const RECONNECT_TIMEOUT_MS = 30_000;
 const ROOT = join(import.meta.dir, '..', '..');
-const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
@@ -56,17 +56,7 @@ async function clickWhenEnabled(selector: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (process.env.BOITE_E2E_PREBUILT_UI !== '1') {
-    const built = Bun.spawnSync({
-      cmd: ['bun', 'run', '--cwd', 'packages/ui', 'build'],
-      cwd: ROOT,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      windowsHide: true,
-    });
-    if (!built.success) throw new Error(`the ui did not build:\n${built.stderr.toString()}`);
-  }
-  if (!existsSync(UI_INDEX)) throw new Error(`Missing prebuilt UI: ${UI_INDEX}. Run bun run build:ui first.`);
+  ensureProductionUi();
   core = await startCore();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
   worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
@@ -79,6 +69,14 @@ afterAll(async () => {
   if (projectDir !== undefined) await removeDirectory(projectDir);
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
 }, 15_000);
+
+test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
+  const index = await (await fetch(`${core.url}/`)).text();
+  const scripts = [...index.matchAll(/src="(?:\.\/|\/)(assets\/[^"]+\.js)"/g)].map((match) => match[1] ?? '');
+  expect(scripts.length).toBeGreaterThan(0);
+  const files = await Promise.all(scripts.map(async (name) => ({ name, text: await (await fetch(`${core.url}/${name}`)).text() })));
+  expect(developmentMarkers(files)).toEqual([]);
+});
 
 test(
   'a fresh core opens on a draft in the drafts, connected to the core it was paired with',

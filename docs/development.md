@@ -271,6 +271,27 @@ and the release shell executable driven over the WebView2 debugging port. The
 shell part runs with `BOITE_SHELL_HIDDEN=1`, which is the only way an agent may
 ever start that executable: a window on the user's screen is forbidden.
 
+### Contract scenarios
+
+`tests/contract/scenarios.ts` holds the contract as behaviour: each scenario
+drives methods through a small environment (`call`, `on`, a new folder, a
+missing one) and throws on the first code, data key or event that breaks the
+rule. It reads codes and data keys, never message text. Two runners share it:
+`packages/core/test/contract.test.ts` against one echo core over WebSocket, and
+`packages/ui/src/lib/fake-client.contract.test.ts` against the in-memory client.
+Both finish in under a second. `KNOWN_DIVERGENCES` lists a scenario allowed to
+fail on one side, with the reason; a listed scenario that passes fails its
+runner, so a fixed drift leaves the list. The rules the fake repeats live in
+`packages/ui/src/lib/fake-client/checks.ts`, and `settings.set` validation is
+one function in the contract (`settingsPatchError`). What only one side can
+show (a shell to close, a login to cancel, a device kept from owner events) is
+in `packages/ui/src/lib/fake-client.parity.test.ts`. In the fake, a folder
+under one named `missing` does not exist.
+
+Vitest gives each UI test 15 seconds (`packages/ui/vitest.config.ts`); the
+`waitFor` of `app.test.ts` stops at 8 seconds, so a slow wait fails with the
+page's text rather than as a bare timeout.
+
 ## Rebuilding the shell executable
 
 `bun run test:shell` runs the Rust unit tests. A full `bun run e2e` fails when
@@ -340,6 +361,15 @@ use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
 one within the test process; the other end-to-end paths use a real temporary
 core with the echo driver.
 
+A real core serves `packages/ui/dist`. `tests/e2e/ui.test.ts` and
+`tests/e2e/cli.test.ts` call `ensureProductionUi` (`tests/e2e/lib/prod-ui.ts`),
+which builds it again with `NODE_ENV=production` only when it is missing, older
+than the UI sources, `packages/contracts` or `bun.lock`, or a development
+build. A child of `bun test` inherits `NODE_ENV=test`, and Vite then builds a
+development bundle that loads the fake client on `?fake=1`. `ui.test.ts` fails
+if the bundle the core serves imports the fake client or carries Svelte's
+development runtime.
+
 `tests/e2e/model-switch.test.ts` changes an existing conversation from Echo to
 an ACP fixture over real RPC and stdio. It checks history continuity and writes
 desktop and phone captures without using provider logins. Core regression tests
@@ -355,6 +385,14 @@ through ANGLE, muted, in a throwaway profile, and drives it over CDP.
 `tests/e2e/.artifacts/`, which is git-ignored. That is the proof for anything
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
+
+`page.close()` kills the browser's process tree without blocking the other
+closes, waits up to 30 s for the browser to exit, then removes its profile,
+retrying for 15 s while Windows still holds a file. A directory it cannot
+remove is printed as `e2e: left <path>`. The test preload removes `boite-e2e-*`
+directories older than an hour, which an interrupted run left in the temp
+folder, and closes any page a file left open when the run ends.
+`tests/e2e/cleanup.test.ts` checks all three.
 
 An end-to-end file serves the UI through `tests/e2e/lib/ui.ts`. `startUi` uses
 the fake-client bundle in `BOITE_E2E_FAKE_UI` when set. With

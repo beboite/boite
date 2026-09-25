@@ -2209,3 +2209,4 @@ export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
 export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
