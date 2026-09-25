@@ -454,7 +454,7 @@ export class Connection {
     const [projects, threads, providers, accountList, settings, scheduler, permissions, questions, logins, keybindings] = results;
     if (permissions.status === 'fulfilled') requests.mergePermissions(permissions.value, 'all');
     if (questions.status === 'fulfilled') requests.mergeQuestions(questions.value, 'all');
-    if (projects.status === 'fulfilled') { s.projects = projects.value; this.ctx.projects.projectsAt = Date.now(); }
+    if (projects.status === 'fulfilled') { s.projects = projects.value; this.ctx.projects.bootListAt = Date.now(); }
     if (threads.status === 'fulfilled') {
       // Held rows are patched, not replaced, so a reconnect redraws only what changed.
       s.threads = reconcileRows(s.threads, threads.value);

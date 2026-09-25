@@ -6,7 +6,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('a draft opened right after the boot reuses the project list the boot fetched', async () => {
+test('the draft the boot lands on reuses the project list of the boot, and a draft the user opens asks again', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   const asked = vi.spyOn(client, 'call');
@@ -16,13 +16,12 @@ test('a draft opened right after the boot reuses the project list the boot fetch
     const lists = () => asked.mock.calls.filter(([method]) => method === 'projects.list').length;
     expect(lists()).toBe(1);
 
-    store.startDraft();
+    await store.openLanding();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.draft).not.toBeNull();
     expect(lists()).toBe(1);
 
-    // A draft opened later asks again, so a `git init` done meanwhile shows.
-    const now = Date.now();
-    vi.spyOn(Date, 'now').mockReturnValue(now + 6_000);
+    // New thread pressed right away still asks, so a `git init` done meanwhile shows.
     store.startDraft();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(lists()).toBe(2);

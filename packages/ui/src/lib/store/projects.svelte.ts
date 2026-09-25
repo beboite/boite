@@ -14,9 +14,11 @@ export class Projects {
    * repository, can change while the app is open: a draft asks again, so its
    * worktree switch follows a `git init` done in a terminal. A failure keeps
    * the list the app has; the boot already reported a core that cannot answer.
-   * A list the boot fetched under five seconds ago is fresh enough.
+   * The draft the boot lands on reuses the list the boot fetched under five
+   * seconds ago; a draft the user opens asks again, however soon after.
    */
-  projectsAt = 0;
+  bootListAt = 0;
+  #landing = false;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -71,7 +73,12 @@ export class Projects {
     // Settings opened while the core was still answering stays open.
     if (s.openThread || this.draft || s.page !== 'chat') return;
     // The drafts, so the first screen is a composer, not a folder picker; or the last project.
-    s.startDraft(work.current.startIn === 'drafts' ? null : s.lastProject());
+    this.#land(() => s.startDraft(work.current.startIn === 'drafts' ? null : s.lastProject()));
+  }
+
+  #land(open: () => void): void {
+    this.#landing = true;
+    try { open(); } finally { this.#landing = false; }
   }
 
   /** The most recent thread, a draft in the first project, or nothing on a first run. */
@@ -85,7 +92,7 @@ export class Projects {
       await s.open(recent.id);
       return;
     }
-    s.startDraft(this.projects[0]?.id ?? null);
+    this.#land(() => s.startDraft(this.projects[0]?.id ?? null));
   }
 
   // -------------------------------------------------------------------------
@@ -143,7 +150,8 @@ export class Projects {
 
   async refreshProjects(): Promise<void> {
     const client = this.ctx.client;
-    if (!client || this.ctx.store.connection !== 'ready' || Date.now() - this.projectsAt < 5_000) return;
+    const fresh = this.#landing && Date.now() - this.bootListAt < 5_000;
+    if (!client || this.ctx.store.connection !== 'ready' || fresh) return;
     try {
       const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
       // Another machine took this Store meanwhile: project ids can collide between machines.
