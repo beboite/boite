@@ -323,11 +323,22 @@ export function main(argv: string[]): void {
       .finally(() => {
         clearTimeout(deadline);
         unlock();
-        process.exit(0);
+        process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
       });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // The last line of defence: Bun exits on either anyway. This leaves a log
+  // line, stops the turns and releases the lock on the way out; the process
+  // never carries on after an error nobody expected.
+  const fatal = (kind: string) => (error: unknown): void => {
+    core.log('error', `${kind}: ${messageOf(error)}`);
+    process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    process.exitCode = 1;
+    shutdown();
+  };
+  process.on('uncaughtException', fatal('uncaught exception'));
+  process.on('unhandledRejection', fatal('unhandled rejection'));
 }
 
 if (import.meta.main) main(process.argv.slice(2));
