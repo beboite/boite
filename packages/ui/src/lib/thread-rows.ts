@@ -32,6 +32,16 @@ export function threadsByProject(threads: readonly ThreadSummary[]): Map<Project
 }
 
 /**
+ * The index of the item with that id, searched from the end. What a stream
+ * writes to is the newest message or turn, so this stops at once where a
+ * forward `find` crossed the whole loaded timeline on every delta.
+ */
+export function lastIndexById<T extends { id: string }>(items: readonly T[], id: string): number {
+  for (let index = items.length - 1; index >= 0; index--) if (items[index]!.id === id) return index;
+  return -1;
+}
+
+/**
  * A `threads.get` answer that starts at `messagesFrom`, laid over the window
  * already held: what came before that message stays, the rest is the core's.
  */

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { PROTOCOL_VERSION, RpcErrorCode, type ThreadStatus } from '@boite/contracts';
+import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
@@ -269,6 +269,42 @@ test('a replacement part followed by a delta is appended once in each independen
     for (const snapshot of [store.openThread, store.delegationThread]) {
       expect(snapshot!.messages.at(-1)!.parts[0]).toEqual({ type: 'text', text: 'hello world' });
     }
+  } finally { store.detach(); client.close(); }
+});
+
+test('a streamed delta, message or turn finds the newest item without walking the whole timeline', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const handlers = new Map<string, (payload: never) => void>();
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (payload: never) => void) => {
+    handlers.set(event, handler);
+    return on(event as never, handler);
+  }) as typeof client.on);
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    const raw = JSON.parse(JSON.stringify(store.openThread)) as Thread;
+    const last = raw.messages.at(-1)!;
+    const turn = raw.turns.at(-1)!;
+    // A long thread scrolled back: what streams is always its newest item.
+    let reads = 0;
+    const counted = <T,>(items: T[]): T[] => new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      }
+    });
+    const older = Array.from({ length: 2000 }, (_, index) => ({ ...last, id: `m-old-${index}`, parts: [{ type: 'text' as const, text: 'old' }] }));
+    const olderTurns = Array.from({ length: 500 }, (_, index) => ({ ...turn, id: `turn-old-${index}` }));
+    store.openThread = { ...raw, messages: counted([...older, last]), turns: counted([...olderTurns, turn]) };
+    handlers.get('message.delta')!({ threadId: 't-trace', messageId: last.id, partIndex: 0, text: '!' } as never);
+    handlers.get('message.started')!({ ...last, state: 'streaming' } as never);
+    handlers.get('turn.started')!({ ...turn } as never);
+    expect(reads).toBeLessThan(20);
+    expect(store.openThread.messages).toHaveLength(2001);
+    expect(store.openThread.messages.at(-1)!.state).toBe('streaming');
   } finally { store.detach(); client.close(); }
 });
 

@@ -92,7 +92,7 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
-import { mergeResumed, patchRow, threadsByProject } from './thread-rows';
+import { lastIndexById, mergeResumed, patchRow, threadsByProject } from './thread-rows';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -901,7 +901,7 @@ export class Store {
 
     on('message.started', (message) => {
       for (const target of this.#threadSnapshots(message.threadId)) {
-        const index = target.messages.findIndex((m) => m.id === message.id);
+        const index = lastIndexById(target.messages, message.id);
         if (index >= 0) target.messages[index] = message;
         else target.messages.push(message);
       }
@@ -3186,7 +3186,7 @@ export class Store {
   #messages(threadId: ThreadId, messageId: string): Set<Message> {
     const messages = new Set<Message>();
     for (const thread of this.#threadSnapshots(threadId)) {
-      const message = thread.messages.find((m) => m.id === messageId);
+      const message = thread.messages[lastIndexById(thread.messages, messageId)];
       if (message) messages.add(message);
     }
     return messages;
@@ -3194,7 +3194,7 @@ export class Store {
 
   #upsertTurn(threadId: ThreadId, turn: Thread['turns'][number]): void {
     for (const thread of this.#threadSnapshots(threadId)) {
-      const index = thread.turns.findIndex((t) => t.id === turn.id);
+      const index = lastIndexById(thread.turns, turn.id);
       if (index >= 0) thread.turns[index] = turn;
       else thread.turns.push(turn);
     }
