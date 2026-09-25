@@ -6,6 +6,7 @@
   import OnboardingScene from './OnboardingScene.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { focusedElement, restoreFocus } from '../lib/focus';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
@@ -35,8 +36,10 @@
   const overlay = new Closing();
   overlay.show();
   $effect(() => { if (!overlay.shown) closeTour(); });
+  /** What had the keyboard when the tour opened; the composer when that was nothing. */
+  const previous = focusedElement();
   onMount(() => panel?.focus({ preventScroll: true }));
-  function finish() { overlay.hide(); }
+  function finish() { overlay.hide(); restoreFocus(previous); }
   function go(next: number) {
     index = Math.min(screens.length - 1, Math.max(0, next));
     void tick().then(() => {

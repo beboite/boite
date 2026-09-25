@@ -156,7 +156,9 @@ Enter during a running turn queues the message and its attachments. The composer
 shows each pending message. Up in an empty composer takes the newest pending
 message out of the queue for editing; clicking a pending message does the same.
 Escape stops the current turn. Pending messages then run in their original
-order. A failed send preserves the queue for an explicit retry.
+order. An Escape that closes something first (a popover, a menu, the command
+palette, a rename field) only closes it, and the focus goes back to where it was,
+so a second Escape is needed to stop. A failed send preserves the queue for an explicit retry.
 
 `/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
 consecutive iterations and stops. Counts range from 1 to 1000. A count written

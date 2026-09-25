@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Ellipsis, Folder, GitPullRequest, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
@@ -60,6 +60,14 @@
     renaming = false;
     await owner.rename(thread.id, title);
   }
+  let row = $state<HTMLButtonElement | undefined>(undefined);
+  /** Enter and Escape hand the keyboard back to the row, never to the page, where Escape stops the turn. */
+  async function leaveRename(commit: boolean) {
+    if (commit) void save();
+    else renaming = false;
+    await tick();
+    row?.focus({ preventScroll: true });
+  }
   function menu(event: MouseEvent) {
     contextMenu.open(
       event,
@@ -96,8 +104,8 @@
     use:focusOnMount
     onblur={() => void save()}
     onkeydown={(event) => {
-      if (event.key === 'Enter') void save();
-      if (event.key === 'Escape') renaming = false;
+      if (event.key === 'Enter') void leaveRename(true);
+      if (event.key === 'Escape') void leaveRename(false);
     }}
   />
 {:else}
@@ -106,6 +114,7 @@
     <button
       type="button"
       class="ghost row"
+      bind:this={row}
       data-testid="thread-row"
       data-thread-id={thread.id}
       data-machine-id={machine.id}
