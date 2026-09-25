@@ -188,6 +188,30 @@ test('the panel sheet, Agents and Settings keep clear of a notch and the status 
   }
 }, 30_000);
 
+test('Appearance in French at 360 px keeps every label beside its choices readable', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 1, mobile: true });
+  try {
+    await page.click('[data-testid=mobile-settings]');
+    await page.click('[data-testid=settings-tab-appearance]');
+    await page.click('[data-testid=locale-fr]');
+    await page.waitFor(`document.querySelector('[data-testid=appearance-page] h1')?.textContent.includes('Apparence')`);
+    const rows = await page.evaluate<Array<{ text: string; clipped: boolean; overlap: boolean; narrow: boolean }>>(`[...document.querySelectorAll('[data-testid=appearance-page] .switch-row')].filter(row => row.querySelector('.segmented')).map(row => {
+      const text = row.querySelector('.text'), t = text.getBoundingClientRect(), s = row.querySelector('.segmented').getBoundingClientRect();
+      return { text: text.textContent.trim(), clipped: text.scrollWidth > text.clientWidth + 1, overlap: t.right > s.left + 1 && t.left < s.right - 1 && t.bottom > s.top + 1 && t.top < s.bottom - 1, narrow: t.width < 120 };
+    })`);
+    await page.evaluate(`document.querySelector('[data-testid=panel-start-launcher], [data-testid^=panel-start-]').scrollIntoView({ block: 'center' })`);
+    await capture('mobile-appearance-fr-360.png');
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.filter(row => row.clipped || row.overlap || row.narrow)).toEqual([]);
+    expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  } finally {
+    await page.click('[data-testid=locale-en]');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  }
+}, 30_000);
+
 test('a phone pins and archives a thread without a right-click, from the header and from the list', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);
