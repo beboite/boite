@@ -131,6 +131,7 @@ export class AgentsRepository {
       db.query('INSERT INTO agent_entities (kind, id, revision, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)')
         .run(kind, record.id, record.revision, now, now, JSON.stringify(record));
     });
+    this.prune(now);
     return record;
   }
 
@@ -145,6 +146,7 @@ export class AgentsRepository {
           .run(record.revision, record.updatedAt, JSON.stringify(record), kind, id, expectedRevision);
         if (updated.changes !== 1) throw refused(`${kind} ${id}: revision changed`);
       });
+      this.prune(record.updatedAt);
       return record;
     });
   }
@@ -155,8 +157,20 @@ export class AgentsRepository {
     return this.journal.db.transaction(run)();
   }
 
-  /** When `command` last dropped receipts past `REQUEST_RETENTION_MS`. */
+  /** When the last pass dropped receipts and record events past `REQUEST_RETENTION_MS`. */
   private pruned = 0;
+
+  /**
+   * Once an hour, from whichever write comes first: every routine run adds
+   * receipts and record events, and neither is read back after a month.
+   */
+  private prune(now: number): void {
+    if (now - this.pruned <= HOUR) return;
+    this.pruned = now;
+    const cutoff = now - REQUEST_RETENTION_MS;
+    this.journal.db.query('DELETE FROM agent_requests WHERE created_at < ?').run(cutoff);
+    this.journal.db.query(PRUNE_RECORD_EVENTS).run(cutoff);
+  }
 
   /**
    * Receipt and effects share a transaction, including after a lost RPC response.
@@ -182,10 +196,7 @@ export class AgentsRepository {
       const now = Date.now();
       this.journal.db.query('INSERT INTO agent_requests (actor, request_id, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(actor, requestId, fingerprint, JSON.stringify(receipt(result)), now);
-      if (now - this.pruned > HOUR) {
-        this.pruned = now;
-        this.journal.db.query('DELETE FROM agent_requests WHERE created_at < ?').run(now - REQUEST_RETENTION_MS);
-      }
+      this.prune(now);
       return result;
     });
   }
@@ -197,6 +208,14 @@ const HOUR = 60 * 60 * 1000;
  * seconds, and a routine's ids carry its revision, so none comes back later.
  */
 export const REQUEST_RETENTION_MS = 30 * 24 * HOUR;
+
+/**
+ * Drops `agents.record` events older than the cutoff. Nothing reads their
+ * payload: `revision()` takes the newest id, and that event always stays, so
+ * the revision never goes back. The inner query names the partial index
+ * `events_agents` with its WHERE clause written the same way.
+ */
+export const PRUNE_RECORD_EVENTS = "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE type IN ('agents.record', 'agents.limits') AND type = 'agents.record' AND ts < ? AND id < (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits')))";
 
 /** What an `agents.record` event says: which record changed, not the record again. */
 function recordEvent(kind: AgentEntityKind, record: { id: string; revision: number }): { kind: AgentEntityKind; id: string; revision: number } {

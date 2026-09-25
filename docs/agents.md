@@ -106,7 +106,9 @@ A command that creates something (a message, a routine run, a decision) takes a
 returns the same record, read again as it stands now, and does nothing twice.
 The receipt names the record rather than copying it, and the journal event of a
 record change names its kind, id and revision, so a routine with a long prompt
-does not copy that prompt into every receipt and event.
+does not copy that prompt into every receipt and event. Those events also leave
+the journal after 30 days, all but the newest, whose id is the revision clients
+compare; the records themselves stay.
 
 ## Providers and tools
 
