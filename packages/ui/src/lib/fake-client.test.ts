@@ -599,3 +599,21 @@ test('fake async answers given while a turn runs start one turn together after i
     expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
   } finally { client.close(); }
 });
+
+test('an account check or provider reload that changes nothing stays silent, as on the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const heard: string[] = [];
+    client.on('accounts.updated', account => heard.push(`account:${account.id}:${account.status}`));
+    client.on('providers.updated', () => heard.push('providers'));
+    const account = await client.call('accounts.add', { providerId: 'opencode', label: 'Checked', useDefaultLocation: true });
+    heard.length = 0;
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    expect(heard).toEqual([`account:${account.id}:ok`]);
+    heard.length = 0;
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    await client.call('providers.reload', {});
+    expect(heard).toEqual([]);
+  } finally { client.close(); }
+});
