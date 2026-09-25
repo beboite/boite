@@ -116,9 +116,13 @@ function localePreload(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(_html, context) {
-        const french = Object.values(context.bundle ?? {}).find((file) => file.type === 'chunk' && /[\\/]src[\\/]lib[\\/]strings\.fr\.ts$/.test(file.facadeModuleId ?? ''));
-        if (!french) throw new Error('src/lib/strings.fr.ts is not a chunk of its own: i18n.svelte.ts must import it dynamically');
-        return [{ tag: 'script', children: localePreloadScript({ fr: `./${french.fileName}` }), injectTo: 'head' }];
+        const chunks: Record<string, string> = {};
+        for (const file of Object.values(context.bundle ?? {})) {
+          const code = file.type === 'chunk' ? /[\\/]src[\\/]lib[\\/]strings\.([a-z]{2})\.ts$/.exec(file.facadeModuleId ?? '')?.[1] : undefined;
+          if (code && code !== 'en') chunks[code] = `./${file.fileName}`;
+        }
+        if (!chunks['fr']) throw new Error('src/lib/strings.fr.ts is not a chunk of its own: i18n.svelte.ts must import it dynamically');
+        return [{ tag: 'script', children: localePreloadScript(chunks), injectTo: 'head' }];
       },
     },
   };
