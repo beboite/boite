@@ -152,3 +152,10 @@ The echo turn is `docker/smoke.ts create` run against that core with
 completion. Local dictation's whisper.cpp runtime needs no AVX2 either: its
 `whisper-bin-x64.zip` ships `ggml-cpu-*.dll` backends from plain x64 to Alder
 Lake, and ggml loads the one the CPU supports.
+
+The bundle and the compiled core minify whitespace and syntax and keep
+identifiers, so a logged stack still names its functions. On the Windows
+sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
+runs on the same day. The compiled core also carries bytecode, which saves
+parsing where no signature check dominates the start; on Windows the compiled
+core stayed at about 790 ms either way.

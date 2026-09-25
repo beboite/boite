@@ -3,13 +3,16 @@
  * Windows, where the installer ships the signed runtime instead (stage-sidecar.ts).
  *
  * On x64 it embeds Bun's baseline runtime, which runs on CPUs without AVX2; the
- * default build stops with an illegal instruction there.
+ * default build stops with an illegal instruction there. `--bytecode` needs ESM
+ * output because the core has top-level awaits. Identifiers stay readable in
+ * logged stacks: only whitespace and syntax are minified.
  */
 const suffix = process.platform === 'win32' ? '.exe' : '';
 const baseline: Record<string, string> = { win32: 'bun-windows-x64-baseline', linux: 'bun-linux-x64-baseline' };
 const target = process.arch === 'x64' ? baseline[process.platform] : undefined;
 const result = Bun.spawnSync([
   'bun', 'build', '--compile', ...(target ? [`--target=${target}`] : []),
+  '--minify-whitespace', '--minify-syntax', '--bytecode', '--format=esm',
   'src/main.ts', '--outfile', `dist/boite-core${suffix}`,
 ], {
   stdout: 'inherit', stderr: 'inherit', windowsHide: true,
