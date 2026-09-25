@@ -57,7 +57,8 @@ export interface GuardStatus {
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
-  release(): void;
+  /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
+  release(): Promise<void>;
   capability(): TraceCapability;
   applySettings(settings: Settings): void;
   attach(threadId: string, pid: number): boolean;

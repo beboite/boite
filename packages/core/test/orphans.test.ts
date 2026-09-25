@@ -72,8 +72,8 @@ describe('orphan sweep', () => {
     sink.exited(THREAD, 102, { exitCode: 1, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
   });
 
-  afterEach(() => {
-    procs.close();
+  afterEach(async () => {
+    await procs.close();
     journal.close();
     if (previousDataDir === undefined) delete process.env.BOITE_DATA_DIR;
     else process.env.BOITE_DATA_DIR = previousDataDir;

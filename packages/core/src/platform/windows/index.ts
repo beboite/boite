@@ -9,7 +9,7 @@ export const platform: ProcessPlatform = {
   },
   release() {
     jobs.releaseJobs();
-    guard.releaseGuard();
+    return guard.releaseGuard();
   },
   capability: jobs.jobsCapability,
   applySettings(settings) {

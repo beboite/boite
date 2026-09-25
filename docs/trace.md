@@ -151,7 +151,9 @@ is held.
 Holding it is the point. Windows keeps a rendering session's mute across
 restarts, so a process that exited muted would come back muted. The mute is
 undone and the interface released when the pid exits, when the setting goes off
-and when the Worker stops. A session the user muted by hand in the mixer reads as
+and when the Worker stops. The core's shutdown waits for that last release, one
+second at most, before it lets the process exit: a core that left first would
+leave those executables muted for their next run. A session the user muted by hand in the mixer reads as
 muted already, so it is left alone and never unmuted on exit. `process.muted`
 says which thread and which pid, and a machine with no render endpoint says so
 once and keeps that half off for the Worker's life.

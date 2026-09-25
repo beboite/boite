@@ -265,7 +265,9 @@ export class Core {
     await this.accounts.closeLogins();
     await this.terminals.closeAll();
     this.procs.killAll();
-    this.procs.close();
+    // The guard Worker unmutes what it held on its way out; `main` exits as soon
+    // as this resolves, so that has to be over first.
+    await this.procs.close();
     this.keybindings.close();
     await this.telemetry.close();
     this.bus.dispose();

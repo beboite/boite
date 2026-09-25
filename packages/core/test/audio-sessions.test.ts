@@ -33,6 +33,16 @@ const FIXTURE = join(import.meta.dir, 'fixtures', 'silent-tone.ts');
 const MUTE_WINDOW_MS = 3000;
 const SESSION_WINDOW_MS = 15000;
 
+/** `waitFor` that answers whether the condition came true instead of throwing. */
+async function settles(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+  try {
+    await waitFor(predicate, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describeWindows('the audio sessions of the default endpoint', () => {
   let endpoint: AudioSessions | null = null;
 
@@ -50,6 +60,58 @@ describeWindows('the audio sessions of the default endpoint', () => {
     const mine = sessionsOf(pid);
     for (const session of mine) session.release();
     return mine.length > 0;
+  }
+
+  /**
+   * Windows keeps a session's mute per executable across runs, so a run that
+   * was cut short before the core unmuted the fixture leaves every later Bun
+   * session muted from its first sample. The core rightly takes a session that
+   * is muted already for the user's own choice and never touches it, and the
+   * test would then wait for a mute that cannot come. The fixture's own session
+   * is the only one this changes, and only while the core does not hold it.
+   */
+  function clearLeftoverMute(pid: number): void {
+    for (const session of sessionsOf(pid)) {
+      if (session.getMute() === true) {
+        console.info(`audio test: pid ${pid} started muted, a mute an earlier run left behind; unmuting it`);
+        session.mute(false);
+      }
+      session.release();
+    }
+  }
+
+  /** A turn that plays the fixture, once the core has muted its session. */
+  async function mutedFixture(harness: TestCore): Promise<{ threadId: string; pid: number; finished: Promise<unknown> }> {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    // The echo driver wraps the command in `cmd /c`, and that shell carries
+    // the fixture's name in its own command line: the process with the audio
+    // session is the Bun grandchild the Job Object reported, not the shell.
+    const started = client.next(
+      'process.started',
+      (record) =>
+        record.threadId === threadId &&
+        record.commandLine?.includes('silent-tone') === true &&
+        record.commandLine.startsWith('bun'),
+      20000,
+    );
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 40000);
+
+    await client.call('turns.start', { threadId, prompt: `[spawn:bun ${FIXTURE}]` });
+    const fixture = await started;
+    expect(fixture.pid).toBeGreaterThan(0);
+
+    await waitFor(() => hasSession(fixture.pid), SESSION_WINDOW_MS);
+    const mutedByCore = (): boolean => harness.core.procs.guardStatus().mutedPids.includes(fixture.pid);
+    // Only once the core had its whole window and did not take the session:
+    // earlier, a session reading muted is the core's own mute on its way here.
+    if (!(await settles(mutedByCore, MUTE_WINDOW_MS))) {
+      clearLeftoverMute(fixture.pid);
+      await waitFor(mutedByCore, MUTE_WINDOW_MS);
+    }
+    return { threadId, pid: fixture.pid, finished };
   }
 
   beforeAll(() => {
@@ -93,33 +155,16 @@ describeWindows('the audio sessions of the default endpoint', () => {
 
     test('has its audio session muted while it runs and unmuted when it exits', async () => {
       expect(endpoint).not.toBeNull();
-      const client = await harness.connect();
-      const { threadId } = await echoThread(harness, client);
-
-      // The echo driver wraps the command in `cmd /c`, and that shell carries
-      // the fixture's name in its own command line: the process with the audio
-      // session is the Bun grandchild the Job Object reported, not the shell.
-      const started = client.next(
-        'process.started',
-        (record) =>
-          record.threadId === threadId &&
-          record.commandLine?.includes('silent-tone') === true &&
-          record.commandLine.startsWith('bun'),
-        20000,
-      );
-      const muted = client.next('process.muted', (event) => event.threadId === threadId, 20000);
-      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 40000);
-
-      await client.call('turns.start', { threadId, prompt: `[spawn:bun ${FIXTURE}]` });
-      const fixture = await started;
-      expect(fixture.pid).toBeGreaterThan(0);
-
-      await waitFor(() => hasSession(fixture.pid), SESSION_WINDOW_MS);
-      await waitFor(() => harness.core.procs.guardStatus().mutedPids.includes(fixture.pid), MUTE_WINDOW_MS);
+      const mutes: number[] = [];
+      harness.core.bus.onAny((name, payload) => {
+        if (name === 'process.muted') mutes.push((payload as { pid: number }).pid);
+      });
+      const { pid, finished } = await mutedFixture(harness);
+      const fixture = { pid };
       const status = harness.core.procs.guardStatus();
       expect(status.audio).toBe('on');
       expect(status.mutedPids).toContain(fixture.pid);
-      expect((await muted).pid).toBe(fixture.pid);
+      expect(mutes).toContain(fixture.pid);
 
       // The mixer itself, read from this process: the fixture's session is muted.
       const live = sessionsOf(fixture.pid);
@@ -140,6 +185,26 @@ describeWindows('the audio sessions of the default endpoint', () => {
         for (const session of after) expect(session.getMute()).not.toBe(true);
       } finally {
         for (const session of after) session.release();
+      }
+    }, 60000);
+
+    test('is unmuted by the time the core has closed, even when it was still playing', async () => {
+      const { pid } = await mutedFixture(harness);
+      // This process's own references: a session object answers while one is
+      // held, even once the process that opened it is gone.
+      const held = sessionsOf(pid);
+      try {
+        expect(held.length).toBeGreaterThan(0);
+        for (const session of held) expect(session.getMute()).toBe(true);
+
+        // Closing kills the fixture while its session is muted. The Worker's
+        // own release is then the only unmute left, and a core that exits right
+        // after `close` resolves must not beat it: Windows would keep the mute
+        // for the next run of that executable.
+        await harness.stop();
+        for (const session of held) expect(session.getMute()).toBe(false);
+      } finally {
+        for (const session of held) session.release();
       }
     }, 60000);
   });

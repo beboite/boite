@@ -33,11 +33,17 @@ export function retainGuard(events: GuardEventSink): void {
   sink = events;
 }
 
-export function releaseGuard(): void {
+/**
+ * Resolves once the Worker has unhooked and given every muted session its
+ * sound back, or after the one-second fallback. A core that exits before that
+ * leaves those sessions muted for good: Windows keeps the mute for the next run
+ * of the same executable.
+ */
+export function releaseGuard(): Promise<void> {
   refCount = Math.max(0, refCount - 1);
-  if (refCount > 0) return;
+  if (refCount > 0) return Promise.resolve();
   sink = null;
-  teardown();
+  return teardown();
 }
 
 export function setGuardEnabled(next: boolean): void {
@@ -144,7 +150,7 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
   }
 }
 
-function teardown(): void {
+function teardown(): Promise<void> {
   const running = worker;
   const flag = stopFlag;
   worker = null;
@@ -153,21 +159,30 @@ function teardown(): void {
   failure = null;
   audioFailure = null;
   mutedPids.clear();
-  if (running === null) return;
+  if (running === null) return Promise.resolve();
+  return stopWorker(running, flag);
+}
 
+/**
+ * The pump leaves within one wait, unhooks, unmutes and posts 'stopped'.
+ * Terminating before that would leave the system hook installed until the
+ * process exits and the sessions it held muted.
+ */
+function stopWorker(running: Worker, flag: Int32Array | null): Promise<void> {
   if (flag !== null) Atomics.store(flag, 0, 1);
-  let released = false;
-  const once = (): void => {
-    if (released) return;
-    released = true;
-    clearTimeout(timer);
-    running.terminate();
-  };
-  // The pump leaves within one wait, unhooks and posts 'stopped'. Terminating
-  // before that would leave the system hook installed until the process exits.
-  running.onmessage = (event: { data: unknown }): void => {
-    if ((event.data as GuardWorkerMessage).kind === 'stopped') once();
-  };
-  const timer = setTimeout(once, 1000);
-  if (typeof timer.unref === 'function') timer.unref();
+  return new Promise<void>((resolve) => {
+    let released = false;
+    const once = (): void => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      running.terminate();
+      resolve();
+    };
+    running.onmessage = (event: { data: unknown }): void => {
+      if ((event.data as GuardWorkerMessage).kind === 'stopped') once();
+    };
+    // Not unref'd: this timer is what a shutdown awaits, and it is bounded.
+    const timer = setTimeout(once, 1000);
+  });
 }

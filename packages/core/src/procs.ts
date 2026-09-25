@@ -92,6 +92,7 @@ export class ProcRegistry {
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
   private readonly stopListening: () => void;
+  private closing: Promise<void> | null = null;
 
   constructor(
     private readonly journal: Journal,
@@ -156,7 +157,12 @@ export class ProcRegistry {
     return this.platform.guardStatus();
   }
 
-  close(): void {
+  /**
+   * Resolves once the platform let go of everything native, the guard's muted
+   * sessions included. Closing twice waits on the same release.
+   */
+  close(): Promise<void> {
+    if (this.closing !== null) return this.closing;
     this.stopListening();
     for (const timer of this.sweepTimers.values()) clearTimeout(timer);
     this.sweepTimers.clear();
@@ -165,7 +171,8 @@ export class ProcRegistry {
     this.exitTimers.clear();
     for (const timer of this.forgetTimers.values()) clearTimeout(timer);
     this.forgetTimers.clear();
-    this.platform.release();
+    this.closing = this.platform.release();
+    return this.closing;
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
