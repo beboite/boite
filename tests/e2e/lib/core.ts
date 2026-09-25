@@ -1,8 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GRANT_QUERY_PARAM, PAIR_QUERY_PARAM } from '../../../packages/contracts/src/index.ts';
 import { connect } from '../../../packages/core/src/client.ts';
+import { E2E_DIR_PREFIX, killProcessTree, removeDirectory } from './cleanup.ts';
+
+export { E2E_DIR_PREFIX, killProcessTree, killProcessTreeAsync, removeDirectory, sweepStaleDirectories } from './cleanup.ts';
 
 const MAIN = join(import.meta.dir, '..', '..', '..', 'packages', 'core', 'src', 'main.ts');
 /** The default: the end to end suite proves the sources, a bench may point elsewhere. */
@@ -34,30 +37,7 @@ export interface RunningCore {
 }
 
 export function freshDataDir(): string {
-  return mkdtempSync(join(tmpdir(), 'boite-e2e-'));
-}
-
-export function killProcessTree(pid: number): void {
-  if (process.platform === 'win32') {
-    Bun.spawnSync(['taskkill', '/pid', String(pid), '/T', '/F'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
-    return;
-  }
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    /* already gone */
-  }
-}
-
-export async function removeDirectory(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      rmSync(path, { recursive: true, force: true });
-      return;
-    } catch {
-      await Bun.sleep(100);
-    }
-  }
+  return mkdtempSync(join(tmpdir(), E2E_DIR_PREFIX));
 }
 
 export async function startCore(options: StartCoreOptions = {}): Promise<RunningCore> {

@@ -3,7 +3,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION } from '../../../packages/ui/src/lib/onboarding.ts';
-import { killProcessTree, removeDirectory } from './core.ts';
+import type { Subprocess } from 'bun';
+import { E2E_DIR_PREFIX, killProcessTreeAsync, removeDirectory } from './cleanup.ts';
 
 /**
  * Marks the tour seen before any script of the page runs, and only where no
@@ -13,6 +14,8 @@ import { killProcessTree, removeDirectory } from './core.ts';
 const SEEN_TOUR = `try { if (localStorage.getItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}) === null) localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}`;
 
 const CONNECT_TIMEOUT_MS = 30_000;
+/** How long a killed browser may take to exit: 30.6 s was measured on a loaded machine. */
+const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 
@@ -87,9 +90,32 @@ export interface BrowserOptions {
   showTour?: boolean;
 }
 
+/** Every page `launch` opened and nobody closed yet, for `closeAllBrowsers`. */
+const open = new Set<BrowserPage>();
+
+/**
+ * Closes whatever a file launched and left open, a `beforeAll` that timed out
+ * before it could hand its page over for one. The preload calls it after the run.
+ */
+export async function closeAllBrowsers(): Promise<void> {
+  await Promise.all([...open].map((page) => page.close()));
+}
+
+/**
+ * Kills the browser's process tree, then waits for the browser itself to exit
+ * before its profile is removed: a profile deleted under a live browser was
+ * the 0.5 GB each full run used to leave behind in the temp folder.
+ */
+async function stopBrowser(proc: Subprocess, userDataDir: string | null): Promise<void> {
+  await killProcessTreeAsync(proc.pid);
+  const exited = await Promise.race([proc.exited.then(() => true), Bun.sleep(EXIT_TIMEOUT_MS).then(() => false)]);
+  if (!exited) console.warn(`e2e: browser ${proc.pid} still running ${EXIT_TIMEOUT_MS} ms after its kill`);
+  if (userDataDir !== null) await removeDirectory(userDataDir);
+}
+
 export class BrowserPage {
   #socket: WebSocket;
-  #pid: number | null;
+  #proc: Subprocess | null;
   #userDataDir: string | null;
   #nextId = 1;
   #pending = new Map<number, Pending>();
@@ -98,10 +124,14 @@ export class BrowserPage {
   /** Requests the page sent and has not finished loading, reported when a wait times out. */
   #requests = new Map<string, { url: string; at: number; answered: boolean }>();
   errors(): string[] { return [...this.#pageErrors]; }
+  /** The profile `launch` made for this page and removes on close; null when the caller owns it. */
+  get profileDir(): string | null { return this.#userDataDir; }
+  /** The browser's pid, null for a page `attach` drives. */
+  get pid(): number | null { return this.#proc?.pid ?? null; }
 
-  private constructor(socket: WebSocket, pid: number | null, userDataDir: string | null) {
+  private constructor(socket: WebSocket, proc: Subprocess | null, userDataDir: string | null) {
     this.#socket = socket;
-    this.#pid = pid;
+    this.#proc = proc;
     this.#userDataDir = userDataDir;
     socket.addEventListener('message', (event: MessageEvent) => {
       this.#receive(typeof event.data === 'string' ? event.data : '');
@@ -118,7 +148,7 @@ export class BrowserPage {
   static async launch(options: BrowserOptions): Promise<BrowserPage> {
     const executable = options.executable ?? findBrowser();
     const ownsUserDataDir = options.userDataDir === undefined;
-    const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'boite-e2e-browser-'));
+    const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), `${E2E_DIR_PREFIX}browser-`));
     const port = options.debugPort ?? (await freePort());
     const size = options.windowSize ?? { width: 1440, height: 900 };
 
@@ -155,10 +185,12 @@ export class BrowserPage {
       windowsHide: true,
     });
 
+    let page: BrowserPage | null = null;
     try {
       const target = await waitForPageTarget(port);
       const socket = await openSocket(target);
-      const page = new BrowserPage(socket, proc.pid, ownsUserDataDir ? userDataDir : null);
+      page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null);
+      open.add(page);
       await page.send('Page.enable', {});
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
@@ -170,8 +202,8 @@ export class BrowserPage {
       await page.navigate(options.url);
       return page;
     } catch (error) {
-      killProcessTree(proc.pid);
-      if (ownsUserDataDir) await removeDirectory(userDataDir);
+      if (page !== null) await page.close();
+      else await stopBrowser(proc, ownsUserDataDir ? userDataDir : null);
       throw error;
     }
   }
@@ -353,8 +385,9 @@ export class BrowserPage {
     } catch {
       /* already gone */
     }
-    if (this.#pid !== null) killProcessTree(this.#pid);
-    if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
+    open.delete(this);
+    if (this.#proc !== null) await stopBrowser(this.#proc, this.#userDataDir);
+    else if (this.#userDataDir !== null) await removeDirectory(this.#userDataDir);
   }
 
   /** What a stalled page is still waiting on: whether the server never answered or the body never arrived. */
