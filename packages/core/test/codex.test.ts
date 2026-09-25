@@ -11,7 +11,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -439,6 +439,8 @@ describe('codex driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[slow]' });
     await started;
+    // A turn under way: a stop during the start sends no prompt at all (below).
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect((await finished).status).toBe('stopped');
@@ -449,6 +451,46 @@ describe('codex driver', () => {
     const trace = await client.call('trace.get', { threadId });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitedAt).not.toBeNull();
+  });
+
+  test('a stop the agent never acts on ends the turn stopped after the grace, and the thread goes on', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_DEAF'] = '1';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    // The grace, then the process: never the whole scheduler drain.
+    expect(Date.now() - stoppedAt).toBeLessThan(4500);
+    expect(fakeLog()).toContain('turn/interrupt codex-fake-turn-1');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+
+    delete process.env['CODEX_FAKE_DEAF'];
+    await runTurn(client, threadId, 'still here');
+  });
+
+  test('a stop that lands while the thread opens sends no prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_SLOW_START'] = '800';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    expect(fakeLog()).not.toContain('turn/start');
+    // The thread the agent opened is kept for the next turn.
+    expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
 
   test('a server that dies fails the turn with its exit code and stderr, and the next turn works', async () => {

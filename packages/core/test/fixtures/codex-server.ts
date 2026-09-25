@@ -13,7 +13,9 @@
  * `turn/interrupt <turnId>` and `model/list`. One `initialize` line per process,
  * so a test can count the agent processes a warm session did or did not save.
  * `CODEX_FAKE_LOST=1` makes every `thread/resume` fail the way a missing
- * rollout does.
+ * rollout does, `CODEX_FAKE_SLOW_START=<ms>` delays the answer to
+ * `thread/start`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
+ * ending the turn.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -408,7 +410,11 @@ function handle(method: string, raw: unknown): unknown {
       log(
         `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}`,
       );
-      return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      const opened = { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      // `CODEX_FAKE_SLOW_START=<ms>`: an app-server slow to open its thread.
+      const slow = Number(process.env['CODEX_FAKE_SLOW_START'] ?? '0');
+      if (slow > 0) return Bun.sleep(slow).then(() => opened);
+      return opened;
     }
     case 'thread/resume': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
@@ -453,6 +459,8 @@ function handle(method: string, raw: unknown): unknown {
     case 'turn/interrupt': {
       const turnId = textOf(params['turnId']);
       log(`turn/interrupt ${turnId}`);
+      // `CODEX_FAKE_DEAF=1`: the request is answered and the turn goes on regardless.
+      if (process.env['CODEX_FAKE_DEAF'] === '1') return {};
       const waiter = waiting.get(turnId);
       if (waiter === undefined) interrupted.add(turnId);
       else waiter();
@@ -482,11 +490,14 @@ process.stdin.on('data', (chunk: string) => {
     const method = message['method'];
     const id = message['id'];
     if (typeof method === 'string' && id !== undefined && id !== null) {
-      try {
-        send({ id, result: handle(method, message['params']) });
-      } catch (error) {
-        send({ id, error: { code: -32601, message: (error as Error).message } });
-      }
+      const params = message['params'];
+      // A handler may answer later (a slow thread/start); the others answer in order.
+      void Promise.resolve()
+        .then(() => handle(method, params))
+        .then(
+          (result) => send({ id, result }),
+          (error: unknown) => send({ id, error: { code: -32601, message: (error as Error).message } }),
+        );
       continue;
     }
     if (typeof method === 'string') {

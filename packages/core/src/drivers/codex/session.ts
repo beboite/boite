@@ -37,6 +37,9 @@ const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread n
 /** `thread/resume` refused a thread the agent no longer has. */
 class ThreadLostError extends Error {}
 
+/** How long a stopped turn waits for the agent to end it before its process is stopped. */
+const STOP_GRACE_MS = 3_000;
+
 // ---------------------------------------------------------------------------
 // The session: one agent process per thread
 // ---------------------------------------------------------------------------
@@ -63,6 +66,10 @@ export class CodexSession {
   private idle: Timer | null = null;
   /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
   private current: CodexTurn | null = null;
+  /** The turn this session is running, from its process start to its settle. */
+  private active: CodexTurn | null = null;
+  /** Armed by a stop: an agent that has not ended the turn by then loses its process. */
+  private stopTimer: Timer | null = null;
   private contextSink: CodexTurn['ctx']['context'] | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
@@ -106,8 +113,34 @@ export class CodexSession {
     // A stop that lands before `turn/start` answered is replayed the moment the
     // turn id arrives, so the order of the two never decides the outcome.
     turn.markStopped();
-    if (this.current !== turn) return;
-    this.interrupt(turn);
+    // A turn still queued behind another reads the stop when its own run begins.
+    if (this.active !== turn) return;
+    if (this.current === turn) this.interrupt(turn);
+    this.armStopGrace(turn);
+  }
+
+  /**
+   * `turn/interrupt` is a request the agent may never act on: a wedged
+   * app-server, or a `turn/start` or `thread/start` that never answers. The
+   * stop is the user's, so it wins after the grace: the turn ends stopped and
+   * the process goes, and the next turn resumes the Codex thread on a new one.
+   */
+  private armStopGrace(turn: CodexTurn): void {
+    if (this.stopTimer !== null) return;
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      if (turn.decided || this.active !== turn) return;
+      turn.ctx.log('warn', `codex: the agent did not end the stopped turn within ${STOP_GRACE_MS} ms; its process is stopped`);
+      turn.endStopped();
+      this.drop();
+    }, STOP_GRACE_MS);
+    this.stopTimer.unref?.();
+  }
+
+  private clearStopGrace(): void {
+    if (this.stopTimer === null) return;
+    clearTimeout(this.stopTimer);
+    this.stopTimer = null;
   }
 
   private interrupt(turn: CodexTurn): void {
@@ -134,6 +167,7 @@ export class CodexSession {
   // -- the turn -------------------------------------------------------------
 
   private async runTurn(turn: CodexTurn): Promise<void> {
+    this.active = turn;
     try {
       await this.start(turn.ctx);
     } catch (error) {
@@ -152,6 +186,12 @@ export class CodexSession {
     }
 
     turn.noteSession(threadId);
+    // Stopped while the process or the thread was opening: the prompt never goes out.
+    if (turn.isStopped) {
+      turn.endStopped();
+      this.endTurn(turn, false);
+      return;
+    }
     this.current = turn;
     this.contextSink = turn.ctx.context;
     const ctx = turn.ctx;
@@ -195,6 +235,8 @@ export class CodexSession {
   }
 
   private endTurn(turn: CodexTurn, drop: boolean): void {
+    if (this.active === turn) this.active = null;
+    this.clearStopGrace();
     turn.settle();
     this.running = Math.max(0, this.running - 1);
     if (drop || this.closing || this.warmMs <= 0) {

@@ -107,6 +107,14 @@ export class CodexTurn {
     this.decide();
   }
 
+  /** A stop the agent never got to act on: the turn ends stopped, with nothing drawn. */
+  endStopped(): void {
+    if (this.decided) return;
+    this.decided = true;
+    this.status = 'stopped';
+    this.decide();
+  }
+
   /**
    * The thread this turn resumes no longer exists on the agent's side. No
    * error part: the core starts a fresh session and runs the turn again.
