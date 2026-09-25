@@ -1026,12 +1026,24 @@ export class Store {
 
   async connectEndpoint(endpoint: Endpoint): Promise<void> {
     this.#attachEndpoint(endpoint, false);
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const client = this.#client;
+    let timedOut = false;
+    // Only a handshake that never finished is given up on. Once the machine
+    // said hello, a slow link still loading the lists is waited for: closing
+    // it there dropped a working machine for good.
+    const timeout = setTimeout(() => {
+      if (client === null || client.state === 'ready') return;
+      timedOut = true;
+      client.close();
+    }, 12_000);
     try {
-      await Promise.race([this.connect(), new Promise<void>(resolve => {
-        timeout = setTimeout(() => { this.error = strings.machines.timeout; this.#client?.close(); resolve(); }, 12_000);
-      })]);
-    } finally { clearTimeout(timeout); this.booted = true; }
+      await this.connect();
+    } finally {
+      clearTimeout(timeout);
+      // Set last: the calls the close dropped report "client closed" first.
+      if (timedOut) this.error = strings.machines.timeout;
+      this.booted = true;
+    }
   }
 
   /** Picks the transport, connects, loads everything the UI opens on. */

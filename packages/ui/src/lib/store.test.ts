@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { RpcErrorCode, type ThreadStatus } from '@boite/contracts';
+import { PROTOCOL_VERSION, RpcErrorCode, type ThreadStatus } from '@boite/contracts';
 import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import { resumeAnchor, Store } from './store.svelte';
+import { strings } from './strings';
 
 test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
   const { store, client } = await ready();
@@ -964,4 +965,52 @@ test('connecting a second account moves the composer to that account, not the fi
   store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'unauthenticated' } : a));
   expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
   expect(store.prefs.accountId).toBe('a-claude-main');
+});
+
+test('a machine on a slow link keeps its connection when the lists take longer than the handshake deadline', async () => {
+  vi.useFakeTimers();
+  const sockets: SlowLinkSocket[] = [];
+  class SlowLinkSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    closedByClient = false;
+    constructor() {
+      sockets.push(this);
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string };
+      const answer = (delay: number, body: Record<string, unknown>) =>
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), delay);
+      if (frame.method === 'hello') answer(40, { result: { core: { protocolVersion: PROTOCOL_VERSION }, principal: 'owner' } });
+      // A thousand threads on a weak cellular link.
+      else if (frame.method === 'threads.list') answer(13_000, { result: [] });
+      else answer(40, { error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
+    }
+    close(): void {
+      this.closedByClient = true;
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', SlowLinkSocket);
+  const store = new Store();
+  try {
+    const connecting = store.connectEndpoint({ url: 'https://far.example', token: 'key', paired: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.connection).toBe('ready');
+    await vi.advanceTimersByTimeAsync(13_000);
+    await connecting;
+    expect(store.connection).toBe('ready');
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.closedByClient).toBe(false);
+    expect(store.error).not.toBe(strings.machines.timeout);
+    expect(store.error).not.toBe('client closed');
+  } finally {
+    store.client?.close();
+    store.detach();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });

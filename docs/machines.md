@@ -28,8 +28,10 @@ core's paired-device list to revoke it. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge
 shows the disconnected state. Other hosts remain usable. WebSocket reconnection
-reloads the host's project and thread summaries. An initial connection that does
-not answer within twelve seconds can be retried from Machines.
+reloads the host's project and thread summaries. An initial connection whose
+handshake does not finish within twelve seconds can be retried from Machines.
+Once the machine has said hello, loading its lists is waited for however long
+it takes on a slow link; the connection is never dropped for it.
 
 A link can die without closing the socket: a phone's NAT mapping expires, the
 core's host sleeps, a tunnel changes path. The client notices by itself
