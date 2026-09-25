@@ -135,8 +135,10 @@
       else if (hidden) { hidden = false; resume(); }
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+    const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
+    window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
@@ -155,6 +157,7 @@
       stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
+      window.removeEventListener('offline', offline);
       window.removeEventListener('pageshow', pageshow);
       navigator.serviceWorker?.removeEventListener('message', notification);
     };

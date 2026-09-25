@@ -309,6 +309,19 @@ export class WsClient implements ObservableClient {
     await this.#startOpen();
   }
 
+  /**
+   * The browser lost its network. A remote socket seldom closes by itself then,
+   * so it is asked at once and dropped when it stays silent: the header stops
+   * saying connected, and the 'online' event reconnects through `resume()`.
+   */
+  offline(): void {
+    const socket = this.#socket;
+    if (!this.#remote || socket === null || this.#state !== 'ready') return;
+    void this.#probeSocket(socket, RESUME_PROBE_MS).then((alive) => {
+      if (!alive) this.#lost(socket);
+    });
+  }
+
   #startOpen(): Promise<CoreInfo> {
     const opening = this.#open();
     this.#opening = opening;

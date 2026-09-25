@@ -45,8 +45,10 @@ up to 16 MB behind which the probe's answer would queue, so only that call's
 own 120 second timeout starts the check, on any host. Returning to the page, an `online` event or
 a page restored from the back/forward cache also send the `hello` first, and
 replace the socket only if it stays silent for 4 seconds, so a tab switch no
-longer drops a healthy connection or reloads the lists. A hidden page is not
-checked.
+longer drops a healthy connection or reloads the lists. An `offline` event asks
+a remote socket the same way and drops it after 4 silent seconds without
+reconnecting, so the header stops saying Connected while the network is gone.
+A hidden page is not checked.
 
 Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
 so the clients of a restarted core do not all return at once. An attempt gets

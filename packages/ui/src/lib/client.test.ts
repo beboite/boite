@@ -223,6 +223,45 @@ describe('WsClient', () => {
     } finally { client.close(); vi.useRealTimers(); }
   });
 
+  test('going offline asks a remote socket at once and stops saying connected when it stays silent', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+
+      online.mockReturnValue(false);
+      client.offline();
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'hello']);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
+      // No retry while offline: the 'online' event calls resume().
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sockets).toHaveLength(1);
+
+      // A socket that answers the question keeps the connection.
+      online.mockReturnValue(true);
+      void client.resume().catch(() => undefined);
+      const second = take(sockets, 1);
+      second.open();
+      second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      client.offline();
+      second.receive({ id: second.frame(1).id, result: { core: CORE, principal: 'session' } });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(second.closed).toBe(false);
+      expect(client.state).toBe('ready');
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
+  });
+
   test('a remote call whose one large answer takes 45 s to arrive keeps its socket and resolves', async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
