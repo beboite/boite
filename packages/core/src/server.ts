@@ -1,5 +1,5 @@
 import type { RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
@@ -266,6 +266,10 @@ export function startServer(options: ServerOptions): RunningServer {
       // (`ServerConnection.sendEvent`). Whether a frame is deflated at all is
       // the connection's call, in `ServerConnection.write`.
       perMessageDeflate: true,
+      // Bun closes the socket on a larger frame before any handler sees it.
+      // The contract derives the attachment total of a turn from this number,
+      // and the UI refuses a larger frame before sending it.
+      maxPayloadLength: RPC_MAX_FRAME_BYTES,
 
       open(socket) {
         const connection = socket.data.connection;

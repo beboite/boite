@@ -800,6 +800,7 @@ export const fr: Translation = {
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
     attachTooLarge: '{name} est trop lourde : une image pèse {max} au maximum.',
     attachTooMany: 'Un tour porte {max} images au maximum, donc {name} a été laissée de côté.',
+    attachTotalTooLarge: "Les fichiers d'un tour pèsent {max} au maximum à eux tous, donc {name} a été laissé de côté.",
     attachNoImages: "{provider} n'accepte pas les images : envoyez le message sans elles."
   },
 

@@ -262,6 +262,11 @@ describe('echo driver', () => {
     await expect(
       client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 9 }, () => image({})) }),
     ).rejects.toThrow('a turn carries at most 8 attachments, this one has 9');
+    // Three phone photos under the per-file cap still make a frame the socket would not carry.
+    const photo = 'A'.repeat(4_893_356);
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: [1, 2, 3].map((at) => image({ data: photo, name: `photo-${at}.jpg` })) }),
+    ).rejects.toThrow('the attachments weigh 10.5 MB together, over the 10 MB one turn may carry');
 
     // Nothing above started a turn, so the thread is still idle and empty.
     const thread = await client.call('threads.get', { threadId });

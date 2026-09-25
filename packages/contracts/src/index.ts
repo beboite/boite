@@ -682,7 +682,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 

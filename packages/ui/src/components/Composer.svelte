@@ -6,8 +6,8 @@
   import { bytes, tokens as formatTokens } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
-  import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
-  import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
+  import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES } from '@boite/contracts';
+  import { acceptAttachments, attachedBytes, decodedBytes, readAttachmentFile } from '../lib/attachments';
   import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -607,6 +607,10 @@
       if (state.attachments.length >= ATTACHMENTS_PER_TURN) {
         store.error = fill(strings.composer.attachTooMany, { name: file.name, max: String(ATTACHMENTS_PER_TURN) });
         break;
+      }
+      if (attachedBytes(state.attachments) + file.size > ATTACHMENTS_TOTAL_MAX_BYTES) {
+        store.error = fill(strings.composer.attachTotalTooLarge, { name: file.name, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) });
+        continue;
       }
       try {
         const attachment = await readAttachmentFile(file);

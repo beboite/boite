@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  RPC_MAX_FRAME_BYTES,
   RPC_PATH,
   RpcCloseCode,
   RpcErrorCode,
@@ -121,6 +122,18 @@ interface Pending {
 
 function transportFailure(message: string): RpcFailure {
   return new RpcFailure({ code: RpcErrorCode.Internal, message });
+}
+
+/** WebSocket close code 1009: the peer refused a frame over its size limit. */
+const MESSAGE_TOO_BIG = 1009;
+
+/** UTF-8 bytes of a frame, encoded only when its length leaves any doubt. */
+function frameBytes(frame: string): number {
+  return frame.length * 3 <= RPC_MAX_FRAME_BYTES ? frame.length : new TextEncoder().encode(frame).byteLength;
+}
+
+function megabytes(bytes: number): string {
+  return (bytes / 1048576).toFixed(1).replace(/\.0$/, '');
 }
 
 function browserSocket(url: string): SocketLike {
@@ -262,6 +275,17 @@ export class WsClient implements ObservableClient {
     method: M,
     params: RpcParams<M>
   ): Promise<RpcResult<M>> {
+    const frame = JSON.stringify({ jsonrpc: '2.0', id: this.#nextId, method, params });
+    const size = frameBytes(frame);
+    if (size > RPC_MAX_FRAME_BYTES) {
+      // The core would close the socket on it before reading a byte, and every
+      // other call on the connection would fail with it.
+      return Promise.reject(new RpcFailure({
+        code: RpcErrorCode.InvalidParams,
+        message: `${method} is ${megabytes(size)} MB, over the ${megabytes(RPC_MAX_FRAME_BYTES)} MB the core reads in one frame`,
+        data: { bytes: size, max: RPC_MAX_FRAME_BYTES }
+      }));
+    }
     const id = this.#nextId++;
     return new Promise<RpcResult<M>>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -273,7 +297,7 @@ export class WsClient implements ObservableClient {
         reject: (error) => { clearTimeout(timer); reject(error); }
       };
       this.#pending.set(id, pending);
-      try { socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
+      try { socket.send(frame); }
       catch (error) {
         this.#pending.delete(id);
         pending.reject(error instanceof Error ? error : transportFailure(String(error)));
@@ -305,9 +329,12 @@ export class WsClient implements ObservableClient {
       socket.onclose = (event) => {
         const incompatible = event?.code === RpcCloseCode.ProtocolMismatch;
         if (incompatible) this.#manuallyClosed = true;
-        this.#dropPending('connection closed');
+        const reason = event?.code === MESSAGE_TOO_BIG
+          ? `the core refused a frame over ${megabytes(RPC_MAX_FRAME_BYTES)} MB and closed the connection`
+          : 'connection closed';
+        this.#dropPending(reason);
         this.#socket = null;
-        fail(incompatible ? `core protocol version must be ${PROTOCOL_VERSION}` : 'connection closed');
+        fail(incompatible ? `core protocol version must be ${PROTOCOL_VERSION}` : reason);
         if (this.#manuallyClosed || !this.#options.reconnect) {
           this.#setState('closed');
           return;

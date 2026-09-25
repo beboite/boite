@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
+import { PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
 import { RpcFailure, WsClient, rpcUrl, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
@@ -119,6 +119,37 @@ describe('WsClient', () => {
       await expect(client.call('projects.list', {})).rejects.toThrow('socket send failed');
       expect(vi.getTimerCount()).toBe(0);
     } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a frame over the core limit is refused before it leaves, and the connection keeps working', async () => {
+    const { client, socket } = connected();
+    try {
+      socket.open();
+      socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+      await client.connect();
+      const prompt = 'x'.repeat(RPC_MAX_FRAME_BYTES);
+      let failure: unknown;
+      await client.call('turns.start', { threadId: 'thread', prompt }).catch((error) => { failure = error; });
+      expect(failure).toBeInstanceOf(RpcFailure);
+      expect((failure as RpcFailure).code).toBe(RpcErrorCode.InvalidParams);
+      expect((failure as Error).message).toBe('turns.start is 16 MB, over the 16 MB the core reads in one frame');
+      expect(socket.sent).toHaveLength(1);
+      expect(client.state).toBe('ready');
+
+      const next = client.call('projects.list', {});
+      socket.receive({ id: socket.frame(1).id, result: [] });
+      expect(await next).toEqual([]);
+    } finally { client.close(); }
+  });
+
+  test('a close for a frame too big says so to every call it drops', async () => {
+    const { client, socket } = connected();
+    socket.open();
+    socket.receive({ id: socket.frame(0).id, result: { core: CORE, principal: 'owner' } });
+    await client.connect();
+    const pending = client.call('threads.list', {}).catch((error: Error) => error.message);
+    socket.close(1009);
+    expect(await pending).toBe('the core refused a frame over 16 MB and closed the connection');
   });
 
   test('resuming replaces a half-open socket without replaying a pending prompt', async () => {
