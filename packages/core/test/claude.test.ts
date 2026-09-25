@@ -678,6 +678,72 @@ describe('claude driver', () => {
     expect(thread.status).toBe('error');
   });
 
+  test('a resume whose transcript is gone starts a fresh session with the history, once', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    // Query 1 opens the session, query 2 asks to resume it and the CLI no longer
+    // has it (its answer, word for word), query 3 is the fresh start.
+    scripted((fake, options) => {
+      if (options.resume === 'sess-gone') {
+        fake.emit(sdk({ ...(failure('sess-gone') as object), errors: ['No conversation found with session ID: sess-gone'] }));
+        fake.end();
+        return;
+      }
+      const id = calls.length === 1 ? 'sess-gone' : 'sess-fresh';
+      fake.emit(init(id));
+      fake.emit(assistant(id, [{ type: 'text', text: calls.length === 1 ? 'first answer' : 'second answer' }]));
+      fake.emit(success(id));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'first question')).toBe('done');
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe('sess-gone');
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'second question' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(done.error).toBeNull();
+
+    expect(calls.map((call) => call.options.resume ?? null)).toEqual([null, 'sess-gone', null]);
+    await waitFor(() => (calls[2]?.prompts.length ?? 0) > 0);
+    // The fresh session is told what the lost one knew.
+    expect(calls[2]?.prompts[0]).toContain('first answer');
+    expect(calls[2]?.prompts[0]).toContain('second question');
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toBe('sess-fresh');
+    expect(thread.sessionGeneration).toBe(1);
+    expect(thread.status).toBe('idle');
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    expect(thread.messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
+  });
+
+  test('a failed resume for any other reason keeps the session', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+
+    scripted((fake, options) => {
+      if (options.resume === 'sess-kept') {
+        fake.emit(failure('sess-kept'));
+        fake.end();
+        return;
+      }
+      fake.emit(init('sess-kept'));
+      fake.emit(success('sess-kept'));
+      fake.end();
+    });
+
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('error');
+    expect(calls).toHaveLength(2);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toBe('sess-kept');
+    expect(thread.sessionGeneration ?? 0).toBe(0);
+  });
+
   test('spawnClaudeCodeProcess goes through the registry and is traced', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

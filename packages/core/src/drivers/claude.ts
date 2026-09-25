@@ -51,6 +51,8 @@ const LINGER_MS = 15_000;
 const ORPHANS_MAX = 5_000;
 /** The system message a turn the agent opened on its own starts with. */
 const WAKE_TEXT = 'Background work finished';
+/** What the CLI answers a `resume` whose transcript is gone (CLI 2.1.282, probed offline). */
+const MISSING_SESSION = /^No conversation found with session ID: /;
 
 /** The effort levels the SDK takes as an option; see `Options['effort']`. */
 const SDK_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -272,6 +274,8 @@ class ClaudeTurn {
   readonly stopped: Promise<void>;
   isStopped = false;
   settled = false;
+  /** The CLI refused to resume: the transcript this turn asked for is gone. */
+  sessionLost = false;
   /** The session holding it right now: a stranded turn moves to another one. */
   session: ClaudeSession | null = null;
 
@@ -316,6 +320,7 @@ class ClaudeTurn {
       usage: this.usage,
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
+      ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }
 
@@ -469,11 +474,30 @@ class ClaudeTurn {
     if (this.contextTokens !== null) {
       this.ctx.context({ tokens: this.contextTokens, window: contextWindowOf(message, this.ctx.thread.model) });
     }
+    const refused = this.resumeRefused(message);
+    if (refused !== null) {
+      // No error part: the core starts a fresh session and runs the turn again,
+      // so the conversation shows the answer, not the refusal.
+      this.sessionLost = true;
+      this.status = 'error';
+      this.error = refused;
+      return;
+    }
     if (message.subtype !== 'success') {
       this.fail(message.errors.length > 0 ? message.errors.join('; ') : message.subtype);
     } else if (message.is_error) {
       this.fail(message.result.length > 0 ? message.result : 'the turn ended on an API error');
     }
+  }
+
+  /**
+   * The one refusal that means the native session is gone for good: a resume
+   * whose transcript the CLI cannot find, before the turn wrote anything. Any
+   * other failure keeps the session.
+   */
+  private resumeRefused(message: SDKResultMessage): string | null {
+    if (message.subtype !== 'error_during_execution' || this.ctx.sessionId === null || this.messageId !== null) return null;
+    return message.errors.some((error) => MISSING_SESSION.test(error)) ? message.errors.join('; ') : null;
   }
 
   // -- parts ----------------------------------------------------------------
@@ -882,6 +906,9 @@ class ClaudeSession {
     // One result per user message: that is the end of this turn, not of the CLI.
     if (message.type === 'result') {
       if (typeof message.total_cost_usd === 'number') this.costSoFar = message.total_cost_usd;
+      // A CLI that could not resume holds no session worth keeping warm: the
+      // retry the core sends next must get a query of its own, with no resume.
+      if (turn.sessionLost) this.close(null);
       this.endTurn(turn);
     }
   }

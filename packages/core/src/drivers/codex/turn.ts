@@ -54,6 +54,8 @@ export class CodexTurn {
   decided = false;
   isStopped = false;
   settled = false;
+  /** `thread/resume` said the Codex thread is gone. */
+  sessionLost = false;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -105,6 +107,19 @@ export class CodexTurn {
     this.decide();
   }
 
+  /**
+   * The thread this turn resumes no longer exists on the agent's side. No
+   * error part: the core starts a fresh session and runs the turn again.
+   */
+  loseSession(reason: string): void {
+    if (this.decided) return;
+    this.decided = true;
+    this.sessionLost = true;
+    this.status = 'error';
+    this.error = reason;
+    this.decide();
+  }
+
   settle(): void {
     if (this.settled) return;
     this.flushOutput();
@@ -121,6 +136,7 @@ export class CodexTurn {
       usage: this.usage,
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
+      ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }
 

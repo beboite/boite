@@ -12,6 +12,8 @@
  * `thread/resume <threadId> ...`, `turn/start model=<m> effort=<e>`,
  * `turn/interrupt <turnId>` and `model/list`. One `initialize` line per process,
  * so a test can count the agent processes a warm session did or did not save.
+ * `CODEX_FAKE_LOST=1` makes every `thread/resume` fail the way a missing
+ * rollout does.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
@@ -414,6 +416,8 @@ function handle(method: string, raw: unknown): unknown {
       log(
         `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,
       );
+      // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.
+      if (process.env['CODEX_FAKE_LOST'] === '1') throw new Error(`no rollout found for thread id ${threadId}`);
       return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
     }
     case 'thread/compact/start': {

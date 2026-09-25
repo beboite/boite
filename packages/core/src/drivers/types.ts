@@ -141,6 +141,14 @@ export interface TurnResult {
    * The core stamps the time, the model and the account; see `PromptCache`.
    */
   promptCache?: PromptCacheLife | null;
+  /**
+   * The agent no longer has the native session the turn asked to resume (a
+   * transcript cleaned up, deleted or never copied), and the turn wrote
+   * nothing. Only that specific refusal sets it, never a transport error or a
+   * crash. The core then starts a fresh session carrying the journal's history
+   * and runs the turn again, once.
+   */
+  sessionLost?: boolean;
 }
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;

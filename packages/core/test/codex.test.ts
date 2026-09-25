@@ -10,6 +10,8 @@ import type { TestCore } from './harness.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
+/** The fixture's environment switches a test may set; every one is cleared after it. */
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -32,6 +34,7 @@ afterEach(async () => {
   const open = harness;
   harness = null;
   delete process.env['CODEX_FAKE_LOG'];
+  for (const name of FAKE_SWITCHES) delete process.env[name];
   if (open !== null) await open.stop();
 });
 
@@ -570,6 +573,32 @@ describe('codex driver', () => {
     await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
     expect(countLines('initialize')).toBe(2);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+  });
+
+  test('a thread whose rollout is gone starts over with the history instead of failing for good', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+
+    await runTurn(client, threadId, 'remember the word pelican');
+    const lost = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(lost).not.toBe('');
+
+    process.env['CODEX_FAKE_LOST'] = '1';
+    await runTurn(client, threadId, 'which word?');
+    expect(fakeLog()).toContain(`thread/resume ${lost} `);
+    // Resume refused, then one fresh start in the same turn.
+    expect(countLines('initialize')).toBe(3);
+    expect(fakeLog().split('\n').filter((line) => line.startsWith('thread/start'))).toHaveLength(2);
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).not.toBe(lost);
+    expect(thread.sessionId).not.toBeNull();
+    expect(thread.sessionGeneration).toBe(1);
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    // The fake echoes its prompt: the fresh thread was told what the lost one knew.
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
   });
 
   test('the permission mode becomes the approval policy and the sandbox codex takes', async () => {

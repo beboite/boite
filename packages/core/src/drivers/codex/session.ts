@@ -28,6 +28,15 @@ import {
 import { CodexRpc } from './rpc.ts';
 import { CodexTurn } from './turn.ts';
 
+/**
+ * What `thread/resume` answers when the thread's rollout file is gone. Both
+ * sentences are in the 0.156.1 binary; any other refusal keeps the thread.
+ */
+const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
+
+/** `thread/resume` refused a thread the agent no longer has. */
+class ThreadLostError extends Error {}
+
 // ---------------------------------------------------------------------------
 // The session: one agent process per thread
 // ---------------------------------------------------------------------------
@@ -128,7 +137,8 @@ export class CodexSession {
     try {
       await this.start(turn.ctx);
     } catch (error) {
-      turn.fail(messageOf(error));
+      if (error instanceof ThreadLostError) turn.loseSession(error.message);
+      else turn.fail(messageOf(error));
       this.endTurn(turn, true);
       return;
     }
@@ -242,6 +252,9 @@ export class CodexSession {
         ...(model === null ? {} : { model }),
         config: { 'tools.update_plan.enabled': true },
         excludeTurns: true,
+      }).catch((error: unknown) => {
+        const reason = messageOf(error);
+        throw MISSING_THREAD.test(reason) ? new ThreadLostError(reason) : error;
       });
       this.threadId = resumed.thread.id;
       this.served = servedOf(resumed);

@@ -942,9 +942,9 @@ export class ThreadStore {
       this.markQueuedStopped(turnId);
       return;
     }
-    const thread = { ...selected, ...queued.execution };
+    let thread = { ...selected, ...queued.execution };
 
-    const running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
+    let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
       this.core.journal.putTurn(running);
     });
@@ -960,6 +960,15 @@ export class ThreadStore {
       const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
       this.handles.set(threadId, handle);
       result = await handle.done;
+      const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
+      if (fresh !== null && result.status === 'error') {
+        // Same turn, fresh session: the prompt now carries the journal's history.
+        thread = fresh;
+        running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+        const retry = driver.startTurn(this.makeContext(thread, provider, account, running));
+        this.handles.set(threadId, retry);
+        result = await retry.done;
+      }
       if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
@@ -1015,6 +1024,26 @@ export class ThreadStore {
     if (result.status === 'done' && !next.archived && this.deferredAnswers.has(threadId)) {
       setTimeout(() => this.flushDeferred(threadId), 0);
     }
+  }
+
+  /**
+   * The agent no longer has the native session this turn resumed: a Claude
+   * transcript past `cleanupPeriodDays`, a deleted Codex rollout, a copied data
+   * directory. Keeping the id would fail every prompt of the thread for good,
+   * so it goes, and the generation moves on as an account switch does: the
+   * next start is fresh and carries the journal's history. Returns the turn's
+   * thread snapshot for that fresh start, or null when the thread moved on
+   * meanwhile (archived, switched account, or a resident agent's session).
+   */
+  private dropLostSession(thread: ThreadSummary, result: TurnResult): ThreadSummary | null {
+    if (thread.agentSessionId || thread.sessionId === null) return null;
+    const current = this.core.journal.getThread(thread.id);
+    if (current === null || current.archived) return null;
+    if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
+    const generation = (current.sessionGeneration ?? 0) + 1;
+    this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
+    this.save({ ...current, sessionId: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
+    return { ...thread, sessionId: null, sessionGeneration: generation, context: null, promptCache: null };
   }
 
   /**

@@ -55,7 +55,11 @@ transaction as the event that changes them. Every event type carries a version.
 Text deltas are coalesced per thread every 16 ms before they reach SQLite or a
 socket. The provider transcript is never remodelled. A thread resumes the
 selected account's native `sessionId`; changing accounts starts a fresh session
-with bounded journal excerpts. Each accepted turn freezes its execution target,
+with bounded journal excerpts. So does a resume the agent refuses because the
+session is gone (Claude's `No conversation found with session ID`, Codex's
+`no rollout found for thread id`): the core drops the id and runs the same turn
+once more on a fresh session, with no error part. Any other resume failure
+keeps the id. Each accepted turn freezes its execution target,
 so a later picker change cannot redirect queued work.
 
 ## The scheduler counts turns, not threads
