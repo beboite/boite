@@ -242,7 +242,8 @@ New workspace package exports need a source mapping in the check's alias table;
 unmapped workspace imports fail instead of disappearing from the graph.
 It also holds every production TypeScript, JavaScript and Svelte file to 900
 lines, apart from the files listed in `scripts/architecture/size-budget.json`,
-which may only shrink ([development](development.md)).
+which may only shrink, and the tables it exempts, which grow with every RPC
+method or UI sentence ([development](development.md)).
 
 `bun run audit:complexity` prints an advisory ranking from pinned oxlint 1.82.0.
 It measures TypeScript, JavaScript and Svelte scripts, not Rust, and accepts

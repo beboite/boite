@@ -414,6 +414,17 @@ When a file shrinks, the check prints a note, and
 `bun run check:architecture --write-size-budget` lowers its entry to match, or
 removes it once the file is back under 900. That flag never raises an entry.
 
+The `exempt` entries of the same file have no ceiling, each with its reason:
+`packages/contracts/src/index.ts`, which every RPC method changes first,
+`lib/fake-client.ts`, which implements that contract, and the
+`lib/strings.*.ts` tables, which gain an entry with every UI sentence.
+
+`bun run check:architecture --rebaseline-size-budget` pins every file above 900
+at its size today, raising or adding entries, and prints each raise. It exists
+for one case: merging branches written before their files were pinned, on the
+tree that combines them, so the raises are reviewed in that diff. Everywhere
+else a file that outgrows its entry is split.
+
 `bun run audit:complexity` ranks production functions by cyclomatic complexity.
 Use `bun run audit:complexity --json` to save a comparison. It is advisory;
 the [architecture guide](architecture.md#module-boundaries-and-complexity)
