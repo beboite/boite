@@ -1017,7 +1017,8 @@ export class ThreadStore {
 
     if (this.core.journal.isClosed()) return;
     this.core.delegation.submitted(threadId, turnId, result.status === 'done');
-    this.core.journal.flushDeltas();
+    // Writes what the turn streamed to its rows before anything reads them as finished.
+    this.core.journal.releaseTurn(turnId);
     this.core.bus.flush();
     this.clearPermissionsOf(threadId);
     this.clearQuestionsOf(threadId);

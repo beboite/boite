@@ -23,8 +23,10 @@ icon.
 
 Keep a backup before trying nightlies: retaining files does not make a future
 journal schema readable by an older release. Boite refuses a journal schema it
-cannot read. The separate `build:shell:dev` build still uses `com.boite.two.dev`
-and `boite2-dev`, and does not receive these updates. Older manually built
+cannot read: the core names the file and both schema versions on stderr, leaves
+the file untouched and exits with code 1. Cores built before this check open a
+newer journal anyway, so restore the backup before going back to one. The
+separate `build:shell:dev` build still uses `com.boite.two.dev` and `boite2-dev`, and does not receive these updates. Older manually built
 nightlies using that development identifier remain separate; their data is not
 silently moved.
 

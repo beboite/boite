@@ -12,7 +12,7 @@ import { FileTickets } from './workdir.ts';
 import { Bus } from './bus.ts';
 import { shutdownDrivers } from './drivers/index.ts';
 import { ImportStore } from './imports.ts';
-import { Journal } from './journal.ts';
+import { Journal, scheduleEventRetention } from './journal.ts';
 import { KeybindingStore } from './keybindings.ts';
 import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
@@ -150,7 +150,9 @@ export class Core {
     mkdirSync(this.dataDir, { recursive: true });
 
     this.bus = new Bus();
-    this.journal = new Journal(join(this.dataDir, 'journal.db'));
+    this.bus.onError = (message) => this.log('error', message);
+    this.journal = new Journal(join(this.dataDir, 'journal.db'), { onError: (message) => this.log('error', message) });
+    this.#stopRetention = scheduleEventRetention(this.journal, (message) => this.log('error', message));
     this.router = new Router();
     this.settings = new SettingsStore(this);
     this.providers = new ProviderRegistry(this.dataDir);
@@ -243,6 +245,8 @@ export class Core {
     return this.#drainPromise;
   }
 
+  #stopRetention: () => void;
+
   /** Share both an active wait and its completion across shutdown phases. */
   #drainPromise: Promise<void> | null = null;
   #stopping = false;
@@ -269,6 +273,7 @@ export class Core {
     this.keybindings.close();
     await this.telemetry.close();
     this.bus.dispose();
+    this.#stopRetention();
     this.journal.close();
   }
 }

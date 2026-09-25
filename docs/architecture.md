@@ -34,7 +34,10 @@ The token is 32 random bytes generated on first start and kept in
 Broadcast events (`project.*`, `settings.updated`, `providers.*`, `accounts.*`)
 reach every authenticated connection, so a second shell or a phone follows a
 change without a reload. `message.*`, `permission.*`, `question.*` and
-`panel.*` reach only the sockets subscribed to that thread. A client that
+`panel.*` reach only the sockets subscribed to that thread, and so does
+`thread.activity` for owners and phones: it carries the whole activity, loop
+history included, up to about 200 KB, and only the open thread shows it. An
+agent socket still gets its own thread's. A client that
 connects mid-turn rebuilds the pending permission card from
 `permissions.list`, because `permission.requested` only reached the sockets
 that existed when it fired.
@@ -52,8 +55,32 @@ environment, held to `AGENT_METHODS` on that thread alone. Both lists live in
 append-only, and the projection tables (`projects`, `threads`, `turns`,
 `messages`, `processes`, `accounts`, `settings`) are updated in the same
 transaction as the event that changes them. Every event type carries a version.
-Text deltas are coalesced per thread every 16 ms before they reach SQLite or a
-socket. The provider transcript is never remodelled. A thread resumes the
+Nothing replays events, so they are a recent trail: a pass a minute after start
+and then daily deletes those older than 30 days, 5,000 per timer tick, keeping
+the newest agents event whose id is the agents revision. Removing a project
+deletes its threads' events with them.
+
+Text deltas are coalesced per thread every 16 ms before they reach a socket or
+the message. Streamed text is no event of its own: it is journaled as the
+message it lands in, framed by `message.started`, `message.part` and
+`message.completed`. While a message streams, its parts live in memory and a
+delta or a tool card only changes them there; the row is written at most every
+500 ms (longer when one write is slow, so writing stays under a twentieth of the
+time, capped at 5 s), when the message completes, when its turn ends, before any
+read of messages, and on close. A delta used to rewrite the whole row, every
+part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. A crash loses at
+most the text of the last write window. Thread activity (goal, loop, tasks) is a
+`settings` row with no event: its payload held the whole loop history and
+nothing read it back. A journal written by a newer release is refused at open
+with the file and both schema versions, before any write. Foreign keys are off,
+so the `ON DELETE CASCADE` clauses are dead; project removal clears every
+thread-keyed table itself. A write that fails on a timer (a full disk, an I/O
+error) has no caller to throw to: it becomes a `core.log` error, the text is
+tried again on the next flush and dropped after three failures, with a line
+saying so. A listener that throws on a bus event is reported the same way and
+the other listeners still get it. An error nothing caught still ends the core,
+as Bun would, after a log line and the usual shutdown that releases the data
+directory lock. The provider transcript is never remodelled. A thread resumes the
 selected account's native `sessionId`; changing accounts starts a fresh session
 with bounded journal excerpts. Each accepted turn freezes its execution target,
 so a later picker change cannot redirect queued work.
@@ -115,7 +142,9 @@ the Win32 calls, so no test ever creates a window or plays a sound.
 protocol onto the contract's parts. What they share: one process and one agent
 session per thread, kept warm across turns where the protocol allows it; a
 permission question drawn as the same inline card whatever asked it; a stop that
-is the protocol's own cancel; usage folded onto the turn, with a real price only
+is the protocol's own cancel, with a core deadline behind it (a turn still
+running 10 s after Stop has its processes ended, and 2 s later the core settles
+it as stopped, saying the agent did not stop in time); usage folded onto the turn, with a real price only
 where the wire carries one; and a lazy module, so a driver nobody used costs
 nothing at start.
 

@@ -260,7 +260,15 @@ export function main(argv: string[]): void {
   const unlock = lockDataDir(dataDir);
   const coreFile = join(dataDir, 'core.json');
   const token = readToken(coreFile) ?? newToken();
-  const core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+  let core: Core;
+  try {
+    core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+  } catch (error) {
+    // A journal from a newer release, among others: say why and leave the data as it is.
+    process.stderr.write(`boite-core: ${messageOf(error)}\n`);
+    unlock();
+    process.exit(1);
+  }
   const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
   if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();
