@@ -91,6 +91,9 @@ in-memory fake.
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
+- `?fake=1&stream=tokens` streams answers and reasoning sixteen characters per
+  delta, the echo driver's rate, instead of five deltas per answer, so a cost
+  paid per delta shows. Tests pass `chunkSize` to `FakeClient` for the same.
 - The app opens on a new thread's draft in the last used project, as if New
   thread had been pressed: the project last opened or drafted in on that
   device (kept per core in `localStorage`), else the project of the most recent
