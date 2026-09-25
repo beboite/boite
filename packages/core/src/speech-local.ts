@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, writeSync, renameSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, writeSync, renameSync, rmSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { unzipSync } from 'fflate';
 import type { Core } from './core.ts';
@@ -19,6 +19,29 @@ const RUNTIME = {
 
 function megabytes(bytes: number): number {
   return Math.round(bytes / 1_000_000);
+}
+
+/** Written beside a `.part`, so a later download resumes only bytes of the same file. */
+interface PartRecord {
+  url: string;
+  sha256: string;
+  /** The server's strong ETag or Last-Modified, sent back as `If-Range`; null when it gave neither. */
+  validator: string | null;
+}
+
+function readPartRecord(part: string): PartRecord | null {
+  try {
+    const raw = JSON.parse(readFileSync(`${part}.json`, 'utf8')) as Partial<PartRecord>;
+    if (typeof raw.url !== 'string' || typeof raw.sha256 !== 'string') return null;
+    return { url: raw.url, sha256: raw.sha256, validator: typeof raw.validator === 'string' ? raw.validator : null };
+  } catch {
+    return null;
+  }
+}
+
+function dropPart(part: string): void {
+  rmSync(part, { force: true });
+  rmSync(`${part}.json`, { force: true });
 }
 
 export class SpeechLocal {
@@ -71,17 +94,20 @@ export class SpeechLocal {
     // Only these managed paths belong to the installer; custom paths are never removed.
     rmSync(join(this.root, 'runtime'), { recursive: true, force: true });
     rmSync(this.model, { force: true });
-    rmSync(`${this.model}.part`, { force: true });
+    dropPart(`${this.model}.part`);
     rmSync(join(this.root, 'runtime.zip'), { force: true });
-    rmSync(join(this.root, 'runtime.zip.part'), { force: true });
+    dropPart(join(this.root, 'runtime.zip.part'));
     rmSync(join(this.root, 'runtime-staging'), { recursive: true, force: true });
     this.error = null;
   }
   /**
    * One download into `${target}.part`, then a rename once size and SHA-256
-   * match. A connection that drops or goes quiet for `stallMs` keeps the part:
-   * the next install hashes it again and asks the server for the rest. A wrong
-   * size, a wrong digest or a cancel starts over.
+   * match. A connection that drops or goes quiet for `stallMs` keeps the part
+   * and a `.part.json` naming the url, digest and validator it came from: the
+   * next install resumes only when the url and digest are the ones it wants,
+   * hashes the part again and asks for the rest with `If-Range`, so a file
+   * changed on the server comes whole. A wrong size, a wrong digest or a cancel
+   * starts over.
    */
   private async download(spec: typeof MODEL, target: string, signal: AbortSignal): Promise<void> {
     const part = `${target}.part`;
@@ -89,14 +115,18 @@ export class SpeechLocal {
     let bytes = 0;
     let held = 0;
     try { held = statSync(part).size; } catch { /* nothing to resume */ }
-    if (held > 0 && held < spec.bytes) {
+    const record = readPartRecord(part);
+    // Bytes of another file, a Boite that pinned another model or runtime, are never resumed.
+    const same = record !== null && record.url === spec.url && record.sha256.toLowerCase() === spec.sha256.toLowerCase();
+    let validator = same ? record.validator : null;
+    if (same && held > 0 && held < spec.bytes) {
       for await (const chunk of Bun.file(part).stream()) {
         signal.throwIfAborted();
         hash.update(chunk);
         bytes += chunk.length;
       }
       this.downloadedBytes += bytes;
-    } else rmSync(part, { force: true });
+    } else dropPart(part);
 
     let fd: number | null = null;
     let keep = false;
@@ -117,7 +147,9 @@ export class SpeechLocal {
       try {
         response = await fetch(spec.url, {
           signal: AbortSignal.any([signal, stall.signal]),
-          headers: bytes > 0 ? { range: `bytes=${bytes}-`, 'accept-encoding': 'identity' } : { 'accept-encoding': 'identity' },
+          headers: bytes > 0
+            ? { range: `bytes=${bytes}-`, ...(validator === null ? {} : { 'if-range': validator }), 'accept-encoding': 'identity' }
+            : { 'accept-encoding': 'identity' },
         });
       } catch (error) {
         throw signal.aborted ? error : lost();
@@ -135,6 +167,13 @@ export class SpeechLocal {
         throw new Error(`speech download: HTTP ${response.status}`);
       }
       if (!response.body) throw new Error(`speech download: HTTP ${response.status} with no body`);
+      const etag = response.headers.get('etag');
+      // `If-Range` takes a strong ETag or a date; a weak one would never match.
+      validator = etag !== null && !etag.startsWith('W/')
+        ? etag
+        : (response.headers.get('last-modified') ?? (response.status === 206 ? validator : null));
+      const kept: PartRecord = { url: spec.url, sha256: spec.sha256, validator };
+      writeFileSync(`${part}.json`, `${JSON.stringify(kept)}\n`);
       fd = openSync(part, bytes > 0 ? 'a' : 'w', 0o600);
       const reader = response.body.getReader();
       for (;;) {
@@ -156,9 +195,10 @@ export class SpeechLocal {
       closeSync(fd);
       fd = null;
       renameSync(part, target);
+      rmSync(`${part}.json`, { force: true });
     } catch (error) {
       try { if (fd !== null) closeSync(fd); }
-      finally { if (!keep || signal.aborted) rmSync(part, { force: true }); }
+      finally { if (!keep || signal.aborted) dropPart(part); }
       throw error;
     } finally {
       clearTimeout(timer);

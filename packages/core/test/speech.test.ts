@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
@@ -149,11 +149,13 @@ describe('a local speech download on a bad connection', () => {
   const spec = { url: '', bytes: body.byteLength, sha256: createHash('sha256').update(body).digest('hex') };
   let server: ReturnType<typeof Bun.serve>;
   let ranges: (string | null)[] = [];
+  let ifRanges: (string | null)[] = [];
   let next: 'resume' | 'whole' = 'resume';
   let first: 'drop' | 'stall' = 'drop';
 
   beforeEach(() => {
     ranges = [];
+    ifRanges = [];
     next = 'resume';
     first = 'drop';
     server = Bun.serve({
@@ -161,6 +163,7 @@ describe('a local speech download on a bad connection', () => {
       fetch(request) {
         const range = request.headers.get('range');
         ranges.push(range);
+        ifRanges.push(request.headers.get('if-range'));
         if (ranges.length === 1) {
           const end = first;
           return new Response(new ReadableStream<Uint8Array>({
@@ -170,7 +173,7 @@ describe('a local speech download on a bad connection', () => {
               await Bun.sleep(50);
               controller.error(new Error('the test server drops the connection'));
             },
-          }), { headers: { 'content-length': String(body.byteLength) } });
+          }), { headers: { 'content-length': String(body.byteLength), etag: '"model-1"' } });
         }
         const from = Number(/^bytes=(\d+)-$/.exec(range ?? '')?.[1] ?? Number.NaN);
         if (next === 'whole' || Number.isNaN(from)) return new Response(body);
@@ -195,6 +198,9 @@ describe('a local speech download on a bad connection', () => {
 
     await download(target);
     expect(ranges).toEqual([null, `bytes=${half}-`]);
+    // The file the bytes came from is named, so a changed one would come whole.
+    expect(ifRanges).toEqual([null, '"model-1"']);
+    expect(existsSync(`${target}.part.json`)).toBe(false);
     expect(new Uint8Array(readFileSync(target))).toEqual(body);
     expect(existsSync(`${target}.part`)).toBe(false);
   });
@@ -205,6 +211,25 @@ describe('a local speech download on a bad connection', () => {
     next = 'whole';
     await download(target);
     expect(ranges[1]).toBe(`bytes=${half}-`);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+  });
+
+  test('a part kept for another file is never resumed: a build that pins another model downloads it whole', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    await download(target).catch(() => {});
+    expect(statSync(`${target}.part`).size).toBe(half);
+    const other = { ...spec, url: `${spec.url}?release=2` };
+    await harness.core.speech.local['download'](other, target, new AbortController().signal);
+    expect(ranges).toEqual([null, null]);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+  });
+
+  test('a part with no record of where it came from is not resumed either', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    await download(target).catch(() => {});
+    rmSync(`${target}.part.json`);
+    await download(target);
+    expect(ranges).toEqual([null, null]);
     expect(new Uint8Array(readFileSync(target))).toEqual(body);
   });
 
