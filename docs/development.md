@@ -385,7 +385,7 @@ external access needs the trusted HTTPS origin described in [phone.md](phone.md)
 
 ```bash
 bun run bench               # against Boite Legacy, writes bench/results/<date>.md
-bun run bench/idle-rss.ts   # the core's idle working set against bare bun
+bun run bench/idle-rss.ts   # the core's idle memory against bare bun, at 4.5 s and 75 s (--fresh-only: 4.5 s)
 ```
 
 Both set their own fresh data directory. Quote a figure with the date of the run

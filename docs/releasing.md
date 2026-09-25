@@ -283,4 +283,10 @@ Run `bun run e2e` on the staged build, not on the sources alone: it is the only
 thing that drives the real shell executable over its debugging port, hidden.
 Then run `bun run bench` and `bun run bench/idle-rss.ts` fresh, so the resource
 figures in the release notes come from the build being released and carry its
-date.
+date. The idle bench reports two points for each process: `fresh`, 4.5 s after
+the spawn, and `steady`, 75 s after it, once the first automatic update check
+has run. Quote both, with the working set, private bytes and thread count it
+prints. Run it without `BOITE_HOST_AGENTS=0` for the notes, so the update check
+reads the providers installed on the machine as a user's core would, and say
+which providers those were; with it set, the check finds none and the steady
+point measures an empty check.
