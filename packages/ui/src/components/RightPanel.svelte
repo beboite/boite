@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     Activity,
     ChevronLeft,
@@ -154,9 +155,13 @@
 
   function measure(): void {
     const node = tabs;
-    if (!node) return;
+    // A strip with no width yet, a phone's sheet still coming in, has nothing to
+    // measure: the observer calls again once it has one. Measured at zero, 44 px
+    // chevrons wider than the tabs flipped the state on every run.
+    if (!node || node.clientWidth === 0) return;
     // Shown chevrons take width from the strip: the tabs overflow only if they would without them.
-    const chevrons = overflowing ? Array.from(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [], (chev) => chev.offsetWidth + 2).reduce((sum, width) => sum + width, 0) : 0;
+    // Read untracked: the effect that measures must not rerun on its own answer.
+    const chevrons = untrack(() => overflowing) ? Array.from(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [], (chev) => chev.offsetWidth + 2).reduce((sum, width) => sum + width, 0) : 0;
     overflowing = node.scrollWidth - node.clientWidth - chevrons > 1;
   }
 
