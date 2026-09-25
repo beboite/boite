@@ -493,16 +493,16 @@ export class FakeClient implements ObservableClient {
     this.#emit('thread.updated', structuredClone(toSummary(thread)));
   }
 
-  /**
-   * What the core announces when the login under an account changed while its
-   * status did not, after a plugin switched the saved login for example
-   * (`packages/core/src/plugins.ts`): the account again, which outdates its probes.
-   */
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
   emitCoreLog(level: RpcEvents['core.log']['level'], message: string): void {
     this.#emit('core.log', { level, message, at: this.#now() });
   }
 
+  /**
+   * What the core announces when the login under an account changed while its
+   * status did not, after a plugin switched the saved login for example
+   * (`packages/core/src/plugins.ts`): the account again, which outdates its probes.
+   */
   announceLogin(accountId: string): void {
     const account = this.#accounts.find((a) => a.id === accountId);
     if (!account) throw this.#notFound('account', accountId);
@@ -3144,10 +3144,6 @@ const ready = true;
   }
 
   /**
-   * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
-   * named as such; only OpenCode uses the large catalog fixture.
-   */
-  /**
    * The core's model and effort checks on `threads.update`, run before
    * anything changes: the model when it changes or the account does, and the
    * effort against the model the thread ends on.
@@ -3172,9 +3168,16 @@ const ready = true;
     checkEffort(provider, models, model, effort);
   }
 
-  /** The core's `modelsFor`: what the last probe of this account read, else the descriptor's list. */
+  /**
+   * The core's `modelsFor`: the descriptor's list, after what the last probe of
+   * this account read, and a model both list only once.
+   */
   #modelsOf(providerId: string, accountId: string): ModelInfo[] {
-    return this.#modelCatalogs.get(providerId + '::' + accountId) ?? this.#providers.find(p => p.id === providerId)?.models ?? [];
+    const described = this.#providers.find(p => p.id === providerId)?.models ?? [];
+    const probed = this.#modelCatalogs.get(providerId + '::' + accountId);
+    if (probed === undefined) return described;
+    const known = new Set(probed.map((model) => model.id));
+    return [...probed, ...described.filter((model) => !known.has(model.id))];
   }
 
   #checkSpeed(providerId: string, accountId: string, model: string | null, speed: string | null): void {
@@ -3183,6 +3186,10 @@ const ready = true;
     if (!models.find(m => m.id === model)?.speeds?.some(option => option.id === speed)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model does not offer this speed' });
   }
 
+  /**
+   * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
+   * named as such; only OpenCode uses the large catalog fixture.
+   */
   async #probe(providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
     const provider = this.#providers.find((p) => p.id === providerId);
     if (!provider) {
