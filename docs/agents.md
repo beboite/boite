@@ -101,6 +101,13 @@ Completed turns reconcile with their saved results. Durable decisions remain
 pending; native approvals expire with their process. Arbitrary shell effects
 cannot guarantee exactly-once execution and are never replayed blindly.
 
+A command that creates something (a message, a routine run, a decision) takes a
+`requestId`. The core remembers each id for 30 days: sending the same id again
+returns the same record, read again as it stands now, and does nothing twice.
+The receipt names the record rather than copying it, and the journal event of a
+record change names its kind, id and revision, so a routine with a long prompt
+does not copy that prompt into every receipt and event.
+
 ## Providers and tools
 
 Profiles use existing model probing, account selection, effort and drivers.

@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 const DELTA_WINDOW_MS = 16;
 
 /** What `listMessagePage` hands back: the page itself and the cursor for what is behind it. */
@@ -444,6 +444,13 @@ function migrate(db: Database): void {
   if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'coordination_status'").get()) {
     db.exec('CREATE INDEX IF NOT EXISTS coordination_status ON coordination_letters (status, direction, created_at)');
     version = 17;
+  }
+  // Request receipts are kept a month, then dropped: the rows already there count from now.
+  if (!db.query("SELECT 1 FROM pragma_table_info('agent_requests') WHERE name = 'created_at'").get()) {
+    db.exec(`ALTER TABLE agent_requests ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+      UPDATE agent_requests SET created_at = ${Date.now()};
+      CREATE INDEX IF NOT EXISTS agent_requests_created ON agent_requests (created_at);`);
+    version = 18;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

@@ -98,6 +98,34 @@ test('routine results appear once in the identity conversation', async () => {
  expect(messages[0]?.text).toContain('puzzle prototype proposal');
  expect(messages[0]?.scope).toEqual({kind:'agent',id:agent.id});
 });
+test('a routine run keeps its prompt once: receipts and events name the record, and a replay reads it back',async()=>{
+ // The echo agent would stream 16,000 characters back for seconds: the run sleeps and is cancelled instead.
+ const prompt=`[sleep:60000]${'p'.repeat(16000-13)}`;
+ const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Long',prompt,schedule:{kind:'interval',everyMinutes:60},enabled:false,nextAt:null,lastWorkId:null,lastScheduledAt:null}});
+ const since=(h.core.journal.db.query('SELECT COALESCE(MAX(id), 0) AS id FROM events').get() as {id:number}).id;
+ const request={routineId:routine.id,requestId:'routine-long-001'};
+ const work=await client.call('agents.routine.run',request);
+ unpause();
+ await waitFor(()=>h.core.workforce.records.list('run').some(r=>r.workId===work.id&&r.status==='running'));
+ const running=h.core.workforce.records.get('work',work.id);
+ await client.call('agents.work.control',{workId:work.id,expectedRevision:running.revision,action:'cancel'});
+ await waitFor(()=>h.core.workforce.records.get('work',work.id).status==='cancelled'&&h.core.workforce.records.list('run').every(r=>r.status!=='running'));
+ const receipt=h.core.journal.db.query('SELECT result, created_at FROM agent_requests WHERE request_id = ?').get(request.requestId) as {result:string;created_at:number};
+ expect(receipt.result.length).toBeLessThan(1024);
+ expect(receipt.created_at).toBeGreaterThan(0);
+ const events=h.core.journal.db.query("SELECT payload FROM events WHERE type = 'agents.record' AND id > ?").all(since) as {payload:string}[];
+ expect(events.length).toBeGreaterThan(3);
+ for(const event of events)expect(event.payload.length).toBeLessThan(1024);
+ const replayed=await client.call('agents.routine.run',request);
+ expect(replayed).toEqual(h.core.workforce.records.get('work',work.id));
+ expect(replayed.prompt).toBe(prompt);
+ expect(replayed.status).toBe('cancelled');
+ // A receipt past the retention is dropped by the next command.
+ h.core.journal.db.query('UPDATE agent_requests SET created_at = 1 WHERE request_id = ?').run(request.requestId);
+ (h.core.workforce.records as unknown as {pruned:number}).pruned=0;
+ await client.call('agents.message.send',{scope:{kind:'agent',id:agent.id},recipientIds:[],text:'After the prune',requestId:'routine-long-002'});
+ expect(h.core.journal.db.query('SELECT 1 FROM agent_requests WHERE request_id = ?').get(request.requestId)).toBeNull();
+});
 test('brain and checkpoint survive compaction without publishing the summary as a reply',async()=>{
  unpause();
  await client.call('agents.message.send',{scope:{kind:'agent',id:agent.id},recipientIds:[agent.id],text:'Remember the prototype is a puzzle game.',requestId:'context-first-001'});
