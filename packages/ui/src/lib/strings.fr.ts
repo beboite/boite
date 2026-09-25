@@ -1461,12 +1461,13 @@ export const fr: Translation = {
       intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
       question: 'Marché conclu ?',
       video: 'Mème Trade Offer',
-      basic: 'NON ! Ça suffit',
+      basic: 'NON ! Juste les compteurs de base',
       basicDefault: '(par défaut)',
       basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
       deal: 'MARCHÉ CONCLU',
       dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
-      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Réglages > Général > Confidentialité et statistiques désactive tout. :c',
+      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
+      offLabel: 'tout désactiver :c',
       doc: 'Ce qui est collecté'
     },
     demo: {

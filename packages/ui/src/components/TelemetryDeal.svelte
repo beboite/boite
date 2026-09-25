@@ -9,7 +9,7 @@
   /**
    * Boite Legacy's consent screen: the trade offer meme, one row per tier, and
    * picking a row ends the tour. "Enough" keeps the anonymous counters, so the
-   * note under both rows says where the full opt-out lives.
+   * note under both rows carries the full opt-out, one click like the rows.
    */
   let { store, onchosen }: { store: Store; onchosen: () => void } = $props();
 
@@ -83,6 +83,11 @@
     if (busy || refusing) return;
     if (await choose('enhanced')) onchosen();
   }
+
+  async function off() {
+    if (busy || refusing) return;
+    if (await choose('off')) onchosen();
+  }
 </script>
 
 <div class="deal" data-testid="telemetry-deal">
@@ -102,7 +107,8 @@
       <span class="hint">{strings.onboarding.privacy.dealHint}</span>
     </button>
   </div>
-  <p class="note">{strings.onboarding.privacy.optOut}</p>
+  <p class="note">{strings.onboarding.privacy.optOut}
+    <button class="link" disabled={busy || refusing} data-testid="onboarding-telemetry-off" onclick={() => void off()}>{strings.onboarding.privacy.offLabel}</button></p>
   <button class="link" disabled={refusing} onclick={() => void openExternal(DOC_URL)}>{strings.onboarding.privacy.doc}</button>
   {#if error}<p role="alert">{error}</p>{/if}
 </div>
@@ -132,7 +138,8 @@
   .link:hover:not(:disabled) { color: var(--color-foreground); }
   [role=alert] { color: var(--color-danger); overflow-wrap: anywhere; }
   @keyframes swap { from { opacity: 0; transform: scale(.96); } }
-  @media (max-height: 640px) { .intro { display: none; } .row { padding: 8px 14px; } }
+  /* A short window shrinks the clip, never the line that says what is counted. */
+  @media (max-height: 640px) { .clip { max-height: 16vh; } .row { padding: 8px 14px; } }
   @media (max-height: 520px) { .clip { display: none; } }
   @media (prefers-reduced-motion: reduce) { .clip { animation: none; } .row:hover:not(:disabled) { transform: none; } }
   :global(html[data-motion="reduced"]) .clip { animation: none; }

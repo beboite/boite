@@ -1491,12 +1491,13 @@ export const strings = {
       intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
       question: 'Deal?',
       video: 'Trade offer meme',
-      basic: 'NO! Enough is enough',
+      basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
       basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
       deal: 'DEAL',
       dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
-      optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
+      optOut: "If you REALLY don't want to help Boite:",
+      offLabel: 'turn everything off :c',
       doc: 'What is collected'
     },
     demo: {
