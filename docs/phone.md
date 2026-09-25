@@ -73,6 +73,13 @@ forgotten on the spot. A link opened twice, or after its time, is refused by
 name. The core token itself stays in `<dataDir>/core.json`, where the shell
 reads it, and travels nowhere.
 
+On a weak link the answer carrying the key can be lost after the core made it.
+The page therefore sends a `nonce` with the grant, 16 random bytes it picks once
+and keeps in memory, and its retry repeats both. The core keeps that exchange's
+answer until the grant's ten minutes run out or the key first says hello on its
+own, and hands the same key to a retry with the same nonce. Anyone else holding
+the link, without the nonce, is still refused.
+
 A link carries a role. `device` is the default and the only one the QR code is
 drawn for: a phone, whose key says hello as `session` and reaches the list below.
 `owner` is for another computer of the owner's that drives a core running

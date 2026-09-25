@@ -177,6 +177,15 @@ function megabytes(bytes: number): string {
   return (bytes / 1048576).toFixed(1).replace(/\.0$/, '');
 }
 
+/**
+ * 16 random bytes as hex. `getRandomValues` works on a plain-http page, where a
+ * phone on the LAN opens the core; `randomUUID` needs a secure context.
+ */
+function pairingNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function browserSocket(url: string): SocketLike {
   return new WebSocket(url) as unknown as SocketLike;
 }
@@ -188,6 +197,12 @@ export class WsClient implements ObservableClient {
   };
   /** Spent on the first hello that answers; a refused grant is not retried. */
   #grant: string | null;
+  /**
+   * Repeated on every grant hello, retries included, so a retry after an
+   * answer lost on the way gets the session the core already made for it.
+   * Memory only, like the grant.
+   */
+  #nonce: string;
   /** The token is a pairing's session key, so a hello it no longer opens is a revoke. */
   #paired: boolean;
   #onSession: ((session: Session) => void) | null;
@@ -224,6 +239,7 @@ export class WsClient implements ObservableClient {
       backoff: options.backoff ?? defaultBackoff
     };
     this.#grant = options.grant ?? null;
+    this.#nonce = this.#grant === null ? '' : pairingNonce();
     this.#paired = options.paired ?? options.grant !== undefined;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
@@ -467,7 +483,7 @@ export class WsClient implements ObservableClient {
 
   #helloParams(): RpcParams<'hello'> {
     return {
-      ...(this.#grant === null ? { token: this.#options.token } : { grant: this.#grant }),
+      ...(this.#grant === null ? { token: this.#options.token } : { grant: this.#grant, nonce: this.#nonce }),
       protocolVersion: PROTOCOL_VERSION,
       client: { name: this.#options.clientName, version: this.#options.version }
     };

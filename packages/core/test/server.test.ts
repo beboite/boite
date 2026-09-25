@@ -391,6 +391,61 @@ describe('server', () => {
     expect(phoneLink.role).toBe('device');
   });
 
+  test('a grant whose answer was lost gives the same session to a retry with the same nonce, and to nobody else', async () => {
+    const sessions = harness.core.sessions;
+    const client = { name: 'pwa', version: '0' };
+    const nonce = 'n'.repeat(32);
+    const { grant } = sessions.grant(1_000);
+
+    // The first answer never reached the phone: its retry repeats the grant and the nonce.
+    const first = sessions.exchange(grant, client, 2_000, nonce);
+    const again = sessions.exchange(grant, client, 3_000, nonce);
+    expect(again).toEqual(first);
+    expect(harness.core.journal.listSessions()).toHaveLength(1);
+
+    // Someone else holding the QR code has no nonce, or the wrong one.
+    const refusedWith = (other: string | null, now = 3_000): string => {
+      try {
+        sessions.exchange(grant, client, now, other);
+        return 'accepted';
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    const spent = 'the pairing link was already used, expired, or never issued';
+    expect(refusedWith(null)).toBe(spent);
+    expect(refusedWith('m'.repeat(32))).toBe(spent);
+    // Past the time the grant had, even the right nonce is refused.
+    expect(refusedWith(nonce, 1_000 + 10 * 60 * 1000)).toBe(spent);
+
+    // Through the socket: once the key opens the core, the grant is spent for good.
+    const owner = await harness.connect();
+    const link = await owner.call('pairing.grant', {});
+    const phone = await connect(harness.url, '', { grant: link.grant, nonce });
+    const retry = await connect(harness.url, '', { grant: link.grant, nonce });
+    expect(retry.session).toEqual(phone.session);
+    await connect(harness.url, phone.session?.token ?? '');
+    let after = 'none';
+    try {
+      await connect(harness.url, '', { grant: link.grant, nonce });
+    } catch (error) {
+      after = (error as Error).message;
+    }
+    expect(after).toBe(spent);
+    expect(harness.core.journal.listSessions()).toHaveLength(2);
+
+    // A nonce too short to be a secret keeps the grant strictly one-shot.
+    const short = sessions.grant(Date.now());
+    sessions.exchange(short.grant, client, Date.now(), 'short');
+    let shortRetry = 'none';
+    try {
+      sessions.exchange(short.grant, client, Date.now(), 'short');
+    } catch (error) {
+      shortRetry = (error as Error).message;
+    }
+    expect(shortRetry).toBe(spent);
+  });
+
   test('a grant expires, and hello with both a token and a grant is refused', async () => {
     const grant = harness.core.sessions.grant(1_000);
     let expired = 'none';

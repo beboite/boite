@@ -425,6 +425,44 @@ describe('WsClient', () => {
     client.close();
   });
 
+  test('a grant hello whose answer is lost is retried with the same grant and nonce', async () => {
+    const sockets: FakeSocket[] = [];
+    const stored: { id: string; token: string }[] = [];
+    const client = new WsClient({
+      url: 'http://192.0.2.1:8777',
+      token: '',
+      grant: 'one-time',
+      onSession: (session) => stored.push(session),
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      backoff: () => 0
+    });
+    void client.connect().catch(() => undefined);
+    const first = take(sockets, 0);
+    first.open();
+    const nonce = first.frame(0).params?.['nonce'];
+    expect(nonce).toMatch(/^[0-9a-f]{32}$/);
+    // The socket dies before the answer carrying the session arrives.
+    first.close();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const second = take(sockets, 1);
+    second.open();
+    expect(second.frame(0).params).toMatchObject({ grant: 'one-time', nonce });
+    second.receive({
+      jsonrpc: '2.0',
+      id: second.frame(0).id,
+      result: { core: CORE, principal: 'session', session: { id: 'ses-1', token: 'minted' } }
+    });
+    await Promise.resolve();
+    expect(stored).toEqual([{ id: 'ses-1', token: 'minted' }]);
+    expect(client.state).toBe('ready');
+    client.close();
+  });
+
   test('a session whose key stops opening the core is revoked: closed for good, and the caller told', async () => {
     const sockets: FakeSocket[] = [];
     let revoked = 0;

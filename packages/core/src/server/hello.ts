@@ -15,7 +15,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+    | { token?: unknown; grant?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -23,6 +23,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   };
   const token = typeof params?.token === 'string' ? params.token : null;
   const grant = typeof params?.grant === 'string' ? params.grant : null;
+  const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
   const client = {
     name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
     version: typeof params?.client?.version === 'string' ? params.client.version : '',
@@ -42,7 +43,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       return;
     }
     try {
-      session = core.sessions.exchange(grant, client);
+      session = core.sessions.exchange(grant, client, Date.now(), nonce);
     } catch (error) {
       refuse(messageOf(error), 'bad grant');
       return;

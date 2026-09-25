@@ -1607,11 +1607,18 @@ export interface RpcMethods extends AgentsRpcMethods {
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
    * two, never both.
+   *
+   * `nonce` goes with a grant: a random string of 16 to 256 characters the
+   * client picks once and repeats on every retry. When the answer carrying the
+   * session is lost, the same grant and nonce get the same session back until
+   * the grant would have expired or the session first says hello with its
+   * token. Without a nonce a grant is strictly one-shot.
    */
   hello: {
     params: {
       token?: string;
       grant?: string;
+      nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
     };
