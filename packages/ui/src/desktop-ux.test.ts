@@ -100,6 +100,48 @@ test('archiving a thread that waits on the user asks first; cancel keeps it', as
   expect(store.threads.find((t) => t.id === 't-bench')?.archived).toBe(false);
 });
 
+test('Escape on the archive confirmation keeps the thread and hands the keyboard back to what had it', async () => {
+  await mountOnFake();
+  await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
+  const title = query('[data-testid=thread-title]');
+  title.focus();
+  const answer = archiveThread(store, 't-bench');
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-cancel');
+  vi.spyOn(store, 'busy', 'get').mockReturnValue(true);
+  const stop = vi.spyOn(store, 'stop').mockResolvedValue(undefined as never);
+  press(document.activeElement!, 'Escape');
+  expect(await answer).toBe(false);
+  await waitFor(() => document.activeElement === title);
+  flushSync();
+  expect(stop).not.toHaveBeenCalled();
+});
+
+test('a thread row menu closed with Escape, or by a pick whose dialog is cancelled, hands the keyboard back to its button', async () => {
+  await mountOnFake();
+  await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
+  await waitFor(() => document.querySelector('[data-testid=thread-row][data-thread-id=t-bench]') !== null);
+  const button = query('[data-testid=thread-row][data-thread-id=t-bench]').parentElement!.querySelector<HTMLButtonElement>('[data-testid=thread-menu]')!;
+  const firstRow = () => document.querySelector<HTMLElement>('[data-testid=context-menu] [data-row]');
+  button.focus();
+  button.click();
+  await waitFor(() => firstRow() !== null && firstRow() === document.activeElement);
+  vi.spyOn(store, 'busy', 'get').mockReturnValue(true);
+  const stop = vi.spyOn(store, 'stop').mockResolvedValue(undefined as never);
+  press(document.activeElement!, 'Escape');
+  await waitFor(() => document.activeElement === button);
+  flushSync();
+  expect(stop).not.toHaveBeenCalled();
+
+  button.click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-cancel');
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null || document.activeElement === button);
+  await waitFor(() => document.activeElement === button);
+  expect(store.threads.find((t) => t.id === 't-bench')?.archived).toBe(false);
+});
+
 test('an archived thread comes back from Settings > General', async () => {
   await mountOnFake();
   expect(await archiveThread(store, 't-trace')).toBe(true);
@@ -152,10 +194,12 @@ test('removing a machine asks first, and cancel keeps its card', async () => {
   await waitFor(() => workspace.machines.length === 2);
   store.showSettings('machines');
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
-  query<HTMLButtonElement>('[data-testid=machine-remove]').click();
-  await waitFor(() => document.querySelector('[data-testid=confirm-cancel]') !== null);
+  const remove = query<HTMLButtonElement>('[data-testid=machine-remove]');
+  remove.focus();
+  remove.click();
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-cancel');
   query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitFor(() => document.activeElement === remove);
   expect(workspace.machines).toHaveLength(2);
   expect(document.querySelectorAll('[data-testid=machine-card]')).toHaveLength(2);
 });

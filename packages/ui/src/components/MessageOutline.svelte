@@ -2,6 +2,7 @@
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
+  import { focusComposer } from '../lib/focus';
   import { messagePreview, promptCommand } from '../lib/message-display';
   import { outlineEntries, outlineUnfold, outlineWave, type OutlineEntry } from '../lib/message-outline';
   import { tick } from 'svelte';
@@ -158,7 +159,8 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     event.preventDefault(); event.stopPropagation(); shown = null;
-    (event.target as HTMLElement).blur();
+    // Blurred onto the page, the next Escape would stop the running turn.
+    if (!focusComposer()) (event.target as HTMLElement).blur();
   }
 </script>
 

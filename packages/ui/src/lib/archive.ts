@@ -22,8 +22,9 @@ export function archiveInterrupts(store: Store, threadId: ThreadId): boolean {
 /**
  * The one way the UI archives a thread (row menu, title menu, palette). A thread
  * with live work asks first in the app's own dialog; an idle one goes at once,
- * since Settings, General, Archived threads brings it back. The keyboard lands
- * in the composer afterwards, never on the page, where Escape stops a turn.
+ * since the archived threads list in Settings brings it back. Archived, the
+ * keyboard lands in the composer; cancelled, the dialog gives it back to what
+ * had it. Never on the page, where Escape stops a turn.
  */
 export async function archiveThread(store: Store, threadId: ThreadId): Promise<boolean> {
   if (archiveInterrupts(store, threadId)) {

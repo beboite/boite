@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
   import { contextMenu, type ContextMenuState } from '../lib/context-menu.svelte';
+  import { restoreFocus } from '../lib/focus';
   import type { MenuItem } from '../lib/menu';
 
   const GAP = 6;
@@ -13,13 +14,19 @@
   let left = $state(0);
   let top = $state(0);
 
+  /** Whether the menu is up, so its close hands the keyboard back once and only then. */
+  let opened = false;
+
   /** Opens at the pointer, then slides inside the viewport once its size is known. */
   $effect(() => {
     const current = contextMenu.current;
     if (!current) {
       popover.hide();
+      if (opened) untrack(giveBack);
+      opened = false;
       return;
     }
+    opened = true;
     held = current;
     popover.show();
     left = current.x;
@@ -37,10 +44,24 @@
     return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]')) : [];
   }
 
+  /**
+   * The rows go with the menu, and a focus left on the page lets the next
+   * Escape stop the running turn: it goes back to the opener, else the
+   * composer, unless something outside the menu took it meanwhile.
+   */
+  function giveBack() {
+    opened = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || root?.contains(active)) restoreFocus(contextMenu.returnTo);
+    contextMenu.returnTo = null;
+  }
+
+  /** The keyboard is back on the opener before the pick runs, so a dialog it opens returns there too. */
   function pick(item: MenuItem) {
     if (item.disabled || item.separator) return;
     const current = contextMenu.current;
     contextMenu.close();
+    giveBack();
     current?.onpick(item.id);
   }
 
@@ -52,8 +73,10 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (!contextMenu.current) return;
+    // Caught on the way down, so the window's own Escape, which stops the turn, never hears it.
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       contextMenu.close();
       return;
     }
@@ -73,7 +96,7 @@
 
 <svelte:window
   onpointerdown={onWindowPointerdown}
-  onkeydown={onkeydown}
+  onkeydowncapture={onkeydown}
   onresize={() => contextMenu.close()}
   onblur={() => contextMenu.close()}
   onscrollcapture={(event) => {
