@@ -78,6 +78,9 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
+      // Before anything closes: a wait still polling from here on belongs to a
+      // test that already ended, and it must stay silent rather than land in the next one.
+      stops += 1;
       for (const client of clients) client.close();
       await server.stop();
       await core.close();
@@ -110,11 +113,30 @@ export async function echoThread(
   return { threadId: thread.id, accountId: account.id };
 }
 
+/** How many test cores have stopped. A wait that outlives a stop was abandoned by its test. */
+let stops = 0;
+
+/**
+ * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait
+ * whose test core stopped while it polled goes quiet instead: bun fails the
+ * running test on any late rejection, so a wait left behind by a failed test
+ * (its predicate now reading a closed journal) would otherwise fail the next test,
+ * whose own wait then fails the one after, down the whole file.
+ */
 export function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
+  const generation = stops;
   return new Promise<void>((resolve, reject) => {
     const tick = (): void => {
-      if (predicate()) {
+      if (stops !== generation) return;
+      let held: boolean;
+      try {
+        held = predicate();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      if (held) {
         resolve();
         return;
       }
