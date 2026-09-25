@@ -186,7 +186,8 @@ Open the installed icon and pair there if the browser did not carry the session
 across. Installing a PWA and using Web Push require no Apple Developer account.
 
 `packages/ui/public/sw.js` caches the files for later opens. It is plain
-JavaScript that Vite copies to `dist/sw.js` untouched, and `lib/sw.ts` registers
+JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
+its cache name, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
 user sees. It registers only where it helps, which is the core's own http(s)
 origin. The Tauri shell loads the identical build from `tauri://`, where the
@@ -196,8 +197,14 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache, `boite-ui-v3`. Activation deletes older `boite-ui-` caches and leaves
-other applications' caches alone before the worker claims its clients.
+One cache per build, `boite-ui-v3-<build id>`. The build id is a hash of the
+file names under `dist/assets`, written into `dist/sw.js` before it is
+compressed (`packages/ui/vite.config.ts`). A core update therefore serves a
+different `sw.js`, the browser installs it, and activation deletes older
+`boite-ui-` caches, the previous build's hashed files with them. Other
+applications' caches are left alone. Before this, `sw.js` was the same file in
+every build, so no new worker ever installed and every update's chunks stayed
+in the one cache for good. A dev server serves the unstamped `boite-ui-v3`.
 
 | Request | Rule |
 |---|---|

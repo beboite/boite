@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { expect, test, vi } from 'vitest';
+import { stampWorkerCache } from './worker-stamp';
 
 const source = readFileSync(resolve('public/sw.js'), 'utf8');
-function worker() {
+function worker(code = source, cacheNames = ['boite-ui-v1', 'another-app']) {
   const listeners = new Map<string, (event: any) => void>();
   const notification = vi.fn().mockResolvedValue(undefined);
   const openWindow = vi.fn().mockResolvedValue(undefined);
@@ -15,9 +16,9 @@ function worker() {
   const put = vi.fn().mockResolvedValue(undefined);
   const cached = new Response('previous shell');
   const cache = { put, match: vi.fn().mockResolvedValue(cached), addAll: vi.fn().mockResolvedValue(undefined) };
-  const caches = { open: vi.fn().mockResolvedValue(cache), keys: vi.fn().mockResolvedValue(['boite-ui-v1', 'another-app']), delete: vi.fn().mockResolvedValue(true) };
+  const caches = { open: vi.fn().mockResolvedValue(cache), keys: vi.fn().mockResolvedValue(cacheNames), delete: vi.fn().mockResolvedValue(true) };
   const fetch = vi.fn().mockResolvedValue(new Response('current shell'));
-  runInNewContext(source, { URL, fetch, caches, setTimeout, clearTimeout, self: {
+  runInNewContext(code, { URL, fetch, caches, setTimeout, clearTimeout, self: {
     addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
     location: { origin: 'https://boite.test' }, registration: { showNotification: notification },
     clients: { matchAll, openWindow, claim: vi.fn().mockResolvedValue(undefined) }, skipWaiting: vi.fn().mockResolvedValue(undefined)
@@ -109,4 +110,23 @@ test('activation keeps other apps caches and RPC is never handled', async () => 
   expect(sw.caches.delete).toHaveBeenCalledExactlyOnceWith('boite-ui-v1');
   await sw.emit('fetch', { request: { method: 'GET', mode: 'cors', url: 'https://boite.test/rpc', headers: new Headers() } });
   expect(sw.fetch).not.toHaveBeenCalled();
+});
+
+test("a build's worker opens a cache of its own, and activating it drops the previous build's files", async () => {
+  const stamped = stampWorkerCache(source, '0123456789abcdef');
+  expect(stamped).not.toBe(source);
+  const sw = worker(stamped, ['boite-ui-v3', 'boite-ui-v3-fedcba9876543210', 'boite-ui-v3-0123456789abcdef', 'another-app']);
+
+  await sw.emit('install');
+  expect(sw.caches.open).toHaveBeenCalledWith('boite-ui-v3-0123456789abcdef');
+  await sw.emit('activate');
+  expect(sw.caches.delete.mock.calls.map(([name]) => name)).toEqual(['boite-ui-v3', 'boite-ui-v3-fedcba9876543210']);
+
+  // A second build is a different file, which is what makes the browser install it.
+  expect(stampWorkerCache(source, 'fedcba9876543210')).not.toBe(stamped);
+});
+
+test('the stamp refuses an id that is not hex, and a worker whose cache line moved', () => {
+  expect(() => stampWorkerCache(source, "x'; evil")).toThrow('lowercase hex');
+  expect(() => stampWorkerCache('const CACHE = somethingElse;', '0123456789abcdef')).toThrow("const CACHE = 'boite-ui-v<n>'");
 });

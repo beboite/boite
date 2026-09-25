@@ -1,10 +1,26 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { stampWorkerCache } from './src/lib/worker-stamp';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
+
+/**
+ * Names the service worker's cache after the hashed files this build emitted
+ * (`src/lib/worker-stamp.ts` says why). Runs before the compression below, so
+ * `sw.js.br` and `sw.js.gz` carry the stamped bytes.
+ */
+function stampWorker(outDir: string): void {
+  const worker = join(outDir, 'sw.js');
+  const assets = join(outDir, 'assets');
+  if (!existsSync(worker) || !existsSync(assets)) return;
+  const names = readdirSync(assets).sort();
+  const buildId = createHash('sha256').update(names.join('\n')).digest('hex').slice(0, 16);
+  writeFileSync(worker, stampWorkerCache(readFileSync(worker, 'utf8'), buildId));
+}
 
 /**
  * Every text file of the build gets a `.br` and a `.gz` beside it, at the
@@ -27,6 +43,7 @@ function precompress(): Plugin {
       outDir = resolve(config.root, config.build.outDir);
     },
     closeBundle() {
+      stampWorker(outDir);
       for (const file of walk(outDir)) {
         if (!COMPRESSIBLE.test(file)) continue;
         const bytes = readFileSync(file);
