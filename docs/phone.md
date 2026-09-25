@@ -155,8 +155,18 @@ context popup or right panel first, then return from a conversation to the
 list it was opened from. Each of those owns one history entry
 (`lib/mobile-history.ts`); closing it by a button removes that entry, so Back
 never lands on something already closed. The conversation the app opens on has
-no list behind it, and Back from there leaves the app as before. Controls have 44 px touch targets; `visualViewport` keeps the composer
-above the keyboard, and the bottom navigation hides while the keyboard is open.
+no list behind it, and Back from there leaves the app as before.
+
+Every button on the chat, the list, the panel and Appearance registers a tap
+19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls
+keep a small look and get a larger hit box, such as the project name in the
+header, a panel tab's icon, which closes the tab, and the accent dots. Under a
+finger, the outline rail beside the conversation gives each prompt a 44 px row
+and scrolls, and the text starts past the rail. A switch sits in a label that
+covers its whole row, so the row is its target. The end-to-end sweep in
+`tests/e2e/mobile.test.ts` measures this with touch emulation on.
+`visualViewport` keeps the composer above the keyboard, and the bottom
+navigation hides while the keyboard is open.
 Safe-area insets keep controls clear of the home indicator and screen cutouts:
 the chat header, the full-screen right panel, and the Agents and Settings pages
 all start below the status bar of an installed app on a notched iPhone.

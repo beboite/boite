@@ -119,6 +119,8 @@
     .identity { min-width: 0; flex: 1; }
     .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }
     .identity :global(.trigger) { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+    /* A finger-sized target without growing the header: the padding reaches over the machine line and the header's own padding. */
+    .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(12px, env(safe-area-inset-right)) 20px max(12px, env(safe-area-inset-left)); }
     .list-heading { padding: 14px 4px; }
     h1 { font-size: var(--text-lg); margin: 0; }

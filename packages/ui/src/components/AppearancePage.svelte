@@ -188,7 +188,7 @@
     :global(.settings .page) .segmented { display: flex; }
     .segmented button { flex: 1; min-width: 0; }
     /* A 26 px dot keeps its look and gets a finger-sized hit box. */
-    .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: -9px; }
+    .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: 0 -9px -9px; }
     .swatch { position: relative; }
     .swatch::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
   }

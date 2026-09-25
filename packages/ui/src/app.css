@@ -105,6 +105,8 @@
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   --input: 34px;
   --touch-target: 44px;
+  /* The timeline's left margin, which the message outline rail sits in. */
+  --outline-room: 38px;
   --settings-width: 880px;
   --settings-padding: 24px;
 
@@ -1009,10 +1011,12 @@ input[type=checkbox][role=switch]:checked { background: var(--color-foreground);
 input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
 input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
 input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
+/* Under a finger the outline rail is a touch target wide (MessageOutline.svelte): the text starts past it. */
+@media (pointer: coarse) { :root { --outline-room: calc(var(--touch-target) + 4px); } }
 @media (max-width: 720px) {
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); }
   [data-mobile-sheet='true'] { position: fixed !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }

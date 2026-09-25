@@ -797,7 +797,7 @@
     overflow: auto;
     /* A fixed reading margin keeps the last answer above the compact activity
        overlay without moving the viewport when tasks appear or update. */
-    padding: 20px 20px 132px 38px;
+    padding: 20px 20px 132px var(--outline-room);
     overscroll-behavior: contain;
   }
 

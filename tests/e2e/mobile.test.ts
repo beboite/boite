@@ -274,3 +274,52 @@ test('Back returns from a conversation to the list and closes the context popup,
   await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
   expect(page.errors()).toEqual([]);
 }, 30_000);
+
+// A control takes a finger when a tap 19 px off its centre, on either axis, still lands on it.
+// A control inside a label is skipped: the whole label row is its target.
+const smallTargets = `(() => {
+  const small = [];
+  for (const el of document.querySelectorAll('button, summary, [role=button]')) {
+    if (el.closest('label')) continue;
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (!r.width || !r.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+    const at = (px, py) => { const hit = document.elementFromPoint(px, py); return !!hit && (hit === el || el.contains(hit)); };
+    if (!at(x, y)) continue;
+    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight);
+    if (reach.every(([px, py]) => at(px, py))) continue;
+    small.push((el.dataset.testid || el.getAttribute('aria-label') || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+  }
+  return small;
+})()`;
+
+test('every phone control on the chat, the panel, the list and Appearance takes a finger', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  try {
+    await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
+    await page.waitFor(`document.querySelector('[data-testid=message-marker]')`);
+    expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(true);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=panel-toggle]');
+    await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=launch-changes]');
+    // The strip shows its scroll chevrons for a frame while the new tab lays out.
+    await page.waitFor(`document.querySelector('[data-testid=panel-tab-close]') && !document.querySelector('[data-testid=right-panel] .chev')`);
+    await capture('mobile-panel-tab-touch.png');
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=panel-close]');
+    await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+    await page.click('[data-testid=mobile-conversations]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=mobile-settings]');
+    await page.click('[data-testid=settings-tab-appearance]');
+    await page.waitFor(`document.querySelector('[data-accent-swatch]')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+  } finally {
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  }
+}, 30_000);

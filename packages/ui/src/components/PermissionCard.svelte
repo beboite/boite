@@ -172,6 +172,9 @@
   .technical[open] summary :global(svg) { transform: rotate(90deg); }
   .technical .tool { margin: 6px 0 4px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .resolved .technical { display: none; }
+  @media (max-width: 720px) {
+    .technical summary { min-height: var(--touch-target); }
+  }
 
   .actions {
     display: flex;

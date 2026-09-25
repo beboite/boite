@@ -257,7 +257,7 @@
   .dot.on::after { background: var(--color-accent); width: 14px; left: 6px; }
   @media (max-width: 480px) {
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
-    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; }
+    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }

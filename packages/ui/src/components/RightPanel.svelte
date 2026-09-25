@@ -155,7 +155,9 @@
   function measure(): void {
     const node = tabs;
     if (!node) return;
-    overflowing = node.scrollWidth - node.clientWidth > 1;
+    // Shown chevrons take width from the strip: the tabs overflow only if they would without them.
+    const chevrons = overflowing ? Array.from(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [], (chev) => chev.offsetWidth + 2).reduce((sum, width) => sum + width, 0) : 0;
+    overflowing = node.scrollWidth - node.clientWidth - chevrons > 1;
   }
 
   $effect(() => {
@@ -853,6 +855,16 @@
 
     .sheet-scrim {
       display: none;
+    }
+
+    /* The tab's icon is its close button: a finger needs the whole height of the tab. */
+    .tab {
+      padding-left: 0;
+    }
+
+    .closer {
+      width: var(--touch-target);
+      height: var(--touch-target);
     }
   }
 </style>
