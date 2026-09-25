@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
-import MessageList, { windowStats } from './MessageList.svelte';
+import MessageList from './MessageList.svelte';
+import { windowStats } from '../lib/message-window';
 import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
