@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { removeDir } from './fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Account, AccountQuota, QuotaWindow } from '@boite/contracts';
@@ -106,7 +106,10 @@ async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);
-    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // A descendant can hold the directory after the direct child closed. Neither
+    // waiting for it nor removing the directory may replace the windows just read.
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `codex quota: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(cwd, (message) => core.log('warn', `codex quota: ${message}`));
   }
 }
 
