@@ -2,7 +2,7 @@
   import InfoTip from './InfoTip.svelte';
   import { onMount, untrack } from 'svelte';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
-  import { glassSupported, readGlass, setGlass, type Glass } from '../lib/glass';
+  import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { work, type PanelStart, type StartIn } from '../lib/work-prefs.svelte';
@@ -42,11 +42,15 @@
 
   // The labels follow the language, so the list is derived rather than built
   // once when the page mounts.
-  let materials = $derived<{ id: Glass; label: string }[]>([
-    { id: 'acrylic', label: strings.settings.materialAcrylic },
-    { id: 'mica', label: strings.settings.materialMica },
-    { id: 'solid', label: strings.settings.materialSolid }
-  ]);
+  // Only the kinds this Windows draws without lag: the shell answers from its build.
+  let offered = $state<Glass[]>([]);
+  let materials = $derived(
+    ([
+      { id: 'acrylic', label: strings.settings.materialAcrylic },
+      { id: 'mica', label: strings.settings.materialMica },
+      { id: 'solid', label: strings.settings.materialSolid }
+    ] satisfies { id: Glass; label: string }[]).filter((option) => offered.includes(option.id))
+  );
 
   let locale = $state<LocaleSetting>(untrack(() => localeSetting()));
   function pickLocale(next: LocaleSetting) {
@@ -55,11 +59,15 @@
   }
 
   let glass = $state<Glass>(untrack(() => readGlass()));
-  // The shell answers on Windows alone, so the row stays away everywhere else.
-  let hasMaterial = $state(false);
+  // The shell answers on Windows alone, and Windows 10 offers solid alone, so
+  // the row stays away wherever there is nothing to pick.
+  let hasMaterial = $derived(hasMaterialChoice(offered));
 
   onMount(() => {
-    void glassSupported().then((supported) => (hasMaterial = supported));
+    void supportedGlass().then((supported) => {
+      offered = supported;
+      glass = effectiveGlass(glass, supported);
+    });
     return subscribeExperiments(() => {
       grain = isExperimentEnabled('theme-grain');
       theme = readTheme();

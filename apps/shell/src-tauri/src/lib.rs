@@ -409,6 +409,28 @@ fn effects_for(kind: &str) -> Result<Option<WindowEffectsConfig>, String> {
     }))
 }
 
+/// The Windows build number, 0 off Windows.
+fn windows_build() -> u32 {
+    #[cfg(windows)]
+    { windows_version::OsVersion::current().build }
+    #[cfg(not(windows))]
+    { 0 }
+}
+
+/// The materials this Windows build draws without a cost the user feels. Mica
+/// exists from Windows 11 (22000). Acrylic before 22523 is the
+/// `SetWindowCompositionAttribute` path that `window_vibrancy` itself warns
+/// makes the window lag on every drag and resize; from 22523 DWM draws it as a
+/// system backdrop, as cheap as mica. So acrylic is offered from 22523 only,
+/// and Windows 10 gets solid alone. Pure, so every build is a test.
+fn supported_materials(build: u32) -> Vec<&'static str> {
+    let mut kinds = Vec::with_capacity(3);
+    if build >= 22523 { kinds.push("acrylic"); }
+    if build >= 22000 { kinds.push("mica"); }
+    kinds.push("solid");
+    kinds
+}
+
 /// The material the window wears, changed from the settings page while the app
 /// runs. Async like the browser commands: a synchronous command runs on the main
 /// thread, which is the thread the window work has to come back to.
@@ -416,6 +438,16 @@ fn effects_for(kind: &str) -> Result<Option<WindowEffectsConfig>, String> {
 async fn window_material(app: AppHandle, webview: Webview, kind: String) -> Result<(), String> {
     browser::only_main(&webview)?;
     let effects = effects_for(&kind)?;
+    // `set_effects` reports success for a material this Windows cannot draw,
+    // and the page would then turn transparent over nothing: refuse it here.
+    let build = windows_build();
+    let supported = supported_materials(build);
+    if !supported.contains(&kind.as_str()) {
+        return Err(format!(
+            "the window material {kind:?} is not offered on Windows build {build}: {}",
+            supported.join(", ")
+        ));
+    }
     let window = app
         .get_webview_window(MAIN_LABEL)
         .ok_or_else(|| format!("the {MAIN_LABEL:?} window is gone: no material was applied"))?;
@@ -424,13 +456,13 @@ async fn window_material(app: AppHandle, webview: Webview, kind: String) -> Resu
         .map_err(|error| format!("the window material {kind:?} was refused: {error}"))
 }
 
-/// Whether this platform has a window material at all. Windows does and nothing
-/// else here does, and the setting hides itself on a false: a control that
-/// changes nothing is worse than no control.
+/// The materials the setting may offer, empty off Windows. The setting hides
+/// itself when solid is all there is: a control that changes nothing is worse
+/// than no control.
 #[tauri::command]
-fn window_material_supported(webview: Webview) -> Result<bool, String> {
+fn window_material_supported(webview: Webview) -> Result<Vec<&'static str>, String> {
     browser::only_main(&webview)?;
-    Ok(cfg!(windows))
+    Ok(if cfg!(windows) { supported_materials(windows_build()) } else { Vec::new() })
 }
 
 /// A system toast for a thread. A click brings the window back and tells the
@@ -1201,17 +1233,24 @@ fn build_main_window<R: Runtime>(
                     browser::close_all(window.app_handle());
                 }
             });
-    // Acrylic is what a window opens on, and `lib/glass.ts` re-applies whatever
-    // the setting says as soon as the UI mounts. Only Windows has a material;
-    // elsewhere the window stays opaque.
+    // Acrylic is what a window opens on where DWM draws it, and `lib/glass.ts`
+    // re-applies whatever the setting says as soon as the UI mounts. A Windows
+    // with no material but solid (Windows 10) gets an opaque window with
+    // nothing to composite; elsewhere the window stays opaque too.
     #[cfg(windows)]
     {
-        builder = builder.transparent(true).effects(WindowEffectsConfig {
-            effects: vec![Effect::Acrylic, Effect::Mica, Effect::Blur],
-            state: None,
-            radius: None,
-            color: None,
-        });
+        let kinds = supported_materials(windows_build());
+        if kinds.contains(&"mica") {
+            builder = builder.transparent(true);
+        }
+        if kinds.contains(&"acrylic") {
+            builder = builder.effects(WindowEffectsConfig {
+                effects: vec![Effect::Acrylic],
+                state: None,
+                radius: None,
+                color: None,
+            });
+        }
     }
     builder = match work_area(app) {
         Some(area) => {
@@ -1418,7 +1457,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{effects_for, label_for, Channel};
+    use super::{effects_for, label_for, supported_materials, Channel};
     use tauri::window::Effect;
 
     #[test]
@@ -1592,6 +1631,18 @@ mod tests {
             .expect("mica is a material")
             .expect("mica paints something");
         assert_eq!(config.effects, vec![Effect::Mica]);
+    }
+
+    #[test]
+    fn a_material_is_offered_only_where_windows_draws_it_without_lag() {
+        // Windows 10 22H2: acrylic there lags on every drag, and mica does not exist.
+        assert_eq!(supported_materials(19045), ["solid"]);
+        // Windows 11 21H2: mica, and still the lagging acrylic.
+        assert_eq!(supported_materials(22000), ["mica", "solid"]);
+        assert_eq!(supported_materials(22522), ["mica", "solid"]);
+        // From 22523 DWM draws acrylic as a system backdrop.
+        assert_eq!(supported_materials(22523), ["acrylic", "mica", "solid"]);
+        assert_eq!(supported_materials(26100), ["acrylic", "mica", "solid"]);
     }
 
     #[test]

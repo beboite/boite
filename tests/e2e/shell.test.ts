@@ -966,11 +966,21 @@ async function reloadShellPage(): Promise<void> {
 shellTest(
   'the stored window material is stamped on every load, and solid stamps nothing',
   async () => {
+    // The list depends on the Windows build: solid always, mica from 22000,
+    // acrylic from 22523. Nothing off Windows. A runner on Windows Server 2022
+    // (20348) offers solid alone, and a stored mica then stamps nothing.
+    const supported = await page?.evaluate<string[]>(
+      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
+    );
+    if (process.platform === 'win32') expect(supported).toContain('solid');
+    else expect(supported).toEqual([]);
+    const mica = supported?.includes('mica') ?? false;
+
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'mica'); return null; })()`,
     );
     await reloadShellPage();
-    await page?.waitFor(`document.documentElement.dataset.glass === 'mica'`, 30_000);
+    await page?.waitFor(`document.documentElement.dataset.glass === ${mica ? "'mica'" : 'undefined'}`, 30_000);
 
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'solid'); return null; })()`,
@@ -984,12 +994,7 @@ shellTest(
     // The other half, which the UI swallows on purpose: the command is really
     // registered, it really reaches the window, and a material nobody defined is
     // refused by name rather than falling back on one.
-    const supported = await page?.evaluate<boolean>(
-      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
-    );
-    expect(supported).toBe(process.platform === 'win32');
-
-    await invokeShell('window_material', { kind: 'mica' });
+    if (mica) await invokeShell('window_material', { kind: 'mica' });
     await invokeShell('window_material', { kind: 'solid' });
 
     let refusal = '';

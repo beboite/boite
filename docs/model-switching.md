@@ -72,6 +72,14 @@ client as `boite.accent-hue` and colours reasoning, primary buttons, links and
 focus indicators. The file attachment button sits beside Send; keyboard help
 stays out of the chatbar.
 
+On Windows, Appearance also picks the window material from what the Windows
+build draws without lag: acrylic from build 22523, where DWM draws it as a
+system backdrop, mica from 22000, and solid always. Windows 10 offers solid
+alone, so the row is hidden there and the window opens opaque. A stored choice
+the build does not offer is shown and applied as solid. The shell refuses a
+material its build does not offer, because Tauri reports success for one it
+cannot draw and the page would turn transparent over nothing.
+
 ## Context transfer
 
 The first prompt carries historical user and assistant text, tool outcomes and

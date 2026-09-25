@@ -341,6 +341,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-winrt-notification",
  "windows-sys 0.61.2",
+ "windows-version",
 ]
 
 [[package]]

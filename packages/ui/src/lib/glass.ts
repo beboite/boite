@@ -16,7 +16,11 @@ const KINDS: Glass[] = ['acrylic', 'mica', 'solid'];
 let materialQueue = Promise.resolve();
 let materialRevision = 0;
 
-/** The stored material, `acrylic` when nothing is stored or storage is refused. */
+/**
+ * The stored choice, `acrylic` when nothing is stored or storage is refused.
+ * What the window wears is this choice checked against what the shell offers:
+ * see `effectiveGlass`.
+ */
 export function readGlass(): Glass {
   try {
     const raw = window.localStorage.getItem(GLASS_STORAGE_KEY);
@@ -24,6 +28,21 @@ export function readGlass(): Glass {
   } catch {
     return 'acrylic';
   }
+}
+
+/**
+ * The material a choice becomes on a shell offering `supported`: the choice
+ * itself when offered, solid otherwise. Windows 10 offers solid alone, and a
+ * Windows 11 build before 22523 offers mica but not acrylic, whose only path
+ * there lags on every drag and resize.
+ */
+export function effectiveGlass(kind: Glass, supported: readonly Glass[]): Glass {
+  return supported.includes(kind) ? kind : 'solid';
+}
+
+/** Whether the setting has anything to choose between. */
+export function hasMaterialChoice(supported: readonly Glass[]): boolean {
+  return supported.some((kind) => kind !== 'solid');
 }
 
 export function writeGlass(kind: Glass): void {
@@ -55,15 +74,17 @@ export function applyGlass(kind: Glass): Promise<void> {
     return Promise.resolve();
   }
   materialQueue = materialQueue.then(async () => {
-    if (!(await glassSupported())) {
+    const supported = await supportedGlass();
+    if (!hasMaterialChoice(supported)) {
       if (revision === materialRevision) delete root.dataset.glass;
       return;
     }
+    const material = effectiveGlass(kind, supported);
     try {
-      await ask('window_material', { kind });
+      await ask('window_material', { kind: material });
       if (revision !== materialRevision || !insideShell()) return;
-      if (kind === 'solid') delete root.dataset.glass;
-      else root.dataset.glass = kind;
+      if (material === 'solid') delete root.dataset.glass;
+      else root.dataset.glass = material;
     } catch {
       if (revision === materialRevision) delete root.dataset.glass;
     }
@@ -83,15 +104,17 @@ export function startGlass(): void {
 }
 
 /**
- * Whether this platform has a window material at all: the shell answers true on
- * Windows and false everywhere else. The setting hides itself on a false, since
- * a control that changes nothing is worse than no control.
+ * The materials this window can wear: the shell answers from the Windows build
+ * and answers nothing off Windows. A shell from before that list answered a
+ * boolean, true meaning every kind.
  */
-export async function glassSupported(): Promise<boolean> {
-  if (!insideShell()) return false;
+export async function supportedGlass(): Promise<Glass[]> {
+  if (!insideShell()) return [];
   try {
-    return (await ask('window_material_supported')) === true;
+    const answer = await ask('window_material_supported');
+    if (answer === true) return [...KINDS];
+    return Array.isArray(answer) ? KINDS.filter((kind) => answer.includes(kind)) : [];
   } catch {
-    return false;
+    return [];
   }
 }
