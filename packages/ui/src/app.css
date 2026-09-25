@@ -377,6 +377,11 @@ textarea:focus-visible {
   border-color: color-mix(in srgb, var(--color-foreground) 35%, var(--color-edge));
 }
 
+/* Forced colors drop the shadows and border tints that mark focus here, so every focused control gets the system's own ring. */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; outline-offset: 2px; }
+}
+
 textarea {
   height: auto;
   padding: 8px 10px;
