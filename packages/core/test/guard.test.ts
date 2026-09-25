@@ -3,6 +3,9 @@ import type { AudioSession } from '../src/platform/windows/audio-sessions.ts';
 import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/windows/guard-logic.ts';
 import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logic.ts';
 import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
+import { setGuardIdleGrace } from '../src/platform/windows/guard.ts';
+import { jobsWorkerRunning, setJobsIdleGrace } from '../src/platform/windows/jobs.ts';
+import type { ThreadId } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -406,5 +409,38 @@ describeWindows('the focus guard Worker', () => {
     await harness.stop();
     stopped = true;
     expect(harness.core.procs.guardStatus().running).toBe(false);
+  }, 30000);
+
+  test('both Workers go once the last traced process is gone, and come back for the next one', async () => {
+    setGuardIdleGrace(200);
+    setJobsIdleGrace(200);
+    try {
+      const procs = harness.core.procs;
+      const threadId = 'idle-workers' as ThreadId;
+      // The grandchild is only ever seen through the Job Object's own events.
+      const script = "Bun.spawn([process.execPath, '-e', 'setTimeout(() => {}, 400)'], { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true }).exited.then(() => {})";
+      const run = async (): Promise<{ most: number; guarded: boolean; drained: boolean }> => {
+        const seen = { most: 0, guarded: false, drained: false };
+        const watch = setInterval(() => {
+          seen.most = Math.max(seen.most, procs.liveCount(threadId));
+          seen.guarded ||= procs.guardStatus().running;
+          seen.drained ||= jobsWorkerRunning();
+        }, 5);
+        const child = procs.spawnPiped(threadId, process.execPath, ['-e', script]);
+        child.proc.stdin.end();
+        await child.exited;
+        await waitFor(() => procs.liveCount(threadId) === 0, 10000);
+        clearInterval(watch);
+        return seen;
+      };
+
+      expect(await run()).toEqual({ most: 2, guarded: true, drained: true });
+      await waitFor(() => !procs.guardStatus().running && !jobsWorkerRunning(), 5000);
+      expect(await run()).toEqual({ most: 2, guarded: true, drained: true });
+      await waitFor(() => !procs.guardStatus().running && !jobsWorkerRunning(), 5000);
+    } finally {
+      setGuardIdleGrace(30_000);
+      setJobsIdleGrace(30_000);
+    }
   }, 30000);
 });

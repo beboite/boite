@@ -224,6 +224,16 @@ let completionPort = 0;
 let worker: Worker | null = null;
 let workerFailure: string | null = null;
 let stopFlag: Int32Array | null = null;
+/**
+ * A Worker stopped because no job held a process any more, until its loop is
+ * out. The port stays open meanwhile: what it queues waits for the next Worker,
+ * which starts only once this one is gone, so two never drain the port at once.
+ */
+let retiring: Worker | null = null;
+let restartWanted = false;
+/** How long the Worker stays up once no job holds a process, so a burst of short processes keeps one. */
+let idleGraceMs = 30_000;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nestingRefused = false;
 let sink: ProcessEventSink | null = null;
@@ -240,6 +250,15 @@ const ignored = new Set<number>();
 export function retainJobs(events: ProcessEventSink): void {
   refCount += 1;
   sink = events;
+}
+
+/** Test seams: how long the Worker outlives the last process, and whether one runs. */
+export function setJobsIdleGrace(ms: number): void {
+  idleGraceMs = ms;
+}
+
+export function jobsWorkerRunning(): boolean {
+  return worker !== null;
 }
 
 export function releaseJobs(): void {
@@ -295,6 +314,9 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
 
   const job = ensureThreadJob(api, threadId);
   if (job === null) return false;
+  // A job built earlier kept its port; its Worker may have gone idle since.
+  cancelIdle();
+  if (completionPort !== 0) ensureWorker(completionPort);
 
   const handle = api.openProcess(ASSIGN_ACCESS, pid);
   if (handle === 0) return false;
@@ -454,6 +476,10 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
 
 function ensureWorker(port: number): void {
   if (worker !== null || workerFailure !== null) return;
+  if (retiring !== null) {
+    restartWanted = true;
+    return;
+  }
   const shared = new SharedArrayBuffer(4);
   stopFlag = new Int32Array(shared);
   try {
@@ -486,6 +512,63 @@ function failWorker(reason: string): void {
   workerFailure = reason;
   worker = null;
   startPolling();
+}
+
+function cancelIdle(): void {
+  if (idleTimer === null) return;
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+/** True when no job holds a process: nothing can start in one again without `assignToThreadJob`. */
+function jobsEmpty(): boolean {
+  if (tracked.size > 0 || ignored.size > 0) return false;
+  for (const job of threadJobs.values()) if (job.pids.size > 0) return false;
+  return true;
+}
+
+function armIdle(): void {
+  cancelIdle();
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    if (jobsEmpty()) retireWorker();
+  }, idleGraceMs);
+  if (typeof idleTimer.unref === 'function') idleTimer.unref();
+}
+
+/**
+ * Stops the drain once no job holds a process. The packets it takes on its way
+ * out are still handled; a process assigned meanwhile gets its Worker once this
+ * one has left, and finds its events queued on the port.
+ */
+function retireWorker(): void {
+  const running = worker;
+  const flag = stopFlag;
+  if (running === null || retiring !== null) return;
+  worker = null;
+  stopFlag = null;
+  retiring = running;
+  running.onerror = null;
+  let done = false;
+  const finish = (): void => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    running.terminate();
+    if (retiring !== running) return;
+    retiring = null;
+    const again = restartWanted;
+    restartWanted = false;
+    if (again && refCount > 0 && completionPort !== 0) ensureWorker(completionPort);
+  };
+  running.onmessage = (event: { data: unknown }): void => {
+    const message = event.data as JobsWorkerMessage;
+    if (message.kind === 'stopped') finish();
+    else if (message.kind === 'packet') onWorkerMessage(message);
+  };
+  if (flag !== null) Atomics.store(flag, 0, 1);
+  const timer = setTimeout(finish, 1000);
+  if (typeof timer.unref === 'function') timer.unref();
 }
 
 function onWorkerMessage(message: JobsWorkerMessage): void {
@@ -564,6 +647,7 @@ function listJobPids(api: Native, job: number): Set<number> | null {
 
 function onProcessStarted(threadId: string, pid: number): void {
   if (pid <= 0 || tracked.has(pid) || ignored.has(pid)) return;
+  cancelIdle();
   const api = ensureNative();
   if (api === null) return;
   threadJobs.get(threadId)?.pids.add(pid);
@@ -593,6 +677,11 @@ function baseName(path: string): string {
 }
 
 function onProcessExited(threadId: string, pid: number): void {
+  reportExit(threadId, pid);
+  if (worker !== null && jobsEmpty()) armIdle();
+}
+
+function reportExit(threadId: string, pid: number): void {
   threadJobs.get(threadId)?.pids.delete(pid);
   if (ignored.delete(pid)) return;
   const entry = tracked.get(pid);
@@ -723,12 +812,16 @@ function teardown(): void {
   // The port and the worker are released together and only once the loop is
   // out. Both are dropped from the module state now, so a core created before
   // that happens builds its own and never inherits a handle about to close.
+  // A retiring Worker may still wait on the port: it is released the same way.
+  cancelIdle();
   const port = completionPort;
-  const running = worker;
+  const running = worker ?? retiring;
   const flag = stopFlag;
   completionPort = 0;
   worker = null;
   stopFlag = null;
+  retiring = null;
+  restartWanted = false;
 
   const release = (): void => {
     if (api !== null && port !== 0) api.close(port);

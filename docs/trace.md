@@ -39,7 +39,10 @@ after spawn, and `windowsHide: true` is set on every one of them.
 
 A completion port on the job reports every process that enters or leaves it,
 grandchildren included, and a Worker drains it. The Worker is built on the first
-traced pid rather than at core start, like everything else heavy here. Those
+traced pid rather than at core start, like everything else heavy here, and stops
+once no job has held a process for 30 seconds. The port stays open: the next
+assigned process starts a new Worker, after the old one has left, and the events
+queued meanwhile are read then. Those
 events become `process.started` and `process.exited` on the wire, each carrying
 pid, parent pid, thread, executable, the command line when it is readable, start
 and exit times, exit code, CPU milliseconds, peak memory and bytes moved.
@@ -116,6 +119,8 @@ they were typing into. The guard is a second Worker holding a system-wide
 core's own process, plus the message pump that hook needs, because an
 out-of-context event is delivered on the thread that installed the hook and only
 while that thread pumps. The main thread posts it the pid set and the setting.
+Like the jobs Worker, it unhooks and stops once no traced pid has been alive for
+30 seconds, and the next traced pid builds it again.
 
 When the window that just took the foreground belongs to a pid a thread
 launched, two remedies fire in order. `SetWindowPos` to `HWND_BOTTOM` without
