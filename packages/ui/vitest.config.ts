@@ -17,6 +17,10 @@ export default defineConfig({
     setupFiles: ['./test-setup.ts'],
     include: ['src/**/*.test.ts'],
     globals: false,
+    /* The app suite runs the fake on the wall clock (install steps, probes,
+       retitles), and one long list renders for seconds on a CI runner: 5 s
+       left too little room. app.test.ts's waits stop at 8 s, inside this. */
+    testTimeout: 15_000,
     /* lucide ships .svelte sources; inlined so the plugin above compiles them too */
     server: { deps: { inline: ['@lucide/svelte'] } }
   }

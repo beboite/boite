@@ -31,13 +31,16 @@ afterEach(() => {
 });
 
 // The first settings mount waits on the dynamic import of the whole settings
-// subtree: on a CI worker that one wait already took 1.2 s, against a budget of
-// 400 ticks. Poll long enough that a slow machine is not a failure.
-async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
+// subtree: on a CI worker that one wait already took 1.2 s. The wait stops at
+// a deadline well inside the test timeout (vitest.config.ts), so a slow wait
+// fails here with the page's text rather than as a bare "Test timed out".
+async function waitFor(check: () => boolean, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  if (check()) return;
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
@@ -1512,7 +1515,7 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
 
   // The fake ticks for about two seconds, then the provider is one tile like any other.
   await store.installProvider('antigravity');
-  await waitFor(() => store.installOf('antigravity')?.state === 'installed', 2000);
+  await waitFor(() => store.installOf('antigravity')?.state === 'installed');
   store.showChat();
   await waitFor(() => document.querySelector('[data-testid=composer-picker]') !== null);
 
@@ -1558,8 +1561,7 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(document.querySelector(`${behind} [data-testid=install-cancel]`)).not.toBeNull();
 
   await waitFor(
-    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0',
-    2000
+    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0'
   );
   expect(document.querySelector('[data-testid=install-update]')).toBeNull();
 
@@ -1855,7 +1857,7 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   await mountOnFake();
   store.showSettings('accounts');
   await store.installProvider('antigravity');
-  await waitFor(() => store.providerOf('antigravity')?.available === true, 2000);
+  await waitFor(() => store.providerOf('antigravity')?.available === true);
   // Installed and nobody signed in: the row's one button is the sign-in.
   const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);

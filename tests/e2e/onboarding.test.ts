@@ -5,6 +5,18 @@ import { startDevUi } from './lib/ui.ts';
 let server: { close(): Promise<void> };
 let page: BrowserPage;
 const PALETTE_CHORD = `document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true }))`;
+/** Notes, for every palette that opens, whether the tour was up at that moment. */
+const WATCH_PALETTE = `(() => {
+  window.__paletteOpens = [];
+  let shown = false;
+  new MutationObserver(() => {
+    const open = !!document.querySelector('[data-testid=palette]');
+    if (open && !shown) window.__paletteOpens.push(!!document.querySelector('[data-testid=onboarding]'));
+    shown = open;
+  }).observe(document.body, { childList: true, subtree: true });
+})()`;
+/** Runs before the app on the next load: notes whether the tour is ever drawn. */
+const WATCH_TOUR = `new MutationObserver(() => { if (document.querySelector('[data-testid=onboarding]')) window.__tourShown = true; }).observe(document, { childList: true, subtree: true });`;
 async function capture(name: string) {
   // Static layout captures use the final frame. The interaction test below
   // checks the running timeline, pause and replay separately.
@@ -23,10 +35,12 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === 'welcome'`);
   await capture('onboarding-welcome.png');
 
-  // The palette chord belongs to the app, and nothing of the app fires under a modal.
+  // The palette chord belongs to the app, and nothing of the app fires under a
+  // modal. Every palette that opens from here on is noted with whether the tour
+  // was up, and the check waits for the one the same chord opens once the tour
+  // is gone: a palette the blocked chord let through would be drawn before it.
+  await page.evaluate(WATCH_PALETTE);
   await page.evaluate(PALETTE_CHORD);
-  await Bun.sleep(200);
-  expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=palette]')`)).toBe(false);
 
   await page.click('[data-testid=onboarding-dot-agents]');
   await page.click('[data-testid=onboarding-example-panel]');
@@ -46,16 +60,29 @@ test('a new device gets the tour on its own, holds the app keys under it, and ne
   await page.waitFor(`!document.querySelector('[data-testid=onboarding]')`);
   expect(await page.evaluate<number>(`JSON.parse(localStorage.getItem('boite.onboarding')).version`)).toBeGreaterThan(0);
 
-  // The same chord, with the tour gone, is the app's again.
+  // The same chord, with the tour gone, is the app's again, and it is the only one that opened the palette.
   await page.evaluate(PALETTE_CHORD);
   await page.waitFor(`document.querySelector('[data-testid=palette]')`);
+  expect(await page.evaluate(`window.__paletteOpens`)).toEqual([false]);
   await page.evaluate(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
   await page.waitFor(`!document.querySelector('[data-testid=palette]')`);
 
-  await page.reload();
-  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
-  await Bun.sleep(500);
-  expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=onboarding]')`)).toBe(false);
+  // After a reload the tour, had it been decided, would load at boot and hold
+  // the keys once drawn. A watcher set before the app's scripts notes whether it
+  // ever appears; the palette opening on the chord proves the keys are the
+  // app's, and its own chunk is asked for after the tour's would have been.
+  const { identifier } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: WATCH_TOUR }) as { identifier: string };
+  try {
+    await page.reload();
+    await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
+    await page.evaluate(PALETTE_CHORD);
+    await page.waitFor(`document.querySelector('[data-testid=palette]')`);
+    await page.evaluate(`(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+    await page.waitFor(`!document.querySelector('[data-testid=palette]')`);
+    expect(await page.evaluate<boolean>(`window.__tourShown === true || !!document.querySelector('[data-testid=onboarding]')`)).toBe(false);
+  } finally {
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
+  }
 }, 45_000);
 
 test('seven screens fit both languages and widths, without leaving the tour', async () => {

@@ -594,15 +594,16 @@ test('queued prompts stay on their thread and run as separate turns', async () =
   press('Enter');
   await waitFor(() => input().value === '');
   await store.open('t-descriptors');
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
-  expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
+  await waitFor(() => store.openThread?.id === 't-descriptors');
   await store.open('t-trace');
   await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 3 && !store.busy);
   expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(-2).map((m) => m.parts)).toEqual([
     [{ type: 'text', text: 'first queued prompt' }],
     [{ type: 'text', text: 'second queued prompt' }]
   ]);
+  // Both prompts have run, on t-trace: anything sent to the other thread was sent before them.
+  const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+  expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
 });
 
 
