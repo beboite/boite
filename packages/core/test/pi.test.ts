@@ -832,6 +832,24 @@ describe('pi driver', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }, 20000);
 
+  test('core shutdown before the stop deadline keeps a stopped pi turn stopped', async () => {
+    const client = await startCore();
+    const threadId = await piThread(client);
+    const statuses: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) statuses.push(turn.status);
+    });
+    await client.call('turns.start', { threadId, prompt: '[deaf]' });
+    await waitFor(() => fakeLog().includes('waiting forever'));
+    await client.call('turns.stop', { threadId });
+    await waitFor(() => fakeLog().includes('abort ignored'));
+    // The 15 s stop deadline has not run: the shutdown is what closes pi.
+    await stopCore();
+    expect(statuses).toEqual(['stopped']);
+  }, 20000);
+
   function countProcesses(
     client: CoreClient,
     threadId: string,

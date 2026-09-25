@@ -947,7 +947,9 @@ class PiSession {
     this.clearIdle();
     const turn = this.current;
     this.current = null;
-    turn?.fail('the pi session was closed');
+    // A turn the user already stopped stays stopped, as Muse's does.
+    if (turn?.isStopped === true) turn.settleRun();
+    else turn?.fail('the pi session was closed');
     this.peer?.fail('the pi session was closed');
     this.peer = null;
     const child = this.child;
