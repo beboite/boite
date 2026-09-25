@@ -18,10 +18,14 @@
  * re-renders the moment the language changes, with no reload, no prop and no
  * import of its own. Components read it through `./strings`, which re-exports
  * it; the catalogues are imported by this file and by nobody else.
+ *
+ * English is bundled with this file. Every other language is a chunk of its
+ * own, so an English screen never downloads French: index.html preloads the
+ * one the device speaks (`localePreload` in vite.config.ts), the boot awaits it
+ * before the first frame, and a switch in the settings swaps once it landed.
  */
 
 import { strings as en, fill, type Strings } from './strings.en';
-import { fr } from './strings.fr';
 
 export { fill };
 export type { Strings };
@@ -63,7 +67,26 @@ export const DEFAULT_LOCALE: Locale = 'en';
 
 export const LOCALES: readonly Locale[] = ['en', 'fr'];
 
-const CATALOGUES: Record<Locale, Translation> = { en, fr };
+const LOADERS: Record<Exclude<Locale, 'en'>, () => Promise<Translation>> = {
+  fr: () => import('./strings.fr').then((module) => module.fr)
+};
+
+/** The catalogues this page holds so far. A lookup in one not here yet answers English. */
+let catalogues = $state.raw<Partial<Record<Locale, Translation>>>({ en });
+const loading = new Map<Locale, Promise<void>>();
+
+/** Fetches a language once. A failed fetch (offline, cold cache) is tried again on the next ask. */
+export function loadLocale(locale: Locale): Promise<void> {
+  if (catalogues[locale] || locale === 'en') return Promise.resolve();
+  let pending = loading.get(locale);
+  if (!pending) {
+    pending = LOADERS[locale]()
+      .then((catalogue) => { catalogues = { ...catalogues, [locale]: catalogue }; })
+      .finally(() => loading.delete(locale));
+    loading.set(locale, pending);
+  }
+  return pending;
+}
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value);
@@ -152,17 +175,34 @@ function stamp(): void {
   document.documentElement.lang = activeLocale();
 }
 
-/** Stores the choice and swaps every sentence on screen in one commit. */
-export function setLocaleSetting(setting: LocaleSetting): void {
-  state.setting = setting;
-  writeLocaleSetting(setting);
-  stamp();
+/**
+ * Stores the choice and swaps every sentence on screen in one commit, once the
+ * language has loaded: until then the screen stays in the one it speaks. A
+ * language that cannot load is still stored, and shows in English meanwhile.
+ */
+let latest: LocaleSetting | null = null;
+export function setLocaleSetting(setting: LocaleSetting): Promise<void> {
+  latest = setting;
+  const apply = () => {
+    // A later pick that landed first wins: a slow French fetch never undoes it.
+    if (latest !== setting) return;
+    state.setting = setting;
+    writeLocaleSetting(setting);
+    stamp();
+  };
+  const target = setting === 'system' ? machineLocale : setting;
+  if (catalogues[target]) {
+    apply();
+    return Promise.resolve();
+  }
+  return loadLocale(target).then(apply, apply);
 }
 
-/** Applies the stored language on boot. `main.ts` and `QuotaApp` call it once. */
-export function startLocale(): void {
+/** Applies the stored language on boot and loads it. `main.ts` awaits it before the first frame. */
+export function startLocale(): Promise<void> {
   state.setting = readLocaleSetting();
   stamp();
+  return loadLocale(activeLocale()).catch(() => undefined);
 }
 
 /**
@@ -193,7 +233,7 @@ function node(path: readonly string[]): object {
 
   const read = (key: string): unknown => {
     const next = [...path, key];
-    const value = resolve(CATALOGUES[activeLocale()], next);
+    const value = resolve(catalogues[activeLocale()], next);
     return value === undefined ? resolve(en, next) : value;
   };
 
@@ -210,7 +250,7 @@ function node(path: readonly string[]): object {
       return typeof key === 'string' && read(key) !== undefined;
     },
     ownKeys() {
-      const active = resolve(CATALOGUES[activeLocale()], path);
+      const active = resolve(catalogues[activeLocale()], path);
       const fallback = resolve(en, path);
       const keys = new Set<string>();
       for (const source of [fallback, active]) {

@@ -6,6 +6,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { stampWorkerCache } from './src/lib/worker-stamp';
 import { tooNewForFloor } from './src/lib/browser-floor';
+import { localePreloadScript } from './src/lib/locale-preload';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
 
@@ -102,8 +103,29 @@ function dropFakeClient(): Plugin {
   };
 }
 
+/**
+ * Each language but English is a chunk of its own (`src/lib/i18n.svelte.ts`).
+ * index.html gets a small inline script that preloads the one the device
+ * speaks (`src/lib/locale-preload.ts`), so the boot finds it already on its way.
+ * A build where the French catalogue is no chunk of its own fails here.
+ */
+function localePreload(): Plugin {
+  return {
+    name: 'boite-locale-preload',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, context) {
+        const french = Object.values(context.bundle ?? {}).find((file) => file.type === 'chunk' && /[\\/]src[\\/]lib[\\/]strings\.fr\.ts$/.test(file.facadeModuleId ?? ''));
+        if (!french) throw new Error('src/lib/strings.fr.ts is not a chunk of its own: i18n.svelte.ts must import it dynamically');
+        return [{ tag: 'script', children: localePreloadScript({ fr: `./${french.fileName}` }), injectTo: 'head' }];
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), browserFloor(), dropFakeClient(), precompress()],
+  plugins: [svelte(), browserFloor(), dropFakeClient(), localePreload(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },

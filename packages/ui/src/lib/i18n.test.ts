@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test } from 'vitest';
 import { strings as en } from './strings';
 import { fr } from './strings.fr';
 import {
@@ -7,6 +7,7 @@ import {
   DEFAULT_LOCALE,
   formatLocale,
   isLocale,
+  loadLocale,
   LOCALE_STORAGE_KEY,
   localeSetting,
   readLocaleSetting,
@@ -27,6 +28,10 @@ function speaks(...languages: string[]): void {
 }
 
 const own = [...navigator.languages];
+
+// French is its own chunk (i18n-lazy.test.ts covers the wait): loaded once
+// here, every switch below is immediate.
+beforeAll(() => loadLocale('fr'));
 
 beforeEach(() => {
   window.localStorage.clear();
