@@ -4,6 +4,7 @@ import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, Provider
 import type { Core } from '../core.ts';
 import { forgetProbes, releaseThread } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
+import type { InstallOutcome } from './install.ts';
 import { profileFor, resolveCommand } from './loader.ts';
 
 /** First check after the core is up, so nothing reaches the network at start. */
@@ -12,6 +13,7 @@ const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 /** An automatic update that found its provider busy looks again this often. */
 const BUSY_RETRY_MS = 10 * 60 * 1000;
 const VERSION_TIMEOUT_MS = 20_000;
+/** An agent's own updater. A managed update has no such limit: its download stops by itself on a dead connection. */
 const UPDATE_TIMEOUT_MS = 15 * 60 * 1000;
 const SKIPS_FILE = 'harness-updates.json';
 const VERSION_PATTERN = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?/;
@@ -93,6 +95,7 @@ export class HarnessUpdates {
 
   constructor(private readonly core: Core) {
     this.skips = this.readSkips();
+    core.providers.installs.onSettled((outcome) => this.installSettled(outcome));
   }
 
   /** Arms the periodic check. The core's entry point calls it; a test core never does. */
@@ -224,8 +227,10 @@ export class HarnessUpdates {
     if (profile === undefined) return null;
     const command = resolveCommand(profile);
     const managedDir = resolve(this.core.providers.installs.currentDir(providerId));
+    // A release on disk under `current` is what makes the route managed, whatever
+    // the install card is doing: an update under way or a failed one still leave it there.
     const runsManaged =
-      summary.install?.state === 'installed' &&
+      this.core.providers.installs.installedVersion(providerId) !== null &&
       command !== null &&
       inside(managedDir, resolve(command.executable));
     if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed' };
@@ -284,8 +289,7 @@ export class HarnessUpdates {
   private async read(target: Target): Promise<{ current: string | null; latest: string | null }> {
     const id = target.descriptor.id;
     if (target.route === 'managed') {
-      const state = this.core.providers.installs.stateOf(id, target.profile.install);
-      return state?.state === 'installed' ? { current: state.version, latest: state.available } : { current: null, latest: null };
+      return { current: this.core.providers.installs.installedVersion(id), latest: target.profile.install?.version ?? null };
     }
     const spec = target.profile.update as ProviderSelfUpdate;
     const current = readVersion(await this.run(target, spec.versionArgs ?? ['--version'], VERSION_TIMEOUT_MS));
@@ -363,21 +367,41 @@ export class HarnessUpdates {
     this.emit();
   }
 
-  /** The install block's own download, waited on: its card shows the progress meanwhile. */
+  /**
+   * The install block's own download, waited on for as long as it takes: its
+   * card shows the progress meanwhile, and the download fails by itself once
+   * the connection stays dead. A download the install card already started is
+   * joined rather than refused as already running.
+   */
   private async runManaged(target: Target): Promise<void> {
     const id = target.descriptor.id;
-    const install = target.profile.install!;
     const installs = this.core.providers.installs;
-    installs.start(id, install);
-    const deadline = Date.now() + UPDATE_TIMEOUT_MS;
-    for (;;) {
-      await new Promise((done) => setTimeout(done, 250));
-      const state = installs.stateOf(id, install);
-      if (state === null || state.state === 'absent') throw new Error('the download was cancelled');
-      if (state.state === 'installed') return;
-      if (state.state === 'failed') throw new Error(state.message);
-      if (Date.now() > deadline) throw new Error('the download did not finish in time');
+    let done = installs.whenDone(id);
+    if (done === null) {
+      installs.start(id, target.profile.install!);
+      done = installs.whenDone(id);
     }
+    const result = await done;
+    if (result === null || result.outcome === 'cancelled') throw new Error('the download was cancelled');
+    if (result.state.state === 'failed') throw new Error(result.state.message);
+  }
+
+  /**
+   * An install that lands from the install card moves the managed release
+   * too: the row is read again at once rather than offering, until the next
+   * check, an update that is already on disk.
+   */
+  private installSettled(outcome: InstallOutcome): void {
+    const entry = this.entries.get(outcome.providerId);
+    if (this.closed || outcome.outcome !== 'installed' || entry?.route !== 'managed' || entry.state === 'updating') return;
+    const target = this.targetOf(outcome.providerId);
+    if (target?.route !== 'managed') return;
+    void this.read(target).then((read) => {
+      if (this.entries.get(outcome.providerId)?.state === 'updating') return;
+      this.put(outcome.providerId, { ...entry, ...read, state: 'idle', message: null, checkedAt: Date.now() });
+    }).catch((error: unknown) => {
+      this.core.log('warn', `reading ${outcome.providerId} after its install: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   private busyThreads(providerId: ProviderId): number {

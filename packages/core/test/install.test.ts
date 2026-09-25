@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
-import type { ProviderInstallState } from '@boite/contracts';
+import type { HarnessUpdate, ProviderInstallState } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
@@ -184,6 +184,19 @@ beforeEach(async () => {
       if (path === '/tampered.zip') return new Response(tampered());
       // Two bytes short of what the descriptor promises.
       if (path === '/short.zip') return new Response(RELEASE.slice(0, RELEASE.byteLength - 2));
+      // The next release, slowly enough for an update to be joined or cancelled on the way.
+      if (path === '/slow-2.zip') {
+        let offset = 0;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await Bun.sleep(25);
+            controller.enqueue(RELEASE_V2.slice(offset, offset + 16));
+            offset += 16;
+            if (offset >= RELEASE_V2.byteLength) controller.close();
+          },
+        });
+        return new Response(body);
+      }
       if (path === '/drop.zip') return flakyRoute(request, 'drop');
       if (path === '/stall.zip') return flakyRoute(request, 'stall');
       // No length announced, and more bytes than the descriptor names.
@@ -566,6 +579,55 @@ describe('managed installs', () => {
     } finally {
       await second.close();
     }
+  });
+});
+
+describe('managed updates', () => {
+  /** 1.0.0 on disk, 1.1.0 on offer from `path`, and the update list read once. */
+  async function behind(path: string): Promise<{ client: Awaited<ReturnType<TestCore['connect']>>; states: ProviderInstallState[]; updates: HarnessUpdate[][] }> {
+    await loadDescriptor(goodInstall());
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    await loadDescriptor({ ...nextInstall(), url: url(path) });
+    harness.core.updates.only = new Set(['managed']);
+    const updates: HarnessUpdate[][] = [];
+    client.on('providers.updatesChanged', (list) => updates.push(list));
+    const [entry] = await client.call('providers.updates', { refresh: true });
+    expect(entry).toMatchObject({ providerId: 'managed', route: 'managed', current: '1.0.0', latest: '1.1.0', pending: true });
+    states.length = 0;
+    return { client, states, updates };
+  }
+
+  test('an update joins the download the install card started and waits for it to land', async () => {
+    const { client, updates } = await behind('/slow-2.zip');
+    await client.call('providers.install', { providerId: 'managed' });
+    const started = await client.call('providers.update', { providerId: 'managed' });
+    expect(started.state).toBe('updating');
+    await waitFor(() => updates.at(-1)?.[0]?.state === 'idle' && updates.at(-1)?.[0]?.current === '1.1.0');
+    expect(updates.at(-1)?.[0]?.pending).toBe(false);
+  });
+
+  test('a download cancelled under an update reads as failed, not as current', async () => {
+    const { client, states, updates } = await behind('/slow-2.zip');
+    await client.call('providers.update', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'downloading'));
+    const downloading = states.find((state) => state.state === 'downloading');
+    if (downloading?.state !== 'downloading') throw new Error('the update did not start downloading');
+    await client.call('providers.installCancel', { providerId: 'managed', operationId: downloading.operationId });
+    await waitFor(() => updates.at(-1)?.[0]?.state === 'failed');
+    expect(updates.at(-1)?.[0]).toMatchObject({ current: '1.0.0', message: 'the download was cancelled', pending: true });
+  });
+
+  test('a release the install card lands clears its pending update without another check', async () => {
+    const { client, states, updates } = await behind('/release-2.zip');
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed'));
+    await waitFor(() => updates.at(-1)?.[0]?.current === '1.1.0');
+    const [entry] = await client.call('providers.updates', {});
+    expect(entry).toMatchObject({ current: '1.1.0', latest: '1.1.0', pending: false, state: 'idle' });
   });
 });
 

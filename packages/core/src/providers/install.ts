@@ -74,6 +74,13 @@ interface Running {
   state: ProviderInstallState;
 }
 
+/** How a run ended, and the state it left: a cancelled update reads as the old release, which is not a success. */
+export interface InstallOutcome {
+  providerId: ProviderId;
+  outcome: 'installed' | 'failed' | 'cancelled';
+  state: ProviderInstallState;
+}
+
 class Cancelled extends Error {
   /** True when the core is stopping rather than the user cancelling: the bytes already downloaded stay for the next install. */
   readonly keep: boolean;
@@ -132,6 +139,8 @@ export class InstallManager {
   #failed = new Map<ProviderId, ProviderInstallState>();
   /** How many live processes are running out of this provider's managed files. */
   #leases = new Map<ProviderId, number>();
+  #waiters = new Map<ProviderId, ((outcome: InstallOutcome) => void)[]>();
+  #settledListeners: ((outcome: InstallOutcome) => void)[] = [];
   /** Test seams: how long a silent download waits, and the pauses between attempts. */
   idleTimeoutMs = IDLE_TIMEOUT_MS;
   retryDelaysMs: readonly number[] = RETRY_DELAYS_MS;
@@ -215,6 +224,12 @@ export class InstallManager {
     return { state: 'absent', version: install.version, archiveBytes: install.archiveBytes };
   }
 
+  /** The release `current` holds, whatever runs meanwhile; null when there is none or its record is unreadable. */
+  installedVersion(providerId: ProviderId): string | null {
+    try { return this.#readRecord(providerId)?.version ?? null; }
+    catch { return null; }
+  }
+
   #readRecord(providerId: ProviderId): ReleaseRecord | null {
     const file = join(this.currentDir(providerId), RELEASE_RECORD);
     if (!existsSync(file)) return null;
@@ -252,6 +267,31 @@ export class InstallManager {
 
   leaseCount(providerId: ProviderId): number {
     return this.#leases.get(providerId) ?? 0;
+  }
+
+  // -- waiting on a run ------------------------------------------------------
+
+  /** The end of the run in flight for this provider, or null when none is. */
+  whenDone(providerId: ProviderId): Promise<InstallOutcome> | null {
+    if (!this.#running.has(providerId)) return null;
+    return new Promise((resolve) => {
+      this.#waiters.set(providerId, [...(this.#waiters.get(providerId) ?? []), resolve]);
+    });
+  }
+
+  /** Called once each run ends, whoever started it. */
+  onSettled(listener: (outcome: InstallOutcome) => void): void {
+    this.#settledListeners.push(listener);
+  }
+
+  #settle(outcome: InstallOutcome): void {
+    const waiters = this.#waiters.get(outcome.providerId) ?? [];
+    this.#waiters.delete(outcome.providerId);
+    for (const resolve of waiters) resolve(outcome);
+    for (const listener of this.#settledListeners) {
+      try { listener(outcome); }
+      catch (error) { this.#log('error', `after installing ${outcome.providerId}: ${messageOf(error)}`); }
+    }
   }
 
   // -- operations -----------------------------------------------------------
@@ -398,6 +438,7 @@ export class InstallManager {
       // still held the provider as missing would offer a repair for one frame.
       this.#sink?.updated();
       this.#emit(providerId, state);
+      this.#settle({ providerId, outcome: 'installed', state });
     } catch (error) {
       // A connection that kept dropping, or a core that stopped, leaves the bytes
       // it got so far: the next install resumes there. A cancel, a wrong size or
@@ -414,6 +455,7 @@ export class InstallManager {
           archiveBytes: install.archiveBytes,
         };
         this.#emit(providerId, state);
+        this.#settle({ providerId, outcome: 'cancelled', state });
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -421,6 +463,7 @@ export class InstallManager {
       this.#failed.set(providerId, state);
       this.#log('error', `installing ${providerId} failed: ${message}`);
       this.#emit(providerId, state);
+      this.#settle({ providerId, outcome: 'failed', state });
     }
   }
 

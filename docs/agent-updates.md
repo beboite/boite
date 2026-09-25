@@ -71,7 +71,15 @@ newest release Boite can read. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
-process. A version read has 20 seconds, an update 15 minutes.
+process. A version read has 20 seconds, an agent's own updater 15 minutes.
+
+A managed update has no time limit: it waits for its download, which retries a
+dropped connection by itself and fails once the retries run out
+([providers](providers.md#managed-installs)). Update pressed while the install
+card is already downloading that release joins that download instead of
+failing. A download cancelled from the install card fails the update with
+`the download was cancelled`, and a release the install card lands clears the
+notice at once, without waiting for the next check.
 
 ## Rules
 
