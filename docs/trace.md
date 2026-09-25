@@ -58,7 +58,9 @@ totals.
 ## What a client sees
 
 - `trace.get` gives one thread's processes, newest first.
-- `resources.list` gives every thread with its live processes and its totals.
+- `resources.list` gives each thread that ran a process, with its live processes
+  and its totals, in two queries whatever the number of threads. An archived
+  thread appears only while something of it still runs.
 - `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
   and the process group of each registered child elsewhere. It returns before the completion port has
   reported the exits, so anything that then reads the trace on the next line

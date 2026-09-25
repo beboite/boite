@@ -124,6 +124,27 @@ describe('procs', () => {
     expect(Date.now() - started).toBeLessThan(5000);
   }, 15000);
 
+  test('resources.list carries threads that ran something, and no archived thread with nothing running', async () => {
+    const client = await harness.connect();
+    const ran = await echoThread(harness, client, 'ran a process');
+    const idle = await echoThread(harness, client, 'never ran one');
+    const archived = await echoThread(harness, client, 'ran one, then archived');
+    const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
+    for (const threadId of [ran.threadId, archived.threadId]) {
+      await harness.core.procs.spawn(threadId, quick[0], [...quick[1]]).exited;
+      await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
+    }
+    await client.call('threads.archive', { threadId: archived.threadId, archived: true });
+
+    const resources = await client.call('resources.list', {});
+    const ids = resources.map((entry) => entry.threadId);
+    expect(ids).toContain(ran.threadId);
+    expect(ids).not.toContain(idle.threadId);
+    expect(ids).not.toContain(archived.threadId);
+    const mine = resources.find((entry) => entry.threadId === ran.threadId);
+    expect(mine).toMatchObject({ title: 'ran a process', live: [], totals: { processes: 1 } });
+  }, 20000);
+
   test('the trace capability says what it can promise on this OS', async () => {
     const client = await harness.connect();
     if (process.platform === 'win32') {

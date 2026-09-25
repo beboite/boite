@@ -63,6 +63,17 @@ test('fake process events reach a client subscribed to that thread only, like th
   } finally { client.close(); }
 });
 
+test('fake resources.list leaves out an archived thread with nothing running, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('resources.list', {});
+    expect(before.find(entry => entry.threadId === 't-trace')?.live).toEqual([]);
+    await client.call('threads.archive', { threadId: 't-trace', archived: true });
+    expect((await client.call('resources.list', {})).map(entry => entry.threadId)).not.toContain('t-trace');
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

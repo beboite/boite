@@ -3280,12 +3280,14 @@ const ready = true;
     const out: ThreadResources[] = [];
     for (const thread of this.#threads.values()) {
       const mine = this.#processes.filter((p) => p.threadId === thread.id);
-      if (mine.length === 0) continue;
+      const live = mine.filter((p) => p.exitedAt === null);
+      // The core's rule: nothing ever ran, or archived with nothing running.
+      if (mine.length === 0 || (thread.archived && live.length === 0)) continue;
       out.push({
         threadId: thread.id,
         title: thread.title,
         status: thread.status,
-        live: mine.filter((p) => p.exitedAt === null),
+        live,
         totals: {
           processes: mine.length,
           cpuMs: mine.reduce((sum, p) => sum + (p.cpuMs ?? 0), 0),
