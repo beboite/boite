@@ -1,9 +1,10 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { Plus, ArrowUpRight, RefreshCw, Unplug, X } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { confirm } from '../lib/confirm.svelte';
+  import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import RemoteCoordination from './RemoteCoordination.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
@@ -22,6 +23,17 @@
   $effect(() => {
     origins = (workspace.active.settings?.browserOrigins ?? []).join('\n');
   });
+  /** Forgetting a machine drops its saved address and key: getting it back takes a new pairing link made there. */
+  async function removeMachine(machine: { id: string; label: string }) {
+    const ok = await confirm.ask({
+      title: fill(strings.machines.removeTitle, { machine: machine.label }),
+      body: strings.machines.removeBody,
+      confirmLabel: strings.machines.remove,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (ok) await workspace.remove(machine.id);
+  }
   function startAdding() {
     adding = true;
     requestAnimationFrame(() => linkInput?.focus());
@@ -130,7 +142,7 @@
               <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
             {/if}
             {#if machine.store !== primary}
-              <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void workspace.remove(machine.id)}><Unplug size={15} /></button>
+              <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
             {/if}
             <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
               >{strings.machines.open}<ArrowUpRight size={13} /></button

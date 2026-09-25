@@ -163,6 +163,9 @@ test('two real cores pair, route turns independently, reconnect and survive a re
       expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(2);
     } finally { admin.close(); }
     await page.click(id('machine-remove'));
+    // Forgetting a machine asks first, in the app's own dialog.
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await page.click(id('confirm-ok'));
     // Back on the first machine: its thread, or the draft it opened on after the reload.
     await page.waitFor(
       `document.querySelectorAll('${id('machine-card')}').length === 1 || document.querySelector('${id('thread-title')}')?.textContent === 'Primary project' || document.querySelector('${id('draft-sentence')}')?.textContent.includes('Primary project')`

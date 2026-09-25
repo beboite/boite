@@ -2020,6 +2020,9 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
   expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid=machine-rename]')).map(input => input.value)).toContain('Builder');
   query<HTMLButtonElement>('[data-testid=machine-remove]').click();
+  // Forgetting a machine asks first; the answer is the in-app dialog's.
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);

@@ -738,6 +738,8 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
     await page?.evaluate(`document.querySelector('[data-machine-id="${remote.url}"] [data-testid=machine-remove]').click()`);
+    await page?.waitFor(`document.querySelector('${testid('confirm-ok')}')`);
+    await page?.click(testid('confirm-ok'));
     await page?.click(testid('settings-back'));
   } finally { remoteClient.close(); await remote.stop(); }
 }, TIMEOUT);
