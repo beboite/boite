@@ -35,6 +35,11 @@ export function hasGitMarker(folder: string, timeoutMs = GIT_PROBE_TIMEOUT_MS): 
   });
 }
 
+/** What two spellings of one folder share: the path itself, lowercased where the file system ignores case. */
+function pathKey(path: string): string {
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
 interface GitFlag {
   value: boolean | undefined;
   inflight: boolean;
@@ -146,8 +151,10 @@ export class ProjectStore {
     // The folder just answered, so this check does too; the answer is exact from the start.
     this.git.set(full, { value: existsSync(join(full, '.git')), inflight: false });
 
-    // No second check of a folder that was just checked.
-    const existing = this.core.journal.listProjects().find((project) => project.path === full);
+    // No second check of a folder that was just checked. Windows paths ignore
+    // case, so `d:\dev\app` is the project `D:\Dev\App` already registered.
+    const key = pathKey(full);
+    const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
     if (existing !== undefined) return this.described(existing, false);
 
     const project: Project = {
