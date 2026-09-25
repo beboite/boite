@@ -39,6 +39,60 @@ const SLOW_CHUNK_MS = 80;
 let harness: TestCore;
 let server: ReturnType<typeof Bun.serve>;
 
+/** A release big enough to be cut in half, so the flaky routes have something to resume. */
+const BIG_EXE = new Uint8Array(512 * 1024).map((_, index) => (index * 31) % 251);
+const BIG_RELEASE = zipSync({ [EXE_PATH]: BIG_EXE, [NOTE_PATH]: NOTE }, { level: 0 });
+const HALF = Math.floor(BIG_RELEASE.byteLength / 2);
+const ETAG = '"big-release-1"';
+
+/** What the flaky routes saw: one `Range` header (or null) per request, and what they do next. */
+let requests: (string | null)[] = [];
+let ifRanges: (string | null)[] = [];
+let served = 0;
+/** How a flaky route answers after its first request: resume, whole file again, stall, or keep failing. */
+let flaky: 'resume' | 'whole' | 'down' = 'resume';
+
+/** Half of the archive, then the connection drops (or, with `stall`, nothing more ever comes). */
+function halfThen(end: 'drop' | 'stall'): Response {
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(BIG_RELEASE.slice(0, HALF));
+      if (end === 'stall') return;
+      await Bun.sleep(50);
+      controller.error(new Error('the test server drops the connection'));
+    },
+  });
+  return new Response(body, { headers: { 'content-length': String(BIG_RELEASE.byteLength), etag: ETAG, 'accept-ranges': 'bytes' } });
+}
+
+function flakyRoute(request: Request, first: 'drop' | 'stall'): Response {
+  const range = request.headers.get('range');
+  requests.push(range);
+  ifRanges.push(request.headers.get('if-range'));
+  served += 1;
+  if (served === 1) return halfThen(first);
+  if (flaky === 'down') return new Response('busy', { status: 503 });
+  const from = Number(/^bytes=(\d+)-$/.exec(range ?? '')?.[1] ?? Number.NaN);
+  if (flaky === 'whole' || Number.isNaN(from)) return new Response(BIG_RELEASE, { headers: { etag: ETAG } });
+  return new Response(BIG_RELEASE.slice(from), {
+    status: 206,
+    headers: { 'content-range': `bytes ${from}-${BIG_RELEASE.byteLength - 1}/${BIG_RELEASE.byteLength}`, etag: ETAG },
+  });
+}
+
+function bigInstall(path: string): Record<string, unknown> {
+  return {
+    version: '1.0.0',
+    url: url(path),
+    sha256: sha256(BIG_RELEASE),
+    archiveBytes: BIG_RELEASE.byteLength,
+    files: [
+      { path: EXE_PATH, bytes: BIG_EXE.byteLength },
+      { path: NOTE_PATH, bytes: NOTE.byteLength },
+    ],
+  };
+}
+
 function url(path: string): string {
   return `${server.url.origin}${path}`;
 }
@@ -113,9 +167,14 @@ function agentDir(...parts: string[]): string {
 }
 
 beforeEach(async () => {
+  requests = [];
+  ifRanges = [];
+  served = 0;
+  flaky = 'resume';
   server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
+    idleTimeout: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
       if (path === '/release.zip') return new Response(RELEASE);
@@ -125,11 +184,22 @@ beforeEach(async () => {
       if (path === '/tampered.zip') return new Response(tampered());
       // Two bytes short of what the descriptor promises.
       if (path === '/short.zip') return new Response(RELEASE.slice(0, RELEASE.byteLength - 2));
+      if (path === '/drop.zip') return flakyRoute(request, 'drop');
+      if (path === '/stall.zip') return flakyRoute(request, 'stall');
+      // No length announced, and more bytes than the descriptor names.
+      if (path === '/oversize.zip') {
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) { controller.enqueue(new Uint8Array(64 * 1024)); },
+        });
+        return new Response(body);
+      }
       if (path === '/slow.zip') {
         const body = new ReadableStream<Uint8Array>({
           async pull(controller) {
             await Bun.sleep(SLOW_CHUNK_MS);
-            controller.enqueue(new Uint8Array(1024));
+            // Eight bytes at a time: the archive is a few hundred, and a body
+            // longer than the descriptor says is refused before the cancel lands.
+            controller.enqueue(new Uint8Array(8));
           },
         });
         return new Response(body);
@@ -496,5 +566,84 @@ describe('managed installs', () => {
     } finally {
       await second.close();
     }
+  });
+});
+
+describe('managed installs on a bad connection', () => {
+  /** Installs from `path` and waits for the run to settle, installed or failed. */
+  async function installFrom(path: string): Promise<ProviderInstallState[]> {
+    await loadDescriptor(bigInstall(path));
+    const client = await harness.connect();
+    const states: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => states.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => states.some((state) => state.state === 'installed' || state.state === 'failed'), 10_000);
+    return states;
+  }
+
+  function quick(): void {
+    const installs = harness.core.providers.installs;
+    installs.retryDelaysMs = [0, 0];
+    installs.idleTimeoutMs = 300;
+  }
+
+  test('a dropped connection resumes from the byte it reached, and the release lands whole', async () => {
+    quick();
+    const states = await installFrom('/drop.zip');
+    expect(states.at(-1)?.state).toBe('installed');
+    expect(requests).toEqual([null, `bytes=${HALF}-`]);
+    expect(ifRanges[1]).toBe(ETAG);
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(BIG_EXE);
+    expect(existsSync(agentDir('downloads', '1.0.0.zip.part'))).toBe(false);
+    expect(existsSync(agentDir('downloads', '1.0.0.zip.part.json'))).toBe(false);
+  });
+
+  test('a server that ignores the range sends the whole file again, and it is taken from the start', async () => {
+    quick();
+    flaky = 'whole';
+    const states = await installFrom('/drop.zip');
+    expect(states.at(-1)?.state).toBe('installed');
+    expect(requests.length).toBe(2);
+    expect(new Uint8Array(await Bun.file(agentDir('current', EXE_PATH)).arrayBuffer())).toEqual(BIG_EXE);
+  });
+
+  test('a download that goes silent is dropped after the idle timeout and resumed', async () => {
+    quick();
+    const states = await installFrom('/stall.zip');
+    expect(states.at(-1)?.state).toBe('installed');
+    expect(requests).toEqual([null, `bytes=${HALF}-`]);
+  });
+
+  test('once the retries run out the bytes stay, and the next install resumes from them', async () => {
+    quick();
+    flaky = 'down';
+    const states = await installFrom('/drop.zip');
+    const failed = states.at(-1);
+    if (failed?.state !== 'failed') throw new Error(`expected a failure, saw ${failed?.state}`);
+    expect(failed.message).toContain('install again to resume');
+    expect(failed.message).not.toContain('verbose');
+    expect(statSync(agentDir('downloads', '1.0.0.zip.part')).size).toBe(HALF);
+    expect(requests.length).toBe(3);
+
+    flaky = 'resume';
+    requests = [];
+    const client = await harness.connect();
+    const again: ProviderInstallState[] = [];
+    client.on('providers.installProgress', (event) => again.push(event));
+    await client.call('providers.install', { providerId: 'managed' });
+    await waitFor(() => again.some((state) => state.state === 'installed' || state.state === 'failed'), 10_000);
+    expect(again.at(-1)?.state).toBe('installed');
+    // The flaky route counts its first request as the one that drops: this one
+    // is the second, and it asked only for the missing half.
+    expect(requests).toEqual([`bytes=${HALF}-`]);
+  });
+
+  test('a body longer than the descriptor says is refused as soon as it overflows', async () => {
+    quick();
+    const states = await installFrom('/oversize.zip');
+    const failed = states.at(-1);
+    if (failed?.state !== 'failed') throw new Error(`expected a failure, saw ${failed?.state}`);
+    expect(failed.message).toContain('sent more than');
+    expect(existsSync(agentDir('downloads', '1.0.0.zip.part'))).toBe(false);
   });
 });

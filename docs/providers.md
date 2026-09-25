@@ -204,9 +204,21 @@ junction on Windows and a symlink elsewhere, and `.install-complete.json` is
 written beside the files: that record, with its version matching the descriptor's,
 is the only thing that makes a provider read as `installed`.
 
+A bad connection does not start the download over. A dropped connection, a
+server answer of 408, 429 or 5xx, or 30 seconds without a byte ends one attempt,
+and the download tries again after 1, 2, 4, 8 and 16 seconds. Each retry asks
+only for the missing bytes (`Range`, with `If-Range` carrying the server's ETag
+or date); a server that sends the whole file again is read from the start. Once
+the retries run out the install fails with how far it got, and keeps the `.part`
+beside a `.part.json` naming its URL and digest. The next install of the same
+archive hashes those bytes again and resumes after them. A body longer than
+`archiveBytes`, or a `Content-Length` that disagrees with it, is refused at once.
+
 Free space is checked first, against the archive plus the unpacked files plus a
-256 MB margin. A cancel aborts the fetch and leaves no `.part`, and nothing goes
-into the journal, so a core that dies mid-download comes back saying `absent`.
+256 MB margin, less what a kept `.part` already holds. A cancel aborts the fetch
+and leaves no `.part`. Nothing goes into the journal, so a core that stops
+mid-download comes back saying `absent`, and its `.part` stays for the next
+install to resume.
 `providers.uninstall` deletes `<dataDir>/agents/<id>` and is refused while a lease
 is held, and one is held for every process a thread, probe or login launched.
 
