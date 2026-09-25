@@ -670,11 +670,19 @@ export class Journal {
     if (this.closed) return;
     const dirty = [...this.open.values()].filter((entry) => entry.dirty);
     if (dirty.length === 0) return;
+    // Under a caller's transaction the write below is only a savepoint, which
+    // that caller can still roll back: the parts are written but stay dirty,
+    // and the timer writes them again on their own.
+    const nested = this.db.inTransaction;
     const started = performance.now();
     const write = this.db.query('UPDATE messages SET parts = ? WHERE id = ?');
     this.db.transaction(() => {
       for (const entry of dirty) write.run(JSON.stringify(entry.message.parts), entry.message.id);
     })();
+    if (nested) {
+      this.armPersistTimer();
+      return;
+    }
     // Clean only once committed: a rolled-back write stays dirty for the next try.
     for (const entry of dirty) entry.dirty = false;
     const elapsed = performance.now() - started;
@@ -689,7 +697,9 @@ export class Journal {
     this.flushDeltas();
     for (const [id, entry] of this.open) {
       if (entry.message.turnId !== turnId) continue;
-      if (entry.dirty) this.writeParts(entry);
+      // Written whatever the flag says: it can be clean after a write a caller's
+      // transaction rolled back, and the memory copy is dropped right after.
+      this.writeParts(entry);
       this.open.delete(id);
     }
   }
@@ -1094,7 +1104,9 @@ export class Journal {
 
   setMessageState(messageId: string, state: Message['state']): void {
     const open = this.open.get(messageId);
-    if (open !== undefined && open.dirty) this.writeParts(open);
+    // Written whatever the flag says when the memory copy goes: a clean flag can
+    // follow a write that a caller's transaction rolled back.
+    if (open !== undefined && (open.dirty || state !== 'streaming')) this.writeParts(open);
     if (state !== 'streaming') this.open.delete(messageId);
     this.db.query('UPDATE messages SET state = ? WHERE id = ?').run(state, messageId);
   }
@@ -1218,6 +1230,10 @@ export class Journal {
 
   private markDirty(entry: OpenMessage): void {
     entry.dirty = true;
+    this.armPersistTimer();
+  }
+
+  private armPersistTimer(): void {
     if (this.persistTimer !== null || this.closed) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
@@ -1233,7 +1249,8 @@ export class Journal {
 
   private writeParts(entry: OpenMessage): void {
     this.db.query('UPDATE messages SET parts = ? WHERE id = ?').run(JSON.stringify(entry.message.parts), entry.message.id);
-    entry.dirty = false;
+    // A write inside a caller's transaction is not committed yet: it stays dirty.
+    if (!this.db.inTransaction) entry.dirty = false;
   }
 
   private armDeltaTimer(): void {

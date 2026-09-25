@@ -116,6 +116,51 @@ describe('journal streaming', () => {
     expect(storedParts('msg_retry')).toEqual([{ type: 'text', text: 'must land' }]);
   });
 
+  test('a write that an outer transaction rolls back does not lose the streamed parts', () => {
+    journal.putMessage(streaming('msg_rolled', 'trn_a'));
+    journal.appendDelta('thr_test', 'msg_rolled', 0, 'streamed answer');
+    journal.flushDeltas();
+    // Another turn is read inside a caller's transaction, which then rolls back.
+    expect(() =>
+      journal.db.transaction(() => {
+        Array.from(journal.walkTurnMessages('thr_other', 'trn_other'));
+        throw new Error('conflict');
+      })(),
+    ).toThrow('conflict');
+    expect(storedParts('msg_rolled')).toEqual([]);
+    journal.setMessageState('msg_rolled', 'complete');
+    expect(storedParts('msg_rolled')).toEqual([{ type: 'text', text: 'streamed answer' }]);
+  });
+
+  test('releasing a turn after a rolled-back write keeps the streamed parts', () => {
+    journal.putMessage(streaming('msg_left', 'trn_a'));
+    journal.appendDelta('thr_test', 'msg_left', 0, 'left open');
+    journal.flushDeltas();
+    expect(() =>
+      journal.db.transaction(() => {
+        journal.persistMessages();
+        throw new Error('conflict');
+      })(),
+    ).toThrow('conflict');
+    journal.releaseTurn('trn_a');
+    expect(storedParts('msg_left')).toEqual([{ type: 'text', text: 'left open' }]);
+  });
+
+  test('a rolled-back write is written again by the timer', async () => {
+    journal.putMessage(streaming('msg_again'));
+    journal.appendDelta('thr_test', 'msg_again', 0, 'kept');
+    journal.flushDeltas();
+    expect(() =>
+      journal.db.transaction(() => {
+        journal.persistMessages();
+        throw new Error('conflict');
+      })(),
+    ).toThrow('conflict');
+    expect(storedParts('msg_again')).toEqual([]);
+    await Bun.sleep(700);
+    expect(storedParts('msg_again')).toEqual([{ type: 'text', text: 'kept' }]);
+  });
+
   test('streamed text writes no message.delta event', () => {
     journal.putMessage(streaming('msg_events'));
     for (let i = 0; i < 5; i++) {
