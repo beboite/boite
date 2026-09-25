@@ -45,6 +45,11 @@ function indexFor(table: Record<string, string>, key: string): string {
 
 /** Domain records and the journal event that changes them always commit together. */
 export class AgentsRepository {
+  /**
+   * Counts record writes, a rolled-back one included. A poller that found nothing
+   * to do sleeps until it moves: only a record write can add work or a run.
+   */
+  writes = 0;
   constructor(readonly journal: Journal) {}
 
   private rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
@@ -121,6 +126,7 @@ export class AgentsRepository {
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {
     const now = Date.now();
     const record = { ...value, id: newId(`agt_${kind}_`), revision: 1, createdAt: now, updatedAt: now } as AgentEntities[K];
+    this.writes += 1;
     this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: { kind, record } }, db => {
       db.query('INSERT INTO agent_entities (kind, id, revision, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)')
         .run(kind, record.id, record.revision, now, now, JSON.stringify(record));
@@ -133,6 +139,7 @@ export class AgentsRepository {
       const previous = this.get(kind, id);
       if (previous.revision !== expectedRevision) throw refused(`${kind} ${id}: expected revision ${previous.revision}, received ${expectedRevision}`, { kind, id, expectedRevision: previous.revision });
       const record = { ...value, id, revision: previous.revision + 1, createdAt: previous.createdAt, updatedAt: Date.now() } as AgentEntities[K];
+      this.writes += 1;
       this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: { kind, record } }, db => {
         const updated = db.query('UPDATE agent_entities SET revision = ?, updated_at = ?, data = ? WHERE kind = ? AND id = ? AND revision = ?')
           .run(record.revision, record.updatedAt, JSON.stringify(record), kind, id, expectedRevision);

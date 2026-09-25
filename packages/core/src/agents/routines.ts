@@ -50,13 +50,26 @@ export class AgentRoutines {
       this.core.workforce.changed();return work;
     });
   }
+  /**
+   * The earliest future `nextAt` as of a record-write count. A due routine held back
+   * by a paused agent or unfinished work waits for a record write too, so until
+   * the count moves or that time comes, a tick reads nothing.
+   */
+  private next:{writes:number;at:number|null}|null=null;
   tick(now=Date.now()):void {
     if(this.core.workforce.limits().paused||this.core.stopping)return;
+    const writes=this.r.writes;
+    if(this.next&&this.next.writes===writes&&(this.next.at===null||this.next.at>now))return;
+    let at:number|null=null,ran=false;
     for(const routine of this.r.list('routine')){
-      if(!routine.enabled||routine.nextAt===null||routine.nextAt>now)continue;
+      if(!routine.enabled||routine.nextAt===null)continue;
+      if(routine.nextAt>now){at=at===null?routine.nextAt:Math.min(at,routine.nextAt);continue;}
       if(this.r.get('profile',routine.agentId).status!=='active')continue;
       if(routine.lastWorkId&&!['done','cancelled'].includes(this.r.get('work',routine.lastWorkId).status))continue;
       this.run({routineId:routine.id,requestId:`due-${routine.nextAt}-${routine.revision}`});
+      ran=true;
     }
+    // A run moved its routine's nextAt: read them all again next time.
+    this.next=ran?null:{writes,at};
   }
 }
