@@ -389,6 +389,94 @@ describe('codex driver', () => {
     };
   }
 
+  /** Starts a turn on `prompt`, answers its one permission card, and returns what the agent said. */
+  async function answerCard(
+    client: CoreClient,
+    threadId: string,
+    prompt: string,
+    decision: 'allow' | 'deny',
+  ): Promise<{ request: RpcEvents['permission.requested']; text: string; permission: MessagePart | undefined }> {
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt });
+    const request = await requested;
+    await client.call('permissions.answer', { requestId: request.id, decision });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    const text = parts.find((part) => part.type === 'text');
+    return { request, text: text?.type === 'text' ? text.text : '', permission: parts.find((part) => part.type === 'permission') };
+  }
+
+  test('an MCP tool approval elicited by a server is a permission card, answered accept or decline', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+
+    const allowed = await answerCard(client, threadId, '[elicit]', 'allow');
+    expect(allowed.request.toolName).toBe('mcp:fake-mcp');
+    expect(allowed.request.input).toMatchObject({ message: 'Allow the fake tool to run?', tool_title: 'Fake tool', tool_params: { path: 'a.txt' } });
+    expect(allowed.text).toBe('elicit accept');
+    expect(allowed.permission).toMatchObject({ type: 'permission', toolName: 'mcp:fake-mcp', decision: 'allow' });
+
+    const denied = await answerCard(client, threadId, '[elicit]', 'deny');
+    expect(denied.text).toBe('elicit decline');
+    expect(denied.permission).toMatchObject({ type: 'permission', toolName: 'mcp:fake-mcp', decision: 'deny' });
+    expect(fakeLog()).toContain('elicit {"action":"accept","content":{}}');
+    expect(fakeLog()).toContain('elicit {"action":"decline"}');
+  });
+
+  test('a stop during a pending elicitation cancels it', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[elicit][slow]' });
+    await requested;
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    await waitFor(() => fakeLog().includes('elicit {"action":"cancel"}'), 3000);
+  });
+
+  test('an elicitation boite cannot show is declined without a card', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    let cards = 0;
+    client.on('permission.requested', (request) => {
+      if (request.threadId === threadId) cards += 1;
+    });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[elicit-url]' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(cards).toBe(0);
+    expect(fakeLog()).toContain('elicit-url {"action":"decline"}');
+  });
+
+  test('a permissions request is a card, granted for the turn or refused', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+
+    const allowed = await answerCard(client, threadId, '[permissions]', 'allow');
+    expect(allowed.request.input).toMatchObject({ permissions: { network: { enabled: true } } });
+    expect(allowed.request.description).toBe('the fake wants the network');
+    expect(allowed.text).toBe('permissions granted');
+
+    const denied = await answerCard(client, threadId, '[permissions]', 'deny');
+    expect(denied.text).toBe('permissions refused');
+    expect(fakeLog()).toContain('permissions {"permissions":{"network":{"enabled":true},"fileSystem":null},"scope":"turn"}');
+    expect(fakeLog()).toContain('permissions {"permissions":{}}');
+  });
+
+  test('currentTime/read is answered in whole Unix seconds', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[time]' });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: 'time ok' }]);
+  });
+
   test('context reported after completion is retained, including a missing total', async () => {
     const client = await startCore({warmProcessMinutes: 1});
     const threadId = await codexThread(client);

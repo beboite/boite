@@ -23,6 +23,7 @@ import {
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
   MODE_POLICY,
+  PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
@@ -519,9 +520,49 @@ export class CodexSession {
       }
       case 'item/tool/requestUserInput':
         return { answers: await this.askQuestions(ctx, params['questions']) };
+      case 'mcpServer/elicitation/request':
+        return this.answerElicitation(ctx, params);
+      case 'item/permissions/requestApproval': {
+        // Only asked with Codex's exec_permission_approvals or
+        // request_permissions_tool features on. An empty profile grants nothing.
+        const decision = await this.askUser(
+          PERMISSIONS_TOOL_NAME,
+          { permissions: params['permissions'] ?? null, cwd: params['cwd'] ?? null },
+          textOf(params['reason']),
+        );
+        return decision === 'accept' ? { permissions: params['permissions'] ?? {}, scope: 'turn' } : { permissions: {} };
+      }
+      case 'currentTime/read':
+        return { currentTimeAt: Math.floor(Date.now() / 1000) };
       default:
         throw new Error(`boite does not implement ${method}`);
     }
+  }
+
+  /**
+   * An MCP server's elicitation. Codex routes its own MCP tool-call approvals
+   * through it (`_meta.codex_approval_kind: "mcp_tool_call"`), and a server
+   * may ask a plain yes or no as a form with nothing required: both become the
+   * permission card, accepted with empty content. A form with required fields,
+   * a url, or a device verification has no card yet and is declined, which
+   * Codex reports as a refused call instead of a failed request.
+   */
+  private async answerElicitation(ctx: TurnContext, params: Record<string, unknown>): Promise<unknown> {
+    const server = textOf(params['serverName']);
+    const meta = (params['_meta'] ?? {}) as Record<string, unknown>;
+    const schema = params['requestedSchema'] as { required?: unknown } | undefined;
+    const required = Array.isArray(schema?.required) ? schema.required.length : 0;
+    const confirmation = meta['codex_approval_kind'] === 'mcp_tool_call' || (params['mode'] === 'form' && required === 0);
+    if (!confirmation) {
+      ctx.log('warn', `codex: declined a ${textOf(params['mode']) || 'modeless'} elicitation from MCP server ${server || '(unnamed)'}, which boite cannot show`);
+      return { action: 'decline' };
+    }
+    const decision = await this.askUser(
+      `mcp:${server}`,
+      { message: textOf(params['message']), tool_title: meta['tool_title'] ?? null, tool_params: meta['tool_params'] ?? null },
+      '',
+    );
+    return decision === 'accept' ? { action: 'accept', content: {} } : { action: decision };
   }
 
   /**
@@ -597,6 +638,9 @@ export class CodexSession {
     const answer = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
     if (answer === 'cancelled') return 'cancel';
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: answer });
+    // Stop denies the open card before it stops the turn: that deny is a
+    // cancel, never the user's refusal.
+    if (turn.isStopped) return 'cancel';
     return answer === 'allow' ? 'accept' : 'decline';
   }
 }

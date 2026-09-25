@@ -29,6 +29,9 @@ export const SLEEP_TOOL_NAME = 'Sleep';
 /** Nor for a patch: `fileChange` is the apply-patch item under another name. */
 export const FILE_CHANGE_TOOL_NAME = 'ApplyPatch';
 
+/** `item/permissions/requestApproval`: a wider sandbox for the rest of the turn. */
+export const PERMISSIONS_TOOL_NAME = 'Permissions';
+
 // ---------------------------------------------------------------------------
 // The slice of the generated protocol this driver speaks
 // ---------------------------------------------------------------------------

@@ -23,10 +23,12 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input|async|stream)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream';
+type Directive =
+  | 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -308,6 +310,39 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         const given = answer.answers ?? {};
         const q1 = typeof given['q1'] === 'string' ? given['q1'] : '';
         say(q1.length === 0 ? 'input refused' : `input answered ${q1}`);
+        break;
+      }
+      case 'elicit':
+      case 'elicit-url': {
+        // An MCP tool approval the way Codex asks for one, or a url elicitation
+        // nothing in boite can show. The answer is logged whole and said back.
+        const params = directive === 'elicit'
+          ? {
+              threadId, turnId, serverName: 'fake-mcp', mode: 'form', message: 'Allow the fake tool to run?',
+              requestedSchema: { type: 'object', properties: {} },
+              _meta: { codex_approval_kind: 'mcp_tool_call', tool_title: 'Fake tool', tool_params: { path: 'a.txt' } },
+            }
+          : { threadId, turnId, serverName: 'fake-mcp', mode: 'url', message: 'Sign in', url: 'https://example.invalid', elicitationId: 'e1' };
+        const answer = await request<{ action: string }>('mcpServer/elicitation/request', params).catch(() => ({ action: 'error' }));
+        log(`${directive} ${JSON.stringify(answer)}`);
+        say(`${directive} ${answer.action}`);
+        break;
+      }
+      case 'permissions': {
+        itemCounter += 1;
+        const permissions = { network: { enabled: true }, fileSystem: null };
+        const answer = await request<{ permissions: unknown }>('item/permissions/requestApproval', {
+          threadId, turnId, itemId: `item-${itemCounter}`, environmentId: null, cwd: process.cwd(),
+          reason: 'the fake wants the network', permissions,
+        }).catch(() => ({ permissions: 'error' }));
+        log(`permissions ${JSON.stringify(answer)}`);
+        say(JSON.stringify(answer.permissions) === JSON.stringify(permissions) ? 'permissions granted' : 'permissions refused');
+        break;
+      }
+      case 'time': {
+        const answer = await request<{ currentTimeAt: unknown }>('currentTime/read', { threadId }).catch(() => ({ currentTimeAt: null }));
+        const at = answer.currentTimeAt;
+        say(typeof at === 'number' && Number.isInteger(at) && Math.abs(at - Date.now() / 1000) < 60 ? 'time ok' : `time wrong ${JSON.stringify(at)}`);
         break;
       }
       case 'async': {

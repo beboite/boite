@@ -413,6 +413,13 @@ Each protocol takes them differently, and the difference is not cosmetic.
   plus read-only, `bypassPermissions` and `dontAsk` never plus danger-full-access.
   No call changes that pair on a live thread, so the mode is part of the session
   key: changing it drops the process and the next turn resumes with the new pair.
+  Under on-request, a command, a file change, a wider sandbox
+  (`item/permissions/requestApproval`, granted for the turn) and an MCP tool
+  call each draw a permission card. Codex asks for the MCP tool call through
+  `mcpServer/elicitation/request`, as does an MCP server asking a plain yes or
+  no; an elicitation that needs a form with required fields, a url or a device
+  check has no card yet and is declined, with a line in the log. Stop answers
+  an open card with `cancel`, not with the user's refusal.
 - Muse splits a mode in two. The approval mode goes on the wire, on
   `session/start` and through `session/setApprovalMode` when the host reports
   another, so a warm host follows it: `default` and `acceptEdits` are
