@@ -56,7 +56,7 @@ import type {
   Todo
 } from '@boite/contracts';
 import {
-  RpcFailure,
+  RpcFailure, readyAgain, wasDropped,
   WsClient,
   type Client,
   type ClientState,
@@ -2415,13 +2415,15 @@ export class Store {
         pending = { id: Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(''), prompt, attachments: [...attachments], previewReferences: JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[], selectionVersion };
         this.#pendingSends.set(threadId, pending);
       }
-      await client.call('turns.start', {
-        threadId,
-        prompt,
-        clientRequestId: pending.id,
-        expectedSelectionVersion: selectionVersion,
-        ...(attachments.length > 0 ? { attachments } : {}),
-        ...(previewReferences.length > 0 ? { previewReferences } : {})
+      const sent = pending;
+      const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: sent.id, expectedSelectionVersion: selectionVersion,
+        ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
+      // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
+      await start().catch(async (error: unknown) => {
+        if (!wasDropped(error) || !(await readyAgain(client))) throw error;
+        await this.#reloading?.promise;
+        if (this.#client !== client || this.#pendingSends.get(threadId) !== sent) throw error;
+        return start();
       });
       this.#pendingSends.delete(threadId);
       return true;

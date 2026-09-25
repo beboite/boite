@@ -50,6 +50,14 @@ a remote socket the same way and drops it after 4 silent seconds without
 reconnecting, so the header stops saying Connected while the network is gone.
 A hidden page is not checked.
 
+A prompt whose socket went while it was being sent is not reported as an
+error at once. The failure carries `data.transport: 'dropped'`, the store waits
+up to 15 seconds for the connection to come back, then sends `turns.start`
+once more with the same `clientRequestId`. The core answers with the turn it
+already took, or starts it if the first request never arrived, and the
+composer clears as for any sent prompt. Only a refused retry, or a connection
+that does not come back in time, shows the error and keeps the text.
+
 Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
 so the clients of a restarted core do not all return at once. An attempt gets
 10 seconds to open and say hello, the next one 20, then 30, so a slow, lossy

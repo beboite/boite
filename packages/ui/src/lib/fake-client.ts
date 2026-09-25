@@ -72,7 +72,7 @@ import {
   type Usage,
 } from '@boite/contracts';
 import { decodedBytes } from './attachments';
-import { RpcFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
+import { RpcFailure, droppedFailure, type ClientState, type EventHandler, type ObservableClient } from './client';
 import { seedAccounts } from './fake-client/accounts-seed';
 import {
   DIFF_NEW,
@@ -432,7 +432,7 @@ export class FakeClient implements ObservableClient {
   drop(): void {
     if (this.#state !== 'ready') return;
     this.#setState('connecting');
-    this.#dropPending('connection closed');
+    this.#dropPending('connection closed', true);
   }
 
   /** The socket back and the hello answered, `#resubscribe` included. */
@@ -2778,12 +2778,12 @@ const ready = true;
     });
   }
 
-  #dropPending(message: string): void {
+  #dropPending(message: string, dropped = false): void {
     this.#speechRequests.clear();
     const pending = [...this.#pending];
     this.#pending.clear();
     for (const entry of pending) {
-      entry.reject(new RpcFailure({ code: RpcErrorCode.Internal, message }));
+      entry.reject(dropped ? droppedFailure(message) : new RpcFailure({ code: RpcErrorCode.Internal, message }));
     }
   }
 
