@@ -9,9 +9,12 @@
  * after it, once the first automatic update check (60 s, providers/updates.ts)
  * has read the providers' versions, started the jobs Worker and fetched the
  * registry metadata. Each reports the working set, the private bytes and the
- * thread count. The cores inherit this environment, so the check reads the
- * providers found on this machine's PATH, as an installed core would; set
- * BOITE_HOST_AGENTS=0 to resolve none. `--fresh-only` skips the 75 s wait.
+ * thread count. The cores get BOITE_HOST_AGENTS=0, so the check resolves no
+ * program and runs none of the agents installed on this machine: an agent's
+ * own updater can open a console window that windowsHide does not stop.
+ * BOITE_BENCH_HOST_AGENTS=1, set by a person and never by an agent, lets the
+ * check read the providers found on PATH, as an installed core would.
+ * `--fresh-only` skips the 75 s wait.
  *
  * Run: bun run bench/idle-rss.ts [--fresh-only]
  */
@@ -31,6 +34,18 @@ const DIST = join(CORE_DIR, 'dist');
 const BUNDLE = join(DIST, 'main.js');
 const EXE = join(DIST, 'boite-core.exe');
 const MB = 1024 * 1024;
+const HOST_AGENTS = process.env.BOITE_BENCH_HOST_AGENTS === '1';
+
+/**
+ * The environment a core under measure starts with: a fresh data directory, no
+ * telemetry, and no host agent unless BOITE_BENCH_HOST_AGENTS=1 asked for them.
+ */
+export function coreEnv(base: NodeJS.ProcessEnv, dataDir: string, hostAgents: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, BOITE_DATA_DIR: dataDir, BOITE_TELEMETRY_URL: '' };
+  if (hostAgents) delete env.BOITE_HOST_AGENTS;
+  else env.BOITE_HOST_AGENTS = '0';
+  return env;
+}
 
 interface Subject {
   label: string;
@@ -107,7 +122,7 @@ async function oneRun(live: Subject[]): Promise<RunReads> {
     if (isCore) dataDirs.push(dataDir);
     const proc = Bun.spawn({
       cmd: isCore ? [...subject.cmd, '--port', '0'] : subject.cmd,
-      env: isCore ? { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_TELEMETRY_URL: '' } : { ...process.env },
+      env: isCore ? coreEnv(process.env, dataDir, HOST_AGENTS) : { ...process.env },
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
@@ -140,7 +155,11 @@ async function main(): Promise<void> {
   const all = subjects();
   const live = all.filter((subject) => subject.missing === null);
   const reads = new Map<string, Map<string, Sample[]>>();
-  process.stdout.write(`BOITE_HOST_AGENTS=${process.env.BOITE_HOST_AGENTS ?? '(unset: the providers on PATH are read)'}\n`);
+  process.stdout.write(
+    HOST_AGENTS
+      ? 'BOITE_BENCH_HOST_AGENTS=1: the cores read the providers on PATH\n'
+      : 'BOITE_HOST_AGENTS=0: the cores resolve no host agent\n',
+  );
 
   for (let run = 0; run < RUNS; run += 1) {
     const measured = await oneRun(live);
@@ -176,4 +195,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (import.meta.main) await main();

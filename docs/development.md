@@ -211,8 +211,9 @@ BOITE_ECHO=1 bun run dev:core
 `BOITE_HOST_AGENTS=0` keeps a core away from the agents installed on the
 machine: the shipped providers still load but resolve no program, so no
 version check, quota read or model probe runs the developer's own CLIs. The
-test harness, the end to end suite and the bench set it; an opt-in live test
-(`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back off.
+test harness, the end to end suite, `bun run bench` and `bench/idle-rss.ts` set
+it; an opt-in live test (`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back
+off.
 
 ## Checks and tests
 
@@ -351,6 +352,7 @@ each one is skipped unless its variable is set. Run them from
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts` | the managed install for real: 468 MB from Google, the sha256 and every file size checked, `initialize` answered. No sign-in |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts` | the whole Google sign-in, in your browser, then one turn. Only a person runs this one |
 | `BOITE_BENCH_CLAUDE=1` | `bun run bench` | the Claude turn row of the bench |
+| `BOITE_BENCH_HOST_AGENTS=1` | `bun run bench/idle-rss.ts` | the steady idle point with the update check reading the agents installed on the machine, as a user's core would |
 
 One more is opt-in for a different reason. `BOITE_E2E_GUARD=1` runs
 `test/guard.e2e.test.ts`, which opens a real window and steals the keyboard focus

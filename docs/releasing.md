@@ -286,7 +286,9 @@ figures in the release notes come from the build being released and carry its
 date. The idle bench reports two points for each process: `fresh`, 4.5 s after
 the spawn, and `steady`, 75 s after it, once the first automatic update check
 has run. Quote both, with the working set, private bytes and thread count it
-prints. Run it without `BOITE_HOST_AGENTS=0` for the notes, so the update check
-reads the providers installed on the machine as a user's core would, and say
-which providers those were; with it set, the check finds none and the steady
-point measures an empty check.
+prints. The bench starts its cores with `BOITE_HOST_AGENTS=0`, so by default
+the check finds no provider and the steady point measures an empty check. For
+the notes, a person runs it with `BOITE_BENCH_HOST_AGENTS=1`, so the update
+check reads the providers installed on the machine as a user's core would, and
+says which providers those were. An agent never sets it: the check runs each
+agent's `--version`, and an agent's own updater can open a console window.

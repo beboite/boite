@@ -61,7 +61,7 @@ jobs:
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
       - run: bun scripts/check-docs.ts
-      - run: bun test scripts/ci
+      - run: bun test scripts/ci ./bench
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
       - run: bun scripts/ci/translations.ts
       - run: bun run check:architecture
