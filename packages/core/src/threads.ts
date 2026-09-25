@@ -183,6 +183,21 @@ interface PendingQuestion {
   resolve: (answer: QuestionAnswer | null) => void;
 }
 
+/**
+ * How long a stopped turn may take to settle. Past `ms` the core ends the
+ * thread's processes, which is what makes the ACP, pi and Codex sessions see
+ * their agent gone; past `ms + forceMs` it settles the turn itself. Mutable so
+ * a test can shorten it.
+ */
+export const STOP_DEADLINE = { ms: 10_000, forceMs: 2_000 };
+export const STOP_DEADLINE_ERROR = 'The agent did not stop in time; its processes were ended.';
+
+interface StopDeadline {
+  handle: TurnHandle;
+  forced: { promise: Promise<TurnResult>; resolve: (result: TurnResult) => void };
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 export class ThreadStore {
   /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
   createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
@@ -199,6 +214,8 @@ export class ThreadStore {
     return thread;
   }
   private readonly handles = new Map<ThreadId, TurnHandle>();
+  /** Per running turn: what settles it when its driver never answers a stop. */
+  private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
   private readonly steering = new Set<ThreadId>();
   private readonly permissions = new Map<RequestId, PendingPermission>();
   private readonly questions = new Map<RequestId, PendingQuestion>();
@@ -817,7 +834,32 @@ export class ThreadStore {
     this.clearPermissionsOf(threadId);
     this.clearQuestionsOf(threadId);
     handle.stop();
+    this.armStopDeadline(threadId, handle);
     return true;
+  }
+
+  /**
+   * A driver whose agent ignores its cancel would leave the thread running for
+   * good, its scheduler slot taken and a project removal waiting on it. Kill
+   * first: settling the turn alone would leave the driver's session busy, and
+   * the next turn would queue behind the wedged one.
+   */
+  private armStopDeadline(threadId: ThreadId, handle: TurnHandle): void {
+    const deadline = this.stopDeadlines.get(threadId);
+    if (deadline === undefined || deadline.handle !== handle || deadline.timer !== null) return;
+    deadline.timer = setTimeout(() => {
+      if (this.handles.get(threadId) !== handle) return;
+      this.core.log('warn', `thread ${threadId} did not stop within ${STOP_DEADLINE.ms} ms: ending its processes`);
+      this.core.procs.killTree(threadId);
+      releaseThread(threadId);
+      deadline.timer = setTimeout(() => {
+        if (this.handles.get(threadId) !== handle) return;
+        const thread = this.core.journal.getThread(threadId);
+        deadline.forced.resolve({ status: 'stopped', sessionId: thread?.sessionId ?? null, usage: null, error: STOP_DEADLINE_ERROR });
+      }, STOP_DEADLINE.forceMs);
+      deadline.timer.unref?.();
+    }, STOP_DEADLINE.ms);
+    deadline.timer.unref?.();
   }
 
   markQueuedStopped(turnId: TurnId): void {
@@ -959,12 +1001,18 @@ export class ThreadStore {
       const driver = getDriver(provider.protocol);
       const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
       this.handles.set(threadId, handle);
-      result = await handle.done;
+      const forced = Promise.withResolvers<TurnResult>();
+      this.stopDeadlines.set(threadId, { handle, forced, timer: null });
+      // A `done` that settles after a forced stop is ignored.
+      result = await Promise.race([handle.done, forced.promise]);
       if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
     } finally {
       this.handles.delete(threadId);
+      const deadline = this.stopDeadlines.get(threadId);
+      if (deadline?.timer) clearTimeout(deadline.timer);
+      this.stopDeadlines.delete(threadId);
     }
 
     if (this.core.journal.isClosed()) return;
