@@ -447,6 +447,7 @@
         items={menuItems}
         onpick={(id) => launch(id as SurfaceKind)}
         placement="bottom"
+        align="end"
         variant="ghost"
         label={strings.rightPanel.newSurface}
         testid="panel-add"
