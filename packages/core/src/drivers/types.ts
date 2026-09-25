@@ -80,6 +80,15 @@ export interface TurnContext {
   attachments: ImageAttachment[];
   sessionId: string | null;
   /**
+   * This turn's prompt and images as a fresh session needs them: the
+   * conversation so far carried in front of the request, the way the core
+   * writes the first turn of a new session generation. For a driver that finds
+   * out only once its agent is up that it cannot resume `sessionId`, and opens
+   * a new session instead. Built on demand; it throws what the core's own
+   * continuation throws (historical images for an agent that takes none).
+   */
+  continuation?(): { prompt: string; attachments: ImageAttachment[] };
+  /**
    * What the finished turns of this agent session already used, for an agent
    * whose running totals survive a resume. Absent or zero on a fresh session.
    */
@@ -150,11 +159,12 @@ export interface TurnResult {
   promptCache?: PromptCacheLife | null;
   /**
    * The agent no longer has the native session the turn asked to resume (a
-   * transcript cleaned up, deleted or never copied), and the turn wrote
-   * nothing. Only that specific refusal sets it, never a transport error or a
-   * crash. The core then starts a fresh session carrying the journal's history
-   * and runs the turn again, once, unless the user stopped it: a stopped turn
-   * reports `stopped` and is never run again.
+   * transcript cleaned up, deleted or never copied, an ACP `session/load`
+   * refused), and the turn wrote nothing. Only that specific refusal sets it,
+   * never a transport error or a crash. The core then forgets the session id,
+   * starts a new session generation carrying the journal's history and runs
+   * the turn again, once, unless the user stopped it: a stopped turn reports
+   * `stopped` and is never run again.
    */
   sessionLost?: boolean;
 }

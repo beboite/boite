@@ -42,15 +42,16 @@ finite or below zero writes nothing.
 | Muse Code | `usedTokens` in `session/contextUsage` | `windowTokens` when reported | completed `compaction` items, with `tokensBefore` and `tokensAfter` |
 | Antigravity CLI | the last `agent_response` step's `usage` in the turn, input plus cache reads plus output, once at the end | not reported | none, compaction is refused |
 | pi | `contextUsage.tokens` of `get_session_stats`, read once after each turn; nothing right after a compaction, where pi reports null until its next answer | `contextUsage.contextWindow` | `compaction_end` of an automatic compaction (`threshold` or `overflow`), with `tokensBefore` and `estimatedTokensAfter`; the manual `compact` response, with the same two |
-| OpenCode, Antigravity, Grok | none yet | | none |
+| OpenCode, Antigravity, Grok | `used` in the last ACP `usage_update` of the turn, once at the end | `size` when above zero | none |
 
 Codex's count includes the last request's output. When `totalTokens` is absent,
 the driver adds the reported input and output counts. Context notifications
 arriving after a turn completes are retained while its session stays warm.
 Cached input is a subset of input, so the segmented bar subtracts it from the
 uncached input segment. Counts remain the last
-reported reading, not a prediction of the next request. ACP context updates
-are not read yet; an unknown reading never becomes a guessed percentage.
+reported reading, not a prediction of the next request. An ACP turn whose
+agent sent no `usage_update` leaves the meter as it was; an unknown reading
+never becomes a guessed percentage.
 
 ## Manual compaction
 

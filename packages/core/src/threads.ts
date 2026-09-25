@@ -1087,6 +1087,8 @@ export class ThreadStore {
     if (current === null) return;
     const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
     if (current.archived || !sameSession) releaseThread(threadId);
+    // A lost session was already forgotten by `dropLostSession` above, which
+    // moved the generation on: nothing here bumps it a second time.
     const next: ThreadSummary = {
       ...current,
       sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
@@ -1453,20 +1455,31 @@ export class ThreadStore {
     };
 
     const input = this.lastUserInput(threadId, turn.id);
-    const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
-      ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
-      : input;
+    const carry = (): { prompt: string; attachments: Attachment[] } =>
+      continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part));
+    const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0 ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
-    // Both are taken once per turn: a second context for the same turn gets what the first one took.
-    const command = prepared.prompt.trimStart().startsWith('/');
-    carried.deferred ??= turn.execution?.operation || command ? '' : this.takeDeferred(threadId);
-    carried.letters ??= turn.execution?.operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
+    const operation = turn.execution?.operation;
+    const slash = (prompt: string): boolean => prompt.trimStart().startsWith('/');
+    // Both are taken once per turn: a second context for the same turn (the
+    // core's retry on a fresh session) and a driver's `continuation` get what
+    // the first one took.
+    carried.deferred ??= operation || slash(prepared.prompt) ? '' : this.takeDeferred(threadId);
+    carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
+    const deferred = carried.deferred;
+    const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters;
+    const compose = (body: string, sessionId: string | null): string =>
+      ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id)) + deferred + body + tail + this.askInstructions({ ...thread, sessionId }, provider, turn, body);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || command ? '' : this.core.brain.instructions(provider.id)) + carried.deferred + prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters) + this.askInstructions(thread, provider, turn, prepared.prompt),
+      prompt: compose(prepared.prompt, thread.sessionId),
+      continuation: () => {
+        const fresh = prepareAttachments(this.core.dataDir, carry());
+        return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
+      },
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
