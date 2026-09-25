@@ -1328,10 +1328,31 @@ fn quit<R: Runtime>(app: &AppHandle<R>) {
     app.exit(0);
 }
 
+/// The tray menu's items, kept so the UI can relabel them in its language.
+struct TrayMenu<R: Runtime> {
+    show: MenuItem<R>,
+    quit: MenuItem<R>,
+}
+
+/// The tray menu is native, and the sentences live in the UI's catalogue: the
+/// UI sends the two labels at start and on every language change. English
+/// until then. A shell with no tray, a test shell say, has nothing to relabel.
+#[tauri::command]
+fn tray_labels(app: AppHandle, webview: Webview, show: String, quit: String) -> Result<(), String> {
+    browser::only_main(&webview)?;
+    if show.trim().is_empty() || quit.trim().is_empty() {
+        return Err(format!("tray labels must not be empty: show {show:?}, quit {quit:?}"));
+    }
+    let Some(menu) = app.try_state::<TrayMenu<tauri::Wry>>() else { return Ok(()) };
+    menu.show.set_text(show).map_err(|error| format!("the tray's Show item kept its label: {error}"))?;
+    menu.quit.set_text(quit).map_err(|error| format!("the tray's Quit item kept its label: {error}"))
+}
+
 fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let leave = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &leave])?;
+    app.manage(TrayMenu { show, quit: leave });
 
     let mut builder = TrayIconBuilder::with_id("boite")
         .tooltip(product_label(app, channel))
@@ -1425,6 +1446,7 @@ pub fn run() {
             quota_window::quota_window,
             window_material,
             window_material_supported,
+            tray_labels,
             browser::browser_create,
             browser::browser_navigate,
             browser::browser_back,

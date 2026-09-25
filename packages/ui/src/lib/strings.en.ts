@@ -1283,6 +1283,9 @@ export const strings = {
   quotas: {
     trayHeading: 'Usage',
     trayIntro: 'Subscription limits',
+    /** The tray icon's right-click menu. */
+    trayShow: 'Show',
+    trayQuit: 'Quit',
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Off',
     noReading: 'Unavailable',

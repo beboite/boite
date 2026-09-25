@@ -1259,6 +1259,8 @@ export const fr: Translation = {
 
   quotas: {
     trayHeading: 'Consommation',
+    trayShow: 'Afficher',
+    trayQuit: 'Quitter',
     trayIntro: "Limites d'abonnement",
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Désactivé',
