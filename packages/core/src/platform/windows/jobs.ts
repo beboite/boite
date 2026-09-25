@@ -261,6 +261,16 @@ export function setProcessLimits(next: ProcessLimits): void {
   for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
 }
 
+/** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
+export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
+  const api = native;
+  if (api === null || globalJob === 0) return null;
+  const buffer = new Uint8Array(8);
+  if (!api.queryJobInfo(globalJob, CLASS_CPU_RATE_CONTROL, buffer)) return null;
+  const view = new DataView(buffer.buffer);
+  return { flags: view.getUint32(0, true), rate: view.getUint32(4, true) };
+}
+
 export function jobsCapability(): TraceCapability {
   const os = 'windows' as const;
   if (native === null) {
@@ -389,12 +399,16 @@ function ensureNative(): Native | null {
 
 function applyCpuCap(api: Native, job: number): void {
   const percent = limits.agentCpuCapPercent;
-  if (!(percent > 0) || percent >= 100) return;
   const buffer = new Uint8Array(8);
-  const view = new DataView(buffer.buffer);
-  view.setUint32(0, CPU_RATE_CONTROL_ENABLE | CPU_RATE_CONTROL_HARD_CAP, true);
-  // CpuRate is in hundredths of a percent of the whole machine.
-  view.setUint32(4, Math.max(1, Math.round(percent * 100)), true);
+  // 0 and 100 mean no cap. They are still written, as all zeros: a cap set
+  // earlier stays on the job until something replaces it, and zeros on a job
+  // that never had one succeed and change nothing.
+  if (percent > 0 && percent < 100) {
+    const view = new DataView(buffer.buffer);
+    view.setUint32(0, CPU_RATE_CONTROL_ENABLE | CPU_RATE_CONTROL_HARD_CAP, true);
+    // CpuRate is in hundredths of a percent of the whole machine.
+    view.setUint32(4, Math.max(1, Math.round(percent * 100)), true);
+  }
   api.setJobInfo(job, CLASS_CPU_RATE_CONTROL, buffer);
 }
 

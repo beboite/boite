@@ -3,6 +3,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
+import { cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -163,6 +164,27 @@ describeWindows('windows job objects', () => {
     const killed = await client.call('resources.killTree', { threadId });
     expect(killed.killed).toBeGreaterThan(0);
     await until('the detached ping to be killed', () => !isRunning(ping?.pid as number), 2000);
+  }, 30000);
+
+  test('a CPU cap set to 0 or 100 at runtime lifts the cap the global job already had', async () => {
+    const client = await harness.connect();
+    const threadId = 'cpu-cap';
+    // A process in a thread job is what builds the global job the cap lives on.
+    const child = harness.core.procs.spawn(threadId, 'ping', ['-n', '30', '127.0.0.1']);
+    expect(cpuRateOfGlobalJob()).not.toBeNull();
+
+    const rateAfter = async (percent: number): Promise<{ flags: number; rate: number } | null> => {
+      await client.call('settings.set', { agentCpuCapPercent: percent });
+      return cpuRateOfGlobalJob();
+    };
+    // ENABLE | HARD_CAP, and the rate in hundredths of a percent.
+    expect(await rateAfter(3)).toEqual({ flags: 0x5, rate: 300 });
+    expect(await rateAfter(0)).toEqual({ flags: 0, rate: 0 });
+    expect(await rateAfter(40)).toEqual({ flags: 0x5, rate: 4000 });
+    expect(await rateAfter(100)).toEqual({ flags: 0, rate: 0 });
+
+    harness.core.procs.killTree(threadId);
+    await child.exited;
   }, 30000);
 });
 
