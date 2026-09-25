@@ -492,6 +492,13 @@ function handle(message: Record<string, unknown>): void {
         log('extension command handled');
         return;
       }
+      if (text.includes('[preflight]')) {
+        // A preflight that never ends (a before_agent_start handler, an auth
+        // check on a dead network): real pi holds the prompt's answer until it
+        // is over, and stays idle, so it still answers `abort` and `get_state`.
+        log('preflight never ends');
+        return;
+      }
       streaming = true;
       deaf = text.includes('[deaf]');
       noClear = text.includes('[noclear]');

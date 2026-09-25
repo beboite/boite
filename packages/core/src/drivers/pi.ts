@@ -342,6 +342,13 @@ class PiTurn {
   pendingError: string | null = null;
   /** Set once the stop deadline runs for this turn. */
   stopDeadline = false;
+  /**
+   * Set while `runTurn` waits on pi's answer to a command of its own: the
+   * setup, the prompt, the state check after it. pi holds the prompt's answer
+   * through its preflight, so a stop there decides the turn and nothing else
+   * ends it.
+   */
+  awaitingPi = false;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -620,19 +627,28 @@ class PiSession {
    * signal, a blocked event loop) is closed: the turn ends stopped, then the
    * process and every tool it started go. Stopped first, or the child's close
    * would fail the turn.
+   *
+   * The deadline runs to the end of the turn, not to its decision: a stop
+   * during pi's prompt preflight is decided by `get_state` while the prompt
+   * still has no answer, and closing pi is what rejects that command.
    */
   private armStopDeadline(turn: PiTurn): void {
     if (turn.stopDeadline) return;
     turn.stopDeadline = true;
     const ms = stopDeadlineMs;
     const timer = setTimeout(() => {
-      if (turn.decided) return;
-      turn.ctx.log('warn', `pi: the agent did not settle within ${ms / 1000} s of abort, closing it`);
+      if (turn.settled || (turn.decided && !turn.awaitingPi)) return;
+      turn.ctx.log(
+        'warn',
+        turn.decided
+          ? `pi: the agent did not answer within ${ms / 1000} s of abort, closing it`
+          : `pi: the agent did not settle within ${ms / 1000} s of abort, closing it`,
+      );
       turn.settleRun();
       this.drop();
     }, ms);
     timer.unref?.();
-    void turn.finished.then(() => {
+    void turn.done.then(() => {
       clearTimeout(timer);
     });
   }
@@ -686,6 +702,7 @@ class PiSession {
     turn.noteSession(sessionId);
     this.current = turn;
     this.steered = false;
+    turn.awaitingPi = true;
     try {
       await this.align(turn.ctx, peer);
       if (turn.isStopped) {
@@ -709,6 +726,7 @@ class PiSession {
         else await this.settleIfIdle(turn, peer);
       }
     } catch (error) {
+      turn.awaitingPi = false;
       // A child that died takes the pipe with it, and its exit says more than
       // "the command failed": give it a moment to be reported.
       const code = await this.exitWithin(EXIT_GRACE_MS);
@@ -717,6 +735,7 @@ class PiSession {
       this.endTurn(turn, true);
       return;
     }
+    turn.awaitingPi = false;
 
     await turn.finished;
     await this.readContext(turn, peer);

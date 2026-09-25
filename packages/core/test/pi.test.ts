@@ -735,6 +735,23 @@ describe('pi driver', () => {
     }
   });
 
+  test('a stop while pi never answers the prompt ends the turn stopped at the deadline', async () => {
+    setPiStopDeadlineForTests(300);
+    try {
+      const client = await startCore();
+      const threadId = await piThread(client);
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: '[preflight]' });
+      await waitFor(() => fakeLog().includes('preflight never ends'));
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+      expect((await client.call('threads.get', { threadId })).status).not.toBe('running');
+    } finally {
+      setPiStopDeadlineForTests(null);
+    }
+  });
+
   test('a refused clear_queue after a steer still ends the turn stopped', async () => {
     const client = await startCore();
     const threadId = await piThread(client);
@@ -825,11 +842,35 @@ describe('pi driver', () => {
   test('core shutdown during a turn pi never settles ends it before the journal closes', async () => {
     const client = await startCore();
     const threadId = await piThread(client);
-    await client.call('turns.start', { threadId, prompt: '[deaf]' });
-    await waitFor(() => fakeLog().includes('waiting forever'));
-    // Nothing may write to the closed journal once the child's close lands.
-    await stopCore();
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const finished: { status: string; error: string | null }[] = [];
+    const logs: string[] = [];
+    harness!.core.bus.onAny((name, payload) => {
+      if (name === 'core.log') logs.push((payload as RpcEvents['core.log']).message);
+      if (name !== 'turn.finished') return;
+      const turn = payload as RpcEvents['turn.finished'];
+      if (turn.threadId === threadId) finished.push({ status: turn.status, error: turn.error });
+    });
+    const uncaught: string[] = [];
+    const onUncaught = (error: unknown): void => {
+      uncaught.push(error instanceof Error ? error.message : String(error));
+    };
+    process.on('uncaughtException', onUncaught);
+    process.on('unhandledRejection', onUncaught);
+    try {
+      await client.call('turns.start', { threadId, prompt: '[deaf]' });
+      await waitFor(() => fakeLog().includes('waiting forever'));
+      // Nothing may write to the closed journal once the child's close lands.
+      await stopCore();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      process.off('uncaughtException', onUncaught);
+      process.off('unhandledRejection', onUncaught);
+    }
+    // The drain stops the turn, pi ignores the abort, and the driver shutdown
+    // ends it stopped while the bus and the journal are still open.
+    expect(finished).toEqual([{ status: 'stopped', error: null }]);
+    expect(uncaught).toEqual([]);
+    expect(logs.filter((line) => /closed database|database is closed/i.test(line))).toEqual([]);
   }, 20000);
 
   test('core shutdown before the stop deadline keeps a stopped pi turn stopped', async () => {

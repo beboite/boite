@@ -513,8 +513,10 @@ stdio of `pi --mode rpc`.
   sends `get_state` after each accepted prompt and ends the turn when
   `isStreaming` is false.
 - Stop sends `abort`, after `clear_queue` when coordination steered the run. A
-  pi that has not settled 15 s later is closed and the turn ends stopped. A
-  stopped turn also ends stopped when the core shuts down before then.
+  pi that has not settled 15 s later is closed and the turn ends stopped. The
+  same holds for a pi still in its prompt preflight, which answers `abort` and
+  `get_state` but holds the answer to `prompt`. A stopped turn also ends
+  stopped when the core shuts down before then.
   Closing a session ends the thread's whole process tree on Windows, so a dev
   server a tool left running goes with it. On Linux and macOS only the direct
   child is killed.
