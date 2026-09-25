@@ -484,6 +484,15 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - `threads.compact` sends `session/compact`; a `noop` answer fails the turn
   with Muse's reason. `session/todoListChanged` fills the thread's tasks, a
   cancelled item left out, and `session/contextUsage` feeds the context meter.
+- Each startup step, `initialize` and then `session/start` or `session/resume`,
+  has 90 s. A host that misses it is closed and the turn fails with the step's
+  name. A stop during startup closes the host at once and ends the turn
+  stopped, and a stop that lands before `turn/start` or `session/compact` sends
+  neither, so a stopped turn never reaches the model.
+- `session/closed` retires the host, idle or not. The turn it interrupts fails
+  with Muse's reason, and the next turn resumes the session on a new host.
+- Closing the host ends the thread's whole process tree on Windows. On Linux
+  and macOS only the direct child is killed.
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
