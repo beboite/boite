@@ -98,6 +98,12 @@ release-specific key. Failed or interrupted jobs do not save an incomplete cache
 that GitHub would keep immutable.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
+After the build, `scripts/ci/budgets.ts` fails the job when the UI's entry
+chunk, the whole UI without its `.br` and `.gz` copies, or the core's
+`dist/main.js` grows past its limit in `scripts/ci/budgets.json`. The limits
+sit about 10% above the sizes measured on 2026-09-25 (314 KB, 2298 KB and
+539 KB). Raise one in the change that explains the growth. Timings are not
+gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
