@@ -24,6 +24,7 @@ import type { Core } from '../core.ts';
 import { agentsDirPath, appDataPath, browserNoopPath, currentOs, homePath } from '../paths.ts';
 import { InstallManager } from './install.ts';
 import { isNpmSpec, resolveNpm } from './npm.ts';
+import { forgetWhich, which } from './which.ts';
 import { notFound, refused } from '../errors.ts';
 import antigravityShipped from './shipped/antigravity.json';
 import antigravityCliShipped from './shipped/antigravity-cli.json';
@@ -688,7 +689,7 @@ export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
   for (const candidate of profile.executable) {
     const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
-      const found = Bun.which(candidate.value);
+      const found = which(candidate.value);
       if (found !== null) return { executable: found, prefix: [], shown: found, updateEnv };
     } else if (candidate.kind === 'file') {
       try {
@@ -718,7 +719,7 @@ function detectResolves(profile: OsProfile, agentsDir: string, dataDir: string):
   if (profile.detect.file !== undefined && !existsSync(substituteHome(profile.detect.file, agentsDir, dataDir))) {
     return false;
   }
-  if (profile.detect.command !== undefined && Bun.which(profile.detect.command) === null) return false;
+  if (profile.detect.command !== undefined && which(profile.detect.command) === null) return false;
   return true;
 }
 
@@ -774,6 +775,8 @@ export class ProviderRegistry {
   }
 
   load(): ProviderLoadResult {
+    // A reload is how the user says a program moved: look everything up again.
+    forgetWhich();
     const entries = new Map<ProviderId, LoadedProvider>();
     const rejected: ProviderRejected[] = [];
 
@@ -918,6 +921,7 @@ export function registerProviderMethods(core: Core): void {
       // own CLI: its default account has to exist before the clients hear of it,
       // or they start a sign-in nobody needs. A failure here must not reach the
       // installer, which would take it for a failed install and delete the release.
+      forgetWhich();
       try { core.accounts.ensureDefaults(); }
       catch (error) { core.log('error', `default accounts after an install: ${error instanceof Error ? error.message : String(error)}`); }
       core.bus.emit('providers.updated', core.providers.list());

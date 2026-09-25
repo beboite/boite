@@ -5,6 +5,7 @@ import type { Core } from '../core.ts';
 import { forgetProbes, releaseThread } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import { profileFor, resolveCommand } from './loader.ts';
+import { forgetWhich } from './which.ts';
 
 /** First check after the core is up, so nothing reaches the network at start. */
 const FIRST_CHECK_MS = 60_000;
@@ -356,6 +357,7 @@ export class HarnessUpdates {
       });
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
+      forgetWhich();
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now() });
