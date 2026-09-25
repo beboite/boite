@@ -88,5 +88,9 @@ of the first frame. In a component, read `strings.x.y` in the markup or in a
    name and preloads it on a device that speaks the language.
 3. Name it in `settings.languageNames`, in every catalogue, in its own
    language: the list is what the picker draws.
+4. Translate the too-old-browser sentence in the `notices` object of the
+   inline script in `packages/ui/index.html`. It runs when the app failed to
+   parse, so no catalogue ever loads; `src/lib/boot-notice.test.ts` fails for a
+   language of `LOCALES` that still gets the English sentence.
 
 The picker, the tour, the detection and the fallback need nothing else.
