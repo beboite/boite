@@ -17,12 +17,18 @@ const RUNTIME = {
   sha256: '49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a',
 };
 
+function megabytes(bytes: number): number {
+  return Math.round(bytes / 1_000_000);
+}
+
 export class SpeechLocal {
   readonly root: string;
   installing = false;
   downloadedBytes = 0;
   totalBytes = 0;
   error: string | null = null;
+  /** How long a download may receive nothing before it gives up and keeps its bytes. A test seam. */
+  stallMs = 60_000;
   private controller: AbortController | null = null;
   private pending: Promise<void> | null = null;
   readonly canInstallRuntime = process.platform === 'win32' && process.arch === 'x64';
@@ -44,12 +50,16 @@ export class SpeechLocal {
       try { return statSync(path).isFile(); } catch { return false; }
     });
   }
+  /** A retry after a failed model download keeps the runtime it already unpacked. */
+  private needsRuntime(): boolean {
+    return this.canInstallRuntime && !existsSync(join(this.root, 'runtime', 'whisper-cli.exe'));
+  }
   start(): void {
     if (this.installing) throw refused('speech: a download is already running');
     this.installing = true;
     this.error = null;
     this.downloadedBytes = 0;
-    this.totalBytes = MODEL.bytes + (this.canInstallRuntime ? RUNTIME.bytes : 0);
+    this.totalBytes = MODEL.bytes + (this.needsRuntime() ? RUNTIME.bytes : 0);
     this.controller = new AbortController();
     this.pending = this.install(this.controller.signal).catch(error => {
       this.error = this.controller?.signal.aborted ? null : String(error.message ?? error);
@@ -67,16 +77,75 @@ export class SpeechLocal {
     rmSync(join(this.root, 'runtime-staging'), { recursive: true, force: true });
     this.error = null;
   }
+  /**
+   * One download into `${target}.part`, then a rename once size and SHA-256
+   * match. A connection that drops or goes quiet for `stallMs` keeps the part:
+   * the next install hashes it again and asks the server for the rest. A wrong
+   * size, a wrong digest or a cancel starts over.
+   */
   private async download(spec: typeof MODEL, target: string, signal: AbortSignal): Promise<void> {
     const part = `${target}.part`;
-    let fd: number | null = openSync(part, 'w', 0o600);
-    const hash = createHash('sha256');
+    let hash = createHash('sha256');
     let bytes = 0;
-    try {
-      const response = await fetch(spec.url, { signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]) });
-      if (!response.ok || !response.body) throw new Error(`speech download: HTTP ${response.status}`);
-      for await (const chunk of response.body) {
+    let held = 0;
+    try { held = statSync(part).size; } catch { /* nothing to resume */ }
+    if (held > 0 && held < spec.bytes) {
+      for await (const chunk of Bun.file(part).stream()) {
         signal.throwIfAborted();
+        hash.update(chunk);
+        bytes += chunk.length;
+      }
+      this.downloadedBytes += bytes;
+    } else rmSync(part, { force: true });
+
+    let fd: number | null = null;
+    let keep = false;
+    const stall = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => stall.abort(), this.stallMs); };
+    const at = () => `at ${megabytes(bytes)} of ${megabytes(spec.bytes)} MB`;
+    // What the network threw, in words that say the bytes so far are kept.
+    const lost = (): Error => {
+      keep = true;
+      return new Error(stall.signal.aborted
+        ? `speech download: no data for ${Math.round(this.stallMs / 1000)} s ${at()}; install again to resume`
+        : `speech download: the connection dropped ${at()}; install again to resume`);
+    };
+    try {
+      arm();
+      let response: Response;
+      try {
+        response = await fetch(spec.url, {
+          signal: AbortSignal.any([signal, stall.signal]),
+          headers: bytes > 0 ? { range: `bytes=${bytes}-`, 'accept-encoding': 'identity' } : { 'accept-encoding': 'identity' },
+        });
+      } catch (error) {
+        throw signal.aborted ? error : lost();
+      }
+      if (response.status === 206) {
+        const from = /^bytes (\d+)-/.exec(response.headers.get('content-range') ?? '')?.[1];
+        if (from === undefined || Number(from) !== bytes) throw new Error(`speech download: the server resumed at byte ${from ?? 'unknown'} instead of ${bytes}`);
+      } else if (response.ok) {
+        // The whole file again: a server that does not resume.
+        this.downloadedBytes -= bytes;
+        bytes = 0;
+        hash = createHash('sha256');
+      } else {
+        keep = response.status === 408 || response.status === 429 || response.status >= 500;
+        throw new Error(`speech download: HTTP ${response.status}`);
+      }
+      if (!response.body) throw new Error(`speech download: HTTP ${response.status} with no body`);
+      fd = openSync(part, bytes > 0 ? 'a' : 'w', 0o600);
+      const reader = response.body.getReader();
+      for (;;) {
+        let read: Awaited<ReturnType<typeof reader.read>>;
+        try { read = await reader.read(); }
+        catch (error) { throw signal.aborted ? error : lost(); }
+        signal.throwIfAborted();
+        if (stall.signal.aborted) throw lost();
+        if (read.done) break;
+        arm();
+        const chunk = read.value;
         bytes += chunk.length;
         if (bytes > spec.bytes) throw new Error('speech download: file exceeds expected size');
         hash.update(chunk);
@@ -89,15 +158,17 @@ export class SpeechLocal {
       renameSync(part, target);
     } catch (error) {
       try { if (fd !== null) closeSync(fd); }
-      finally { rmSync(part, { force: true }); }
+      finally { if (!keep || signal.aborted) rmSync(part, { force: true }); }
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
   private async install(signal: AbortSignal): Promise<void> {
     mkdirSync(this.root, { recursive: true });
     const free = freeBytesAt(this.root);
     if (free !== null && free < MODEL.bytes + RUNTIME.bytes * 4 + 256 * 1024 * 1024) throw refused('speech: at least 500 MB of free space is required for the download');
-    if (this.canInstallRuntime) {
+    if (this.needsRuntime()) {
       const archive = join(this.root, 'runtime.zip');
       const staging = join(this.root, 'runtime-staging');
       try {
@@ -137,7 +208,8 @@ export async function transcribeLocal(core: Core, local: SpeechLocal, audio: Uin
     signal.throwIfAborted();
     child = core.procs.spawn(id, config.executable || local.executable, [
       '-m', config.modelPath || local.model, '-f', join(dir, 'input.wav'),
-      '-l', config.language || 'auto', '-t', '4', '-ng', '-nt', '-otxt', '-of', join(dir, 'result'),
+      // No '-t': whisper-cli takes min(4, cores) itself, which a 2-core machine needs.
+      '-l', config.language || 'auto', '-ng', '-nt', '-otxt', '-of', join(dir, 'result'),
     ], { cwd: dir });
     signal.addEventListener('abort', abort, { once: true });
     // Drain both pipes without keeping raw transcripts or diagnostics in the journal.
