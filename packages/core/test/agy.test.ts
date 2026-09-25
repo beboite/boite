@@ -388,7 +388,10 @@ describe('agy driver', () => {
 
     const refused = client.call('providers.probe', { providerId: 'agy-fake', accountId, refresh: true });
     await waitFor(() => linesStarting('models').length === 2);
+    // A finished login announces its account whatever the status reads; a plain
+    // check that finds the same status is no change and leaves the probe alone.
     await client.call('accounts.check', { accountId });
+    harness!.core.accounts.check(accountId, true);
     await expect(refused).rejects.toThrow(/changed during discovery/);
   });
 
