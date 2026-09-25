@@ -1283,6 +1283,7 @@ export const fr: Translation = {
     windowHours: '{hours} heures',
     windowWeekly: 'Hebdomadaire',
     windowMonthly: 'Mensuelle',
+    windowCredits: 'Crédits',
     checked: 'Mis à jour {time}',
     stale: 'Dernière lecture réussie',
     empty: "Connectez un fournisseur pour voir ses limites d'abonnement.",
@@ -1434,6 +1435,7 @@ export const fr: Translation = {
   },
 
   effortLevels: {
+    none: 'Aucun',
     off: 'Désactivé',
     minimal: 'Minimal',
     low: 'Faible',

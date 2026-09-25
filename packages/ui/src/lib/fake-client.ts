@@ -2001,6 +2001,8 @@ const ready = true;
       windows: this.#quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && this.#quotaEnabled[account.id] !== true ? [] : [
         { id: 'primary', label: '5 hours', usedPercent: [32, 87, 14, 48, 71, 6, 23, 40][index % 8]!, resetsAt: Date.now() + (1 + index % 4) * 3600_000 },
         { id: 'secondary', label: 'Weekly', usedPercent: [61, 94, 38, 27, 55, 12, 73, 66][index % 8]!, resetsAt: Date.now() + (1 + index % 6) * 86400_000 },
+        // Claude also reports a weekly window per model, which the core names `Weekly · <model>`.
+        ...(account.providerId === 'claude' ? [{ id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 44, resetsAt: Date.now() + 3 * 86400_000 }] : []),
       ],
     }));
   }

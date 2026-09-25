@@ -68,12 +68,22 @@ export function levelName(level: { id: string; label: string }): string {
   return typeof name === 'string' ? name : level.label;
 }
 
-/** A quota window the core named in English (`5 hours`, `Weekly`, `Monthly`) in the app's language; any other name as sent. */
+/**
+ * A quota window the core named in English (`5 hours`, `Weekly`, `Monthly`,
+ * `Credits`) in the app's language; any other name as sent. The core joins a
+ * period to a model or a group with ` · ` (`Weekly · Opus`, `Gemini · 5 hours`),
+ * so each side is read on its own.
+ */
 export function quotaWindowName(label: string): string {
-  if (label === 'Weekly') return strings.quotas.windowWeekly;
-  if (label === 'Monthly') return strings.quotas.windowMonthly;
-  const hours = /^(\d+(?:\.\d+)?) hours$/.exec(label)?.[1];
-  return hours === undefined ? label : strings.quotas.windowHours.replace('{hours}', formatters().plain.format(Number(hours)));
+  return label.split(' · ').map(quotaPeriod).join(' · ');
+}
+
+function quotaPeriod(part: string): string {
+  if (part === 'Weekly') return strings.quotas.windowWeekly;
+  if (part === 'Monthly') return strings.quotas.windowMonthly;
+  if (part === 'Credits') return strings.quotas.windowCredits;
+  const hours = /^(\d+(?:\.\d+)?) hours$/.exec(part)?.[1];
+  return hours === undefined ? part : strings.quotas.windowHours.replace('{hours}', formatters().plain.format(Number(hours)));
 }
 
 /** Up to one decimal, in the language's own digits: a percentage left on a quota. */

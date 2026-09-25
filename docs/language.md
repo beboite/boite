@@ -34,8 +34,10 @@ default: French reads `38,0 s`, `1 594 tours` and `113,23 $US`.
 The core names effort levels and quota windows in English. The UI shows its
 own word instead: an effort or speed level by its id (`high`, `xhigh`, `fast`,
 `strings.effortLevels`), a quota window by the name the core gives it (`5
-hours`, `Weekly`, `Monthly`). A level or a window the UI has no word for shows
-the provider's own name.
+hours`, `Weekly`, `Monthly`, `Credits`). When the core joins a period to a
+model or a group with ` · ` (`Weekly · Opus`, `Gemini · 5 hours`), only the
+period is translated. A level or a window the UI has no word for shows the
+provider's own name.
 
 ## Where the sentences are
 

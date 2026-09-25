@@ -36,5 +36,10 @@ test('durations, sizes, effort levels and quota windows follow the language the 
     expect(quotaWindowName('Weekly')).toBe('Hebdomadaire');
     expect(quotaWindowName('5 hours')).toBe('5 heures');
     expect(quotaWindowName('Opus weekly')).toBe('Opus weekly');
+    // The core joins a period to a model or a group: only the period changes language.
+    expect(quotaWindowName('Weekly · Opus')).toBe('Hebdomadaire · Opus');
+    expect(quotaWindowName('Gemini Pro · 5 hours')).toBe('Gemini Pro · 5 heures');
+    expect(quotaWindowName('Credits')).toBe('Crédits');
+    expect(levelName({ id: 'none', label: 'None' })).toBe('Aucun');
   } finally { setLocaleSetting('en'); }
 });
