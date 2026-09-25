@@ -23,7 +23,7 @@ const response = await fetch(`${coreUrl()}/health`, {
   signal: AbortSignal.timeout(4000),
 });
 if (!response.ok) throw new Error(`core health returned ${response.status}`);
-const health = await response.json();
-if (health === null || typeof health !== 'object' || health.ok !== true) {
+const health: unknown = await response.json();
+if (health === null || typeof health !== 'object' || (health as { ok?: unknown }).ok !== true) {
   throw new Error('invalid core health response');
 }
