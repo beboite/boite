@@ -1548,8 +1548,17 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
   expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // Down and one release behind: the row offers Update, the details name both versions.
+  // The fake's OpenCode runs from the user's own install, so the updates card
+  // owns its version and the row offers no Update beside that card's "Up to date".
   const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
+  await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
+  expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
+  expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
+
+  // With Boite's copy the one that runs, down and one release behind: the row
+  // offers Update, the details name both versions.
+  store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
+  await waitFor(() => document.querySelector(`${behind} [data-testid=install-update]`) !== null);
   expect(query(`${behind} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
   await openProviderDetails('opencode');
   expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Version 0.4.12 · 0.5.0 is available');

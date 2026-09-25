@@ -28,6 +28,9 @@ the conversation screen.
   offers a skipped version again.
 - A failed update brings its notice back with the updater's last line and Try
   again.
+- When the agent that runs is the user's own install (the `self` route), its
+  provider row offers no Update for a copy Boite downloaded earlier: that copy
+  is not what runs, and the Agent updates card owns the version shown.
 
 `Update agents automatically` in the same card makes the core update by
 itself. It is off by default.

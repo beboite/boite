@@ -103,6 +103,9 @@
 
   function updatable(provider: ProviderSummary): boolean {
     const install = store.installOf(provider.id);
+    // When the agent that runs is not Boite's copy, the updates card owns its
+    // version; an Update here would refresh a copy nothing uses, beside "Up to date".
+    if (store.harnessUpdates.some((update) => update.providerId === provider.id && update.route === 'self')) return false;
     return install?.state === 'installed' && install.available !== install.version;
   }
 
