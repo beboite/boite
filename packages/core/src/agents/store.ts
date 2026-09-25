@@ -35,11 +35,17 @@ export class AgentStore {
   constructor(readonly core: Core) { this.records = new AgentsRepository(core.journal); this.resident = new ResidentAgents(core); this.routines = new AgentRoutines(core); }
 
   changed(): void { this.core.bus.emit('agents.changed', { revision: this.records.revision() }); }
-  limits(): AgentsSnapshot['limits'] { return (this.core.journal.getSetting('agents:limits') as AgentsSnapshot['limits'] | undefined) ?? { ...DEFAULT_LIMITS }; }
+  /** Read on every scheduler pass; `setLimits` is its only writer, so it is read from disk once. */
+  private held: Readonly<AgentsSnapshot['limits']> | null = null;
+  limits(): AgentsSnapshot['limits'] {
+    this.held ??= Object.freeze((this.core.journal.getSetting('agents:limits') as AgentsSnapshot['limits'] | undefined) ?? { ...DEFAULT_LIMITS });
+    return this.held;
+  }
   setLimits(value: AgentsSnapshot['limits']): AgentsSnapshot['limits'] {
     object(value, 'limits');
     const next = { backgroundConcurrency: integer(value.backgroundConcurrency, 'backgroundConcurrency', 1, 8), paused: boolean(value.paused, 'paused'), kebaccExperiment: boolean(value.kebaccExperiment, 'kebaccExperiment') };
     this.core.journal.append({ type: 'agents.limits', threadId: null, version: 1, payload: next }, () => this.core.journal.setSetting('agents:limits', next));
+    this.held = Object.freeze({ ...next });
     this.changed();
     return next;
   }

@@ -45,6 +45,11 @@ function indexFor(table: Record<string, string>, key: string): string {
 
 /** Domain records and the journal event that changes them always commit together. */
 export class AgentsRepository {
+  /**
+   * Counts record writes, a rolled-back one included. A poller that found nothing
+   * to do sleeps until it moves: only a record write can add work or a run.
+   */
+  writes = 0;
   constructor(readonly journal: Journal) {}
 
   private rows<K extends AgentEntityKind>(sql: string, ...params: (string | number)[]): AgentEntities[K][] {
@@ -121,10 +126,12 @@ export class AgentsRepository {
   create<K extends AgentEntityKind>(kind: K, value: AgentDraft<AgentEntities[K]>): AgentEntities[K] {
     const now = Date.now();
     const record = { ...value, id: newId(`agt_${kind}_`), revision: 1, createdAt: now, updatedAt: now } as AgentEntities[K];
-    this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: { kind, record } }, db => {
+    this.writes += 1;
+    this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: recordEvent(kind, record) }, db => {
       db.query('INSERT INTO agent_entities (kind, id, revision, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)')
         .run(kind, record.id, record.revision, now, now, JSON.stringify(record));
     });
+    this.prune(now);
     return record;
   }
 
@@ -133,11 +140,13 @@ export class AgentsRepository {
       const previous = this.get(kind, id);
       if (previous.revision !== expectedRevision) throw refused(`${kind} ${id}: expected revision ${previous.revision}, received ${expectedRevision}`, { kind, id, expectedRevision: previous.revision });
       const record = { ...value, id, revision: previous.revision + 1, createdAt: previous.createdAt, updatedAt: Date.now() } as AgentEntities[K];
-      this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: { kind, record } }, db => {
+      this.writes += 1;
+      this.journal.append({ type: 'agents.record', threadId: null, version: 1, payload: recordEvent(kind, record) }, db => {
         const updated = db.query('UPDATE agent_entities SET revision = ?, updated_at = ?, data = ? WHERE kind = ? AND id = ? AND revision = ?')
           .run(record.revision, record.updatedAt, JSON.stringify(record), kind, id, expectedRevision);
         if (updated.changes !== 1) throw refused(`${kind} ${id}: revision changed`);
       });
+      this.prune(record.updatedAt);
       return record;
     });
   }
@@ -148,7 +157,26 @@ export class AgentsRepository {
     return this.journal.db.transaction(run)();
   }
 
-  /** Receipt and effects share a transaction, including after a lost RPC response. */
+  /** When the last pass dropped receipts and record events past `REQUEST_RETENTION_MS`. */
+  private pruned = 0;
+
+  /**
+   * Once an hour, from whichever write comes first: every routine run adds
+   * receipts and record events, and neither is read back after a month.
+   */
+  private prune(now: number): void {
+    if (now - this.pruned <= HOUR) return;
+    this.pruned = now;
+    const cutoff = now - REQUEST_RETENTION_MS;
+    this.journal.db.query('DELETE FROM agent_requests WHERE created_at < ?').run(cutoff);
+    this.journal.db.query(PRUNE_RECORD_EVENTS).run(cutoff);
+  }
+
+  /**
+   * Receipt and effects share a transaction, including after a lost RPC response.
+   * A result that is one record is kept as a reference and read again on a
+   * replay, so a routine's 16,000-character prompt is not copied per run.
+   */
   command<T>(actor: string, requestId: string, payload: unknown, execute: () => T): T {
     if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw invalidParams('requestId: expected 8 to 128 letters, numbers, underscores or hyphens');
     const fingerprint = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -156,13 +184,49 @@ export class AgentsRepository {
       const held = this.journal.db.query('SELECT fingerprint, result FROM agent_requests WHERE actor = ? AND request_id = ?').get(actor, requestId) as { fingerprint: string; result: string } | null;
       if (held) {
         if (held.fingerprint !== fingerprint) throw refused(`requestId ${requestId} was already used with different input`);
-        return JSON.parse(held.result) as T;
+        const kept = JSON.parse(held.result) as unknown;
+        const ref = (kept as { ref?: { kind?: unknown; id?: unknown } } | null)?.ref;
+        if (typeof ref?.kind === 'string' && KINDS.has(ref.kind) && typeof ref.id === 'string' && Object.keys(kept as object).length === 1) {
+          return this.get(ref.kind as AgentEntityKind, ref.id) as T;
+        }
+        return kept as T;
       }
       const result = execute();
       if (result instanceof Promise) throw new Error('agent command transactions must be synchronous');
-      this.journal.db.query('INSERT INTO agent_requests (actor, request_id, fingerprint, result) VALUES (?, ?, ?, ?)')
-        .run(actor, requestId, fingerprint, JSON.stringify(result));
+      const now = Date.now();
+      this.journal.db.query('INSERT INTO agent_requests (actor, request_id, fingerprint, result, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(actor, requestId, fingerprint, JSON.stringify(receipt(result)), now);
+      this.prune(now);
       return result;
     });
   }
+}
+
+const HOUR = 60 * 60 * 1000;
+/**
+ * How long a request id is remembered. A client retries a lost answer within
+ * seconds, and a routine's ids carry its revision, so none comes back later.
+ */
+export const REQUEST_RETENTION_MS = 30 * 24 * HOUR;
+
+/**
+ * Drops `agents.record` events older than the cutoff. Nothing reads their
+ * payload: `revision()` takes the newest id, and that event always stays, so
+ * the revision never goes back. The inner query names the partial index
+ * `events_agents` with its WHERE clause written the same way.
+ */
+export const PRUNE_RECORD_EVENTS = "DELETE FROM events WHERE id IN (SELECT id FROM events WHERE type IN ('agents.record', 'agents.limits') AND type = 'agents.record' AND ts < ? AND id < (SELECT MAX(id) FROM events WHERE type IN ('agents.record', 'agents.limits')))";
+
+/** What an `agents.record` event says: which record changed, not the record again. */
+function recordEvent(kind: AgentEntityKind, record: { id: string; revision: number }): { kind: AgentEntityKind; id: string; revision: number } {
+  return { kind, id: record.id, revision: record.revision };
+}
+
+/** A record `create` made (`agt_<kind>_...`) is kept as its reference, anything else as is. */
+function receipt(result: unknown): unknown {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return result;
+  const { id, revision } = result as { id?: unknown; revision?: unknown };
+  const kind = typeof id === 'string' ? /^agt_([a-z]+)_/.exec(id)?.[1] : undefined;
+  if (kind === undefined || !KINDS.has(kind) || typeof revision !== 'number') return result;
+  return { ref: { kind, id } };
 }

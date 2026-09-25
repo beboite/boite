@@ -18,8 +18,13 @@ newest file first. Each entry names the account, the session id, the file, its
 size and last write, the time of the first prompt, the title, and the thread
 that already carries the session if one does. A file with no prompt is left
 out, and one whose first prompt was recorded in another directory is skipped
-with a line on the log. The listing parses the first prompt and the title
-records only, so a folder of long sessions answers in well under a second.
+with a line on the log. The listing reads a file from its start up to the
+first prompt, then its last 256 KB for the latest title record, since the CLI
+writes that record again all along the session. A file whose tail holds no
+title, such as an old transcript with one `summary` near its start, is read
+whole. The core keeps each file's entry while its size and last write stay the
+same, and a second `imports.list` for a project that is still being listed
+waits for the same answer, so reopening the list reads only what changed.
 
 Only Claude Code keeps transcripts Boite reads today. OpenCode, Codex, pi,
 Antigravity, Grok and Muse Code have their own stores; none is read yet.

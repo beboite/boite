@@ -38,9 +38,49 @@ function read(root: string, path: string): string {
   return readFileSync(actual, 'utf8');
 }
 
+/**
+ * What a path looked like: absent, or its times and size. A file edited in
+ * place changes its own stamp, and a folder whose list of names changed
+ * (a skill added, removed or renamed) changes the folder's.
+ */
+function stamp(path: string): string {
+  try {
+    const stat = statSync(path);
+    return `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+  } catch { return 'absent'; }
+}
+
+/**
+ * A stamp this close to the scan cannot be trusted: a file system with coarse
+ * times can take another edit in the same tick. Git's racy-clean rule.
+ */
+const RACY_MS = 2_000;
+
+interface Inventory {
+  entries: BrainEntry[];
+  problems: string[];
+  /** Every path the scan looked at, and what it saw there. */
+  stamps: Map<string, string>;
+  /** The text of each instruction file, by entry path, as the scan read it. */
+  texts: Map<string, string>;
+  /** Whether any stamp came from within RACY_MS of the scan. */
+  racy: boolean;
+}
+
 /** Only instruction entrypoints and catalog folders are inspected. Never execute a brain script. */
 export function scanBrain(root: string): { entries: BrainEntry[]; problems: string[] } {
-  root = realpathSync(root);
+  const { entries, problems } = inventory(root);
+  return { entries, problems };
+}
+
+function inventory(given: string): Inventory {
+  const startedAt = Date.now();
+  const stamps = new Map<string, string>(), texts = new Map<string, string>();
+  const note = (path: string) => { if (!stamps.has(path)) stamps.set(path, stamp(path)); };
+  const probe = (path: string) => { note(path); return exists(path); };
+  note(given);
+  const root = realpathSync(given);
+  note(root);
   if (!statSync(root).isDirectory()) throw refused(`${root}: expected an existing brain folder`);
   const entries: BrainEntry[] = [], problems: string[] = [];
   const visited = new Set<string>();
@@ -50,7 +90,8 @@ export function scanBrain(root: string): { entries: BrainEntry[]; problems: stri
     const entry: BrainEntry = { kind, path: relative(root, file).split(sep).join('/'), name: basename(kind === 'skill' ? resolve(file, '..') : file), description: '', error: null };
     try {
       const text = read(root, file);
-      if (kind !== 'instructions') {
+      if (kind === 'instructions') texts.set(entry.path, text);
+      else {
         const front = kind === 'skill' ? /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1] : undefined;
         if (kind === 'skill' && front === undefined) throw new Error(`${entry.path}: expected YAML frontmatter with name and description`);
         const metadata: unknown = kind === 'plugin' ? JSON.parse(text) : Bun.YAML.parse(front!);
@@ -70,9 +111,10 @@ export function scanBrain(root: string): { entries: BrainEntry[]; problems: stri
     if (!inside(root, actual)) { problems.push(`${dir}: link points outside the brain folder`); return; }
     if (visited.has(actual)) return;
     visited.add(actual);
+    note(dir);
     const skill = join(dir, 'SKILL.md');
-    if (exists(skill)) add('skill', skill);
-    for (const file of PLUGIN_FILES) if (exists(join(dir, file))) add('plugin', join(dir, file));
+    if (probe(skill)) add('skill', skill);
+    for (const file of PLUGIN_FILES) if (probe(join(dir, file))) add('plugin', join(dir, file));
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (['.git', 'node_modules', '.secrets', '.claude-plugin', '.codex-plugin'].includes(entry.name)) continue;
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
@@ -83,14 +125,26 @@ export function scanBrain(root: string): { entries: BrainEntry[]; problems: stri
       if (walked > WALK_LIMIT || entries.length >= ENTRY_LIMIT) return;
     }
   }
-  for (const file of INSTRUCTION_FILES) if (exists(join(root, file))) add('instructions', join(root, file));
+  for (const file of INSTRUCTION_FILES) if (probe(join(root, file))) add('instructions', join(root, file));
   for (const dir of CATALOG_DIRS) {
-    try { if (exists(join(root, dir))) walk(join(root, dir), 0); }
+    try { if (probe(join(root, dir))) walk(join(root, dir), 0); }
     catch (cause) { problems.push(messageOf(cause)); }
     if (walked > WALK_LIMIT || entries.length >= ENTRY_LIMIT) break;
   }
   if (entries.length >= ENTRY_LIMIT) problems.push(`Brain inventory reached ${ENTRY_LIMIT} entries; some entries may be missing`);
-  return { entries, problems };
+  let racy = false;
+  for (const value of stamps.values()) {
+    const mtime = Number(value.split(':')[0]);
+    if (Number.isFinite(mtime) && mtime >= startedAt - RACY_MS) racy = true;
+  }
+  return { entries, problems, stamps, texts, racy };
+}
+
+/** Whether every path a scan looked at still looks the same. A few stats, no reads. */
+function unchanged(inventory: Inventory): boolean {
+  if (inventory.racy) return false;
+  for (const [path, seen] of inventory.stamps) if (stamp(path) !== seen) return false;
+  return true;
 }
 
 export class BrainStore {
@@ -101,6 +155,10 @@ export class BrainStore {
   private automatic?: Promise<void>;
   private readonly processes = new Map<string, Promise<void>>();
   private readonly links: BrainLinks;
+  /** The last scan behind `instructions()`, trusted while its stamps hold. */
+  private inventory: { path: string; value: Inventory } | null = null;
+  /** How many times `instructions()` scanned the folder; read by tests. */
+  scans = 0;
   constructor(private readonly core: Core, private readonly schedule: Schedule = defaultSchedule, profiles?: BrainProfiles) {
     this.links = new BrainLinks({
       get: () => (core.journal.getSetting('brain.links') as OwnedBrainLink[] | undefined) ?? [],
@@ -173,6 +231,7 @@ export class BrainStore {
       this.core.journal.setSetting('brain.lastSync', null);
       this.core.journal.setSetting('brain.pullError', null);
     }
+    this.inventory = null;
     this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) });
     this.links.apply(this.globalRoot());
     this.schedulePull();
@@ -201,17 +260,32 @@ export class BrainStore {
   instructions(providerId?: string): string {
     const { path, enabled } = this.config();
     if (!enabled || !path) return '';
-    const { entries } = scanBrain(path);
+    const { entries, texts } = this.current(path);
     const blocks = [`Shared agent brain: ${path}. Instructions below apply to this turn. Project instructions still apply.`];
     for (const entry of entries.filter(entry => entry.kind === 'instructions' && (entry.path.endsWith('AGENTS.md') || (entry.path === 'CLAUDE.md' && providerId === 'claude') || (entry.path === 'GEMINI.md' && providerId === 'antigravity')))) {
       if (entry.error) throw refused(entry.error);
-      blocks.push(`Instructions from ${entry.path}:\n${read(path, join(path, entry.path))}`);
+      blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
     }
     const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error);
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));
     const text = blocks.join('\n\n');
     if (Buffer.byteLength(text) > INSTRUCTIONS_LIMIT) throw refused(`Brain instructions and skill catalog exceed ${INSTRUCTIONS_LIMIT} bytes; reduce the entry files or catalog`);
     return `${text}\n\nUser request:\n`;
+  }
+
+  /**
+   * Every normal turn asks for the instructions, and the folder rarely changes
+   * between two: the last scan is reused while every path it looked at stats
+   * the same, and scanned again on any difference, a missing folder included.
+   */
+  private current(path: string): Inventory {
+    const cached = this.inventory;
+    if (cached?.path === path && unchanged(cached.value)) return cached.value;
+    this.inventory = null;
+    this.scans++;
+    const value = inventory(path);
+    this.inventory = { path, value };
+    return value;
   }
 
   async sync(): Promise<BrainStatus> {
@@ -241,6 +315,7 @@ export class BrainStore {
       if (state.behind > 0) await this.git(path, ['merge', '--ff-only', '@{upstream}']);
       // An external checkout after the check must never change what gets published.
       if (push && state.ahead > 0) await this.git(path, ['push', '--', remote, `${state.head}:${merge}`]);
+      this.inventory = null;
       this.core.journal.setSetting('brain.lastSync', Date.now());
       this.core.journal.setSetting('brain.pullError', null);
       this.links.apply(this.globalRoot());
@@ -283,6 +358,7 @@ export class BrainStore {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.inventory = null;
     this.cancelTimer?.();
     this.cancelTimer = undefined;
     for (const id of this.processes.keys()) this.core.procs.killTree(id);

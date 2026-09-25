@@ -13,7 +13,7 @@ import type {
   Usage,
 } from '@boite/contracts';
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 18;
 const DELTA_WINDOW_MS = 16;
 /** The shortest wait before a streaming message's parts are written to its row. */
 const PERSIST_MS = 500;
@@ -478,6 +478,19 @@ function migrate(db: Database, file: string): void {
       CREATE INDEX IF NOT EXISTS agent_decision_work ON agent_entities (json_extract(data, '$.workId')) WHERE kind = 'decision';
       CREATE INDEX IF NOT EXISTS events_agents ON events (id) WHERE type IN ('agents.record', 'agents.limits');`);
     version = 16;
+  }
+  // The coordination sweep filters letters by status and direction every two seconds,
+  // and delivered, expired and rejected letters pile up behind the few it looks for.
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'coordination_status'").get()) {
+    db.exec('CREATE INDEX IF NOT EXISTS coordination_status ON coordination_letters (status, direction, created_at)');
+    version = 17;
+  }
+  // Request receipts are kept a month, then dropped: the rows already there count from now.
+  if (!db.query("SELECT 1 FROM pragma_table_info('agent_requests') WHERE name = 'created_at'").get()) {
+    db.exec(`ALTER TABLE agent_requests ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+      UPDATE agent_requests SET created_at = ${Date.now()};
+      CREATE INDEX IF NOT EXISTS agent_requests_created ON agent_requests (created_at);`);
+    version = 18;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

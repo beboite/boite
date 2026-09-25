@@ -251,7 +251,13 @@ operate only on the authenticated pairing. Subscription URLs and encryption
 keys are not placed in events or logs. The encryption library loads on demand.
 
 Finished turns, errors, permission requests and questions trigger notifications
-through the shared core event bus. Stopped turns do not. A click opens the
+through the shared core event bus. Stopped turns do not, and neither do the
+turns under a thread that are not news of their own: a delegated agent's turns
+(its parent's next turn reports the result), a parent's turn that ends while
+its agents still work, a persistent agent's finished work (read in the agents
+inbox; its failures still notify) and a context compaction. Permission
+requests and questions notify whichever thread asks. A desktop toast follows
+the same rule, from `notifiesOnFinish` in the contracts. A click opens the
 conversation, preserving an existing page and its drafts. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.

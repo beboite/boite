@@ -69,6 +69,15 @@ It does not prove that the agent understood, agreed or finished acting. Uncertai
 means submission may have happened; Boite does not replay it automatically.
 An offline machine leaves outgoing messages queued until recovery or expiry.
 
+A message goes to its recipient as soon as it arrives, and again when the
+recipient's current turn ends. A check every two seconds covers the rest:
+expiry, retries to another machine and a provider that was not ready to take
+input yet. When no message is waiting, that check is one or two index lookups.
+An uncertain message is not waiting: nothing replays it, and only an outgoing
+one to another machine is asked about again until it expires. Delivered,
+expired, rejected and uncertain messages leave the journal after 30 days; the
+panel shows the last 100 of a conversation.
+
 For a restart, the maintenance agent should ask the agent using the resource
 to confirm readiness and wait for its answer. A delivery receipt or silence is
 not consent. Coordination is advisory: it is not a distributed lock, and Boite

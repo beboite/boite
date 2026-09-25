@@ -81,6 +81,25 @@ test('agents commands discover, send and reply using the calling thread identity
   expect((await boite(['agents', 'inbox'])).out).toContain('from=');
 });
 
+test('a send retried with the same --request-id is the same letter, and without it a new one', async () => {
+  const client = await harness.connect();
+  const other = (await echoThread(harness, client, 'VM worker')).threadId;
+  const config = { mode: 'brief' as const, resources: 'VM', remote: false, paused: false };
+  harness.core.coordination.configure(threadId, config);
+  harness.core.coordination.configure(other, config);
+  const contact = JSON.parse((await boite(['agents', 'list', '--json'])).out).agents[0];
+  const args = ['agents', 'send', `${contact.coreId}/${other}`, 'Can I restart?', '--request-id', 'cli_send_retry_001', '--json'];
+  const first = await boite(args);
+  expect(first.code).toBe(0);
+  const again = await boite(args);
+  expect(again.code).toBe(0);
+  expect(JSON.parse(again.out).id).toBe(JSON.parse(first.out).id);
+  const fresh = await boite(['agents', 'send', `${contact.coreId}/${other}`, 'Can I restart?', '--json']);
+  expect(JSON.parse(fresh.out).id).not.toBe(JSON.parse(first.out).id);
+  const received = harness.core.journal.db.query('SELECT COUNT(*) AS n FROM coordination_letters WHERE thread_id = ?').get(other) as { n: number };
+  expect(received.n).toBe(2);
+});
+
 test('persistent agent CLI uses its own context, durable memory and idempotent decision requests', async () => {
   const client = await harness.connect();
   const account = harness.core.accounts.list().find(a => a.providerId === 'echo')!;

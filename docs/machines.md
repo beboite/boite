@@ -86,11 +86,22 @@ appears as a green underlined number immediately before the machine icon; no
 placeholder appears when there is no PR. PR
 metadata comes from the execution machine's `gh pr list`, using the worktree
 branch or the current branch of the working directory. Non-repositories and
-detached checkouts have no PR. The core caches results and errors for one minute,
-coalesces duplicate requests, and runs at most two lookups at once. Each command
-has a ten-second deadline and runs through the process registry under
-`pull-request:<threadId>`. The thread menu can request a refresh. Missing `gh`,
-authentication failures and malformed responses use the error notification. A PR link opens in the system browser.
+detached checkouts have no PR. The core asks once per repository, not per
+thread: one `git remote -v` kept five minutes, and one `gh pr list` of the 200
+latest pull requests with their head branches, kept one minute with its errors,
+which every thread of that repository reads its branch from. The worktrees of
+one repository count as that repository: the core finds it from the common git
+directory each checkout's `.git` file points to. Only when gh returned a full
+page of 200 and a branch is missing from it does the core ask for that branch
+alone, even if two of those 200 came from one branch. At most two commands run at once. Each has a ten-second deadline and
+runs through the process registry under `pull-request:<threadId>`. Cards in a
+folded project wait for the unfold before they ask.
+
+A lookup the user did not ask for fails quietly, and once `gh` is missing or
+signed out the core stops starting it. The thread menu's refresh reads the
+repository again, tries `gh` again, and shows a missing `gh`, an
+authentication failure or a malformed response in the error notification. A
+PR link opens in the system browser.
 
 Older cores that do not implement PR lookup are probed once per connection.
 Their cards omit the PR link. A manual refresh explains that the hosting

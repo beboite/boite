@@ -61,6 +61,14 @@ Paths are relative to the thread's cwd, or absolute inside it, and a path that
 resolves outside (a symlink out, a `..`) is refused by name. `files.write` also
 refuses a link to nothing, since the write would create its target.
 
+The Changes tab reads the same checkout the agent writes in, so its git runs
+with `GIT_OPTIONAL_LOCKS=0` and counts lines with `git diff-index`, neither of
+which writes the index back: an agent's own `git add` or `git commit` never
+meets an `index.lock` the panel took. Each of those reads has 30 seconds. A git
+that has not answered by then is stopped by its own process id and the read
+fails with the command and the directory; the thread's other processes are
+left alone.
+
 `files.read` answers text inline, cut at `FILE_MAX_BYTES`. A picture, a video,
 a sound or another binary comes as a url on the core's HTTP server,
 `GET /file/<ticket>`, where the ticket is a random value bound to one path and

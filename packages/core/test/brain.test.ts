@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
@@ -211,6 +211,44 @@ test('normal turns receive current instructions and skill paths without changing
   expect(h.core.brain.instructions()).not.toContain('Skill body stays on disk');
   file(join(root, 'AGENTS.md'), 'Shared convention two');
   expect(h.core.brain.instructions()).toContain('Shared convention two');
+});
+
+/** Moves every time under `dir` an hour back, as a brain nobody edited today looks. */
+function age(dir: string, offsetMs = 3_600_000) {
+  const then = new Date(Date.now() - offsetMs);
+  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    utimesSync(join(entry.parentPath, entry.name), then, then);
+  }
+  utimesSync(dir, then, then);
+}
+
+test('an unchanged brain is scanned once across turns, and an edit or a new skill is read on the next one', async () => {
+  file(join(root, 'AGENTS.md'), 'Convention one');
+  file(join(root, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes.\n---\nbody');
+  await h.core.brain.configure({ path: root, enabled: true });
+  const brain = h.core.brain;
+  age(root);
+  const scans = brain.scans;
+  const first = brain.instructions();
+  expect(brain.instructions()).toBe(first);
+  expect(brain.instructions('claude')).toBe(first);
+  expect(brain.scans - scans).toBe(1);
+
+  // Same size, same folder: only the file's own stamp tells.
+  file(join(root, 'AGENTS.md'), 'Convention two');
+  expect(brain.instructions()).toContain('Convention two');
+  age(root);
+  brain.instructions();
+  const settled = brain.scans;
+  expect(brain.instructions()).toContain('Convention two');
+  expect(brain.scans).toBe(settled);
+
+  file(join(root, 'skills/deploy/SKILL.md'), '---\nname: deploy\ndescription: Ship it.\n---\nbody');
+  expect(brain.instructions()).toContain('deploy: Ship it.');
+  age(root);
+  brain.instructions();
+  unlinkSync(join(root, 'skills/deploy/SKILL.md'));
+  expect(brain.instructions()).not.toContain('deploy: Ship it.');
 });
 
 test('configuration persists across store instances; missing folders and oversized instructions are reported', async () => {

@@ -103,7 +103,8 @@ Task ids are `t1`, `t2` and so on, allocated by the CLI; `start 2` and
 progress, `[x]` completed. A todo is a card of the project's list, shared by
 every thread of the project: an agent adds one or claims one, which marks it
 finished and awaiting the user's confirmation; `done` and removal are the user's
-in the Tasks surface.
+in the Tasks surface. An agent's add is refused once the project holds 200 open
+or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.
@@ -126,7 +127,10 @@ Replies preserve their message reference and authenticated sender identity.
 The singular `agent` commands belong to [persistent agents](agents.md), not
 ordinary thread coordination. They use the calling session's current scope.
 Pass `--request-id <stable-id>` when retrying a send, artifact or decision after
-a lost response. An artifact object contains `missionId`, `taskId`, `title`,
+a lost response. The same flag covers `agents send`, `agents reply`,
+`delegate spawn` and `delegate send`: a retry with the id of a call that already
+landed returns that letter or child instead of making a second one. Without the
+flag each call gets a fresh id. An artifact object contains `missionId`, `taskId`, `title`,
 `summary`, `paths`, `commit` and `verification`. A decision contains `prompt`
 and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds

@@ -1,4 +1,5 @@
 import { createHash, ECDH } from 'node:crypto';
+import { notifiesOnFinish } from '@boite/contracts';
 import type { RpcEvents, RpcParams } from '@boite/contracts';
 import type { PushSubscription } from 'web-push';
 import type { Core } from './core.ts';
@@ -47,11 +48,20 @@ export class PushStore {
         this.notify(request.threadId, 'Needs your answer', `request-${request.id}`);
       } else if (name === 'turn.finished') {
         const turn = payload as RpcEvents['turn.finished'];
-        if (turn.status === 'done' || turn.status === 'error') {
-          this.notify(turn.threadId, turn.status === 'done' ? 'Done' : 'The agent encountered an error', `turn-${turn.id}`);
-        }
+        if (this.closed || this.core.journal.isClosed() || (turn.status !== 'done' && turn.status !== 'error')) return;
+        const thread = this.core.journal.getThread(turn.threadId);
+        if (thread === null || !notifiesOnFinish(thread, turn, this.activeChildren(thread.id))) return;
+        this.notify(turn.threadId, turn.status === 'done' ? 'Done' : 'The agent encountered an error', `turn-${turn.id}`);
       }
     });
+  }
+
+  /** The parent's delegated agents with a turn still under way. */
+  private activeChildren(threadId: string): number {
+    const row = this.core.journal.db
+      .query("SELECT COUNT(*) AS count FROM threads WHERE parent_thread_id = ? AND status IN ('queued', 'running', 'waiting')")
+      .get(threadId) as { count: number };
+    return row.count;
   }
 
   private subscriptions(): Record<string, Subscription> {

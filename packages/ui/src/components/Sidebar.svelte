@@ -210,7 +210,7 @@
                   data-testid="draft-row"
                   onclick={() => owner.startDraft(project.id)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
                 >{/if}
-              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} />{/each}
+              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
                 </p>{/if}

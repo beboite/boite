@@ -349,3 +349,13 @@ test('a profile switches harness/account/model without copying the parent transc
   expect(seen?.prompt).toContain('Read the API parser');
   expect(seen?.prompt).not.toContain('Unrelated private parent conversation');
 });
+
+test('a finished child wakes an idle parent at once, without waiting for the tick', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
+  const child = await spawn();
+  runs.get(child.thread.id)!.finish();
+  // The tick runs every second: 100 ms leaves it a 10 % chance to be the one that delivered.
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(h.core.journal.listTurns(threadId).map(turn => turn.execution?.operation)).toEqual(['delegation']);
+  expect(runs.get(threadId)?.ctx.prompt).toContain('Checked src/example.ts');
+});

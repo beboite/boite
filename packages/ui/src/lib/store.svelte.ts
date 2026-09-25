@@ -68,6 +68,7 @@ import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
 import {
+  finishNotifies,
   readNotifications,
   requestNotificationPermission,
   sendNotification,
@@ -873,7 +874,9 @@ export class Store {
     on('turn.started', (turn) => this.#upsertTurn(turn.threadId, turn));
     on('turn.finished', (turn) => {
       this.#upsertTurn(turn.threadId, turn);
-      // A stop is the user's own doing: nothing to tell them.
+      // A stop is the user's own doing, and a delegated agent's result or a
+      // persistent agent's routine work is not news of its own.
+      if (!finishNotifies(this.threads, turn)) return;
       if (turn.status === 'done') this.#notify('done', turn.threadId, null);
       else if (turn.status === 'error') this.#notify('error', turn.threadId, turn.error);
     });

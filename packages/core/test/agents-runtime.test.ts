@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import type { AgentProfile } from '@boite/contracts';
 import { startTestCore, waitFor } from './harness.ts';
 import { connect } from '../src/client.ts';
@@ -94,5 +94,28 @@ test('a persistent agent answers without a project and keeps group contexts sepa
     await expect(client.call('turns.start', { threadId: thread.id, prompt: 'bypass scheduling' })).rejects.toThrow('persistent');
     expect((await client.call('agent.where', { threadId: thread.id })).projectId).toBeNull();
     await expect(client.call('todos.list', { threadId: thread.id })).rejects.toThrow('no project');
+  } finally { await h.stop(); }
+});
+
+test('an idle agent runtime reads nothing until a record changes, then starts the new work', async () => {
+  const h = await startTestCore();
+  try {
+    const client = await h.connect();
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const r = h.core.workforce.records;
+    const statusReads = spyOn(r, 'withStatus');
+    const listReads = spyOn(r, 'list');
+    const settingReads = spyOn(h.core.journal, 'getSetting');
+    const limitReads = () => settingReads.mock.calls.filter(call => call[0] === 'agents:limits').length;
+    // A tick or two settle it, then three more at 500 ms find it quiet.
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const before = { status: statusReads.mock.calls.length, list: listReads.mock.calls.length, limits: limitReads() };
+    await new Promise(resolve => setTimeout(resolve, 1600));
+    expect(statusReads.mock.calls.length).toBe(before.status);
+    expect(listReads.mock.calls.length).toBe(before.list);
+    expect(limitReads()).toBe(before.limits);
+    const agent = await client.call('agents.profile.save', { value: { name: 'Quiet', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' }, status: 'active', tools: ['messages'], accountIntegration: 'provider' } });
+    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, recipientIds: [], text: 'Wake up', requestId: 'quiet_runtime_wake' });
+    await waitFor(() => r.list('run').some(run => run.status === 'done'));
   } finally { await h.stop(); }
 });
