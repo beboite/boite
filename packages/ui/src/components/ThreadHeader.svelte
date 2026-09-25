@@ -58,10 +58,25 @@
     ];
   });
 
+  let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
+
+  /**
+   * A phone's header has room for the title or for every toggle, not both: the
+   * Agents and Terminal toggles move into the title's sheet there, ticked when on.
+   */
+  let phoneItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const toggles: MenuItem[] = [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }];
+    if (store.owner) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
+    return [...toggles, separator('sep-toggles'), ...titleItems];
+  });
+
   function titleAction(action: string) {
     const open = store.openThread;
     if (!open) return;
-    if (action === 'rename') beginRename();
+    if (action === 'agents') store.panel.toggleKind('agents');
+    else if (action === 'terminal') store.toggleTerminal();
+    else if (action === 'rename') beginRename();
     else if (action === 'retitle') void store.retitle(open.id);
     else if (action === 'pin') void store.pin(open.id, !open.pinned);
     else if (action === 'copy') void store.copy(open.cwd);
@@ -100,7 +115,7 @@
           </button>
           <!-- A phone has no right-click: the title opens the same actions as a sheet. -->
           <span class="title-menu">
-            <Menu items={titleItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
+            <Menu items={phoneItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
               <span class="title-text">{thread.title}</span><ChevronDown size={14} />
             </Menu>
           </span>
@@ -132,11 +147,11 @@
       {#if thread}
         <button
           type="button"
-          class="ghost trace"
-          class:on={store.panelOpen && store.panel.active?.kind === 'agents'}
+          class="ghost trace in-title-menu"
+          class:on={agentsOn}
           title={strings.delegation.panelHint}
           aria-label={strings.delegation.heading}
-          aria-pressed={store.panelOpen && store.panel.active?.kind === 'agents'}
+          aria-pressed={agentsOn}
           data-testid="agents-toggle"
           onclick={() => store.panel.toggleKind('agents')}
         >
@@ -151,7 +166,7 @@
         {@const terminalKey = store.keyLabel('terminal')}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost trace in-title-menu"
           class:on={store.terminalShown(thread.id)}
           title={terminalKey ? `${strings.thread.terminalHint} (${terminalKey})` : strings.thread.terminalHint}
           aria-label={strings.thread.terminalHint}
@@ -245,8 +260,12 @@
     .path { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
     .trace .label { display: none; }
+    /* The title's sheet holds these on a phone. */
+    .in-title-menu { display: none; }
     .rename { width: 100%; }
-    .title { display: none; }
+    /* The thread's title button gives way to its menu; a draft's label has no menu and stays. */
+    .title:not(.draft) { display: none; }
+    .title.draft { max-width: none; }
     .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
     .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }

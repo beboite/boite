@@ -238,11 +238,19 @@ test('a phone pins and archives a thread without a right-click, from the header 
   const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
   const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
   expect(trigger.height).toBeGreaterThanOrEqual(44);
-  // The owner's header holds five buttons; the title still gets the most room (5 characters before).
-  expect(trigger.width).toBeGreaterThan(140);
+  // Agents and Terminal move into the title's sheet, so the title keeps most of the row.
+  expect(trigger.width).toBeGreaterThan(200);
+  expect(await page.evaluate(`['agents-toggle', 'terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'archive']);
   await capture('mobile-thread-menu.png');
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=pin]');
   await page.waitFor(`__boiteTest.workspace.active.openThread.pinned === true`);
   await page.click('[data-testid=mobile-conversations]');
@@ -253,6 +261,33 @@ test('a phone pins and archives a thread without a right-click, from the header 
   await page.waitFor(`!document.querySelector('[data-testid=mobile-thread-${id}]')`);
   expect(page.errors()).toEqual([]);
 }, 20_000);
+
+test('a phone header shows the label of a draft and most of a French title at 360 px', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
+  // A draft has no title menu: its own label is the header's title.
+  await page.click('[data-testid=mobile-new]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.classList.contains('draft')`);
+  const draft = await page.evaluate<{ text: string; width: number }>(`(() => { const t = document.querySelector('[data-testid=thread-title]'); return { text: t.textContent.trim(), width: t.getBoundingClientRect().width }; })()`);
+  expect(draft.text).toBe('New thread');
+  expect(draft.width).toBeGreaterThan(40);
+  await capture('mobile-draft-header.png');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 1, mobile: true });
+  try {
+    await page.navigate(`${origin}/?fake=1&open=recent`);
+    await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent && document.documentElement.lang === 'fr'`);
+    const title = await page.evaluate<{ visible: number; full: number }>(`(() => { const t = document.querySelector('[data-testid=thread-menu-trigger] .title-text'); return { visible: t.getBoundingClientRect().width, full: t.scrollWidth }; })()`);
+    await capture('mobile-title-fr-360.png');
+    expect(title.visible).toBeGreaterThanOrEqual(160);
+    expect(title.visible).toBeGreaterThanOrEqual(title.full * 0.6);
+  } finally {
+    await page.evaluate(`localStorage.setItem('boite.locale', 'en')`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  }
+  expect(page.errors()).toEqual([]);
+}, 30_000);
 
 test('Back returns from a conversation to the list and closes the context popup, the panel and the project picker first', async () => {
   const origin = await page.evaluate<string>('location.origin');
