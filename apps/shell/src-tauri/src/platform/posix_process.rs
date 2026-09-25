@@ -46,7 +46,7 @@ fn alive_pid(pid: libc::pid_t) -> bool {
 
 /// Whether a process with this pid is still running. A child of this process
 /// that exited counts until it is waited on: a caller holding its `Child`
-/// calls `try_wait` first (`reap_child` in lib.rs).
+/// calls `try_wait` first (`reap_child` in local_core/mod.rs).
 pub fn alive(pid: u32) -> bool {
     libc::pid_t::try_from(pid).is_ok_and(|pid| pid > 0 && alive_pid(pid))
 }

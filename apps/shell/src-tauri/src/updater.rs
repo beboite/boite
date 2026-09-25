@@ -243,7 +243,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
     // still running would keep that file locked and, once the new shell
     // started, be adopted as the engine of a version it is not.
     let core = app.clone();
-    let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::CoreState>() {
+    let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::local_core::CoreState>() {
         Some(core) => core.stop_for_install(),
         None => Ok(()),
     }).await;
@@ -260,7 +260,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
     match result {
         Ok(Ok(())) => { app.restart(); }
         outcome => {
-            if let Some(core) = app.try_state::<crate::CoreState>() { core.release_hold(); }
+            if let Some(core) = app.try_state::<crate::local_core::CoreState>() { core.release_hold(); }
             let error = match outcome { Ok(Err(e)) => e.to_string(), Err(e) => e.to_string(), _ => unreachable!() };
             state.fail(&app, error.clone());
             Err(error)

@@ -1,4 +1,4 @@
-//! OS integration. The shell's orchestration and IPC authorization stay in lib.rs.
+//! OS integration. The shell's orchestration and IPC authorization stay outside it.
 mod paths;
 pub(crate) use paths::default_data_dir;
 

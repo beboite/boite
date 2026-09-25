@@ -41,10 +41,26 @@ pub(crate) fn notify(app: AppHandle, title: String, body: String, thread_id: Str
         .title(&title)
         .text1(&body)
         .on_activated(move |_| {
-            crate::show_main(&handle);
+            crate::window::show_main(&handle);
             let _ = handle.emit("notification://open", &thread_id);
             Ok(())
         })
         .show()
         .map_err(|error| format!("the toast {title:?} was refused: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toast_app_id;
+    use std::path::Path;
+
+    #[test]
+    fn a_toast_carries_the_identifier_once_installed_and_powershells_id_under_target() {
+        let id = "com.boite.two";
+        assert_eq!(toast_app_id(Path::new(r"C:\Users\x\AppData\Local\Boite"), id), id);
+        assert_eq!(toast_app_id(Path::new(r"D:\src\boite\apps\shell\src-tauri\target\release"), id).contains("powershell.exe"), true);
+        assert_eq!(toast_app_id(Path::new(r"D:\src\boite\apps\shell\src-tauri\target\debug"), id).contains("powershell.exe"), true);
+        // A directory merely named release, not under target, is an install.
+        assert_eq!(toast_app_id(Path::new(r"D:\apps\release"), id), id);
+    }
 }
