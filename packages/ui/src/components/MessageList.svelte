@@ -32,6 +32,7 @@
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import DelegationActivity from './DelegationActivity.svelte';
   import { visibleAnswer } from '../lib/message-display';
+  import { TurnProgress } from '../lib/turn-progress.svelte';
   import { isNamedModel } from '../lib/model-order';
 
   let {
@@ -540,20 +541,8 @@
     return message.parts[last]?.type === 'text' ? last : -1;
   }
 
-  // One reasoning disclosure per turn. New reasoning replaces its previous text.
-  const thoughts = $derived.by(() => {
-    const result = new Map<string, { host: string; text: string; live: boolean }>();
-    for (const message of messages) {
-      if (message.role !== 'assistant') continue;
-      for (const [index, part] of message.parts.entries()) {
-        if (part.type !== 'thinking') continue;
-        const previous = result.get(message.turnId);
-        result.set(message.turnId, { host: previous?.host ?? message.id, text: part.text || previous?.text || '', live: message.state === 'streaming' && index === message.parts.length - 1 });
-      }
-    }
-    return result;
-  });
-  const responded = $derived(new Set(messages.filter(m => m.role === 'assistant' && m.parts.some(p => p.type === 'text' || p.type === 'thinking' ? p.text.length > 0 : true)).map(m => m.turnId)));
+  // Finished and streaming messages are derived apart, so a delta never rescans the thread.
+  const progress = new TurnProgress(() => messages);
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
@@ -662,7 +651,7 @@
             </div>
             <div class="receipts" data-testid="message-receipts">
               <span class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
-              <span class:received={responded.has(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
+              <span class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
             </div>
           {:else}
             {@const execution = store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution}
@@ -676,7 +665,7 @@
               <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
             {/if}
             {@const caretAt = message.state === 'streaming' ? lastTextIndex(message) : -1}
-            {@const thought = thoughts.get(message.turnId)}
+            {@const thought = progress.thought(message.turnId)}
             {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
             <div class="parts">
               {#each message.parts as part, index (index)}
