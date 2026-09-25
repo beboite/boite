@@ -267,6 +267,17 @@ test('refusing the deal keeps basic counters, turns the row red and closes after
   expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
 });
 
+test('the note under the rows turns everything off in one click and closes the tour', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query('[data-testid=onboarding-telemetry-basic]').textContent).toContain('basic counters');
+  await answer('onboarding-telemetry-off');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
+  expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+  expect(tourSeen()).toBe(true);
+});
+
 test('under reduced motion refusing closes at once, and a replay keeps a saved opt-out', async () => {
   document.documentElement.dataset.motion = 'reduced';
   try {

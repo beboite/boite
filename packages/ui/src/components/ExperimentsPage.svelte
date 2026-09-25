@@ -2,18 +2,12 @@
   import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
+  import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
 
   const uid = $props.id();
 
-  /** One entry per shipped id, so a new experiment cannot land without its words. */
-  const copy: Record<ExperimentId, { title: string; hint: string }> = {
-    'theme-grain': strings.experiments.themeGrain,
-    'session-import': strings.experiments.sessionImport,
-    'prompt-cache': strings.experiments.promptCache,
-    'chat-artifacts': strings.experiments.chatArtifacts,
-    'preview-comments': strings.experiments.previewComments
-  };
+  let copy = $derived(experimentCopy());
 
   let enabled = $state<ExperimentId[]>(untrack(() => readExperiments()));
 

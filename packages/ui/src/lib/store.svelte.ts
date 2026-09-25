@@ -199,9 +199,6 @@ function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
  */
 export const LOCAL_RECOVERY_MS = 4_000;
 
-const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, idle: 4 };
-type ThreadStatusRank = Record<ThreadSummary['status'], number>;
-
 
 export class Store {
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
@@ -456,17 +453,6 @@ export class Store {
   #byProject = $derived(threadsByProject(this.threads));
   threadsOf(projectId: ProjectId): ThreadSummary[] {
     return this.#byProject.get(projectId) ?? [];
-  }
-
-  /** Pinned threads first, then the live ones, then by last activity; the search box narrows it. */
-  sortedThreadsOf(projectId: ProjectId): ThreadSummary[] {
-    const needle = this.search.trim().toLowerCase();
-    return this.threadsOf(projectId)
-      .filter((t) => needle === '' || t.title.toLowerCase().includes(needle))
-      .sort(
-        (a, b) =>
-          Number(b.pinned) - Number(a.pinned) || LIVE[a.status] - LIVE[b.status] || b.updatedAt - a.updatedAt
-      );
   }
 
   accountsOf(providerId: ProviderId): Account[] {
@@ -2834,13 +2820,16 @@ export class Store {
     }
   }
 
-  async saveSettings(patch: Partial<Settings>): Promise<void> {
+  /** False when nothing was saved, so a caller never reports a save the core refused. */
+  async saveSettings(patch: Partial<Settings>): Promise<boolean> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return false;
     try {
       this.settings = await client.call('settings.set', patch);
+      return true;
     } catch (error) {
       this.#fail(error);
+      return false;
     }
   }
 

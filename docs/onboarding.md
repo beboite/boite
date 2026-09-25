@@ -32,12 +32,14 @@ and show the completed state under reduced motion. The dots are the only progres
 indicator.
 
 The privacy screen is Boite Legacy's: a title that turns red over ten seconds,
-the trade offer clip, and two rows. "No! Enough is enough" keeps the anonymous
-counters (or a saved opt-out on a replay), swaps to the refusal clip and closes
-the tour two seconds later, at once under reduced motion. "Deal" turns on
-enhanced analytics and closes it. That screen has no Next button; Escape and
-the cross leave the counters as they are. Export and deletion management remain
-in Settings.
+the trade offer clip, and two rows. "NO! Just the basic counters" keeps the
+anonymous counters (or a saved opt-out on a replay), swaps to the refusal clip
+and closes the tour two seconds later, at once under reduced motion. "Deal" turns
+on enhanced analytics and closes it. The "turn everything off" link under both
+rows saves Off and closes it. That screen has no Next button; Escape and the
+cross leave the counters as they are. On a window under 640 px tall the clip
+shrinks, and the line saying what is counted stays. Export and deletion
+management remain in Settings.
 
 In the shell the scrim starts under the title bar, so the window can be dragged,
 minimized or closed during the tour.
@@ -48,7 +50,9 @@ The shell opens its main window at 1280 x 890, centred in the primary monitor's
 work area, and at 92% of that area on a smaller screen (`centred` in
 `apps/shell/src-tauri/src/lib.rs`). 890 is the tallest tour screen, the French
 consent screen at 808 px, plus the scrim's margin and the title bar. A screen
-that grows past it scrolls inside the panel; raise the constant with it.
+that grows past it scrolls inside the panel; raise the constant with it. Every
+screen takes that same panel height, or the window's height when it is shorter,
+so Next stays in one place from screen to screen.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen

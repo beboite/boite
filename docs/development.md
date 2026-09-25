@@ -115,12 +115,19 @@ its directories through the owner-only `projects.browse` method. The native
 folder button is available only for the shell's local core. A folder dropped
 from the desktop switches to that local core before opening the path.
 
+Both sidebar views order threads the same way (`lib/thread-order.ts`): pinned
+threads first, then a thread waiting on the user, then running, queued and failed
+ones, then the rest by the user's last message. Under a project's header a row
+leaves out the project name; Recent shows it.
+
 The sidebar footer counts authenticated machine connections. Remembered cores
 use separate sockets without thread subscriptions; failed connections retry
 every thirty seconds. The menu names disconnected machines and opens connection
 settings. The title bar has no second connection indicator.
 
-Two menus open over the composer while typing. `/` on an empty box lists the
+Two menus open over the composer while typing, above the box, shortened to the
+room left under the title bar, or below the box when that side has more room
+(`lib/menu-fit.ts`). `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
 reported), then Boite's, the same list as the palette. `@` at the start of a
 word lists the project's files, ranked by `projects.files` on the word after
@@ -153,13 +160,23 @@ they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
 person's call, `git worktree remove` from the project.
 
+Archiving stops the thread's running turn, its pending questions and its child
+agents, so the sidebar menu, the header and the palette ask first when the thread
+is working, waits on an answer or has a live child agent. An idle thread archives
+at once. Settings > General > Archived threads (on a phone, Settings > Archived
+threads) lists the archived conversations on demand and restores one to the
+sidebar; stopped work does not resume.
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments. The composer
 shows each pending message. Up in an empty composer takes the newest pending
 message out of the queue for editing; clicking a pending message does the same.
 Escape stops the current turn. Pending messages then run in their original
-order. A failed send preserves the queue for an explicit retry.
+order. An Escape that closes something first (a popover, a menu, a
+confirmation, the command palette, a rename field) only closes it, and the focus
+goes back to where it was, or to the composer when that is gone, so a second
+Escape is needed to stop. A failed send preserves the queue for an explicit retry.
 
 `/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
 consecutive iterations and stops. Counts range from 1 to 1000. A count written

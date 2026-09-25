@@ -52,6 +52,17 @@
   function show() { clearTimeout(leave); place(); popup.show(); }
   function hideLater() { clearTimeout(leave); leave = setTimeout(() => { if (!root?.contains(document.activeElement)) popup.hide(); }, 180); }
   onDestroy(() => clearTimeout(leave));
+  /**
+   * Captured on the window, ahead of App's own listener there and of the
+   * composer's: the Escape that shuts this popup is spent on it and never
+   * also stops the running turn.
+   */
+  function closeOnEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !popup.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    popup.hide();
+  }
   async function compact() {
     if (reason || submitting) return;
     submitting = true;
@@ -59,7 +70,7 @@
   }
 </script>
 
-<svelte:window onresize={() => { if (popup.open) place(); }} onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydown={event => { if (event.key === 'Escape' && popup.open) { popup.hide(); event.stopPropagation(); } }} />
+<svelte:window onresize={() => { if (popup.open) place(); }} onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydowncapture={closeOnEscape} />
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="context" bind:this={root} data-testid="context-meter" data-percent={percent ?? ''} data-level={contextLevel(percent)} onmouseenter={show} onmouseleave={hideLater} onfocusin={show} onfocusout={hideLater}>
   <button type="button" class="trigger ghost" data-testid="context-trigger" aria-label={cacheLabel ? `${strings.thread.contextDetails}, ${cacheLabel}` : strings.thread.contextDetails} aria-expanded={popup.open} aria-haspopup="dialog" onclick={show}>

@@ -4,6 +4,7 @@
   import type { ThreadSummary } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { appCommands, runCommand } from '../lib/commands.svelte';
+  import { focusedElement, restoreFocus } from '../lib/focus';
   import { PALETTE_LIMIT, RECENT_THREADS, rankItems, type PaletteItem } from '../lib/palette';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -17,14 +18,24 @@
   let selected = $state(0);
   let input = $state<HTMLInputElement | undefined>(undefined);
   let list = $state<HTMLDivElement | undefined>(undefined);
+  let dialog = $state<HTMLDivElement | undefined>(undefined);
+  /** What had the keyboard before the palette took it, where it goes back on close. */
+  let previous: HTMLElement | null = null;
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
   $effect(() => {
     if (!store.paletteOpen) {
       overlay.hide();
+      // Shut from outside (the Ctrl+K chord again): the focus would die with the input.
+      untrack(() => {
+        const active = document.activeElement;
+        if (active === document.body || (active && dialog?.contains(active))) restoreFocus(previous);
+        previous = null;
+      });
       return;
     }
+    untrack(() => (previous = focusedElement()));
     query = '';
     selected = 0;
     overlay.show();
@@ -78,6 +89,7 @@
 
   function close() {
     store.paletteOpen = false;
+    restoreFocus(previous);
   }
 
   function pick(item: PaletteItem) {
@@ -91,7 +103,14 @@
     runCommand(store, item.id, inShell);
   }
 
+  /** On the whole dialog, so a key pressed with a row focused never reaches the window's Escape. */
   function onkeydown(event: KeyboardEvent) {
+    if (event.key === 'Tab') {
+      // The field is the one stop: the rows are walked with the arrows.
+      event.preventDefault();
+      input?.focus({ preventScroll: true });
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
@@ -142,7 +161,8 @@
       if (event.target === event.currentTarget) close();
     }}
   >
-    <div class="palette" class:closing={overlay.closing} role="dialog" aria-modal="true" aria-label={strings.palette.placeholder} data-testid="palette">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="palette" class:closing={overlay.closing} role="dialog" aria-modal="true" tabindex="-1" aria-label={strings.palette.placeholder} data-testid="palette" bind:this={dialog} {onkeydown}>
       <label class="field">
         <Search size={16} strokeWidth={1.75} />
         <input
@@ -153,7 +173,6 @@
           autocomplete="off"
           spellcheck="false"
           data-testid="palette-input"
-          {onkeydown}
         />
         <span class="kbd">Esc</span>
       </label>
@@ -169,6 +188,7 @@
             class="row"
             class:selected={index === selected}
             role="option"
+            tabindex="-1"
             aria-selected={index === selected}
             data-index={index}
             data-testid="palette-row"

@@ -184,6 +184,7 @@ export const strings = {
     settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
     settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
     settingsAppearanceHint: 'Theme and accent for this phone.',
+    settingsArchivedHint: 'Bring back a conversation archived on the connected machine.',
     settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
@@ -197,7 +198,9 @@ export const strings = {
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, General, Phones and other devices, create a pairing link and paste it here. Turn on Full control there to manage its accounts and settings from this one.',
     labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
-    remove: 'Disconnect', open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
+    remove: 'Remove machine', removeTitle: 'Remove {machine}?',
+    removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
+    open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
     duplicate: 'This machine is already connected.', noPr: 'No PR', refreshPr: 'Refresh pull request',
     prUnavailable: 'Pull request unavailable', manual: 'Connect with URL and token',
     filter: 'Filter machines', all: 'All machines',
@@ -380,6 +383,8 @@ export const strings = {
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
+    archiveTitle: 'Archive this thread?',
+    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 
@@ -1194,7 +1199,8 @@ export const strings = {
     reapOrphans: 'Stop what agents leave running',
     reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped, the way an interrupted command leaves them. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
-    asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn `boite ask` when a session starts. Codex asks this way natively.',
+    asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn the boite ask command when a session starts. Codex asks this way natively.',
+    numberRange: 'A whole number from {min} to {max}.',
     save: 'Save',
     saved: 'Saved',
     core: 'Core',
@@ -1205,6 +1211,13 @@ export const strings = {
     dataDir: 'Data directory',
     endpoint: 'Endpoint',
     noCore: 'Not connected to a core.',
+    archived: {
+      heading: 'Archived threads',
+      intro: 'An archived thread leaves the sidebar and its agent stops. Restore it to bring the conversation back; its agent starts again with the next message.',
+      show: 'Show archived threads',
+      empty: 'No archived thread on this machine.',
+      restore: 'Restore'
+    },
     pairing: {
       heading: 'Phones and other devices',
       intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',
@@ -1213,7 +1226,7 @@ export const strings = {
       expires: 'Works once, until {time}',
       qr: 'The pairing link as a QR code',
       scan: 'Scan the code with the phone, or open the link on it.',
-      lanHint: 'The core listens on this machine only: turn on the LAN switch in Scheduler below, then restart it, before a phone can reach this link.',
+      lanHint: 'The core listens on this machine only. Turn on "Listen on the LAN" in Scheduler below, then quit and reopen Boite, before a phone can reach this link.',
       devices: 'Paired devices',
       noDevices: 'No device paired yet.',
       thisDevice: 'this device',
@@ -1441,7 +1454,7 @@ export const strings = {
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
-    pairingLink: 'That is not a pairing link: it needs an http or https address carrying a grant.'
+    pairingLink: 'That is not a pairing link. Paste the link shown by New pairing link on the other machine; it starts with http and contains ?grant=.'
   },
 
   units: {
@@ -1481,12 +1494,13 @@ export const strings = {
       intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
       question: 'Deal?',
       video: 'Trade offer meme',
-      basic: 'NO! Enough is enough',
+      basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
       basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
       deal: 'DEAL',
       dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
-      optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
+      optOut: "If you REALLY don't want to help Boite:",
+      offLabel: 'turn everything off :c',
       doc: 'What is collected'
     },
     demo: {

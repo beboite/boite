@@ -609,7 +609,7 @@ test(
     await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
-    await page.click(testid('settings-machines'));
+    await page.click(testid('settings-tab-machines'));
     await page.waitFor(`document.querySelector('${testid('machine-card')}')`);
     expect(await page.evaluate<string>(textOf('machine-card'))).toContain(core.url);
 

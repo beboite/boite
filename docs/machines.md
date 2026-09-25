@@ -21,9 +21,10 @@ port as another machine. Older generated `This computer` loopback entries are
 removed during startup. Paired remote connections are retained. The sidebar
 counter and project picker use the workspace's connected machine list.
 
-The machine list shows connection errors and lets you reopen a host or disconnect
-it. Disconnect closes that host's socket and forgets its saved key. It does not
-stop agents, remove files or revoke the key on the remote host. Use the remote
+The machine list shows connection errors and lets you reopen a host or remove
+it. Remove machine asks first, then closes that host's socket and forgets its
+saved address and key, so connecting it again needs a new pairing link. It does
+not stop agents, remove files or revoke the key on the remote host. Use the remote
 core's paired-device list to revoke it. The primary core stays attached.
 
 If a machine goes offline, its known rows remain visible and its machine badge

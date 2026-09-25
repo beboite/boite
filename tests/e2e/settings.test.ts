@@ -145,5 +145,7 @@ test('machines list each execution host and disconnect only the selected host', 
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
   await page.click(id('machine-remove'));
+  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+  await page.click(id('confirm-ok'));
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 1`);
 }, 30_000);

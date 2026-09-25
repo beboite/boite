@@ -4,6 +4,7 @@
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
+  import { focusComposer } from '../lib/focus';
   import { ZOOM_DEFAULT, stepZoom } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -131,7 +132,7 @@
     event.preventDefault();
     const next = normalizeUrl(draft ?? '');
     draft = null;
-    field?.blur();
+    leaveField();
     if (!next) return;
     browserBridge.navigate(id, next);
     panel.update(id, { url: next });
@@ -142,7 +143,12 @@
     if (request) cancelSelection();
     event.stopPropagation();
     draft = null;
-    field?.blur();
+    leaveField();
+  }
+
+  /** Out of the address field onto the composer: left on the page, the next Escape would stop the running turn. */
+  function leaveField(): void {
+    if (!focusComposer()) field?.blur();
   }
 
   /** `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while this surface is the one showing. */

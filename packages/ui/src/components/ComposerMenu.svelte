@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Closing } from '../lib/closing.svelte';
+  import { fitMenu, type MenuFit } from '../lib/menu-fit';
   import type { PaletteItem } from '../lib/palette';
 
   /**
@@ -50,18 +51,41 @@
     else popover.hide();
   });
 
+  /** Eight rows of a name and its description, then it scrolls. */
+  const CAP = 420;
+  let fit = $state<MenuFit>({ below: false, maxHeight: CAP });
+  let viewport = $state(0);
+
+  /** Measured against the composer box the list hangs from, and the title bar it must not cover. */
+  function measure(node: HTMLElement): MenuFit {
+    const anchor = (node.offsetParent ?? node.parentElement)?.getBoundingClientRect();
+    if (!anchor) return { below: false, maxHeight: CAP };
+    const titlebar = document.querySelector('.titlebar')?.getBoundingClientRect().bottom ?? 0;
+    return fitMenu(anchor, window.innerHeight, Math.max(0, titlebar), CAP);
+  }
+
   $effect(() => {
     void items;
+    void viewport;
+    if (popover.shown && list) fit = measure(list);
+  });
+
+  $effect(() => {
+    void items;
+    void fit;
     const row = list?.querySelector<HTMLElement>(`[data-index="${selected}"]`);
     // jsdom draws nothing and has no scrollIntoView; a real list keeps the row in view.
     if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' });
   });
 </script>
 
+<svelte:window onresize={() => (viewport = window.innerHeight)} />
 {#if popover.shown}
   <div
     class="menu"
     class:closing={popover.closing}
+    class:below={fit.below}
+    style:max-height="{fit.maxHeight}px"
     role="listbox"
     aria-label={label}
     tabindex="-1"
@@ -109,7 +133,9 @@
 
 <style>
   /* Above the composer, on the picker's surface: same ground, same radius,
-     same shadow, same entrance. Eight rows fit, the rest scrolls. */
+     same shadow, same entrance. Eight rows fit, the rest scrolls; a shorter
+     window gets a shorter list, or the list under the box when that side has
+     more room (`lib/menu-fit.ts`). */
   .menu {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -119,8 +145,6 @@
     flex-direction: column;
     gap: 1px;
     width: min(420px, 100%);
-    /* Eight rows of a name and its description, then it scrolls. */
-    max-height: 420px;
     overflow: auto;
     padding: 6px;
     background: var(--color-surface-2);
@@ -129,6 +153,12 @@
     box-shadow: var(--shadow-e2);
     animation: pop var(--dur-2) var(--ease-out-quint);
     transform-origin: bottom left;
+  }
+
+  .menu.below {
+    top: calc(100% + 6px);
+    bottom: auto;
+    transform-origin: top left;
   }
 
   .menu.closing {

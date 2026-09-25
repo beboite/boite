@@ -166,7 +166,8 @@
 </div>
 
 <style>
-  .page { width: 100%; padding: 24px; }
+  /* The padding is the settings page's own (app.css), so the title lines up with every other tab. */
+  .page { width: 100%; }
   .page > :is(section, form, details, .error) { max-width: var(--settings-width); }
   h1 { margin: 0; font-size: var(--text-lg); }
   h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }

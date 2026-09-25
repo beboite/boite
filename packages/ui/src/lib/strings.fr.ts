@@ -197,6 +197,7 @@ export const fr: Translation = {
     settingsPhone: 'Application et notifications', settingsPhoneHint: 'Installation et alertes de la machine connectée.',
     settingsMachinesHint: 'Connecter, changer ou déconnecter une machine distante.',
     settingsAppearanceHint: 'Thème et couleur pour ce téléphone.',
+    settingsArchivedHint: 'Ramener une conversation archivée sur la machine connectée.',
     settingsRemoteHint: "Les fournisseurs, les projets et l'administration du serveur se gèrent depuis l'application de bureau.",
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
@@ -210,7 +211,9 @@ export const fr: Translation = {
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: "Sur l'autre machine, ouvrez Réglages, Général, Téléphones et appareils, créez un lien d'appairage et collez-le ici. Activez le contrôle total là-bas pour gérer ses comptes et ses réglages depuis celle-ci.",
     labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
-    remove: 'Déconnecter', open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
+    remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
+    removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
+    open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
     duplicate: 'Cette machine est déjà connectée.', noPr: 'Pas de PR', refreshPr: 'Actualiser la pull request',
     prUnavailable: 'Pull request indisponible', manual: 'Connecter avec une URL et un jeton',
     filter: 'Filtrer les machines', all: 'Toutes les machines',
@@ -390,6 +393,8 @@ export const fr: Translation = {
     unpin: 'Désépingler',
     pinned: 'Épinglée',
     archive: 'Archiver',
+    archiveTitle: 'Archiver cette conversation ?',
+    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Conversations archivées, dans les Réglages, ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 
@@ -1172,7 +1177,8 @@ export const fr: Translation = {
     reapOrphans: 'Arrêter ce que les agents laissent tourner',
     reapOrphansHint: "Dix secondes après un tour, un processus dont le parent est sorti est arrêté, comme ceux qu'une commande interrompue laisse derrière elle. Windows seulement.",
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
-    asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent `boite ask` au début d’une session. Codex pose ses questions ainsi nativement.',
+    asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent la commande boite ask au début d’une session. Codex pose ses questions ainsi nativement.',
+    numberRange: 'Un nombre entier de {min} à {max}.',
     save: 'Enregistrer',
     saved: 'Enregistré',
     core: 'Cœur',
@@ -1183,6 +1189,13 @@ export const fr: Translation = {
     dataDir: 'Répertoire de données',
     endpoint: 'Point de connexion',
     noCore: 'Pas connecté à un cœur.',
+    archived: {
+      heading: 'Conversations archivées',
+      intro: "Une conversation archivée quitte la barre latérale et son agent s'arrête. Restaurez-la pour retrouver la conversation ; son agent repart au prochain message.",
+      show: 'Afficher les conversations archivées',
+      empty: 'Aucune conversation archivée sur cette machine.',
+      restore: 'Restaurer'
+    },
     pairing: {
       heading: 'Téléphones et appareils',
       intro: "Un lien d'appairage ouvre Boite sur un autre appareil avec une clé à lui. Il sert une fois et tient dix minutes.",
@@ -1191,7 +1204,7 @@ export const fr: Translation = {
       expires: "Valable une fois, jusqu'à {time}",
       qr: "Le lien d'appairage en QR code",
       scan: 'Scannez le code avec le téléphone, ou ouvrez le lien dessus.',
-      lanHint: "Le cœur n'écoute que sur cette machine : activez le réseau local dans Ordonnanceur, plus bas, puis redémarrez-le, avant qu'un téléphone puisse atteindre ce lien.",
+      lanHint: "Le cœur n'écoute que sur cette machine. Activez « Écouter sur le réseau local » dans Ordonnanceur, plus bas, puis quittez et rouvrez Boite, avant qu'un téléphone puisse atteindre ce lien.",
       devices: 'Appareils appairés',
       noDevices: 'Aucun appareil appairé pour le moment.',
       thisDevice: 'cet appareil',
@@ -1417,7 +1430,7 @@ export const fr: Translation = {
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",
-    pairingLink: "Ce n'est pas un lien d'appairage : il lui faut une adresse http ou https portant un grant."
+    pairingLink: "Ce n'est pas un lien d'appairage. Collez le lien affiché par Nouveau lien d'appairage sur l'autre machine ; il commence par http et contient ?grant=."
   },
 
   units: {
@@ -1451,12 +1464,13 @@ export const fr: Translation = {
       intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
       question: 'Marché conclu ?',
       video: 'Mème Trade Offer',
-      basic: 'NON ! Ça suffit',
+      basic: 'NON ! Juste les compteurs de base',
       basicDefault: '(par défaut)',
       basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
       deal: 'MARCHÉ CONCLU',
       dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
-      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Réglages > Général > Confidentialité et statistiques désactive tout. :c',
+      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
+      offLabel: 'tout désactiver :c',
       doc: 'Ce qui est collecté'
     },
     demo: {

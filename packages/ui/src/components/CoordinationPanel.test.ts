@@ -52,6 +52,22 @@ test('an owner configures a thread and sees the hourly budgets', async () => {
   expect(active.coordination?.config.paused).toBe(true);
 });
 
+test('a contact shows its status in the words the app speaks, not the raw value', async () => {
+  const active = await show();
+  const panel = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-panel"]')!;
+  panel.open = true;
+  panel.dispatchEvent(new Event('toggle'));
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')!.click();
+  await settle();
+  active.coordinationDirectory = {
+    agents: [{ coreId: 'core-x', threadId: 't-x', title: 'Other', machine: 'box', resources: '', status: 'waiting', mode: 'team' }],
+    unavailable: []
+  };
+  await settle();
+  expect(document.querySelector('[data-testid="coordination-contact"] .contact-status')?.textContent).toBe('waiting for you');
+});
+
 test('a paired device reads coordination but cannot change it', async () => {
   await show('session');
   expect(document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')?.disabled).toBe(true);

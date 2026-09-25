@@ -32,8 +32,9 @@
   --color-hover: rgba(255, 255, 255, 0.05);
   --color-active: rgba(255, 255, 255, 0.09);
   --color-foreground: #ececf1;
+  /* Both text tiers clear 4.5:1 on every surface in both themes: subtle carries paths and timestamps (lib/contrast.test.ts). */
   --color-muted-foreground: #a2a2ad;
-  --color-subtle: #6f6f7a;
+  --color-subtle: #8c8c96;
   --color-selection: rgba(228, 228, 231, 0.18);
   --accent-hue: 260;
   --color-accent: oklch(68% 0.19 var(--accent-hue));
@@ -128,8 +129,8 @@
   --color-hover: rgba(0, 0, 0, 0.045);
   --color-active: rgba(0, 0, 0, 0.08);
   --color-foreground: #1c1c21;
-  --color-muted-foreground: #66666f;
-  --color-subtle: #8b8b95;
+  --color-muted-foreground: #50505a;
+  --color-subtle: #67676f;
   --color-selection: rgba(28, 28, 33, 0.14);
   --color-live: #ca8a04;
   --color-success: #16a34a;

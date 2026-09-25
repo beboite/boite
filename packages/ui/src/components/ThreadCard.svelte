@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Ellipsis, Folder, GitPullRequest, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { archiveThread } from '../lib/archive';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
@@ -18,7 +19,8 @@
     project,
     thread,
     now,
-    hidden = false
+    hidden = false,
+    showProject = true
   }: {
     machine: Machine;
     project: Project;
@@ -26,6 +28,8 @@
     now: number;
     /** In a folded project: the card waits for the unfold to look up its pull request. */
     hidden?: boolean;
+    /** Off under the project's own header, where the folder line would only repeat it. */
+    showProject?: boolean;
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
@@ -60,6 +64,14 @@
     renaming = false;
     await owner.rename(thread.id, title);
   }
+  let row = $state<HTMLButtonElement | undefined>(undefined);
+  /** Enter and Escape hand the keyboard back to the row, never to the page, where Escape stops the turn. */
+  async function leaveRename(commit: boolean) {
+    if (commit) void save();
+    else renaming = false;
+    await tick();
+    row?.focus({ preventScroll: true });
+  }
   function menu(event: MouseEvent) {
     contextMenu.open(
       event,
@@ -82,7 +94,7 @@
         if (action === 'retitle') void owner.retitle(thread.id);
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
         if (action === 'pr') void refreshPr(true);
-        if (action === 'archive') void owner.archive(thread.id);
+        if (action === 'archive') void archiveThread(owner, thread.id);
       }
     );
   }
@@ -96,8 +108,8 @@
     use:focusOnMount
     onblur={() => void save()}
     onkeydown={(event) => {
-      if (event.key === 'Enter') void save();
-      if (event.key === 'Escape') renaming = false;
+      if (event.key === 'Enter') void leaveRename(true);
+      if (event.key === 'Escape') void leaveRename(false);
     }}
   />
 {:else}
@@ -106,6 +118,7 @@
     <button
       type="button"
       class="ghost row"
+      bind:this={row}
       data-testid="thread-row"
       data-thread-id={thread.id}
       data-machine-id={machine.id}
@@ -124,7 +137,7 @@
       </span>
     </button>
     <div class="metadata">
-      <span class="project-name" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>
+      {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
@@ -241,6 +254,7 @@
   }
   .machine {
     flex: none;
+    margin-left: auto;
   }
   .machine.offline {
     color: var(--color-danger);

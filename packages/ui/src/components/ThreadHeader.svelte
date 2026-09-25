@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { archiveThread } from '../lib/archive';
   import { separator } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
@@ -34,13 +36,18 @@
     if (thread) await store.rename(thread.id, renameText);
   }
 
-  function onRenameKey(event: KeyboardEvent) {
+  let titleButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  /** Enter and Escape give the keyboard back to the title, never to the page, where Escape stops the turn. */
+  async function onRenameKey(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
       void commitRename();
     } else if (event.key === 'Escape') {
       renaming = false;
-    }
+    } else return;
+    await tick();
+    titleButton?.focus({ preventScroll: true });
   }
 
   function openTitleMenu(event: MouseEvent) {
@@ -63,7 +70,7 @@
         if (action === 'rename') beginRename();
         else if (action === 'retitle') void store.retitle(open.id);
         else if (action === 'copy') void store.copy(open.cwd);
-        else if (action === 'archive') void store.archive(open.id);
+        else if (action === 'archive') void archiveThread(store, open.id);
       }
     );
   }
@@ -87,6 +94,7 @@
           <button
             type="button"
             class="ghost title"
+            bind:this={titleButton}
             data-testid="thread-title"
             title={strings.sidebar.rename}
             onclick={beginRename}

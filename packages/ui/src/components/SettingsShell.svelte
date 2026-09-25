@@ -7,6 +7,8 @@
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
   import { COMMAND_GROUPS } from '../lib/keybindings';
+  import { EXPERIMENT_IDS } from '../lib/experiments';
+  import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
   import type { SettingsTab, Store } from '../lib/store.svelte';
   import AccountsPage from './AccountsPage.svelte';
@@ -50,7 +52,7 @@
       ...COMMAND_GROUPS.map(group => ({id: `keys-${group.id}`, label: strings.keyboard.groups[group.id]})),
       {id: 'keybinding-file', label: strings.keyboard.file}
     ],
-    experiments: [{id: 'theme-grain', label: strings.experiments.themeGrain.title}, {id: 'session-import', label: strings.experiments.sessionImport.title}, {id: 'prompt-cache', label: strings.experiments.promptCache.title}],
+    experiments: EXPERIMENT_IDS.map(id => ({ id, label: experimentCopy()[id].title })),
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-breakdown', label: strings.usage.breakdown },
@@ -59,8 +61,8 @@
     general: [
       ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'projects', label: strings.settings.projects },
+      { id: 'archived', label: strings.settings.archived.heading },
       { id: 'background', label: strings.settings.background },
-      { id: 'machines', label: strings.machines.heading },
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'scheduler', label: strings.settings.scheduler },
       { id: 'tour', label: strings.onboarding.label },
@@ -130,7 +132,7 @@
           <div>
             {#each children[entry.id] ?? [] as child (child.id)}
               {#if store.owner || child.id !== 'scheduler'}
-                <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
+                <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}>{child.label}</button>
               {/if}
             {/each}
           </div>
