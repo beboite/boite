@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
+import { unlistedPanels } from './thread-rows';
 
 async function ready(): Promise<{ store: Store; client: FakeClient }> {
   const client = new FakeClient({ delayMs: 0 });
@@ -62,4 +63,18 @@ test('the project lists hold the live top-level threads of each project', async 
     store.detach();
     client.close();
   }
+});
+
+test('a list prunes only its own machine layouts, never the thread on screen', () => {
+  const key = (machine: string, id: string) => JSON.stringify([machine, id]);
+  const stale = unlistedPanels('http://a.test', new Set([key('http://a.test', 't-live')]), key('http://a.test', 't-open'));
+  expect(stale(key('http://a.test', 't-gone'))).toBe(true);
+  expect(stale(key('http://a.test', 't-live'))).toBe(false);
+  expect(stale(key('http://a.test', 't-open'))).toBe(false);
+  expect(stale(key('http://b.test', 't-gone'))).toBe(false);
+  expect(stale('not json')).toBe(false);
+  // A store with no machine id writes bare keys and owns only those.
+  const bare = unlistedPanels('', new Set(['t-live']), null);
+  expect(bare('t-gone')).toBe(true);
+  expect(bare(key('http://a.test', 't-gone'))).toBe(false);
 });

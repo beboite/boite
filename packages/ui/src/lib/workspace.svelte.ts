@@ -1,8 +1,9 @@
-import { servesThisPage, Store, store } from './store.svelte';
+import { Store, store } from './store.svelte';
 import {
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
+  servesThisPage,
   storeEndpoint,
   upsertEnvironment,
   readStoredEndpoint,

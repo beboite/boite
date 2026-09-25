@@ -4,7 +4,8 @@ import { RpcFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import * as endpoints from './endpoint';
-import { LOCAL_RECOVERY_MS, resumeAnchor, Store } from './store.svelte';
+import { LOCAL_RECOVERY_MS, Store } from './store.svelte';
+import { resumeAnchor } from './thread-rows';
 import { strings } from './strings';
 import { confirm } from './confirm.svelte';
 import { browserBridge } from './browser-bridge';
@@ -1006,6 +1007,48 @@ describe('Store', () => {
       await client.call('threads.archive', { threadId: other!.id, archived: true });
       await waitFor(() => (rightPanel.threads[store.threadKey(other!.id)] === undefined ? true : undefined));
       expect(store.composerStates[other!.id]).toBeUndefined();
+    } finally { store.detach(); client.close(); }
+  });
+
+  test('the open thread archived from another client keeps its panel until this client leaves it', async () => {
+    const { store, client } = await ready();
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    try {
+      const [shown, next] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
+      await store.open(shown!.id);
+      const key = store.threadKey(shown!.id);
+      const view = store.panel.open('browser');
+      const file = store.panel.openFile('src/index.ts');
+      store.panel.keepDraft(file.id, 'unsaved edit');
+      await client.call('threads.archive', { threadId: shown!.id, archived: true });
+      await waitFor(() => (store.openThread?.archived ? true : undefined));
+
+      client.drop();
+      await client.restore();
+      await store.reload();
+      expect(store.openThread?.id).toBe(shown!.id);
+      expect(rightPanel.threads[key]?.surfaces.map((surface) => surface.id)).toEqual([view.id, file.id]);
+      expect(store.panel.draft(file.id)).toBe('unsaved edit');
+      expect(destroy).not.toHaveBeenCalled();
+
+      await store.open(next!.id);
+      expect(rightPanel.threads[key]).toBeUndefined();
+      expect(rightPanel.drafts.has(key)).toBe(false);
+      expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
+    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+  });
+
+  test('a draft started over an open thread archived elsewhere lets its panel go', async () => {
+    const { store, client } = await ready();
+    try {
+      const shown = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
+      await store.open(shown.id);
+      store.panel.open('trace');
+      await client.call('threads.archive', { threadId: shown.id, archived: true });
+      await waitFor(() => (store.openThread?.archived ? true : undefined));
+      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeDefined();
+      store.startDraft();
+      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeUndefined();
     } finally { store.detach(); client.close(); }
   });
 

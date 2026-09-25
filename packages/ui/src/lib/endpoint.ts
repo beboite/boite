@@ -233,6 +233,11 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
+/** Whether a core at this address served the page, the only core a notification's `?thread=` link can mean. */
+export function servesThisPage(url: string): boolean {
+  try { return new URL(url).origin === window.location.origin; } catch { return false; }
+}
+
 let shellRefusal: string | null = null;
 
 /**

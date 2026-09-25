@@ -63,7 +63,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, servesThisPage, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -92,8 +92,9 @@ import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
 import { fill, strings } from './strings';
-import { lastIndexById, mergeResumed, patchRow, reconcileRows, threadsByProject } from './thread-rows';
+import { lastIndexById, mergeResumed, patchRow, reconcileRows, resumeRequest, threadsByProject, unlistedPanels } from './thread-rows';
 import { fitsReadingCache } from './reading-cache';
+import { mergeRequests, requestsOf, type RequestScope } from './requests';
 import { confirm } from './confirm.svelte';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
@@ -186,35 +187,6 @@ export function probeKey(providerId: ProviderId, accountId: string): string {
   return `${providerId}::${accountId}`;
 }
 
-/**
- * The requests of one thread, or of none. The same object comes back when there
- * was nothing to drop, so a filter that changes nothing re-renders nothing.
- */
-function requestsOf<T extends { threadId: ThreadId }>(
-  records: Record<RequestId, T>,
-  keep: (threadId: ThreadId) => boolean
-): Record<RequestId, T> {
-  const kept: Record<RequestId, T> = {};
-  let dropped = false;
-  for (const [id, record] of Object.entries(records)) {
-    if (keep(record.threadId)) kept[id] = record;
-    else dropped = true;
-  }
-  return dropped ? kept : records;
-}
-
-/**
- * What a list of requests speaks for: every thread (`reload()`), one thread
- * (`open()`), or nothing but itself, which is one event arriving.
- */
-type RequestScope = ThreadId | 'all' | 'one';
-
-/** True while `scope` says nothing about this request, so it is kept as it is. */
-function outside(request: { threadId: ThreadId }, scope: RequestScope): boolean {
-  if (scope === 'one') return true;
-  if (scope === 'all') return false;
-  return request.threadId !== scope;
-}
 
 /** A pid alone is reused by the OS, so a trace row is a pid and its start. */
 function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
@@ -230,21 +202,6 @@ export const LOCAL_RECOVERY_MS = 4_000;
 const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, idle: 4 };
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
 
-/**
- * The message a held thread asks `threads.get` to start from: the oldest one of
- * a turn this client has not seen finish, since its parts may still have moved,
- * or the last one when every turn it knows is over. Null when nothing is held.
- */
-export function resumeAnchor(thread: Pick<Thread, 'messages' | 'turns'>): MessageId | null {
-  const finished = new Set(thread.turns.filter((turn) => turn.finishedAt !== null).map((turn) => turn.id));
-  const open = thread.messages.find((message) => message.state === 'streaming' || !finished.has(message.turnId));
-  return (open ?? thread.messages[thread.messages.length - 1])?.id ?? null;
-}
-
-/** Whether a core at this address served the page, the only core a notification's `?thread=` link can mean. */
-export function servesThisPage(url: string): boolean {
-  try { return new URL(url).origin === window.location.origin; } catch { return false; }
-}
 
 export class Store {
   readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
@@ -1698,7 +1655,7 @@ export class Store {
       if (read) read.unread = false;
       // Archived while this client was away: their layouts would never be shown again.
       const listed = new Set(threads.value.map((t) => this.threadKey(t.id)));
-      rightPanel.prune((key) => this.#ownsPanelKey(key) && !listed.has(key));
+      rightPanel.prune(unlistedPanels(this.machineId, listed, this.openThread ? this.threadKey(this.openThread.id) : null));
       // A device with no record of how it works: conversations already here, or
       // a tour already seen, mean an install from before the question.
       work.settle(threads.value.length > 0 || onboardingSeen());
@@ -1740,9 +1697,8 @@ export class Store {
     if (!held || held.id !== threadId) return;
     const epoch = this.#delegationSelectionEpoch;
     const current = () => epoch === this.#delegationSelectionEpoch && client === this.#client && this.delegationThread === held;
-    const after = resumeAnchor(held);
     try {
-      const thread = await client.call('threads.get', after === null ? { threadId } : { threadId, after });
+      const thread = await client.call('threads.get', resumeRequest(threadId, held));
       if (!current()) return;
       mergeResumed(held, thread);
       this.delegationThread = thread;
@@ -2036,6 +1992,7 @@ export class Store {
       : projectId ?? this.openProject?.id ?? (work.current.startIn === 'drafts' ? drafts : this.lastProject());
     this.rememberReadingThread();
     void this.#unsubscribe();
+    this.#leaveArchived(null);
     this.openThread = null;
     this.draftChoice = null;
     this.trace = [];
@@ -2102,8 +2059,7 @@ export class Store {
       // what it cannot vouch for: a reconnect on a long conversation used to
       // download its last 120 messages again for the two that were new.
       const held = this.openThread?.id === threadId ? this.openThread : this.#readingThreads.get(threadId);
-      const after = held ? resumeAnchor(held) : null;
-      const fetched = client.call('threads.get', after === null ? { threadId } : { threadId, after });
+      const fetched = client.call('threads.get', resumeRequest(threadId, held));
       const permissionsAsked = client.call('permissions.list', { threadId });
       const questionsAsked = client.call('questions.list', { threadId });
       // A run that a newer click overtakes returns early and never awaits these.
@@ -2149,6 +2105,7 @@ export class Store {
         this.delegationSaving = false;
         this.delegationError = null;
       }
+      this.#leaveArchived(threadId);
       this.openThread = thread;
       // The thread that was open takes its permission and question cards with it.
       this.#keepRequestsOf(threadId);
@@ -2507,40 +2464,13 @@ export class Store {
     this.questionRequests = requestsOf(this.questionRequests, others);
   }
 
-  /**
-   * `permission.requested` reaches a subscribed socket once and is gone. A page
-   * that loads while a turn waits gets the same request from `permissions.list`,
-   * so both paths land here and the same id never makes a second card.
-   *
-   * `scope` is what the list the caller holds speaks for. A list is the core's
-   * whole answer about it, empty included, so an id the core no longer carries
-   * was settled where this client could not hear it and its card must stop
-   * offering the button. An event carries one request and speaks for nothing
-   * else, so it comes in as `'one'` and drops nothing.
-   */
+  /** A list or an event of requests over the cards held: `mergeRequests` says what `scope` drops. */
   #mergePermissions(requests: PermissionRequest[], scope: RequestScope): void {
-    const byId = new Map(
-      this.pendingPermissions.filter((request) => outside(request, scope)).map((r) => [r.id, r] as const)
-    );
-    for (const request of requests) byId.set(request.id, request);
-    this.pendingPermissions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
-    this.permissionRequests = {
-      ...this.permissionRequests,
-      ...Object.fromEntries(requests.map((request) => [request.id, request] as const))
-    };
+    ({ pending: this.pendingPermissions, records: this.permissionRequests } = mergeRequests(this.pendingPermissions, this.permissionRequests, requests, scope));
   }
 
-  /** The same rebuild as the permissions, for the same reasons. */
   #mergeQuestions(requests: QuestionRequest[], scope: RequestScope): void {
-    const byId = new Map(
-      this.pendingQuestions.filter((request) => outside(request, scope)).map((q) => [q.id, q] as const)
-    );
-    for (const request of requests) byId.set(request.id, request);
-    this.pendingQuestions = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
-    this.questionRequests = {
-      ...this.questionRequests,
-      ...Object.fromEntries(requests.map((request) => [request.id, request] as const))
-    };
+    ({ pending: this.pendingQuestions, records: this.questionRequests } = mergeRequests(this.pendingQuestions, this.questionRequests, requests, scope));
   }
 
   async answerQuestion(
@@ -3176,15 +3106,10 @@ export class Store {
     rightPanel.forget(this.threadKey(threadId));
   }
 
-  /** A panel key of this machine's: prefixed with its id, or bare on a store that has none. */
-  #ownsPanelKey(key: string): boolean {
-    if (!this.machineId) return !key.startsWith('[');
-    try {
-      const parsed: unknown = JSON.parse(key);
-      return Array.isArray(parsed) && parsed[0] === this.machineId;
-    } catch {
-      return false;
-    }
+  /** The open thread, archived from another client, stayed on screen with its panel; leaving it lets that go. */
+  #leaveArchived(next: ThreadId | null): void {
+    const left = this.openThread;
+    if (left?.archived && left.id !== next) this.#forgetThread(left.id);
   }
 
   #threadSnapshots(threadId: ThreadId): Set<Thread> {

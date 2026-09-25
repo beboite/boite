@@ -1,4 +1,4 @@
-import type { ProjectId, Thread, ThreadSummary } from '@boite/contracts';
+import type { MessageId, ProjectId, Thread, ThreadId, ThreadSummary } from '@boite/contracts';
 
 /** Same value: primitives by identity, the small objects of a summary (load, context, cache) by content. */
 function same(a: unknown, b: unknown): boolean {
@@ -54,6 +54,43 @@ export function threadsByProject(threads: readonly ThreadSummary[]): Map<Project
 export function lastIndexById<T extends { id: string }>(items: readonly T[], id: string): number {
   for (let index = items.length - 1; index >= 0; index--) if (items[index]!.id === id) return index;
   return -1;
+}
+
+/**
+ * The message a held thread asks `threads.get` to start from: the oldest one of
+ * a turn this client has not seen finish, since its parts may still have moved,
+ * or the last one when every turn it knows is over. Null when nothing is held.
+ */
+export function resumeAnchor(thread: Pick<Thread, 'messages' | 'turns'>): MessageId | null {
+  const finished = new Set(thread.turns.filter((turn) => turn.finishedAt !== null).map((turn) => turn.id));
+  const open = thread.messages.find((message) => message.state === 'streaming' || !finished.has(message.turnId));
+  return (open ?? thread.messages[thread.messages.length - 1])?.id ?? null;
+}
+
+/** The `threads.get` parameters for a thread, from its resume anchor when part of it is held. */
+export function resumeRequest(threadId: ThreadId, held: Pick<Thread, 'messages' | 'turns'> | undefined): { threadId: ThreadId; after?: MessageId } {
+  const after = held ? resumeAnchor(held) : null;
+  return after === null ? { threadId } : { threadId, after };
+}
+
+/** A panel key of the machine `machineId`: prefixed with its id, or bare on a store that has none. */
+export function ownsPanelKey(machineId: string, key: string): boolean {
+  if (!machineId) return !key.startsWith('[');
+  try {
+    const parsed: unknown = JSON.parse(key);
+    return Array.isArray(parsed) && parsed[0] === machineId;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The layouts a fresh `threads.list` leaves behind: this machine's, of threads
+ * it no longer lists. The thread on screen is never one of them: archived from
+ * another client, it stays open here, and goes when this client leaves it.
+ */
+export function unlistedPanels(machineId: string, listed: ReadonlySet<string>, openKey: string | null): (key: string) => boolean {
+  return (key) => key !== openKey && !listed.has(key) && ownsPanelKey(machineId, key);
 }
 
 /**

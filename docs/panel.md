@@ -8,10 +8,13 @@ way it was left. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
 
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
-than parked, since the UI has no way to show an archived thread again. Each
-machine's `threads.list` also drops that machine's layouts for threads it no
-longer lists, which covers archives made while this client was away. A machine
-that has not connected yet keeps its layouts.
+than parked, since the UI has no way to show an archived thread again. The one
+exception is the thread on screen when another client archives it: it stays
+open with its tabs and unsaved file edits, reconnects included, and its layout
+goes when this client opens another thread or a draft. Each machine's
+`threads.list` also drops that machine's layouts for threads it no longer
+lists, which covers archives made while this client was away, except the open
+thread's. A machine that has not connected yet keeps its layouts.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
