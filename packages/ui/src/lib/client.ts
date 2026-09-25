@@ -124,6 +124,35 @@ function transportFailure(message: string): RpcFailure {
   return new RpcFailure({ code: RpcErrorCode.Internal, message });
 }
 
+/**
+ * Silence on a remote socket before the client asks whether the core is still
+ * there. A phone whose NAT mapping expired, or a core host that went to sleep,
+ * leaves a socket that never fires close.
+ */
+const IDLE_PROBE_MS = 25_000;
+/**
+ * How long a probe waits for any frame at all. Long enough for a slow link that
+ * is still carrying one large frame, which would otherwise read as dead and be
+ * fetched again on the reconnect.
+ */
+const PROBE_DEADLINE_MS = 15_000;
+/** How long `resume()` gives the socket it already has before replacing it. */
+const RESUME_PROBE_MS = 4_000;
+
+/** The shell and a browser on the core's machine: that socket cannot go half-open. */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const name = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    return name === '127.0.0.1' || name === 'localhost' || name === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function pageHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 /** WebSocket close code 1009: the peer refused a frame over its size limit. */
 const MESSAGE_TOO_BIG = 1009;
 
@@ -165,6 +194,12 @@ export class WsClient implements ObservableClient {
   #manuallyClosed = false;
   #opening: Promise<CoreInfo> | null = null;
   #cancelOpen: (() => void) | null = null;
+  /** Remote sockets are probed when silent; a loopback one never goes half-open. */
+  #remote: boolean;
+  #lastFrameAt = 0;
+  #liveness: ReturnType<typeof setTimeout> | null = null;
+  /** The one probe in flight: settled true by any frame, false by its deadline or a teardown. */
+  #probe: { socket: SocketLike; result: Promise<boolean>; settle: (alive: boolean) => void } | null = null;
 
   constructor(options: WsClientOptions) {
     this.#options = {
@@ -180,6 +215,7 @@ export class WsClient implements ObservableClient {
     this.#paired = options.paired ?? options.grant !== undefined;
     this.#onSession = options.onSession ?? null;
     this.#onRevoked = options.onRevoked ?? null;
+    this.#remote = !isLoopbackUrl(options.url);
   }
 
   get state(): ClientState {
@@ -219,11 +255,22 @@ export class WsClient implements ObservableClient {
     return this.#startOpen();
   }
 
-  /** A mobile browser can retain a dead socket after sleep without firing close. */
+  /**
+   * Back from hidden, back online or out of the back/forward cache. A mobile
+   * browser can keep a dead socket after sleep without firing close, but most
+   * of the time the socket is fine: it is probed first, and only a socket that
+   * stays silent is replaced, rejecting the calls it carried.
+   */
   async resume(): Promise<void> {
     if (this.#manuallyClosed || this.#state === 'idle') return;
     // A one-time grant must finish its exchange before any connection replaces it.
     if (this.#grant !== null && this.#opening) { await this.#opening; return; }
+    const socket = this.#socket;
+    if (this.#state === 'ready' && socket !== null) {
+      if (await this.#probeSocket(socket, RESUME_PROBE_MS)) return;
+      // Closed meanwhile, or already replaced by a socket of its own.
+      if (this.#manuallyClosed || (this.#socket !== null && this.#socket !== socket)) return;
+    }
     if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     this.#teardown('connection resumed; check the conversation before resending');
@@ -291,6 +338,9 @@ export class WsClient implements ObservableClient {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(transportFailure(`${method} timed out; check the conversation before retrying`));
+        // A call that never answers is the first sign of a half-open socket:
+        // ask once, and replace the socket if nothing at all comes back.
+        if (method !== 'hello') this.#suspect(socket);
       }, 120_000);
       const pending: Pending = {
         resolve: (value) => { clearTimeout(timer); resolve(value as RpcResult<M>); },
@@ -333,6 +383,7 @@ export class WsClient implements ObservableClient {
           ? `the core refused a frame over ${megabytes(RPC_MAX_FRAME_BYTES)} MB and closed the connection`
           : 'connection closed';
         this.#dropPending(reason);
+        this.#stopLiveness();
         this.#socket = null;
         fail(incompatible ? `core protocol version must be ${PROTOCOL_VERSION}` : reason);
         if (this.#manuallyClosed || !this.#options.reconnect) {
@@ -344,11 +395,7 @@ export class WsClient implements ObservableClient {
       };
       socket.onopen = () => {
         const grant = this.#grant;
-        this.#send(socket, 'hello', {
-          ...(grant === null ? { token: this.#options.token } : { grant }),
-          protocolVersion: PROTOCOL_VERSION,
-          client: { name: this.#options.clientName, version: this.#options.version }
-        }).then(
+        this.#send(socket, 'hello', this.#helloParams()).then(
           (result) => {
             if (result.core.protocolVersion !== PROTOCOL_VERSION) {
               this.#manuallyClosed = true;
@@ -366,7 +413,9 @@ export class WsClient implements ObservableClient {
             this.#principal = result.principal;
             this.#attempt = 0;
             this.#core = result.core;
+            this.#lastFrameAt = Date.now();
             this.#setState('ready');
+            this.#armLiveness(IDLE_PROBE_MS);
             this.#resubscribe(socket);
             if (!settled) {
               settled = true;
@@ -403,6 +452,80 @@ export class WsClient implements ObservableClient {
     });
   }
 
+  #helloParams(): RpcParams<'hello'> {
+    return {
+      ...(this.#grant === null ? { token: this.#options.token } : { grant: this.#grant }),
+      protocolVersion: PROTOCOL_VERSION,
+      client: { name: this.#options.clientName, version: this.#options.version }
+    };
+  }
+
+  /**
+   * Whether anything at all arrives on `socket` within `deadlineMs`. The
+   * question is a `hello`, which the core answers on an authenticated
+   * connection with its info and nothing else, for every principal; any frame,
+   * an event included, counts as the answer.
+   */
+  #probeSocket(socket: SocketLike, deadlineMs: number): Promise<boolean> {
+    if (this.#probe?.socket === socket) return this.#probe.result;
+    let settle: (alive: boolean) => void = () => undefined;
+    const result = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => settle(false), deadlineMs);
+      settle = (alive) => {
+        clearTimeout(timer);
+        if (this.#probe?.socket === socket) this.#probe = null;
+        resolve(alive);
+      };
+    });
+    this.#probe = { socket, result, settle };
+    void this.#send(socket, 'hello', this.#helloParams()).catch(() => undefined);
+    return result;
+  }
+
+  #suspect(socket: SocketLike): void {
+    if (this.#socket !== socket || this.#state !== 'ready') return;
+    void this.#probeSocket(socket, PROBE_DEADLINE_MS).then((alive) => {
+      if (!alive) this.#lost(socket);
+    });
+  }
+
+  /** The socket stopped answering without closing: the same path as a close. */
+  #lost(socket: SocketLike): void {
+    if (this.#socket !== socket || this.#manuallyClosed) return;
+    this.#teardown('connection lost; check the conversation before resending');
+    if (!this.#options.reconnect) {
+      this.#setState('closed');
+      return;
+    }
+    this.#setState('connecting');
+    this.#attempt = 0;
+    this.#scheduleRetry();
+  }
+
+  /** One timer per ready remote socket, re-armed from its own callback rather than on every frame. */
+  #armLiveness(delayMs: number): void {
+    if (!this.#remote || this.#liveness !== null) return;
+    this.#liveness = setTimeout(() => {
+      this.#liveness = null;
+      const socket = this.#socket;
+      if (this.#state !== 'ready' || socket === null) return;
+      // A hidden page is not probed: `resume()` checks the socket on the way back.
+      if (pageHidden()) { this.#armLiveness(IDLE_PROBE_MS); return; }
+      const quiet = Date.now() - this.#lastFrameAt;
+      if (quiet < IDLE_PROBE_MS) { this.#armLiveness(IDLE_PROBE_MS - quiet); return; }
+      void this.#probeSocket(socket, PROBE_DEADLINE_MS).then((alive) => {
+        if (alive) this.#armLiveness(IDLE_PROBE_MS);
+        else this.#lost(socket);
+      });
+    }, delayMs);
+  }
+
+  #stopLiveness(): void {
+    if (this.#liveness !== null) clearTimeout(this.#liveness);
+    this.#liveness = null;
+    this.#probe?.settle(false);
+  }
+
   #resubscribe(socket: SocketLike): void {
     for (const threadId of this.#subscribed) {
       void this.#send(socket, 'threads.subscribe', { threadId }).catch(() => undefined);
@@ -427,6 +550,7 @@ export class WsClient implements ObservableClient {
   }
 
   #teardown(message: string): void {
+    this.#stopLiveness();
     this.#cancelOpen?.();
     this.#cancelOpen = null;
     this.#opening = null;
@@ -443,6 +567,8 @@ export class WsClient implements ObservableClient {
   }
 
   #receive(raw: unknown): void {
+    this.#lastFrameAt = Date.now();
+    this.#probe?.settle(true);
     if (typeof raw !== 'string') return;
     let frame: unknown;
     try {

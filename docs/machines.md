@@ -31,6 +31,19 @@ shows the disconnected state. Other hosts remain usable. WebSocket reconnection
 reloads the host's project and thread summaries. An initial connection that does
 not answer within twelve seconds can be retried from Machines.
 
+A link can die without closing the socket: a phone's NAT mapping expires, the
+core's host sleeps, a tunnel changes path. The client notices by itself
+(`packages/ui/src/lib/client.ts`). On a remote host, 25 seconds without any
+frame sends a `hello`, which the core answers on an open connection with its
+info and nothing else. If no frame of any kind arrives within 15 seconds, the
+socket is replaced and the calls it carried fail with "connection lost; check
+the conversation before resending". A call that gets no answer in 120 seconds
+starts the same check on any host. Returning to the page, an `online` event or
+a page restored from the back/forward cache also send the `hello` first, and
+replace the socket only if it stays silent for 4 seconds, so a tab switch no
+longer drops a healthy connection or reloads the lists. A hidden page is not
+checked.
+
 ## Browser and phone connections
 
 The desktop shell is an allowed origin on every core. A browser or phone has
