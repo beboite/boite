@@ -276,7 +276,7 @@ export const fr: Translation = {
     readyAction: 'Installer la mise à jour',
     detailsAction: 'Détails',
     installTitle: 'Installer la mise à jour de Boite ?',
-    installBody: "Boite va se fermer et arrêter les tours d'agents en cours sur cet ordinateur. Les tours interrompus ne redémarrent pas automatiquement.",
+    installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
     readyTitlebar: 'Installer la mise à jour prête',
     detailsTitlebar: 'Ouvrir les détails de la mise à jour'
   },
@@ -1405,6 +1405,7 @@ export const fr: Translation = {
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",
     noEndpoint: "Aucun point de connexion n'a pu être résolu.",
+    coreStart: "Le cœur de cet ordinateur n'a pas démarré : {reason}",
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",

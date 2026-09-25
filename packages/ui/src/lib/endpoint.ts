@@ -228,12 +228,25 @@ export function insideTauri(): boolean {
   return window.__TAURI_INTERNALS__ !== undefined;
 }
 
+let shellRefusal: string | null = null;
+
+/**
+ * Why the shell gave no endpoint the last time it was asked: its own sentence
+ * (the core exited and what it printed, a start past its timeout), or null
+ * once it gave one.
+ */
+export function shellEndpointError(): string | null {
+  return shellRefusal;
+}
+
 export async function fromTauri(): Promise<Endpoint | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const result: unknown = await invoke('core_endpoint');
+    shellRefusal = isEndpoint(result) ? null : 'the shell answered with no core address';
     return isEndpoint(result) ? { url: normalise(result.url), token: result.token, local: true } : null;
-  } catch {
+  } catch (error) {
+    shellRefusal = error instanceof Error ? error.message : String(error);
     return null;
   }
 }

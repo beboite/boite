@@ -63,7 +63,7 @@ import {
   type EventHandler,
   type ObservableClient
 } from './client';
-import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
+import { clearStoredEndpoint, refreshLocalEnvironment, fromTauri, shellEndpointError, parsePairingLink, readEnvironments, removeEnvironment, resolveEndpoint, storeEndpoint, upsertEnvironment, type Endpoint, type StoredEnvironment } from './endpoint';
 import { isExperimentEnabled } from './experiments';
 import { titleFrom } from './format';
 import { chordLabel, commandForKey, resolveBindings } from './keybindings';
@@ -90,7 +90,7 @@ import {
 import { work, type Profile } from './work-prefs.svelte';
 import { onboardingSeen } from './onboarding';
 import { rightPanel, type BoundPanel } from './right-panel.svelte';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, readModelDefaults, writeModelDefaults, resolveModelDefault, type ModelDefaults } from './model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from './model-order';
 
@@ -199,6 +199,12 @@ function outside(request: { threadId: ThreadId }, scope: RequestScope): boolean 
 function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
   return a.pid === b.pid && a.startedAt === b.startedAt;
 }
+
+/**
+ * How long the shell's own core may stay unreachable before the shell is asked
+ * for it again. A core restarting on its own port is back well within it.
+ */
+export const LOCAL_RECOVERY_MS = 4_000;
 
 const LIVE: ThreadStatusRank = { waiting: 0, running: 1, queued: 2, error: 3, idle: 4 };
 type ThreadStatusRank = Record<ThreadSummary['status'], number>;
@@ -775,6 +781,7 @@ export class Store {
       this.#off.push(
         client.onState((state) => {
           this.connection = state;
+          this.#watchLocalCore(client, state);
           if (state === 'ready') {
             resetPullRequestSupport(client);
             this.#probeEpoch++;
@@ -1071,6 +1078,10 @@ export class Store {
         const endpoint = await resolveEndpoint(preferLocal);
         if (!endpoint) {
           this.connection = 'closed';
+          // The shell's reason, when it has one: the core exited and what it
+          // printed, or a start that never answered.
+          const refusal = window.__TAURI_INTERNALS__ ? shellEndpointError() : null;
+          if (refusal) this.error = fill(strings.errors.coreStart, { reason: refusal });
           this.booted = true;
           return;
         }
@@ -1202,9 +1213,55 @@ export class Store {
     this.startDraft(this.projects[0]?.id ?? null);
   }
 
+  #localRecovery: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The core this shell started, lost for `LOCAL_RECOVERY_MS`: the shell is
+   * asked for it again, which starts a new core when the old one exited (a
+   * crash, a kill), and the store follows it if it moved. A client closed on
+   * purpose ("Stop this core") is not watched: that stop is meant to hold.
+   */
+  #watchLocalCore(client: Client, state: ClientState): void {
+    if (state !== 'connecting' || !this.localCore) {
+      if (this.#localRecovery !== null) clearTimeout(this.#localRecovery);
+      this.#localRecovery = null;
+      return;
+    }
+    if (this.#localRecovery !== null) return;
+    this.#localRecovery = setTimeout(() => {
+      this.#localRecovery = null;
+      if (this.#client === client && client.state === 'connecting') void this.#followLocalCore(client);
+    }, LOCAL_RECOVERY_MS);
+  }
+
+  /**
+   * Asks the shell where its core is now and moves this store there when the
+   * address changed: `moved`. `same` when there is nothing to follow (not the
+   * shell's core, or the same address), `refused` when the shell has no core
+   * to give, its reason then being the store's error.
+   */
+  async #followLocalCore(client: Client): Promise<'moved' | 'same' | 'refused'> {
+    if (!this.localCore || window.__TAURI_INTERNALS__ === undefined) return 'same';
+    const local = await fromTauri();
+    if (this.#client !== client) return 'same';
+    if (!local) {
+      const refusal = shellEndpointError();
+      this.error = refusal ? fill(strings.errors.coreStart, { reason: refusal }) : strings.errors.noEndpoint;
+      return 'refused';
+    }
+    if (client.state === 'ready' || local.url === this.endpointUrl) return 'same';
+    this.localEndpointUrl = local.url;
+    this.environments = refreshLocalEnvironment(local);
+    await this.#switchTo(local);
+    return 'moved';
+  }
+
   async connect(): Promise<void> {
     const client = this.#client;
     if (!client) return;
+    // A closed client of the shell's own core: its core may be gone, and the
+    // shell starts another on this ask, maybe on a new port.
+    if (client.state === 'closed' && await this.#followLocalCore(client) !== 'same') return;
     try {
       this.core = await client.connect();
       this.connection = client.state;

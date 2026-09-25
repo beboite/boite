@@ -265,7 +265,7 @@ export const strings = {
     readyAction: 'Install update',
     detailsAction: 'Details',
     installTitle: 'Install the Boite update?',
-    installBody: 'Boite will close and stop agent turns running on this computer. Interrupted turns do not restart automatically.',
+    installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
     readyTitlebar: 'Install the ready app update',
     detailsTitlebar: 'Open app update details'
   },
@@ -1428,6 +1428,7 @@ export const strings = {
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',
     noEndpoint: 'No core endpoint could be resolved.',
+    coreStart: 'The core on this computer did not start: {reason}',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
