@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn a_core_json_naming_a_process_that_exited_costs_no_connection() {
-        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+        let _process_guard = crate::process_test_guard();
         let mut gone = Command::new("bun");
         gone.args(["-e", "0"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         platform::prepare_command(&mut gone);

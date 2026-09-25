@@ -134,7 +134,7 @@ setInterval(() => {}, 1000);
 
     #[test]
     fn a_resident_core_is_asked_to_stop_with_its_token_and_is_gone_after() {
-        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+        let _process_guard = crate::process_test_guard();
         let directory = scratch("stop");
         let mut child = fake_core(&directory, "secret-token");
         let pid = child.id();
@@ -159,7 +159,7 @@ setInterval(() => {}, 1000);
 
     #[test]
     fn a_live_pid_that_does_not_answer_as_the_core_is_left_alone() {
-        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+        let _process_guard = crate::process_test_guard();
         let directory = scratch("squat");
         let mut other = Command::new("bun");
         other.args(["-e", "setInterval(() => {}, 1000)"]).stdin(Stdio::null()).stdout(Stdio::null());

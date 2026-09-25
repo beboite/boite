@@ -81,7 +81,7 @@ fn spawned_pid(state: &CoreState) -> Option<u32> {
 
 #[test]
 fn a_core_that_exits_at_start_is_reported_at_once_with_what_it_said() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     for resident in [false, true] {
         let directory = scratch(if resident { "early-resident" } else { "early-owned" });
         let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "fail"), resident, Duration::from_secs(30));
@@ -97,7 +97,7 @@ fn a_core_that_exits_at_start_is_reported_at_once_with_what_it_said() {
 
 #[test]
 fn a_running_core_of_another_version_is_stopped_and_replaced() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     let directory = scratch("stale");
     let (mut old, old_pid) = running_core(&directory, "1.0.0");
     let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
@@ -114,7 +114,7 @@ fn a_running_core_of_another_version_is_stopped_and_replaced() {
 
 #[test]
 fn a_running_core_of_this_version_is_adopted_and_nothing_is_started() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     let directory = scratch("current");
     let (mut core, pid) = running_core(&directory, "2.0.0");
     // A start would fail: adopting is the only way this resolves.
@@ -129,7 +129,7 @@ fn a_running_core_of_this_version_is_adopted_and_nothing_is_started() {
 
 #[test]
 fn a_core_that_died_is_replaced_by_the_next_caller() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     let directory = scratch("restart");
     let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
     publish(&state.slot, resolve_core(&state));
@@ -166,7 +166,7 @@ fn a_core_that_died_is_replaced_by_the_next_caller() {
 
 #[test]
 fn a_core_stopped_for_an_install_stays_stopped_until_the_hold_is_released() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     let directory = scratch("hold");
     let state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
     publish(&state.slot, resolve_core(&state));
@@ -187,7 +187,7 @@ fn a_core_stopped_for_an_install_stays_stopped_until_the_hold_is_released() {
 
 #[test]
 fn a_slow_resident_core_is_left_running_and_a_slow_owned_one_is_stopped() {
-    let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+    let _process_guard = crate::process_test_guard();
     let directory = scratch("slow");
     let resident = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "hang"), true, Duration::from_secs(1));
     let error = resolve_core(&resident).err().expect("a core that never answers is not adopted");

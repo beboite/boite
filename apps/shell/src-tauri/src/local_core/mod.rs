@@ -126,6 +126,8 @@ impl CoreState {
     pub(crate) fn stop_for_install(&self) -> Result<(), String> {
         self.held.store(true, Ordering::SeqCst);
         let stopped = resident::stop_local_core(&self.launch.directory, resident::GRACE);
+        // The stop leaves the exit of a core this shell started to its `Child`.
+        reap_child(self);
         if stopped.is_err() {
             self.release_hold();
         }

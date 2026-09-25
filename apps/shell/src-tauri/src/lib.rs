@@ -38,6 +38,12 @@ use window::{build_main_window, hidden, hide_main, show_main, Reveal};
 #[cfg(test)]
 pub(crate) static PROCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+/// One failed test must not fail every later one with a poisoned lock.
+#[cfg(test)]
+pub(crate) fn process_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    PROCESS_TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// A system toast for a thread. A click brings the window back and tells the
 /// UI which thread through `notification://open`; the UI opens it.
 #[tauri::command]

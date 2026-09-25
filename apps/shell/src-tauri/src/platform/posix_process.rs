@@ -12,12 +12,14 @@ impl Watched {
     }
 
     /// Whether the process exited before `timeout` ran out. A core this shell
-    /// started is its child and would stay a zombie that `kill(pid, 0)` still
-    /// finds, so it is reaped here; `ECHILD` just means it is someone else's.
+    /// started is its child and stays a zombie that `kill(pid, 0)` still finds
+    /// until its `Child` is waited on, so its exit is read with `WNOWAIT`: the
+    /// status stays for the `Child`, whose `wait` would fail with `ECHILD` once
+    /// something else reaped it.
     pub fn exited_within(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
-            if unsafe { libc::waitpid(self.0, std::ptr::null_mut(), libc::WNOHANG) } == self.0 || !alive_pid(self.0) {
+            if exited_child(self.0) || !alive_pid(self.0) {
                 return true;
             }
             if Instant::now() >= deadline {
@@ -35,6 +37,15 @@ impl Watched {
     pub fn terminate(&self) {
         unsafe { libc::kill(self.0, libc::SIGKILL) };
     }
+}
+
+/// Whether `pid` is a child of this process that exited, left unreaped.
+/// `ECHILD` just means it is someone else's.
+fn exited_child(pid: libc::pid_t) -> bool {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let options = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    // With WNOHANG and no exit yet, the call succeeds and leaves `info` zeroed.
+    unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, options) == 0 && info.si_signo == libc::SIGCHLD }
 }
 
 fn alive_pid(pid: libc::pid_t) -> bool {
