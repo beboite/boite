@@ -369,6 +369,24 @@ describe('agy driver', () => {
     expect(argvLines().at(-1)).toContain('model=gemini-3.8-flash-medium');
   });
 
+  test('a stop while the models are listed before the launch ends the turn at once, and no process starts', async () => {
+    const client = await startCore();
+    const { threadId } = await agyThread(client, { model: 'gemini-3.8-flash', probe: true });
+    getDriver('agy').forgetProbes?.({});
+    process.env['AGY_FAKE_MODELS_DELAY_MS'] = '4000';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'never launched' });
+    await waitFor(() => linesStarting('models').length === 2);
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect((await finished).status).toBe('stopped');
+    expect(Date.now() - stoppedAt).toBeLessThan(1000);
+    // The listing ends on its own; the turn's process never starts.
+    await Bun.sleep(4500);
+    expect(argvLines()).toHaveLength(0);
+  });
+
   test('a signed-out agy fails the probe with what to do about it', async () => {
     const client = await startCore();
     const { accountId } = await agyAccount(client);

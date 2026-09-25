@@ -42,6 +42,7 @@ import type {
 import { messageOf, unavailable } from '../errors.ts';
 import type { SpawnedChild } from '../procs.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../providers/loader.ts';
+import { stderrLines } from './stderr-lines.ts';
 import type {
   Driver,
   ProbeContext,
@@ -165,10 +166,13 @@ class AgyTurn {
   private error: string | null = null;
   private resolve: (result: TurnResult) => void = () => undefined;
   private decide: () => void = () => undefined;
+  private wake: () => void = () => undefined;
 
   readonly done: Promise<TurnResult>;
   /** Resolves the moment the outcome is known, before anything is journalled. */
   readonly finished: Promise<void>;
+  /** Resolves on a stop, so a turn still waiting to launch its process stops waiting. */
+  readonly stopRequested: Promise<void>;
 
   /** agy's `conversation_id`, which the next process resumes with `--conversation`. */
   sessionId: string | null;
@@ -185,6 +189,9 @@ class AgyTurn {
     this.finished = new Promise<void>((resolve) => {
       this.decide = resolve;
     });
+    this.stopRequested = new Promise<void>((resolve) => {
+      this.wake = resolve;
+    });
   }
 
   noteSession(sessionId: string): void {
@@ -193,6 +200,7 @@ class AgyTurn {
 
   markStopped(): void {
     this.isStopped = true;
+    this.wake();
   }
 
   writeText(text: string): void {
@@ -498,10 +506,20 @@ class AgySession {
       this.endTurn(turn, false);
       return;
     }
+    let launched: boolean;
     try {
-      await this.start(turn.ctx);
+      // The launch can wait on the previous process's exit (up to
+      // EXIT_GRACE_MS) and on the model listing (up to PROBE_TIMEOUT_MS). A
+      // stop ends the turn now: the session is dropped, and `open` spawns
+      // nothing once it has ended.
+      launched = await Promise.race([this.start(turn.ctx).then(() => true), turn.stopRequested.then(() => false)]);
     } catch (error) {
       turn.fail(messageOf(error));
+      this.endTurn(turn, true);
+      return;
+    }
+    if (!launched) {
+      turn.settleRun();
       this.endTurn(turn, true);
       return;
     }
@@ -557,6 +575,8 @@ class AgySession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
     if (this.previous !== null) await this.previous;
+    // A stop while the previous process left: no model listing, no process.
+    if (this.ended) return;
     const model = await this.launchModel(ctx);
     if (this.ended) return;
     const args = [
@@ -595,14 +615,9 @@ class AgySession {
       stdout.feed(chunk);
     });
     child.stdin.on('error', () => undefined);
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      for (const line of chunk.split(/\r?\n/)) {
-        const text = line.trim();
-        if (text.length === 0) continue;
-        this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('info', `agy: ${this.lastStderr}`);
-      }
+    stderrLines(child.stderr, (text) => {
+      this.lastStderr = text.slice(0, STDERR_MAX);
+      ctx.log('info', `agy: ${this.lastStderr}`);
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
