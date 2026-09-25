@@ -1,11 +1,14 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { newToken } from '../src/ids.ts';
 import { pair } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
-import { startTestCore } from './harness.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, startServer, UI_DIST } from '../src/server.ts';
+import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const HELLO_TIMEOUT_MS = 200;
@@ -102,6 +105,40 @@ describe('server', () => {
     expect(body.ok).toBe(true);
     expect(body.version).toBe(harness.core.version);
     expect(body.pid).toBe(process.pid);
+  });
+
+  test('shutdown takes a POST with the core token, and an embedded core says it cannot stop', async () => {
+    const at = `${harness.url}/shutdown`;
+    expect((await fetch(at)).status).toBe(405);
+    expect((await fetch(at, { method: 'POST' })).status).toBe(401);
+    expect((await fetch(at, { method: 'POST', headers: { authorization: 'Bearer nope' } })).status).toBe(401);
+    // A proxy on this machine forwards a public name: the route is not for it.
+    const proxied = await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}`, host: 'boite.example' } });
+    expect(proxied.status).toBe(403);
+    // The harness core has no process of its own to stop.
+    expect((await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}` } })).status).toBe(501);
+  });
+
+  test('shutdown with the core token stops a core that owns its process', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-shutdown-'));
+    let stopped = 0;
+    const token = newToken();
+    const core = new Core({ dataDir, token, onShutdown: () => { stopped += 1; } });
+    const server = startServer({ core, host: '127.0.0.1', port: 0 });
+    try {
+      const ask = () => fetch(`${server.url}/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+      const first = await ask();
+      expect(first.status).toBe(202);
+      expect(((await first.json()) as { pid: number }).pid).toBe(process.pid);
+      // A second request while the first is draining is not a second stop.
+      expect((await ask()).status).toBe(202);
+      await Bun.sleep(60);
+      expect(stopped).toBe(1);
+    } finally {
+      await server.stop();
+      await core.close();
+      await removeDir(dataDir);
+    }
   });
 
   test('the root serves the UI build, or the placeholder when there is none', async () => {
