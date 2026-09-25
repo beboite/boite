@@ -34,6 +34,10 @@ export const RELEASE_RECORD = '.install-complete.json';
 /** How often a download reports itself while it runs. */
 const PROGRESS_INTERVAL_MS = 250;
 
+/** Compressed bytes handed to the unzip at once, and how long it may hold the thread before yielding. */
+const EXTRACT_SLICE_BYTES = 16 * 1024;
+const EXTRACT_YIELD_MS = 10;
+
 /** A download that receives nothing for this long is dropped and tried again from where it stopped. */
 const IDLE_TIMEOUT_MS = 30_000;
 
@@ -734,7 +738,7 @@ export class InstallManager {
     const wanted = new Map(install.files.map((file) => [file.path.split('\\').join('/'), file]));
     mkdirSync(releaseDir, { recursive: true });
     if (install.format === 'binary') {
-      if (running.controller.signal.aborted) throw new Cancelled();
+      if (running.controller.signal.aborted) throw running.controller.signal.reason;
       const file = install.files[0];
       if (!file || install.files.length !== 1 || safeEntryPath(file.path) === null) {
         throw refused('a binary install requires exactly one safe relative file path');
@@ -782,12 +786,23 @@ export class InstallManager {
     try {
       const stream = Bun.file(part).stream();
       const reader = stream.getReader();
+      // Inflating runs on the core's own thread: a compressible member turns one
+      // read into megabytes of output. Small slices, and a turn of the event loop
+      // whenever a few milliseconds went by, keep RPCs and the cancel answering.
+      let lastYield = performance.now();
       for (;;) {
-        if (running.controller.signal.aborted) throw new Cancelled();
+        if (running.controller.signal.aborted) throw running.controller.signal.reason;
         const { done, value } = await reader.read();
         if (done) break;
-        unzip.push(value, false);
-        if (failure !== null) throw failure;
+        for (let offset = 0; offset < value.byteLength; offset += EXTRACT_SLICE_BYTES) {
+          unzip.push(value.subarray(offset, offset + EXTRACT_SLICE_BYTES), false);
+          if (failure !== null) throw failure;
+          if (performance.now() - lastYield >= EXTRACT_YIELD_MS) {
+            await new Promise<void>((done) => setImmediate(done));
+            lastYield = performance.now();
+            if (running.controller.signal.aborted) throw running.controller.signal.reason;
+          }
+        }
       }
       unzip.push(new Uint8Array(0), true);
       if (failure !== null) throw failure;
