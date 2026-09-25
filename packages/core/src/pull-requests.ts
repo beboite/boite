@@ -1,6 +1,6 @@
 import type { ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { messageOf, refused } from './errors.ts';
 import { GIT_PROBE_TIMEOUT_MS, hasGitMarker } from './projects.ts';
@@ -82,7 +82,10 @@ export function repositoryOf(root: string): string {
       }
     }
   } catch { /* An unreadable pointer leaves the checkout standing for itself. */ }
-  const key = normalize(gitDir);
+  // The real path, so a checkout reached through a link or a Windows short
+  // name (`RUNNER~1`) keys like the pointer git wrote in long form.
+  let key = normalize(gitDir);
+  try { key = realpathSync.native(key); } catch { /* A missing .git keys by its spelling. */ }
   return process.platform === 'win32' ? key.toLowerCase() : key;
 }
 
