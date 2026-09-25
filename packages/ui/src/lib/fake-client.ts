@@ -1215,7 +1215,7 @@ export class FakeClient implements ObservableClient {
         record.exitedAt = this.#now();
         record.exitCode = 1;
         killed += 1;
-        this.#emit('process.exited', structuredClone(record));
+        this.#emitToThread(record.threadId, 'process.exited', structuredClone(record));
       }
       const thread = this.#threads.get(params.threadId);
       if (thread) {
@@ -2645,7 +2645,7 @@ const ready = true;
     this.#processes.push(record);
     thread.load = { processes: 1, cpuPercent: 12, memoryBytes: 48 * 1024 * 1024 };
     this.#touch(thread);
-    this.#emit('process.started', structuredClone(record));
+    this.#emitToThread(record.threadId, 'process.started', structuredClone(record));
 
     await this.#pause();
 
@@ -2656,7 +2656,7 @@ const ready = true;
     record.ioBytes = 32 * 1024;
     thread.load = null;
     this.#touch(thread);
-    this.#emit('process.exited', structuredClone(record));
+    this.#emitToThread(record.threadId, 'process.exited', structuredClone(record));
   }
 
   // -------------------------------------------------------------------------

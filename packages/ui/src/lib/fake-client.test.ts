@@ -42,6 +42,27 @@ test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[do
   } finally { client.close(); }
 });
 
+test('fake process events reach a client subscribed to that thread only, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const seen: string[] = [];
+    client.on('process.started', event => seen.push(`started ${event.threadId}`));
+    client.on('process.exited', event => seen.push(`exited ${event.threadId}`));
+    const run = async () => {
+      const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[spawn:fixture]' });
+      await vi.waitFor(async () => {
+        expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+      }, { timeout: 500 });
+    };
+    await run();
+    expect(seen).toEqual([]);
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    await run();
+    expect(seen).toEqual(['started t-trace', 'exited t-trace']);
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

@@ -33,8 +33,10 @@ The token is 32 random bytes generated on first start and kept in
 
 Broadcast events (`project.*`, `settings.updated`, `providers.*`, `accounts.*`)
 reach every authenticated connection, so a second shell or a phone follows a
-change without a reload. `message.*`, `permission.*`, `question.*` and
-`panel.*` reach only the sockets subscribed to that thread. A client that
+change without a reload. `message.*`, `permission.*`, `question.*`,
+`panel.*` and `process.*` reach only the sockets subscribed to that thread; a
+process record carries a command line of up to 32 KB that only that thread's
+trace panel reads. A client that
 connects mid-turn rebuilds the pending permission card from
 `permissions.list`, because `permission.requested` only reached the sockets
 that existed when it fired.

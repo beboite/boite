@@ -486,6 +486,25 @@ describe('echo driver', () => {
     expect(seen).not.toContain('message.started');
   });
 
+  test('process events reach the connections subscribed to that thread only', async () => {
+    const subscriber = await harness.connect();
+    const watcher = await harness.connect();
+    const { threadId } = await echoThread(harness, subscriber);
+    await subscriber.call('threads.subscribe', { threadId });
+
+    const seen: string[] = [];
+    watcher.onAny((event) => seen.push(event));
+
+    const exited = subscriber.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const finished = subscriber.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await subscriber.call('turns.start', { threadId, prompt: '[spawn:echo hello]' });
+    await exited;
+    await finished;
+
+    expect(seen).toContain('thread.updated');
+    expect(seen.filter((event) => event.startsWith('process.'))).toEqual([]);
+  });
+
   test('a spawn directive traces the child and appends its output', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
