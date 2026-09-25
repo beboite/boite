@@ -120,6 +120,16 @@ describe('providers', () => {
     expect(claude?.capabilities.planMode).toBe(true);
   });
 
+  test('a test core resolves none of the agents installed on the machine', async () => {
+    expect(process.env.BOITE_HOST_AGENTS).toBe('0');
+    const client = await harness.connect();
+    const { loaded } = await client.call('providers.list', {});
+    for (const provider of loaded.filter((entry) => entry.id !== 'echo')) {
+      expect({ id: provider.id, available: provider.available, executable: provider.executable }).toEqual({ id: provider.id, available: false, executable: null });
+    }
+    expect(await client.call('providers.updates', { refresh: true })).toEqual([]);
+  });
+
   test('the shipped opencode descriptor loads, resolves its executable and offers one model', async () => {
     const client = await harness.connect();
     const { loaded, rejected } = await client.call('providers.list', {});

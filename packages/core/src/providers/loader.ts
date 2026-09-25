@@ -46,6 +46,23 @@ export function echoEnabled(): boolean {
 }
 
 /**
+ * `BOITE_HOST_AGENTS=0` keeps a core away from the agents installed on the
+ * machine it runs on: the shipped descriptors still load, but none of them
+ * resolves a program, so no version check, quota read or model probe starts
+ * one. The e2e suite sets it, because a core it drives must never run the
+ * developer's own CLIs.
+ */
+export function hostAgentsEnabled(): boolean {
+  return process.env['BOITE_HOST_AGENTS'] !== '0';
+}
+
+/**
+ * The shipped candidate lists `BOITE_HOST_AGENTS=0` resolves to nothing. A test
+ * that swaps a profile's list for its own fixture program gets that program.
+ */
+const HOST_CANDIDATES = new WeakSet<ExecutableCandidate[]>();
+
+/**
  * Where the shipped descriptors and the scripts they name live. A login command
  * writes `{shippedDir}/<script>` instead of a path nobody could write by hand.
  * Only echo uses it, and echo ships from the sources alone (`BOITE_ECHO=1`); a
@@ -685,6 +702,7 @@ export interface ResolvedCommand {
 }
 
 export function resolveCommand(profile: OsProfile): ResolvedCommand | null {
+  if (HOST_CANDIDATES.has(profile.executable)) return null;
   for (const candidate of profile.executable) {
     const updateEnv = candidate.updateEnv ?? {};
     if (candidate.kind === 'path') {
@@ -781,6 +799,9 @@ export class ProviderRegistry {
       if (shipped.when !== undefined && !shipped.when()) continue;
       try {
         const descriptor = validateDescriptor(shipped.raw, shipped.file, new Set(), this.dataDir);
+        if (!hostAgentsEnabled() && descriptor.id !== 'echo') {
+          for (const profile of Object.values(descriptor.profiles)) if (profile !== undefined) HOST_CANDIDATES.add(profile.executable);
+        }
         entries.set(descriptor.id, { descriptor, source: 'shipped', file: shipped.file });
       } catch (error) {
         if (error instanceof Rejection) rejected.push(error.rejected);
