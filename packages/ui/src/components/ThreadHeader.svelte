@@ -135,12 +135,13 @@
           class="ghost trace"
           class:on={store.panelOpen && store.panel.active?.kind === 'agents'}
           title={strings.delegation.panelHint}
+          aria-label={strings.delegation.heading}
           aria-pressed={store.panelOpen && store.panel.active?.kind === 'agents'}
           data-testid="agents-toggle"
           onclick={() => store.panel.toggleKind('agents')}
         >
           <UsersRound size={16} strokeWidth={1.75} />
-          {strings.delegation.heading}
+          <span class="label">{strings.delegation.heading}</span>
         </button>
       {/if}
       <!-- Every surface of the panel reads something only the owner may ask
@@ -165,12 +166,13 @@
           class="ghost trace"
           class:on={store.panelOpen}
           title={strings.thread.panelHint}
+          aria-label={strings.thread.panel}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
           <PanelRight size={16} strokeWidth={1.75} />
-          {strings.thread.panel}
+          <span class="label">{strings.thread.panel}</span>
         </button>
       {/if}
 </div>
@@ -237,8 +239,13 @@
   .title { min-width: 0; }
   .title-menu { display: none; }
   @media (max-width: 720px) {
+    /* The title is what tells one conversation from another: the buttons give
+       up their words for it, and keep a finger-sized square. */
+    .thread-header { gap: 4px; }
     .path { display: none; }
-    .trace { padding: 0 6px; }
+    .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .trace .label { display: none; }
+    .rename { width: 100%; }
     .title { display: none; }
     .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
     .title-menu :global(.menu) { min-width: 0; max-width: 100%; }

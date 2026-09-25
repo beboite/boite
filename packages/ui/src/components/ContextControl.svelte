@@ -108,6 +108,8 @@
 <style>
   .context { position: relative; flex: none; color: var(--color-muted-foreground); }
   .trigger { display: flex; align-items: center; gap: 5px; padding: 4px; }
+  /* On a phone the ring alone says how full the context is; the popup has the number. */
+  @media (max-width: 720px) { .trigger { min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; } .amount { display: none; } }
   svg { width: 24px; height: 24px; transform: rotate(-90deg); }
   circle { fill: none; stroke-width: 3; }
   .track { stroke: var(--color-border); }
