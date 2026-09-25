@@ -1343,16 +1343,28 @@ export class ThreadStore {
     };
 
     const input = this.lastUserInput(threadId, turn.id);
-    const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
-      ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
-      : input;
+    const carry = (): { prompt: string; attachments: Attachment[] } =>
+      continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part));
+    const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0 ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
+    const operation = turn.execution?.operation;
+    const slash = (prompt: string): boolean => prompt.trimStart().startsWith('/');
+    // Taken once: the deferred answers and the delegation letters are consumed
+    // here, and a driver's `continuation` reuses them rather than taking again.
+    const deferred = operation || slash(prepared.prompt) ? '' : this.takeDeferred(threadId);
+    const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id);
+    const compose = (body: string, sessionId: string | null): string =>
+      ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id)) + deferred + body + tail + this.askInstructions({ ...thread, sessionId }, provider, turn, body);
     return {
       thread,
       account,
       provider,
       turn,
-      prompt: ((turn.execution?.operation && thread.sessionId !== null) || prepared.prompt.trimStart().startsWith('/') ? '' : this.core.brain.instructions(provider.id)) + (turn.execution?.operation || prepared.prompt.trimStart().startsWith('/') ? '' : this.takeDeferred(threadId)) +prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + this.core.delegation.initialInput(threadId, turn.id)) + this.askInstructions(thread, provider, turn, prepared.prompt),
+      prompt: compose(prepared.prompt, thread.sessionId),
+      continuation: () => {
+        const fresh = prepareAttachments(this.core.dataDir, carry());
+        return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
+      },
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,

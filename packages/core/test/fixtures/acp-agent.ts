@@ -24,11 +24,19 @@
  * - `ACP_FAKE_FORGET=1`: `session/load` throws, as an agent that lost the
  *   session does; the SDK answers that as a JSON-RPC internal error.
  * - `ACP_FAKE_NO_LOAD=1`: `initialize` advertises no `loadSession`.
+ * - `ACP_FAKE_LOAD_AUTH=1`: `session/load` answers -32000 authentication
+ *   required, a refusal that says nothing about the session.
+ * - `ACP_FAKE_LOAD_BROKEN=1`: `session/load` answers the internal error
+ *   OpenCode answers for a session it cannot read, missing or not:
+ *   -32603 "OpenCode service failure" with `{ service: 'session' }`.
  *
  * `usage_update.cost` is the session's running total, as the protocol defines
- * it: each `[usage]` adds 0.0042 to it.
+ * it: each `[usage]` adds 0.0042 to it. The total outlives the process, the way
+ * OpenCode sums it from the session's stored messages: it is kept in
+ * `<ACP_FAKE_LOG>.costs.json`. `ACP_FAKE_COST_PER_PROCESS=1` makes it the
+ * agent that counts each process from zero instead.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
 import { agent, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
@@ -151,8 +159,24 @@ const noLoad = process.env['ACP_FAKE_NO_LOAD'] === '1';
 /** The sessions this process handed out, so `session/load` can recognise one. */
 const known = new Set<string>();
 const cancels = new Map<string, () => void>();
-/** Each session's running cost, which `usage_update` reports whole. */
+/** Each session's running cost in this process, for `ACP_FAKE_COST_PER_PROCESS=1`. */
 const spent = new Map<string, number>();
+
+/** Adds one `[usage]` to the session's running total and returns the total. */
+function spend(sessionId: string): number {
+  const file = process.env['ACP_FAKE_LOG'];
+  if (process.env['ACP_FAKE_COST_PER_PROCESS'] === '1' || file === undefined || file.length === 0) {
+    const total = (spent.get(sessionId) ?? 0) + 0.0042;
+    spent.set(sessionId, total);
+    return total;
+  }
+  const store = `${file}.costs.json`;
+  const totals = existsSync(store) ? (JSON.parse(readFileSync(store, 'utf8')) as Record<string, number>) : {};
+  const total = (totals[sessionId] ?? 0) + 0.0042;
+  totals[sessionId] = total;
+  writeFileSync(store, JSON.stringify(totals), 'utf8');
+  return total;
+}
 
 function log(line: string): void {
   const file = process.env['ACP_FAKE_LOG'];
@@ -220,6 +244,14 @@ const app = agent({ name: 'acp-fake' })
       log(`load-refused:${params.sessionId}`);
       // A plain throw, like OpenCode's: the SDK answers it with -32603.
       throw new Error(`Session not found: ${params.sessionId}`);
+    }
+    if (process.env['ACP_FAKE_LOAD_AUTH'] === '1') {
+      log(`load-auth:${params.sessionId}`);
+      throw RequestError.authRequired({}, 'sign in again');
+    }
+    if (process.env['ACP_FAKE_LOAD_BROKEN'] === '1') {
+      log(`load-broken:${params.sessionId}`);
+      throw RequestError.internalError({ service: 'session' }, 'OpenCode service failure');
     }
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
@@ -380,8 +412,7 @@ const app = agent({ name: 'acp-fake' })
           // Already sent above, before the answer.
           break;
         case 'usage': {
-          const total = (spent.get(sessionId) ?? 0) + 0.0042;
-          spent.set(sessionId, total);
+          const total = spend(sessionId);
           await send({ sessionUpdate: 'usage_update', used: 12, size: 200, cost: { amount: total, currency: 'USD' } });
           usage = { totalTokens: 12, inputTokens: 8, outputTokens: 4, cachedReadTokens: 2 };
           break;

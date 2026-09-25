@@ -310,14 +310,14 @@ class AcpTurn {
    * `costBefore`.
    */
   costUsdEquivalent: number | null = null;
-  /** What the session had already cost when this turn began: zero on a new session. */
+  /** What the session had already cost when this turn began: see `AcpSession.costBaseline`. */
   costBefore = 0;
   /** `used` and `size` of the last `usage_update`, reported once when the turn ends. */
   contextUse: { tokens: number; window: number | null } | null = null;
   /**
-   * The agent no longer has the thread's session, or cannot resume one once
-   * its process is gone: the thread's next turn starts a new session and
-   * carries the conversation so far in its prompt.
+   * The agent refused to load the thread's session in a way that says it no
+   * longer has it: the thread's next turn starts a new session and carries the
+   * conversation so far in its prompt.
    */
   sessionLost = false;
   isStopped = false;
@@ -531,16 +531,43 @@ export function toolOutputText(output: unknown): string {
   return stringify(output);
 }
 
-/** `session/load` refused by a live agent: the conversation is gone on its side. */
-class SessionLost extends Error {}
+/**
+ * `session/load` refused by a live agent. `lost` is a refusal that means the
+ * conversation is gone on its side; otherwise the thread keeps its session and
+ * the next turn tries the load again.
+ */
+class LoadRefused extends Error {
+  constructor(message: string, readonly lost: boolean) {
+    super(message);
+  }
+}
 
 /**
  * A JSON-RPC error the agent answered with, as opposed to the SDK's own "the
- * connection closed". Any code counts: an agent that throws a plain error in
- * its handler answers -32603, which is how OpenCode says "no such session".
+ * connection closed".
  */
 function rpcRefusal(error: unknown): boolean {
   return error instanceof Error && typeof (error as { code?: unknown }).code === 'number';
+}
+
+/** A reason that names a session or conversation the agent does not have. */
+const MISSING_SESSION = /\b(session|conversation)\b.{0,80}?\b(not found|no such|unknown|does not exist|doesn't exist|missing|expired|deleted)\b|\b(no such|unknown|missing) (session|conversation)\b/i;
+
+/**
+ * What a `session/load` refusal says about the session. `gone`: the agent
+ * does not have it (-32002 resource not found, no `session/load` method at all,
+ * or a reason that names a missing session, which is how an agent that throws
+ * a plain error answers). `kept`: the session is fine and something else is
+ * not (-32000 authentication required, -32800 cancelled). `unsure`: any other
+ * error, such as an internal one while the agent read its storage; OpenCode
+ * answers a missing session that way too, so the same refusal twice in a row
+ * counts as gone.
+ */
+function loadRefusal(error: unknown, reason: string): 'gone' | 'kept' | 'unsure' {
+  const code = (error as { code: number }).code;
+  if (code === -32000 || code === -32800) return 'kept';
+  if (code === -32002 || code === -32601) return 'gone';
+  return MISSING_SESSION.test(reason) || MISSING_SESSION.test(messageOf(error)) ? 'gone' : 'unsure';
 }
 
 /** The refusal in words: an internal error carries the real reason in `data.details`. */
@@ -549,6 +576,21 @@ function rpcReason(error: unknown): string {
   const details = plainObject(data)?.['details'];
   const reason = typeof details === 'string' && details.length > 0 ? details : messageOf(error);
   return reason.slice(0, STDERR_MAX);
+}
+
+/**
+ * What the driver learns about agents across their processes, for the life of
+ * the core.
+ */
+interface AcpMemory {
+  /**
+   * Providers seen to count a loaded session's cost from zero in each new
+   * process, against the protocol's "cumulative session cost": their cold
+   * turns are charged the whole total the process reports.
+   */
+  costPerProcess: Set<ProviderId>;
+  /** `provider\0sessionId` of loads refused once with an `unsure` error. */
+  refusedLoads: Set<string>;
 }
 
 /**
@@ -573,6 +615,19 @@ class AcpSession {
 
   private sessionId: string | null = null;
   private canLoad = false;
+  /** This process resumed the thread's session with `session/load`, rather than creating one. */
+  private loaded = false;
+  /**
+   * The thread's session this process could not load and replaced with a new
+   * one: the turn that asked for it is sent the conversation so far.
+   */
+  private replaces: string | null = null;
+  /**
+   * The last USD running total this process reported, in a turn, between two
+   * turns or while a `session/load` replayed the history. What the next turn
+   * adds is measured from it.
+   */
+  private reportedCost: number | null = null;
   private imagesSupported = false;
   private configWarned = false;
   /** What the last session answer, or the last `set_config_option`, listed. */
@@ -610,6 +665,7 @@ class AcpSession {
     readonly key: string,
     private warmMs: number,
     private readonly deps: AcpDeps,
+    private readonly memory: AcpMemory,
     private readonly onEnded: (session: AcpSession) => void,
     /** The config options a session answered with, for the next session of the account to start from. */
     private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
@@ -699,8 +755,8 @@ class AcpSession {
     } catch (error) {
       if (turn.isStopped) {
         turn.stopNow();
-      } else if (error instanceof SessionLost) {
-        turn.sessionLost = true;
+      } else if (error instanceof LoadRefused) {
+        turn.sessionLost = error.lost;
         turn.fail(error.message);
       } else {
         // An agent that exits while it starts takes the connection with it,
@@ -720,10 +776,27 @@ class AcpSession {
       this.endTurn(turn, true);
       return;
     }
-    // A session this turn did not resume is a new one, whose running cost starts at zero.
-    if (sessionId === turn.ctx.sessionId) turn.costBefore = turn.ctx.sessionBefore?.costUsd ?? 0;
+    let prompt = turn.ctx.prompt;
+    let attachments = turn.ctx.attachments;
+    // The agent could not resume the thread's session and this process opened
+    // a new one: the prompt carries the conversation so far, as it does after
+    // a session the agent lost.
+    if (this.replaces !== null && this.replaces === turn.ctx.sessionId) {
+      this.replaces = null;
+      try {
+        const carried = turn.ctx.continuation?.();
+        if (carried !== undefined) {
+          prompt = carried.prompt;
+          attachments = carried.attachments;
+        }
+      } catch (error) {
+        turn.fail(messageOf(error));
+        this.endTurn(turn, true);
+        return;
+      }
+    }
 
-    if (turn.ctx.attachments.length > 0 && !this.imagesSupported) {
+    if (attachments.length > 0 && !this.imagesSupported) {
       turn.fail(`${turn.ctx.provider.name} takes no images`);
       this.endTurn(turn, true);
       return;
@@ -737,12 +810,13 @@ class AcpSession {
     await this.applyModel(turn.ctx);
     await this.applyConfig(turn.ctx);
     await this.applyMode(turn.ctx);
+    const judged = this.costBaseline(turn);
     this.current = turn;
     let response: PromptResponse;
     try {
       const pending = agent.request('session/prompt', {
         sessionId,
-        prompt: [{ type: 'text', text: turn.ctx.prompt }, ...imageBlocksOf(turn.ctx.attachments)],
+        prompt: [{ type: 'text', text: prompt }, ...imageBlocksOf(attachments)],
       });
       if (turn.isStopped) this.cancel();
       response = await pending;
@@ -762,7 +836,36 @@ class AcpSession {
     }
     this.current = null;
     turn.finish(response);
+    // A resumed session whose first total came in below what the session
+    // already cost: this agent counts each process from zero.
+    const total = turn.costUsdEquivalent;
+    if (judged && total !== null && total < turn.costBefore && !this.memory.costPerProcess.has(turn.ctx.provider.id)) {
+      this.memory.costPerProcess.add(turn.ctx.provider.id);
+      turn.ctx.log('info', `acp: ${turn.ctx.provider.id} reports a resumed session's cost from zero; its cold turns are charged their whole total`);
+    }
     this.endTurn(turn, turn.isStopped);
+  }
+
+  /**
+   * What the session had cost before this turn, which `usage_update`'s running
+   * total is measured from. A total this process already reported is exact. A
+   * session it created starts at zero. A session it loaded and that has said
+   * nothing yet starts where the journal left it, since the protocol defines
+   * the cost as the session's and OpenCode computes it from the session's
+   * stored messages; an agent seen to count from zero again starts at zero.
+   * True when the turn's reading has to tell which of the two the agent does.
+   */
+  private costBaseline(turn: AcpTurn): boolean {
+    if (this.reportedCost !== null) {
+      turn.costBefore = this.reportedCost;
+      return false;
+    }
+    if (!this.loaded || this.memory.costPerProcess.has(turn.ctx.provider.id)) {
+      turn.costBefore = 0;
+      return false;
+    }
+    turn.costBefore = turn.ctx.sessionBefore?.costUsd ?? 0;
+    return turn.costBefore > 0;
   }
 
   private endTurn(turn: AcpTurn, drop: boolean): void {
@@ -772,9 +875,6 @@ class AcpSession {
     }
     if (this.active === turn) this.active = null;
     const dropping = drop || this.closing || this.warmMs <= 0;
-    // An agent that cannot load a session loses this one with its process: the
-    // thread's next turn starts a new session and carries the history instead.
-    if (dropping && !this.canLoad && this.sessionId !== null) turn.sessionLost = true;
     turn.settle();
     this.running = Math.max(0, this.running - 1);
     if (dropping) {
@@ -844,7 +944,8 @@ class AcpSession {
         this.onOptions(discovered.configOptions ?? []);
       }
       // Every `session/update` of a load is history replay: `current` is null,
-      // so the update handler drops them.
+      // so the update handler drops them, all but a running cost.
+      const refusedKey = `${ctx.provider.id}\0${ctx.sessionId}`;
       let loaded: LoadSessionResponse;
       try {
         loaded = await connection.agent.request('session/load', {
@@ -853,23 +954,41 @@ class AcpSession {
           mcpServers: [],
         });
       } catch (error) {
-        // An answer from a live agent, not a dead pipe: it no longer has the
-        // session (pruned, migrated, another project). Retrying the same id
-        // would fail every turn of the thread from now on.
+        // Only an answer from a live agent says anything about the session; a
+        // dead pipe is the process's failure.
         if (!rpcRefusal(error) || this.ended || child.exitCode !== null) throw error;
-        ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${rpcReason(error)}`);
-        throw new SessionLost(
-          `${ctx.provider.name} no longer has this conversation (${rpcReason(error)}). Send the message again: Boite starts a new session that carries the conversation so far.`,
+        const reason = rpcReason(error);
+        ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${reason}`);
+        const kind = loadRefusal(error, reason);
+        if (kind === 'gone' || (kind === 'unsure' && this.memory.refusedLoads.has(refusedKey))) {
+          // Pruned, migrated, another project: retrying the same id would fail
+          // every turn of the thread from now on.
+          this.memory.refusedLoads.delete(refusedKey);
+          throw new LoadRefused(
+            `${ctx.provider.name} no longer has this conversation (${reason}). Send the message again: Boite starts a new session that carries the conversation so far.`,
+            true,
+          );
+        }
+        if (kind === 'unsure') this.memory.refusedLoads.add(refusedKey);
+        // Signed out, or a failure on the agent's side: the session may well
+        // still be there, and the next turn loads it again.
+        throw new LoadRefused(
+          `${ctx.provider.name} could not open this conversation (${reason}). The session is kept: send the message again to retry.`,
+          false,
         );
       }
+      this.memory.refusedLoads.delete(refusedKey);
       this.sessionId = ctx.sessionId;
+      this.loaded = true;
       this.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
       return;
     }
     if (ctx.sessionId !== null) {
-      // Only a warm process that idled out gets here: without `loadSession` a
-      // cold turn is sent the history by the core instead.
-      ctx.log('warn', `acp: ${ctx.provider.id} cannot load a session, so this turn starts a new one`);
+      // The thread has a session this agent cannot resume: its process ended
+      // (the turn took it, an idle window, an archive, a restart). The new
+      // session this opens is sent the conversation so far.
+      ctx.log('warn', `acp: ${ctx.provider.id} cannot load a session, so this turn starts a new one carrying the conversation`);
+      this.replaces = ctx.sessionId;
     }
 
     const created = await connection.agent.request('session/new', {
@@ -1158,6 +1277,12 @@ class AcpSession {
       this.ctx?.log('info', `acp: the agent switched to the session mode ${update.currentModeId}`);
       return;
     }
+    // A running total outside a turn is still what the next one is measured
+    // from: an agent may report it while a load replays, or between turns.
+    if (update.sessionUpdate === 'usage_update') {
+      const cost = usdCostOf(update);
+      if (cost !== null) this.reportedCost = cost;
+    }
     const turn = this.current;
     if (turn === null) return;
     switch (update.sessionUpdate) {
@@ -1187,10 +1312,12 @@ class AcpSession {
           update.content,
         );
         break;
-      case 'usage_update':
-        if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
+      case 'usage_update': {
+        const cost = usdCostOf(update);
+        if (cost !== null) turn.costUsdEquivalent = cost;
         turn.noteContext(update.used, update.size);
         break;
+      }
       case 'plan':
         turn.ctx.tasks?.(update.entries.map((entry, index) => ({ id: String(index), text: entry.content, status: entry.status })));
         break;
@@ -1707,6 +1834,13 @@ function toolStatus(status: ToolCallStatus): ToolStatus {
   }
 }
 
+/** A `usage_update`'s running cost when it is a finite USD amount, the only currency a turn records. */
+function usdCostOf(update: { cost?: { amount: number; currency: string } | null }): number | null {
+  const cost = update.cost;
+  if (cost == null || cost.currency !== 'USD' || !Number.isFinite(cost.amount) || cost.amount < 0) return null;
+  return cost.amount;
+}
+
 /** `PromptResponse.usage` is experimental: a cost the agent reported without it is still the turn's cost. */
 function mapUsage(usage: AcpUsage | null, costUsdEquivalent: number | null): Usage | null {
   if (usage === null) {
@@ -1754,6 +1888,7 @@ function withModelEffort(models: ModelInfo[], effort: ProbeReading['effort']): M
 export function createAcpDriver(deps: AcpDeps): Driver {
   const sessions = new Map<ThreadId, AcpSession>();
   const probes = new Map<string, ProbeEntry>();
+  const memory: AcpMemory = { costPerProcess: new Set<ProviderId>(), refusedLoads: new Set<string>() };
 
   const keyOf = (providerId: ProviderId, accountId: AccountId): string => `${providerId}::${accountId}`;
 
@@ -1816,6 +1951,11 @@ export function createAcpDriver(deps: AcpDeps): Driver {
     },
 
     forgetProbes(filter: ProbeFilter = {}): void {
+      // A reloaded or updated agent may count its cost differently.
+      if (filter.accountId === undefined) {
+        if (filter.providerId === undefined) memory.costPerProcess.clear();
+        else memory.costPerProcess.delete(filter.providerId);
+      }
       for (const [key, entry] of [...probes]) {
         if (filter.providerId !== undefined && filter.providerId !== entry.providerId) continue;
         if (filter.accountId !== undefined && filter.accountId !== entry.accountId) continue;
@@ -1848,6 +1988,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
           key,
           warmMs,
           deps,
+          memory,
           (ended) => {
             if (sessions.get(threadId) === ended) sessions.delete(threadId);
           },
@@ -1891,6 +2032,8 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       const open = [...sessions.values()];
       sessions.clear();
       probes.clear();
+      memory.costPerProcess.clear();
+      memory.refusedLoads.clear();
       for (const session of open) session.close(null);
     },
   };

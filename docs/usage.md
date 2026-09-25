@@ -86,10 +86,18 @@ Claude's `total_cost_usd` is a running total: it grows across the turns of a
 warm process, and a process that resumes a session restores it. The driver
 charges each turn the difference, reading the earlier turns of the session from
 the journal, and takes the total as it stands when the CLI started from zero.
-The ACP `usage_update` cost is the session's running total in the same way:
-a warm session charges each turn the difference from the session's earlier
-turns, and a new or resumed process that starts below that sum is charged its
-own total. A `usage_update` with no token counts still records its cost.
+The ACP `usage_update` cost is the session's running total in the same way,
+and each turn is charged what it added. The driver measures from the last
+total the same process reported, in an earlier turn, between turns or while a
+`session/load` replayed the history; a session the process created starts at
+zero. A process that loaded the session and has reported nothing yet starts
+from the session's earlier turns in the journal, because the protocol defines
+the cost as the session's and OpenCode sums it from the session's stored
+messages. When such a first total comes in below that sum, the turn is charged
+the total, and the driver takes that agent to count every process from zero:
+its later cold turns are charged their whole total until the core restarts or
+the provider is reloaded. A `usage_update` with no token counts still records
+its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 

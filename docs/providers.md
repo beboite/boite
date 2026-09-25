@@ -286,13 +286,23 @@ empty home opens a browser.
 
 An ACP thread resumes its session with `session/load` when the agent
 advertises `loadSession`. When the agent refuses that load while its process is
-alive, the turn fails with a sentence saying the agent no longer has the
-conversation and asking to send the message again; the core forgets the
-session id and starts a new session generation, so the next turn opens a fresh
-session and carries the conversation so far in its prompt. An agent without
-`loadSession` gets the same treatment whenever its process goes with the turn,
-and the log says it cannot load a session. Stop sends `session/cancel` and
-gives the agent three seconds to end the turn before the process is dropped; a
+alive, what the refusal says decides. -32002 (resource not found), a missing
+`session/load` method, or a reason that names a missing session means the
+conversation is gone: the turn fails with a sentence saying the agent no longer
+has it and asking to send the message again, and the core forgets the session
+id and starts a new session generation, so the next turn opens a fresh session
+and carries the conversation so far in its prompt. -32000 (authentication
+required) and -32800 (cancelled) leave the session alone: the turn fails with
+the agent's reason and the next turn loads the session again. Any other error,
+such as an internal one, keeps the session the first time; the same session
+refused that way on the next load too counts as gone, since OpenCode answers a
+missing session with its generic -32603 "OpenCode service failure". An agent
+without `loadSession` opens a new session whenever a turn finds no process
+holding the thread's session, whatever ended it (the turn itself, the idle
+window, an archive, a restart); that turn's prompt carries the conversation so
+far, and the log says the agent cannot load a session. Stop sends
+`session/cancel` and gives the agent three seconds to end the turn before the
+process is dropped; a
 stop while the process or the session is still starting drops it at once. An
 agent that exits before it answers `initialize`, in a turn, a probe or a login,
 fails with its exit code and the last line it wrote to stderr. Stderr is read in

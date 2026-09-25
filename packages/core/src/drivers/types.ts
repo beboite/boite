@@ -78,6 +78,15 @@ export interface TurnContext {
   attachments: ImageAttachment[];
   sessionId: string | null;
   /**
+   * This turn's prompt and images as a fresh session needs them: the
+   * conversation so far carried in front of the request, the way the core
+   * writes the first turn of a new session generation. For a driver that finds
+   * out only once its agent is up that it cannot resume `sessionId`, and opens
+   * a new session instead. Built on demand; it throws what the core's own
+   * continuation throws (historical images for an agent that takes none).
+   */
+  continuation?(): { prompt: string; attachments: ImageAttachment[] };
+  /**
    * What the finished turns of this agent session already used, for an agent
    * whose running totals survive a resume. Absent or zero on a fresh session.
    */
@@ -142,10 +151,10 @@ export interface TurnResult {
    */
   promptCache?: PromptCacheLife | null;
   /**
-   * The agent no longer has the thread's session (it refused to load it), or
-   * cannot resume one once this turn's process is gone. The core forgets the
-   * session id and starts a new session generation, so the next turn opens a
-   * fresh session and carries the conversation so far in its prompt.
+   * The agent no longer has the thread's session: it refused to load it. The
+   * core forgets the session id and starts a new session generation, so the
+   * next turn opens a fresh session and carries the conversation so far in its
+   * prompt.
    */
   sessionLost?: boolean;
 }
