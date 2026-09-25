@@ -6,6 +6,13 @@ and width for each thread in the browser's storage, so a thread comes back the
 way it was left. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
 `RightPanel.svelte` the frame, one component per surface.
 
+A thread that is archived, here or from another client, or removed with its
+project, takes its layout with it, and its browser views are destroyed rather
+than parked, since the UI has no way to show an archived thread again. Each
+machine's `threads.list` also drops that machine's layouts for threads it no
+longer lists, which covers archives made while this client was away. A machine
+that has not connected yet keeps its layouts.
+
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
 Appearance, Workspace changes it ([onboarding.md](onboarding.md)).

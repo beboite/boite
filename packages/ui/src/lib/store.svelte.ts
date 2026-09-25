@@ -830,6 +830,8 @@ export class Store {
       this.#upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === summary.id) Object.assign(open, summary);
+      // Archived from another client: nothing here can show it again.
+      else if (summary.archived) this.#forgetThread(summary.id);
       if (this.delegationThread?.id === summary.id) Object.assign(this.delegationThread, summary);
     });
     // The agent's `/name` list is the whole list each time, and it lives on the
@@ -869,8 +871,8 @@ export class Store {
     on('thread.removed', ({ threadId }) => {
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
-      // A thread that left Boite takes its panel layout with it.
-      rightPanel.forget(this.threadKey(threadId));
+      // A thread that left Boite takes its panel layout and composer with it.
+      this.#forgetThread(threadId);
       if (this.openThread?.id !== threadId) return;
       this.openThread = null;
       // The two steps `archive()` takes when the thread on screen goes: the
@@ -1672,6 +1674,9 @@ export class Store {
     if (projects.status === 'fulfilled') this.projects = projects.value;
     if (threads.status === 'fulfilled') {
       this.threads = threads.value;
+      // Archived while this client was away: their layouts would never be shown again.
+      const listed = new Set(threads.value.map((t) => this.threadKey(t.id)));
+      rightPanel.prune((key) => this.#ownsPanelKey(key) && !listed.has(key));
       // A device with no record of how it works: conversations already here, or
       // a tour already seen, mean an install from before the question.
       work.settle(threads.value.length > 0 || onboardingSeen());
@@ -2644,8 +2649,10 @@ export class Store {
       await client.call('threads.archive', { threadId, archived: true });
       this.threads = this.threads.filter((t) => t.id !== threadId);
       this.#dropRequestsOf(threadId);
-      if (this.openThread?.id === threadId) {
-        this.openThread = null;
+      const wasOpen = this.openThread?.id === threadId;
+      if (wasOpen) this.openThread = null;
+      this.#forgetThread(threadId);
+      if (wasOpen) {
         await this.#unsubscribe();
         await this.openWhereLeft();
       }
@@ -3117,6 +3124,28 @@ export class Store {
     const row = this.threads.find((t) => t.id === summary.id);
     if (row) patchRow(row, summary);
     else this.threads.push(summary);
+  }
+
+  /** What the UI keeps per thread, dropped once the thread is archived or gone: the UI cannot unarchive. */
+  #forgetThread(threadId: ThreadId): void {
+    delete this.composerStates[threadId];
+    this.#previewUndo.delete(this.threadKey(threadId));
+    this.#pendingSends.delete(threadId);
+    this.#readingThreads.delete(threadId);
+    this.readingPositions.delete(threadId);
+    if (this.terminalShown(threadId)) this.hideTerminal(threadId);
+    rightPanel.forget(this.threadKey(threadId));
+  }
+
+  /** A panel key of this machine's: prefixed with its id, or bare on a store that has none. */
+  #ownsPanelKey(key: string): boolean {
+    if (!this.machineId) return !key.startsWith('[');
+    try {
+      const parsed: unknown = JSON.parse(key);
+      return Array.isArray(parsed) && parsed[0] === this.machineId;
+    } catch {
+      return false;
+    }
   }
 
   #threadSnapshots(threadId: ThreadId): Set<Thread> {

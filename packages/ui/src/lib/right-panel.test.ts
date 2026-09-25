@@ -355,6 +355,24 @@ describe('the right panel', () => {
     destroy.mockRestore();
   });
 
+  test('a prune drops the layouts it names, with their browser views, and writes once', () => {
+    const root = new RightPanelStore();
+    const gone = root.for('t-gone').open('browser');
+    root.for('t-kept').open('trace');
+    root.for(null).open('trace');
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+
+    root.prune((key) => key !== 't-kept');
+
+    expect(Object.keys(root.threads).sort()).toEqual(['', 't-kept']);
+    expect(destroy.mock.calls.map(([id]) => id)).toEqual([gone.id]);
+    expect(write.mock.calls.filter(([key]) => key === PANEL_STORAGE_KEY)).toHaveLength(1);
+    expect(Object.keys(new RightPanelStore().threads).sort()).toEqual(['', 't-kept']);
+    destroy.mockRestore();
+    write.mockRestore();
+  });
+
   test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {
     const { root, bound } = panel();
     const readme = bound.openFile('README.md');

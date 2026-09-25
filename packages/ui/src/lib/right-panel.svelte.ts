@@ -165,8 +165,12 @@ export function clampPanel(width: number, viewport: number, sibling: number): nu
 }
 
 export class RightPanelStore {
-  /** One entry per thread id. The empty key is the scratch state of "no thread". */
-  threads = $state<Record<string, PanelState>>({});
+  /**
+   * One entry per thread id. The empty key is the scratch state of "no thread".
+   * Raw: every write replaces the record, so no deep proxy is built, and `save()`
+   * serializes plain objects instead of walking one proxy per layout.
+   */
+  threads = $state.raw<Record<string, PanelState>>({});
   width = $state(PANEL_DEFAULT);
   /** The chat column at zero width. Deliberately not persisted, like T3's. */
   maximized = $state(false);
@@ -231,18 +235,36 @@ export class RightPanelStore {
 
   /** A thread that left Boite takes its panel with it, browser views included. */
   forget(threadId: string): void {
-    const state = this.threads[threadId];
-    if (!state) return;
-    // The strip goes with the layout, so nothing will ever list these surfaces
-    // again: a view not destroyed here outlives the session with no tab to
-    // close it. The surface's own teardown only parks it, on purpose.
-    for (const surface of state.surfaces) {
-      if (surface.kind === 'browser') browserBridge.destroy(surface.id);
+    this.#forget([threadId]);
+  }
+
+  /**
+   * The layouts `stale` names, dropped in one write. The caller decides which
+   * keys it may judge: a machine not connected yet must keep its own.
+   */
+  prune(stale: (key: string) => boolean): void {
+    this.#forget(Object.keys(this.threads).filter((key) => key !== '' && stale(key)));
+  }
+
+  #forget(keys: string[]): void {
+    const kept = { ...this.threads };
+    let changed = false;
+    for (const key of keys) {
+      const state = kept[key];
+      if (!state) continue;
+      // The strip goes with the layout, so nothing will ever list these surfaces
+      // again: a view not destroyed here outlives the session with no tab to
+      // close it. The surface's own teardown only parks it, on purpose.
+      for (const surface of state.surfaces) {
+        if (surface.kind === 'browser') browserBridge.destroy(surface.id);
+      }
+      delete kept[key];
+      this.#bound.delete(key);
+      this.drafts.delete(key);
+      changed = true;
     }
-    const { [threadId]: _gone, ...kept } = this.threads;
+    if (!changed) return;
     this.threads = kept;
-    this.#bound.delete(threadId);
-    this.drafts.delete(threadId);
     this.save();
   }
 }

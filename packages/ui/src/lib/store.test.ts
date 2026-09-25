@@ -7,6 +7,8 @@ import * as endpoints from './endpoint';
 import { LOCAL_RECOVERY_MS, resumeAnchor, Store } from './store.svelte';
 import { strings } from './strings';
 import { confirm } from './confirm.svelte';
+import { browserBridge } from './browser-bridge';
+import { rightPanel } from './right-panel.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
 test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
@@ -822,6 +824,57 @@ describe('Store', () => {
     await store.saveSettings({ publicUrl: 'https://boite.example.com/' });
     expect(store.error).toBeNull();
     expect(store.settings?.publicUrl).toBe('https://boite.example.com');
+  });
+
+  test('archiving a thread lets go of its panel, browser views, composer and terminal', async () => {
+    const { store, client } = await ready();
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    try {
+      const thread = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
+      await store.open(thread.id);
+      const view = store.panel.open('browser');
+      store.editComposerText(thread.id, 'half a prompt');
+      store.toggleTerminal();
+      expect(store.terminalShown(thread.id)).toBe(true);
+
+      await store.archive(thread.id);
+
+      expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
+      expect(rightPanel.threads[store.threadKey(thread.id)]).toBeUndefined();
+      expect(store.composerStates[thread.id]).toBeUndefined();
+      expect(store.terminalShown(thread.id)).toBe(false);
+    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+  });
+
+  test('a thread archived from another client drops its panel here too', async () => {
+    const { store, client } = await ready();
+    try {
+      const [shown, other] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
+      await store.open(shown!.id);
+      rightPanel.for(store.threadKey(other!.id)).open('trace');
+      store.editComposerText(other!.id, 'draft');
+      await client.call('threads.archive', { threadId: other!.id, archived: true });
+      await waitFor(() => (rightPanel.threads[store.threadKey(other!.id)] === undefined ? true : undefined));
+      expect(store.composerStates[other!.id]).toBeUndefined();
+    } finally { store.detach(); client.close(); }
+  });
+
+  test('a reload drops the layouts of threads its core no longer lists, and only its own', async () => {
+    const { store, client } = await ready();
+    try {
+      store.machineId = 'http://a.test';
+      const live = store.threads[0]!.id;
+      rightPanel.for(store.threadKey(live)).open('trace');
+      rightPanel.for(store.threadKey('t-archived-long-ago')).open('trace');
+      rightPanel.for(JSON.stringify(['http://b.test', 't-archived-long-ago'])).open('trace');
+      await store.reload();
+      expect(rightPanel.threads[store.threadKey(live)]).toBeDefined();
+      expect(rightPanel.threads[store.threadKey('t-archived-long-ago')]).toBeUndefined();
+      expect(rightPanel.threads[JSON.stringify(['http://b.test', 't-archived-long-ago'])]).toBeDefined();
+    } finally {
+      rightPanel.forget(JSON.stringify(['http://b.test', 't-archived-long-ago']));
+      store.detach(); client.close();
+    }
   });
 
   test('an answer sent while the socket is down says so and can be sent again', async () => {
