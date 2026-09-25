@@ -167,14 +167,26 @@ a new request ID for that selection.
 
 ### Oldest browsers
 
-The UI runs on Safari 15.4 (iOS and iPadOS 15.4) and Chrome 111 or newer. The
+The UI starts on Safari 15.4 (iOS and iPadOS 15.4) and Chrome 111 or newer. The
 build target lowers syntax only, so what those engines lack is refused where it
 would ship: `packages/ui/vite.config.ts` fails the build on a regex lookbehind or
 a copying array method (`toSorted`, `toReversed`, `toSpliced`) in any chunk, and
 `src/lib/browser-floor.test.ts` checks the sources the same way. A lookbehind is
 a parse error before Safari 16.4, and one in a startup chunk used to leave iOS 15
-with a blank page. Safari 15.4 to 16.1 have `oklch` but not `color-mix`, so the
-shared accent tint has a plain fallback and a few one-off tints are not drawn.
+with a blank page.
+
+Starting is not the whole layout. That check covers syntax and methods, not CSS
+or DOM features, and three of those arrive later. Every layout below works from
+Safari 17 and Chrome 114:
+
+| Feature | Safari | Chrome | Without it |
+| --- | --- | --- | --- |
+| `color-mix()` | 16.2 | 111 | The shared accent tint has a plain fallback; a few one-off tints are not drawn. |
+| Container queries | 16.0 | 105 | The narrow rules are ignored and the wide layout stays at phone width: the panel's Agents surface and the usage limits (`<= 520px`), the usage table's hidden columns (`<= 560px`, `<= 420px`), the plugin rows (`<= 560px`), the onboarding scenes (`<= 400px`). The changes list keeps the diff under it, which is its phone layout anyway. |
+| Popover API | 17.0 | 114 | `lib/floating.ts` calls `showPopover` only when it exists, so the phone menus and their backdrop are not moved to the top layer. A menu inside the composer is then placed against the composer's glass layer instead of the viewport, and can land off its anchor. |
+
+None of these was tried on a real Safari 15 or 16 device; the table comes from
+the features the built CSS and `lib/floating.ts` use.
 
 A browser under the floor fails to parse the app, so `main.ts` never runs. An
 inline script in `index.html` notices on `load` and writes one sentence in the
