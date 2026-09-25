@@ -1056,6 +1056,10 @@ export class Journal {
       .run(key, JSON.stringify(value ?? null));
   }
 
+  deleteSetting(key: string): void {
+    this.db.query('DELETE FROM settings WHERE key = ?').run(key);
+  }
+
   private writeEvent(event: JournalEvent): void {
     this.db
       .query('INSERT INTO events (thread_id, ts, type, version, payload) VALUES (?, ?, ?, ?, ?)')
