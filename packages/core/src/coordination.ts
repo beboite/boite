@@ -6,8 +6,16 @@ import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure } from './errors.ts';
 
 const HOUR = 3_600_000;
-/** How long a delivered, expired or rejected letter stays in the journal. */
+/** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
 export const LETTER_RETENTION_MS = 30 * 24 * HOUR;
+/** How long a letter waits for delivery before it expires. */
+const LETTER_TTL_MS = 15 * 60_000;
+/** The sweep's idle probes, each one read on the status index: letters it still has work for. */
+export const SWEEP_PROBES = [
+  "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received') LIMIT 1",
+  // An uncertain letter is never replayed. Only an outgoing one is asked about again, until it expires.
+  "SELECT 1 FROM coordination_letters WHERE status = 'uncertain' AND direction = 'out' AND created_at > ? AND json_extract(data, '$.expiresAt') > ? LIMIT 1",
+] as const;
 const MAX_BODY = 262_144;
 const ROUTE = '/agent-messages';
 const initial = (): CoordinationConfig => ({ mode: 'off', resources: '', remote: false, paused: false });
@@ -268,7 +276,7 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + 15 * 60_000, status: 'queued', error: null };
+    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + LETTER_TTL_MS, status: 'queued', error: null };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
@@ -294,7 +302,7 @@ export class Coordination {
       if (!same(existing.from, from) || !same(existing.to, target) || existing.text !== letter.text || existing.replyTo !== letter.replyTo) throw refused('message id already used for different content');
       return existing;
     }
-    if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + 15 * 60_000) throw refused('message expired or timestamps invalid');
+    if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + LETTER_TTL_MS) throw refused('message expired or timestamps invalid');
     if (this.count(target.threadId, 'in') >= limits(config.mode).receive) throw refused('recipient hourly message budget reached');
     const accepted: AgentLetter = { id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
@@ -421,11 +429,13 @@ export class Coordination {
       this.core.journal.db.query('DELETE FROM coordination_wakes WHERE at < ?').run(now - HOUR);
       // A settled letter has nothing left to deliver or acknowledge: its expiry is 15
       // minutes, a receipt asks only for a letter that has not expired, and a thread
-      // shows its last 100.
-      this.core.journal.db.query("DELETE FROM coordination_letters WHERE status IN ('delivered', 'expired', 'rejected') AND created_at < ?").run(now - LETTER_RETENTION_MS);
+      // shows its last 100. An uncertain letter is settled too: it is never replayed,
+      // and a month later no receipt will tell what became of it.
+      this.core.journal.db.query("DELETE FROM coordination_letters WHERE status IN ('delivered', 'expired', 'rejected', 'uncertain') AND created_at < ?").run(now - LETTER_RETENTION_MS);
     }
-    // Nothing waits on the sweep: one probe on the status index, then back to sleep.
-    if (!this.core.journal.db.query("SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain') LIMIT 1").get()) return;
+    // Nothing waits on the sweep: a probe or two on the status index, then back to sleep.
+    const db = this.core.journal.db;
+    if (!db.query(SWEEP_PROBES[0]).get() && !db.query(SWEEP_PROBES[1]).get(now - LETTER_TTL_MS, now)) return;
     for (const row of this.rows("status IN ('queued', 'received') AND json_extract(data, '$.expiresAt') <= ?", Date.now())) this.update(JSON.parse(row.data), 'expired', 'Message expired before delivery');
     const threads = this.core.journal.db.query("SELECT DISTINCT thread_id FROM coordination_letters WHERE direction = 'in' AND status = 'received'").all() as { thread_id: string }[];
     for (const { thread_id } of threads) {

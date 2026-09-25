@@ -5,7 +5,7 @@ import { sign } from 'node:crypto';
 import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt } from '../src/coordination.ts';
+import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -249,7 +249,7 @@ test('the sweep reads pending letters through the status index and prunes settle
   db.query("UPDATE coordination_letters SET status = 'delivered', created_at = ? WHERE id = ?").run(Date.now() - LETTER_RETENTION_MS - 1, old.id);
   const plan = (sql: string, ...params: (string | number)[]) => (db.query(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map(row => row.detail).join(' | ');
   for (const sql of [
-    "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received', 'uncertain') LIMIT 1",
+    ...SWEEP_PROBES.map(probe => probe.replaceAll('?', '1')),
     "SELECT data FROM coordination_letters WHERE status IN ('queued', 'received') AND json_extract(data, '$.expiresAt') <= 1",
     "SELECT DISTINCT thread_id FROM coordination_letters WHERE direction = 'in' AND status = 'received'",
     "SELECT data FROM coordination_letters WHERE direction = 'out' AND status IN ('queued', 'received', 'uncertain') AND json_extract(data, '$.expiresAt') > 1",
@@ -257,5 +257,26 @@ test('the sweep reads pending letters through the status index and prunes settle
   await (h.core.coordination as unknown as { tick(): Promise<void> }).tick();
   const ids = (db.query('SELECT id FROM coordination_letters').all() as { id: string }[]).map(row => row.id);
   expect(ids).toContain(kept.id);
+  expect(ids).not.toContain(old.id);
+});
+
+test('an uncertain letter does not keep the sweep awake, and leaves the journal after 30 days', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.coordination.pause(b);
+  const stuck = await send(h, a, dest(h, b), 'Steer failed');
+  const old = await send(h, a, dest(h, b), 'Long uncertain');
+  const db = h.core.journal.db;
+  // A steer that threw leaves its letters uncertain, and nothing moves them on.
+  db.query("UPDATE coordination_letters SET status = 'uncertain', data = json_set(data, '$.status', 'uncertain', '$.error', 'steer failed', '$.expiresAt', ?) WHERE id = ?").run(Date.now() - 1, stuck.id);
+  db.query("UPDATE coordination_letters SET status = 'uncertain', created_at = ? WHERE id = ?").run(Date.now() - LETTER_RETENTION_MS - 1, old.id);
+  const coordination = h.core.coordination as unknown as { tick(): Promise<void>; swept: number; rows(where: string): unknown[] };
+  coordination.swept = 0;
+  const rows = spyOn(coordination, 'rows');
+  restores.push(() => rows.mockRestore());
+  await coordination.tick();
+  // The idle probes found nothing to do: no scan of the letters followed them.
+  expect(rows).not.toHaveBeenCalled();
+  const ids = (db.query('SELECT id FROM coordination_letters').all() as { id: string }[]).map(row => row.id);
+  expect(ids).toContain(stuck.id);
   expect(ids).not.toContain(old.id);
 });
