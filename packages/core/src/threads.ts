@@ -994,9 +994,13 @@ export class ThreadStore {
     if (current === null) return;
     const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
     if (current.archived || !sameSession) releaseThread(threadId);
+    // The agent lost the session: the next turn starts a new one and is sent
+    // the history, as after an account switch.
+    const lost = sameSession && result.sessionLost === true;
     const next: ThreadSummary = {
       ...current,
-      sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
+      sessionId: lost ? null : sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
+      ...(lost ? { sessionGeneration: (current.sessionGeneration ?? 0) + 1 } : {}),
       status: result.status === 'error' ? 'error' : 'idle',
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
       promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,

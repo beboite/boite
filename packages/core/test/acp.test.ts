@@ -1,12 +1,15 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionNotification } from '@agentclientprotocol/sdk';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import type { AcpSdk } from '../src/drivers/acp.ts';
-import { createAcpDriver, toolOutputText } from '../src/drivers/acp.ts';
+import { createAcpDriver, runAcpLogin, toolOutputText } from '../src/drivers/acp.ts';
+import { stderrLines } from '../src/drivers/stderr-lines.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -24,6 +27,10 @@ afterEach(async () => {
   delete process.env['ACP_FAKE_LOG'];
   delete process.env['ACP_FAKE_NO_MODES'];
   delete process.env['ACP_FAKE_NO_IMAGES'];
+  delete process.env['ACP_FAKE_HANG_INIT'];
+  delete process.env['ACP_FAKE_EXIT_AT_START'];
+  delete process.env['ACP_FAKE_FORGET'];
+  delete process.env['ACP_FAKE_NO_LOAD'];
   try {
     if (open !== null) await open.stop();
   } finally {
@@ -393,6 +400,26 @@ describe('acp driver', () => {
       cacheWriteTokens: 0,
       costUsdEquivalent: 0.0042,
     });
+    // `used` and `size` of the same update are the context meter.
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.context).toMatchObject({ tokens: 12, window: 200 });
+    expect(thread.context?.at).toBeGreaterThan(0);
+  });
+
+  test("the session's running cost is split into what each turn added", async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await acpThread(client);
+    const costs: number[] = [];
+    for (const prompt of ['[usage]first', '[usage]second']) {
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt });
+      const done = await finished;
+      expect(done.status).toBe('done');
+      costs.push(done.usage?.costUsdEquivalent ?? Number.NaN);
+    }
+    // The agent reported 0.0042, then 0.0084 for the whole session.
+    expect(costs[0]).toBeCloseTo(0.0042, 10);
+    expect(costs[1]).toBeCloseTo(0.0042, 10);
   });
 
   test('an Antigravity interaction keeps the selected option id', async () => {
@@ -428,6 +455,196 @@ describe('acp driver', () => {
     const trace = await client.call('trace.get', { threadId });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitedAt).not.toBeNull();
+  });
+
+  test('a stop while the agent is still starting ends the turn at once, and the next turn runs', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+    process.env['ACP_FAKE_HANG_INIT'] = '1';
+
+    const started = client.next('process.started', (record) => record.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'never answered' });
+    await started;
+    await waitFor(() => initializeCount() === 1, 10000);
+
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    expect(Date.now() - stoppedAt).toBeLessThan(2000);
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+
+    delete process.env['ACP_FAKE_HANG_INIT'];
+    await runTurn(client, threadId, 'after the stop');
+  });
+
+  test('a stop on an agent that ignores session/cancel closes it past the grace', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[deaf]' });
+    await waitFor(() => fakeLog().includes('deaf'), 10000);
+
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    expect(Date.now() - stoppedAt).toBeLessThan(6000);
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+
+    await runTurn(client, threadId, 'after the stop');
+  });
+
+  test('a session the agent forgot fails once, and the next turn starts a new one carrying the history', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, 'remember the word apricot');
+    const forgotten = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(forgotten).toMatch(/^acp-fake-/);
+
+    process.env['ACP_FAKE_FORGET'] = '1';
+    const lost = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'second message' });
+    const failure = await lost;
+    expect(failure.status).toBe('error');
+    expect(failure.error).toContain('no longer has this conversation');
+    expect(fakeLog()).toContain(`load-refused:${forgotten}`);
+    const cleared = await client.call('threads.get', { threadId });
+    expect(cleared.sessionId).toBeNull();
+    expect(cleared.sessionGeneration).toBe(1);
+
+    await runTurn(client, threadId, 'third message');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).toMatch(/^acp-fake-/);
+    expect(thread.sessionId).not.toBe(forgotten);
+    // The fake answers with the prompt it got: the history rode along.
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    const text = answer?.type === 'text' ? answer.text : '';
+    expect(text).toContain('<conversation-history>');
+    expect(text).toContain('remember the word apricot');
+    expect(text).toContain('third message');
+  });
+
+  test('an agent without loadSession gets the history on every cold turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    process.env['ACP_FAKE_NO_LOAD'] = '1';
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, 'remember the word apricot');
+    await runTurn(client, threadId, 'second message');
+
+    expect(fakeLog()).not.toContain('loaded:');
+    const thread = await client.call('threads.get', { threadId });
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    const text = answer?.type === 'text' ? answer.text : '';
+    expect(text).toContain('<conversation-history>');
+    expect(text).toContain('remember the word apricot');
+  });
+
+  test('an agent that exits during startup names its exit code and stderr: turn, probe and login', async () => {
+    const client = await startCore();
+    const { accountId, projectId } = await acpAccount(client);
+    process.env['ACP_FAKE_EXIT_AT_START'] = '1';
+
+    await expect(client.call('providers.probe', { providerId: 'acp-fake', accountId })).rejects.toThrow(
+      /exited with code 4: not signed in/,
+    );
+
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'acp-fake',
+      accountId,
+      title: 'exits',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === thread.id, 20000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+    const failure = await finished;
+    expect(failure.status).toBe('error');
+    expect(failure.error).toContain('exited with code 4');
+    expect(failure.error).toContain('not signed in');
+
+    const lines: string[] = [];
+    const login = runAcpLogin({
+      methodId: 'none',
+      executable: process.execPath,
+      args: [FAKE_AGENT],
+      cwd: harness?.dataDir ?? '.',
+      env: { ...process.env },
+      spawnChild: (cmd, args, opts) =>
+        spawn(cmd, args, { cwd: opts?.cwd, env: opts?.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }),
+      onLine: (line) => lines.push(line),
+    });
+    await expect(login.done).rejects.toThrow(/exited with code 4 before it authenticated: not signed in/);
+    login.kill();
+    await login.exited;
+  });
+
+  test('a stderr line split across reads is one line: a big glog info line is no warning', async () => {
+    const client = await startCore();
+    const logs = collectLogs(client);
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, '[big-glog]the answer');
+    expect(logs.filter((line) => line.startsWith('warn acp agent:'))).toEqual([]);
+  });
+
+  test('stderr lines come out whole, whatever the reads cut', async () => {
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    stderrLines(stream, (line) => lines.push(line), 16);
+    const bytes = Buffer.from('I0925 first\r\nsecond héllo\n', 'utf8');
+    const cut = bytes.indexOf(0xc3) + 1;
+    stream.write(bytes.subarray(0, 4));
+    stream.write(bytes.subarray(4, cut));
+    stream.write(bytes.subarray(cut));
+    // Past the cap: cut at 16 characters, the rest of the line dropped.
+    stream.write(`${'z'.repeat(40)}\nlast`);
+    stream.end();
+    await new Promise<void>((resolve) => stream.once('end', resolve));
+    expect(lines).toEqual(['I0925 first', 'second héllo', 'z'.repeat(16), 'last']);
+  });
+
+  test('a huge tool output and huge documents are cut before they are journalled', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client);
+    await runTurn(client, threadId, '[huge-tool]');
+
+    const thread = await client.call('threads.get', { threadId });
+    const tool = (thread.messages.at(-1)?.parts ?? []).find((part) => part.type === 'tool');
+    expect(tool?.type).toBe('tool');
+    if (tool?.type !== 'tool') return;
+    expect(tool.output?.length ?? 0).toBeLessThanOrEqual(64 * 1024 + 100);
+    expect(tool.output).toContain('[cut at 65536 characters]');
+    const documents = tool.documents ?? [];
+    expect(documents).toHaveLength(2);
+    const note = documents[0];
+    expect(note?.kind === 'markdown' ? note.text.length : 0).toBeLessThanOrEqual(64 * 1024 + 100);
+    // A diff cut in half would read as a real change: it becomes a line saying so.
+    expect(documents[1]).toMatchObject({ kind: 'markdown', title: '/work/src/app.ts' });
+    expect(documents[1]?.kind === 'markdown' ? documents[1].text : '').toContain('too large');
+  });
+
+  test('a resumed session discovers the controls once, not on every cold turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await acpThread(client, 'fake-smart');
+    const { forgetProbes } = await import('../src/drivers/index.ts');
+    const created = (): number => fakeLog().split('\n').filter((line) => line.startsWith('new:')).length;
+
+    await runTurn(client, threadId, 'first');
+    forgetProbes();
+    await runTurn(client, threadId, 'second');
+    const afterDiscovery = created();
+    await runTurn(client, threadId, 'third');
+    expect(created()).toBe(afterDiscovery);
+    expect(fakeLog().split('\n').filter((line) => line.startsWith('loaded:'))).toHaveLength(2);
+
+    // Forgotten probes are forgotten controls: the next resume looks again.
+    forgetProbes();
+    await runTurn(client, threadId, 'fourth');
+    expect(created()).toBe(afterDiscovery + 1);
   });
 
   test('a refusal ends the turn on an error naming the stop reason', async () => {

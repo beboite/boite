@@ -17,6 +17,16 @@
  * an attachment to. Otherwise the fake advertises image support, and every
  * `image` block a `session/prompt` carries is logged as
  * `image <mimeType> <byte length>`.
+ *
+ * The failure switches, one per way an agent lets a client down:
+ * - `ACP_FAKE_HANG_INIT=1`: `initialize` is never answered.
+ * - `ACP_FAKE_EXIT_AT_START=1`: one line on stderr, then exit 4 before any answer.
+ * - `ACP_FAKE_FORGET=1`: `session/load` throws, as an agent that lost the
+ *   session does; the SDK answers that as a JSON-RPC internal error.
+ * - `ACP_FAKE_NO_LOAD=1`: `initialize` advertises no `loadSession`.
+ *
+ * `usage_update.cost` is the session's running total, as the protocol defines
+ * it: each `[usage]` adds 0.0042 to it.
  */
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
@@ -31,7 +41,7 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(tool|documents|big-image|permission|question|thought|usage|slow|refuse|crash|noise)\]/g;
+const DIRECTIVE = /\[(tool|documents|big-image|huge-tool|permission|question|thought|usage|slow|deaf|refuse|crash|noise|big-glog)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
@@ -40,14 +50,29 @@ type Directive =
   | 'tool'
   | 'documents'
   | 'big-image'
+  | 'huge-tool'
   | 'permission'
   | 'question'
   | 'thought'
   | 'usage'
   | 'slow'
+  | 'deaf'
   | 'refuse'
   | 'crash'
-  | 'noise';
+  | 'noise'
+  | 'big-glog';
+
+/** What `[huge-tool]` returns as output, as a text block and as a diff: 1 MB each. */
+const HUGE_TEXT = 'y'.repeat(1024 * 1024);
+/** What `[big-glog]` writes to stderr: one glog info line of 200 KB, in several writes. */
+const BIG_GLOG = `I0925 12:00:00.000000 4242 main.py:80] ${'x'.repeat(200 * 1024)}\n`;
+
+if (process.env['ACP_FAKE_EXIT_AT_START'] === '1') {
+  // A signed-out or misconfigured agent: it says why on stderr and leaves.
+  process.stderr.write('not signed in: run the CLI once\n', () => {
+    process.exit(4);
+  });
+}
 
 /**
  * What `[noise]` writes straight to stdout, in the middle of the protocol
@@ -121,9 +146,13 @@ function modeState(): SessionModeState | undefined {
   return noModes ? undefined : { currentModeId, availableModes: MODES };
 }
 
+/** An agent that cannot resume a session, so the client has to carry the history. */
+const noLoad = process.env['ACP_FAKE_NO_LOAD'] === '1';
 /** The sessions this process handed out, so `session/load` can recognise one. */
 const known = new Set<string>();
 const cancels = new Map<string, () => void>();
+/** Each session's running cost, which `usage_update` reports whole. */
+const spent = new Map<string, number>();
 
 function log(line: string): void {
   const file = process.env['ACP_FAKE_LOG'];
@@ -163,12 +192,13 @@ function chunksOf(text: string): string[] {
 }
 
 const app = agent({ name: 'acp-fake' })
-  .onRequest('initialize', () => {
+  .onRequest('initialize', async () => {
     log('initialize');
+    if (process.env['ACP_FAKE_HANG_INIT'] === '1') await new Promise<void>(() => undefined);
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
-        loadSession: true,
+        loadSession: !noLoad,
         ...(noImages ? {} : { promptCapabilities: { image: true } }),
       },
       agentInfo: { name: 'acp-fake', version: '1' },
@@ -177,6 +207,7 @@ const app = agent({ name: 'acp-fake' })
   .onRequest('session/new', async ({ client }) => {
     const sessionId = `acp-fake-${crypto.randomUUID().slice(0, 8)}`;
     known.add(sessionId);
+    log(`new:${sessionId}`);
     // Before any prompt: the between-turns path a driver must not drop.
     await client.notify('session/update', {
       sessionId,
@@ -185,6 +216,11 @@ const app = agent({ name: 'acp-fake' })
     return { sessionId, configOptions, modes: modeState() };
   })
   .onRequest('session/load', ({ params }) => {
+    if (process.env['ACP_FAKE_FORGET'] === '1') {
+      log(`load-refused:${params.sessionId}`);
+      // A plain throw, like OpenCode's: the SDK answers it with -32603.
+      throw new Error(`Session not found: ${params.sessionId}`);
+    }
     known.add(params.sessionId);
     log(`loaded:${params.sessionId}`);
     // A conforming load may omit configOptions. The probe still supplied them.
@@ -343,9 +379,35 @@ const app = agent({ name: 'acp-fake' })
         case 'noise':
           // Already sent above, before the answer.
           break;
-        case 'usage':
-          await send({ sessionUpdate: 'usage_update', used: 12, size: 200, cost: { amount: 0.0042, currency: 'USD' } });
+        case 'usage': {
+          const total = (spent.get(sessionId) ?? 0) + 0.0042;
+          spent.set(sessionId, total);
+          await send({ sessionUpdate: 'usage_update', used: 12, size: 200, cost: { amount: total, currency: 'USD' } });
           usage = { totalTokens: 12, inputTokens: 8, outputTokens: 4, cachedReadTokens: 2 };
+          break;
+        }
+        case 'huge-tool':
+          await send({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'fake-huge-tool',
+            title: 'read a huge file',
+            name: 'read_file',
+            kind: 'read',
+            status: 'completed',
+            rawInput: { path: DIFF_PATH },
+            rawOutput: HUGE_TEXT,
+            content: [
+              { type: 'content', content: { type: 'text', text: HUGE_TEXT } },
+              { type: 'diff', path: DIFF_PATH, oldText: HUGE_TEXT, newText: `${HUGE_TEXT}!` },
+            ],
+          });
+          break;
+        case 'big-glog':
+          // Split across writes, so the line crosses several pipe reads.
+          for (let at = 0; at < BIG_GLOG.length; at += 50 * 1024) {
+            process.stderr.write(BIG_GLOG.slice(at, at + 50 * 1024));
+            await new Promise<void>((resolve) => setTimeout(resolve, 20));
+          }
           break;
         case 'slow':
           await new Promise<void>((resolve) => {
@@ -353,6 +415,11 @@ const app = agent({ name: 'acp-fake' })
           });
           cancels.delete(sessionId);
           return { stopReason: 'cancelled' };
+        case 'deaf':
+          // An agent that ignores `session/cancel`: the prompt never ends.
+          log('deaf');
+          await new Promise<void>(() => undefined);
+          break;
         case 'refuse':
           return { stopReason: 'refusal' };
         case 'crash':
@@ -369,9 +436,11 @@ const app = agent({ name: 'acp-fake' })
     return usage === null ? { stopReason: 'end_turn' } : { stopReason: 'end_turn', usage };
   });
 
-app.connect(
-  ndJsonStream(
-    Writable.toWeb(process.stdout) as unknown as WritableStream<Uint8Array>,
-    Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>,
-  ),
-);
+if (process.env['ACP_FAKE_EXIT_AT_START'] !== '1') {
+  app.connect(
+    ndJsonStream(
+      Writable.toWeb(process.stdout) as unknown as WritableStream<Uint8Array>,
+      Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>,
+    ),
+  );
+}

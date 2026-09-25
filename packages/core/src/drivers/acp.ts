@@ -4,6 +4,7 @@ import type {
   ClientConnection,
   ClientContext,
   ContentBlock,
+  LoadSessionResponse,
   PermissionOption,
   PermissionOptionKind,
   PromptResponse,
@@ -41,6 +42,7 @@ import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../provid
 import { normalizeAntigravityTool, isAntigravityQuestion } from './antigravity.ts';
 import { grokEffortOf, grokLaunchArgs, grokReasoningEffortOf } from './grok.ts';
 import { imageDocument } from './documents.ts';
+import { stderrLines } from './stderr-lines.ts';
 import type {
   Driver,
   ProbeContext,
@@ -75,6 +77,10 @@ const STDERR_MAX = 400;
 const GLOG_INFO = /^I\d{4} \d{2}:\d{2}:\d{2}\.\d+\s/;
 /** How long a failed prompt waits for the child's exit before blaming the error itself. */
 const EXIT_GRACE_MS = 500;
+/** How long an agent gets to answer `session/cancel` before its process is closed. */
+const STOP_GRACE_MS = 3_000;
+/** What one tool part keeps of its output, and of each text document, in the journal. */
+const TOOL_TEXT_MAX = 64 * 1024;
 /**
  * The model id a descriptor carries when it has no model list of its own
  * (OpenCode's shipped one does): the agent keeps whatever it is configured
@@ -234,22 +240,36 @@ interface ToolEntry {
  * A tool call's `content` as documents. A `diff` member is a file the call
  * wrote, a text block is markdown, an image block an image. `terminal`, audio
  * and resource blocks have no document in the contract, so they are dropped.
- * This is not the tool's output: `rawOutput` stays what it always was.
+ * This is not the tool's output: `rawOutput` stays what it always was. Text is
+ * cut at `TOOL_TEXT_MAX`, since the whole part is journalled and sent again on
+ * every `tool_call_update`; a diff that large becomes a line saying so, because
+ * half a diff would read as a real change.
  */
 function documentsOf(content: ToolCallContent[]): ToolDocument[] {
   const documents: ToolDocument[] = [];
   for (const entry of content) {
     if (entry.type === 'diff') {
       // No `oldText` is a file the call created.
-      documents.push({ kind: 'diff', path: entry.path, oldText: entry.oldText ?? '', newText: entry.newText });
+      const oldText = entry.oldText ?? '';
+      const size = oldText.length + entry.newText.length;
+      if (size > TOOL_TEXT_MAX) {
+        documents.push({ kind: 'markdown', title: entry.path, text: `The change is too large to show here (${size} characters).` });
+        continue;
+      }
+      documents.push({ kind: 'diff', path: entry.path, oldText, newText: entry.newText });
       continue;
     }
     if (entry.type !== 'content') continue;
     const block = entry.content;
-    if (block.type === 'text') documents.push({ kind: 'markdown', title: null, text: block.text });
+    if (block.type === 'text') documents.push({ kind: 'markdown', title: null, text: boundText(block.text) });
     else if (block.type === 'image') documents.push(imageDocument(block.mimeType, block.data, null));
   }
   return documents;
+}
+
+/** The head of a text, with a line saying where it was cut. */
+function boundText(text: string, max = TOOL_TEXT_MAX): string {
+  return text.length > max ? `${text.slice(0, max)}\n[cut at ${max} characters]` : text;
 }
 
 /** `AvailableCommand` as the contract's `AgentCommand`: no `input` means no hint. */
@@ -284,8 +304,22 @@ class AcpTurn {
   readonly stopped: Promise<void>;
 
   sessionId: string | null;
-  /** The last USD cost an `usage_update` carried, folded into the turn's usage. */
+  /**
+   * The last USD cost an `usage_update` carried. The protocol defines it as the
+   * session's running total, so the turn's own cost is what it added to
+   * `costBefore`.
+   */
   costUsdEquivalent: number | null = null;
+  /** What the session had already cost when this turn began: zero on a new session. */
+  costBefore = 0;
+  /** `used` and `size` of the last `usage_update`, reported once when the turn ends. */
+  contextUse: { tokens: number; window: number | null } | null = null;
+  /**
+   * The agent no longer has the thread's session, or cannot resume one once
+   * its process is gone: the thread's next turn starts a new session and
+   * carries the conversation so far in its prompt.
+   */
+  sessionLost = false;
   isStopped = false;
   settled = false;
 
@@ -312,10 +346,27 @@ class AcpTurn {
     this.wake();
   }
 
+  /**
+   * A stop that ended the turn before the agent answered it: the process was
+   * closed under a pending request. The turn is stopped, not failed, so no
+   * error part; a turn that already failed stays failed.
+   */
+  stopNow(): void {
+    if (this.settled || this.status === 'error') return;
+    this.status = 'stopped';
+  }
+
+  /** `usage_update`: only the latest reading counts, and it is reported once, at the end. */
+  noteContext(used: number, size: number): void {
+    if (!Number.isFinite(used) || used < 0) return;
+    this.contextUse = { tokens: used, window: Number.isFinite(size) && size > 0 ? size : null };
+  }
+
   settle(): void {
     if (this.settled) return;
     this.settled = true;
     this.wake();
+    if (this.contextUse !== null) this.ctx.context(this.contextUse);
     if (this.messageId !== null) {
       this.ctx.emit.complete(this.messageId, this.status === 'error' ? 'error' : 'complete');
     }
@@ -325,12 +376,20 @@ class AcpTurn {
       usage: this.usage,
       error: this.error ?? undefined,
       promptCache: acpCacheLife(this.ctx.provider.id, this.ctx.thread.model),
+      ...(this.sessionLost ? { sessionLost: true } : {}),
     });
+  }
+
+  /** The turn's share of the session's running cost; a total below what came before is a session that started over. */
+  private turnCost(): number | null {
+    const total = this.costUsdEquivalent;
+    if (total === null) return null;
+    return total >= this.costBefore ? total - this.costBefore : total;
   }
 
   /** The prompt response: the stop reason becomes the status, the usage the numbers. */
   finish(response: PromptResponse): void {
-    this.usage = mapUsage(response.usage ?? null, this.costUsdEquivalent);
+    this.usage = mapUsage(response.usage ?? null, this.turnCost());
     switch (response.stopReason) {
       case 'end_turn':
         break;
@@ -426,7 +485,9 @@ class AcpTurn {
       if (native.output !== undefined) entry.output = native.output;
     } else {
       if (input !== undefined) entry.input = input;
-      if (output !== undefined && output !== null) entry.output = toolOutputText(output);
+      // Journalled whole and sent again on every update: a file read or a
+      // command's output can be megabytes.
+      if (output !== undefined && output !== null) entry.output = boundText(toolOutputText(output));
     }
     if (status !== null && status !== undefined) entry.status = toolStatus(status);
     if (content !== null && content !== undefined) entry.documents = documentsOf(content);
@@ -468,6 +529,26 @@ export function toolOutputText(output: unknown): string {
     }
   }
   return stringify(output);
+}
+
+/** `session/load` refused by a live agent: the conversation is gone on its side. */
+class SessionLost extends Error {}
+
+/**
+ * A JSON-RPC error the agent answered with, as opposed to the SDK's own "the
+ * connection closed". Any code counts: an agent that throws a plain error in
+ * its handler answers -32603, which is how OpenCode says "no such session".
+ */
+function rpcRefusal(error: unknown): boolean {
+  return error instanceof Error && typeof (error as { code?: unknown }).code === 'number';
+}
+
+/** The refusal in words: an internal error carries the real reason in `data.details`. */
+function rpcReason(error: unknown): string {
+  const data = (error as { data?: unknown }).data;
+  const details = plainObject(data)?.['details'];
+  const reason = typeof details === 'string' && details.length > 0 ? details : messageOf(error);
+  return reason.slice(0, STDERR_MAX);
 }
 
 /**
@@ -516,6 +597,10 @@ class AcpSession {
   private idle: Timer | null = null;
   /** The turn whose `session/prompt` is in flight; updates outside one are dropped. */
   private current: AcpTurn | null = null;
+  /** The turn the queue is running, from its start to its end, prompt or not. */
+  private active: AcpTurn | null = null;
+  /** Armed by a stop on a prompt in flight: an agent that ignores the cancel is closed. */
+  private stopTimer: Timer | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
   private closing = false;
@@ -526,6 +611,8 @@ class AcpSession {
     private warmMs: number,
     private readonly deps: AcpDeps,
     private readonly onEnded: (session: AcpSession) => void,
+    /** The config options a session answered with, for the next session of the account to start from. */
+    private readonly onOptions: (options: SessionConfigOption[]) => void = () => undefined,
   ) {}
 
   seedConfig(options: SessionConfigOption[]): void {
@@ -549,20 +636,37 @@ class AcpSession {
       try {
         await this.runTurn(turn);
       } catch (error) {
-        turn.fail(messageOf(error));
+        if (turn.isStopped) turn.stopNow();
+        else turn.fail(messageOf(error));
         this.endTurn(turn, true);
       }
     });
   }
 
-  /** `session/cancel` is the only stop ACP has; the prompt response ends the turn. */
+  /**
+   * `session/cancel` is the only stop ACP has, and the prompt response ends the
+   * turn. It only asks, though: an agent that ignores it is closed past
+   * `STOP_GRACE_MS`, and one still starting (`initialize`, `session/new` or
+   * `session/load`, a `set_*` call) is closed at once, since nothing it has
+   * not answered yet can be cancelled. Closing the connection rejects the
+   * pending request, and the turn settles as stopped.
+   */
   stopTurn(turn: AcpTurn): void {
     if (turn.settled) return;
-    // A stop that lands before the prompt went out is replayed by `runTurn`
-    // the moment it does, so the order of the two never decides the outcome.
     turn.markStopped();
-    if (this.current !== turn) return;
+    // Not begun: `runTurn` settles it the moment the queue reaches it.
+    if (this.active !== turn) return;
+    if (this.current !== turn) {
+      this.drop();
+      return;
+    }
     this.cancel();
+    if (this.stopTimer !== null) return;
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      if (!turn.settled) this.drop();
+    }, STOP_GRACE_MS);
+    this.stopTimer.unref?.();
   }
 
   private cancel(): void {
@@ -583,11 +687,27 @@ class AcpSession {
   // -- the process ----------------------------------------------------------
 
   private async runTurn(turn: AcpTurn): Promise<void> {
+    this.active = turn;
+    if (turn.isStopped) {
+      turn.stopNow();
+      this.endTurn(turn, false);
+      return;
+    }
     this.ctx = turn.ctx;
     try {
       await this.start(turn.ctx);
     } catch (error) {
-      turn.fail(messageOf(error));
+      if (turn.isStopped) {
+        turn.stopNow();
+      } else if (error instanceof SessionLost) {
+        turn.sessionLost = true;
+        turn.fail(error.message);
+      } else {
+        // An agent that exits while it starts takes the connection with it,
+        // and its exit code and last stderr line say more than that.
+        const code = await this.exitWithin(EXIT_GRACE_MS);
+        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+      }
       this.endTurn(turn, true);
       return;
     }
@@ -595,10 +715,13 @@ class AcpSession {
     const agent = this.agent;
     const sessionId = this.sessionId;
     if (agent === null || sessionId === null) {
-      turn.fail('the acp session went away before the prompt');
+      if (turn.isStopped) turn.stopNow();
+      else turn.fail('the acp session went away before the prompt');
       this.endTurn(turn, true);
       return;
     }
+    // A session this turn did not resume is a new one, whose running cost starts at zero.
+    if (sessionId === turn.ctx.sessionId) turn.costBefore = turn.ctx.sessionBefore?.costUsd ?? 0;
 
     if (turn.ctx.attachments.length > 0 && !this.imagesSupported) {
       turn.fail(`${turn.ctx.provider.name} takes no images`);
@@ -625,10 +748,15 @@ class AcpSession {
       response = await pending;
     } catch (error) {
       this.current = null;
-      // A child that died takes the connection with it, and its exit says more
-      // than "the connection closed": give it a moment to be reported.
-      const code = await this.exitWithin(EXIT_GRACE_MS);
-      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+      if (turn.isStopped) {
+        // The stop closed the process under the prompt.
+        turn.stopNow();
+      } else {
+        // A child that died takes the connection with it, and its exit says more
+        // than "the connection closed": give it a moment to be reported.
+        const code = await this.exitWithin(EXIT_GRACE_MS);
+        turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+      }
       this.endTurn(turn, true);
       return;
     }
@@ -638,9 +766,18 @@ class AcpSession {
   }
 
   private endTurn(turn: AcpTurn, drop: boolean): void {
+    if (this.stopTimer !== null) {
+      clearTimeout(this.stopTimer);
+      this.stopTimer = null;
+    }
+    if (this.active === turn) this.active = null;
+    const dropping = drop || this.closing || this.warmMs <= 0;
+    // An agent that cannot load a session loses this one with its process: the
+    // thread's next turn starts a new session and carries the history instead.
+    if (dropping && !this.canLoad && this.sessionId !== null) turn.sessionLost = true;
     turn.settle();
     this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.warmMs <= 0) {
+    if (dropping) {
       this.drop();
       return;
     }
@@ -654,6 +791,8 @@ class AcpSession {
 
   private async open(ctx: TurnContext): Promise<void> {
     const sdk = await this.deps.loadSdk();
+    // A stop while the SDK loaded: nothing may be spawned for a session that is over.
+    if (this.ended) throw new Error('the acp session was closed before it started');
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -695,22 +834,42 @@ class AcpSession {
 
     if (ctx.sessionId !== null && this.canLoad) {
       // A fresh core has no probe cache, and session/load may omit controls.
-      // Discover them before loading so the resumed session stays the active one.
+      // Discover them before loading so the resumed session stays the active
+      // one. What it finds is kept for the account, so the next cold turn of
+      // any thread does not open a throwaway session again.
       if (!isGrok(ctx.provider) && this.configOptions.length === 0
         && (ctx.thread.model !== AGENT_OWN_MODEL || ctx.thread.effort !== null)) {
         const discovered = await connection.agent.request('session/new', { cwd: ctx.thread.cwd, mcpServers: [] });
         this.seedConfig(discovered.configOptions ?? []);
+        this.onOptions(discovered.configOptions ?? []);
       }
       // Every `session/update` of a load is history replay: `current` is null,
       // so the update handler drops them.
-      const loaded = await connection.agent.request('session/load', {
-        sessionId: ctx.sessionId,
-        cwd: ctx.thread.cwd,
-        mcpServers: [],
-      });
+      let loaded: LoadSessionResponse;
+      try {
+        loaded = await connection.agent.request('session/load', {
+          sessionId: ctx.sessionId,
+          cwd: ctx.thread.cwd,
+          mcpServers: [],
+        });
+      } catch (error) {
+        // An answer from a live agent, not a dead pipe: it no longer has the
+        // session (pruned, migrated, another project). Retrying the same id
+        // would fail every turn of the thread from now on.
+        if (!rpcRefusal(error) || this.ended || child.exitCode !== null) throw error;
+        ctx.log('warn', `acp: ${ctx.provider.id} refused to load the session ${ctx.sessionId}: ${rpcReason(error)}`);
+        throw new SessionLost(
+          `${ctx.provider.name} no longer has this conversation (${rpcReason(error)}). Send the message again: Boite starts a new session that carries the conversation so far.`,
+        );
+      }
       this.sessionId = ctx.sessionId;
       this.noteSession(loaded.modes, loaded.configOptions ?? null, loaded);
       return;
+    }
+    if (ctx.sessionId !== null) {
+      // Only a warm process that idled out gets here: without `loadSession` a
+      // cold turn is sent the history by the core instead.
+      ctx.log('warn', `acp: ${ctx.provider.id} cannot load a session, so this turn starts a new one`);
     }
 
     const created = await connection.agent.request('session/new', {
@@ -719,6 +878,7 @@ class AcpSession {
     });
     this.sessionId = created.sessionId;
     this.noteSession(created.modes, created.configOptions ?? null, created);
+    this.onOptions(created.configOptions ?? []);
   }
 
   /**
@@ -891,17 +1051,12 @@ class AcpSession {
 
   private watch(child: SpawnedChild, ctx: TurnContext): void {
     child.stdin.on('error', () => undefined);
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      for (const line of chunk.split(/\r?\n/)) {
-        const text = line.trim();
-        if (text.length === 0) continue;
-        this.lastStderr = text.slice(0, STDERR_MAX);
-        // Antigravity writes every protocol frame to stderr as a glog info line,
-        // three hundred a turn: only what the agent itself calls a warning is one.
-        if (GLOG_INFO.test(text)) continue;
-        ctx.log('warn', `acp agent: ${this.lastStderr}`);
-      }
+    stderrLines(child.stderr, (text) => {
+      this.lastStderr = text.slice(0, STDERR_MAX);
+      // Antigravity writes every protocol frame to stderr as a glog info line,
+      // three hundred a turn: only what the agent itself calls a warning is one.
+      if (GLOG_INFO.test(text)) return;
+      ctx.log('warn', `acp agent: ${this.lastStderr}`);
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
@@ -1034,6 +1189,7 @@ class AcpSession {
         break;
       case 'usage_update':
         if (update.cost != null && update.cost.currency === 'USD') turn.costUsdEquivalent = update.cost.amount;
+        turn.noteContext(update.used, update.size);
         break;
       case 'plan':
         turn.ctx.tasks?.(update.entries.map((entry, index) => ({ id: String(index), text: entry.content, status: entry.status })));
@@ -1305,12 +1461,8 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (option
     env: agentEnv(ctx.provider, ctx.accountEnv),
   });
   child.stdin.on('error', () => undefined);
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => {
-    for (const line of chunk.split(/\r?\n/)) {
-      const text = line.trim();
-      if (text.length > 0) lastStderr = text.slice(0, STDERR_MAX);
-    }
+  stderrLines(child.stderr, (text) => {
+    lastStderr = text.slice(0, STDERR_MAX);
   });
 
   const say = (head: string): string => (lastStderr.length === 0 ? head : `${head}: ${lastStderr}`);
@@ -1378,7 +1530,10 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (option
       return { options, listed: agentModelsOf(created), effort };
     })();
 
-    const answer = await Promise.race([read, died, expired]);
+    // When the agent exits, stdout closes and the pending request rejects with
+    // "the connection closed" before the exit is reported: a failed read
+    // waits a moment for the exit, whose code and stderr line say why.
+    const answer = await Promise.race([read.catch((error: unknown) => preferExit(died, error)), died, expired]);
     noteOptions(answer.options ?? []);
     return { models: modelsFrom(ctx.provider, answer.options, answer.listed), effort: answer.effort };
   } finally {
@@ -1395,6 +1550,18 @@ async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: (option
     }
     ctx.killTree();
   }
+}
+
+/** A failure of the connection, unless the process's own exit lands within the grace: then that one. */
+async function preferExit(died: Promise<never>, error: unknown): Promise<never> {
+  await Promise.race([
+    died,
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, EXIT_GRACE_MS);
+      timer.unref?.();
+    }),
+  ]);
+  throw error;
 }
 
 // ---------------------------------------------------------------------------
@@ -1438,18 +1605,23 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
     child.once('error', () => resolve());
   });
   child.stdin.on('error', () => undefined);
-  child.stderr.setEncoding('utf8');
-  let stderrBuffer = '';
-  child.stderr.on('data', (chunk: string) => {
-    stderrBuffer += chunk;
-    let index = stderrBuffer.indexOf('\n');
-    while (index >= 0) {
-      const line = stderrBuffer.slice(0, index).replace(/\r$/, '').trim();
-      stderrBuffer = stderrBuffer.slice(index + 1);
-      index = stderrBuffer.indexOf('\n');
-      if (line.length > 0) input.onLine(line.slice(0, STDERR_MAX));
-    }
+  let lastStderr = '';
+  stderrLines(child.stderr, (text) => {
+    lastStderr = text.slice(0, STDERR_MAX);
+    input.onLine(lastStderr);
   });
+  // Listened for before the SDK loads: an agent that exits at once would
+  // otherwise be gone before anyone heard it.
+  const died = new Promise<never>((_resolve, reject) => {
+    child.once('exit', (code) => {
+      const head = `the agent exited with code ${code ?? 'unknown'} before it authenticated`;
+      reject(new Error(lastStderr.length === 0 ? head : `${head}: ${lastStderr}`));
+    });
+    child.once('error', (error) => {
+      reject(new Error(`the agent did not start: ${messageOf(error)}`));
+    });
+  });
+  died.catch(() => undefined);
 
   let connection: ClientConnection | null = null;
   let timer: Timer | null = null;
@@ -1477,14 +1649,6 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
 
   const done = (async (): Promise<void> => {
     const sdk = await import('@agentclientprotocol/sdk');
-    const died = new Promise<never>((_resolve, reject) => {
-      child.once('exit', (code) => {
-        reject(new Error(`the agent exited with code ${code ?? 'unknown'} before it authenticated`));
-      });
-      child.once('error', (error) => {
-        reject(new Error(`the agent did not start: ${messageOf(error)}`));
-      });
-    });
     const expired = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         reject(new Error(`the sign-in was not finished within ${LOGIN_TIMEOUT_MS / MINUTE_MS} minutes`));
@@ -1513,7 +1677,7 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
     })();
 
     try {
-      await Promise.race([run, died, expired]);
+      await Promise.race([run.catch((error: unknown) => preferExit(died, error)), died, expired]);
     } finally {
       if (timer !== null) clearTimeout(timer);
     }
@@ -1543,8 +1707,12 @@ function toolStatus(status: ToolCallStatus): ToolStatus {
   }
 }
 
+/** `PromptResponse.usage` is experimental: a cost the agent reported without it is still the turn's cost. */
 function mapUsage(usage: AcpUsage | null, costUsdEquivalent: number | null): Usage | null {
-  if (usage === null) return null;
+  if (usage === null) {
+    if (costUsdEquivalent === null) return null;
+    return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent };
+  }
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -1616,7 +1784,11 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       if (known !== null && !missing) return known;
 
       const running = readModels(missing ? ctx : { ...ctx, model: undefined }, deps, (options) => { entry.options = options; }).then((reading) => {
-        if (reading.effort !== null) entry.effortRead.add(reading.effort.model);
+        // Asked once, found or not: a model the agent gives no scale of its
+        // own (Grok's without one, a model outside the `model` option) would
+        // otherwise start an agent process on every probe that names it.
+        if (missing && wanted !== undefined) entry.effortRead.add(wanted);
+        else if (reading.effort !== null) entry.effortRead.add(reading.effort.model);
         // A second look keeps the scales the earlier ones found.
         const earlier = new Map((known?.models ?? []).filter((model) => model.effort !== undefined).map((model) => [model.id, model.effort]));
         const models = withModelEffort(reading.models, reading.effort).map((model) => (model.effort === undefined && earlier.has(model.id) ? { ...model, effort: earlier.get(model.id) } : model));
@@ -1630,8 +1802,9 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         if (probes.get(key) === entry) entry.result = result;
         return result;
       } catch (error) {
-        // A failed look at one model's efforts leaves the list already read standing.
-        if (probes.get(key) === entry && known === null) probes.delete(key);
+        // A failed look at one model's efforts leaves the list already read
+        // standing, and a failed first look leaves the options a turn noted.
+        if (probes.get(key) === entry && known === null && entry.options.length === 0) probes.delete(key);
         throw error;
       } finally {
         entry.running = null;
@@ -1669,14 +1842,35 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         );
         session = null;
       }
+      const probeKey = keyOf(ctx.provider.id, ctx.account.id);
       if (session === null) {
-        session = new AcpSession(key, warmMs, deps, (ended) => {
-          if (sessions.get(threadId) === ended) sessions.delete(threadId);
-        });
+        session = new AcpSession(
+          key,
+          warmMs,
+          deps,
+          (ended) => {
+            if (sessions.get(threadId) === ended) sessions.delete(threadId);
+          },
+          (options) => {
+            // Kept beside the probe, never as its result: the picker and the
+            // model check still see an account nobody probed.
+            if (options.length === 0) return;
+            const entry = probes.get(probeKey) ?? {
+              options: [],
+              providerId: ctx.provider.id,
+              accountId: ctx.account.id,
+              running: null,
+              result: null,
+              effortRead: new Set<string>(),
+            };
+            if (entry.options.length === 0) entry.options = structuredClone(options);
+            probes.set(probeKey, entry);
+          },
+        );
         sessions.set(threadId, session);
       }
       const running = session;
-      running.seedConfig(probes.get(keyOf(ctx.provider.id, ctx.account.id))?.options ?? []);
+      running.seedConfig(probes.get(probeKey)?.options ?? []);
       running.attach(turn, warmMs);
       return {
         done: turn.done,

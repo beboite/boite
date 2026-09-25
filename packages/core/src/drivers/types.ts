@@ -141,6 +141,13 @@ export interface TurnResult {
    * The core stamps the time, the model and the account; see `PromptCache`.
    */
   promptCache?: PromptCacheLife | null;
+  /**
+   * The agent no longer has the thread's session (it refused to load it), or
+   * cannot resume one once this turn's process is gone. The core forgets the
+   * session id and starts a new session generation, so the next turn opens a
+   * fresh session and carries the conversation so far in its prompt.
+   */
+  sessionLost?: boolean;
 }
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
