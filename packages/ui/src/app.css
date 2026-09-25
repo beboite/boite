@@ -168,6 +168,8 @@
   }
 }
 
+/* The same, forced from the page: the tests set it, since jsdom has no media
+   queries. Components that loop forever guard both. */
 html[data-motion='reduced'] {
   --dur-1: 0.01ms;
   --dur-2: 0.01ms;

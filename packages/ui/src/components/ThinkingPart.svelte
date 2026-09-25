@@ -126,4 +126,8 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  :global(html[data-motion='reduced']) .dot { animation: none; }
 </style>
