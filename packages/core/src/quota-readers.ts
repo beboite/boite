@@ -97,7 +97,7 @@ async function readAntigravity(core: Core): Promise<QuotaWindow[]> {
   const cwd = await mkdtemp(join(tmpdir(), 'boite-agy-quota-'));
   const threadId = ANTIGRAVITY_QUOTA_ID;
   const run = (args: string[], timeout: number) => new Promise<string>((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' };
+    const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1', AGY_CLI_DISABLE_AUTO_UPDATE: 'true' };
     delete env['ANTIGRAVITY_OAUTH_CREDENTIALS_JSON'];
     const child = core.procs.spawnChild(threadId, executable, args, { cwd, env });
     let output = '', bytes = 0, failure = '';

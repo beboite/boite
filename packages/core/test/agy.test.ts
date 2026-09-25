@@ -5,6 +5,7 @@
  * conversation by a later process, the warm process, the permission flags, the
  * `agy models` probe with its effort grouping, and the refusals.
  */
+import shippedAgy from '../src/providers/shipped/antigravity-cli.json';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +67,8 @@ function writeDescriptor(dataDir: string): void {
     executable: [{ kind: 'path', value: 'bun' }],
     launch: { args: [FAKE_AGENT] },
     isolation: {},
-    env: { BROWSER: '{browserNoop}', NO_COLOR: '1' },
+    // The shipped environment, so a variable it drops shows up here.
+    env: shippedAgy.profiles.windows.env,
     close: { processes: [] },
   };
   writeFileSync(
@@ -160,6 +162,8 @@ describe('agy driver', () => {
     expect(argvLines()).toEqual(['argv conversation=new model=configured mode=default skip=false stream=true']);
     // The browser the CLI would open for a sign-in is the no-op, never a window.
     expect(linesStarting('env BROWSER=')).toEqual([`env BROWSER=${browserNoopPath(harness?.dataDir ?? '')}`]);
+    // agy's own updater spawns a detached `agy --version` that opens a console window.
+    expect(linesStarting('env AGY_CLI_DISABLE_AUTO_UPDATE=')).toEqual(['env AGY_CLI_DISABLE_AUTO_UPDATE=true']);
   });
 
   test('a tool step is one part, running then done, between the two answers, and usage adds both', async () => {
@@ -332,6 +336,7 @@ describe('agy driver', () => {
     // Cached, and nothing is left running under the probe's thread.
     await client.call('providers.probe', { providerId: 'agy-fake', accountId });
     expect(linesStarting('models')).toHaveLength(1);
+    expect(linesStarting('probe env ')).toEqual(['probe env AGY_CLI_DISABLE_AUTO_UPDATE=true']);
     await waitFor(() => harness?.core.procs.liveCount(`probe:agy-fake:${accountId}`) === 0);
   });
 

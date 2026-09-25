@@ -303,6 +303,15 @@ account of its own ([accounts.md](accounts.md)). A signed-out agy is found by
 the probe instead: `agy models` answers "Please sign in", and the probe says to
 run `agy` in a terminal and sign in there.
 
+Every agy Boite starts (turns, `agy models`, the usage read) runs with
+`AGY_CLI_DISABLE_AUTO_UPDATE=true`, and only that exact value works: `1` does
+not. Left on, agy spawns `agy --bg-updater` at most every 15 minutes, and that
+detached process runs `agy --version` in a console of its own. No hidden-window
+flag on Boite's side reaches it, so on Windows the user got a terminal window
+over whatever they were doing. agy is updated from the agent updates card
+instead ([agent-updates.md](agent-updates.md)), whose `agy update` run keeps
+the variable unset.
+
 The `agy` driver (`packages/core/src/drivers/agy.ts`) speaks the CLI's
 headless mode, `--input-format stream-json --output-format stream-json -p=`.
 `-p=` needs its empty value, since a bare `-p` takes the next argument as the
