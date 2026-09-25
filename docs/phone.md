@@ -157,7 +157,9 @@ list it was opened from. Each of those owns one history entry
 never lands on something already closed. The conversation the app opens on has
 no list behind it, and Back from there leaves the app as before. Controls have 44 px touch targets; `visualViewport` keeps the composer
 above the keyboard, and the bottom navigation hides while the keyboard is open.
-Safe-area insets keep controls clear of the home indicator and screen cutouts.
+Safe-area insets keep controls clear of the home indicator and screen cutouts:
+the chat header, the full-screen right panel, and the Agents and Settings pages
+all start below the status bar of an installed app on a notched iPhone.
 
 Draft text stays with its conversation. Four recent timelines are retained in
 memory, each limited to 2,000 messages and 4 MB of text/image data, to preserve

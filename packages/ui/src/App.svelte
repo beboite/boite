@@ -415,7 +415,7 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -656,6 +656,9 @@
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
+    /* Agents and Settings draw no mobile header: the body keeps clear of the
+       status bar and the notch itself. */
+    .app.off-chat .body { padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;

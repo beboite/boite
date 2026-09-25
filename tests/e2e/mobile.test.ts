@@ -164,6 +164,30 @@ test('a wide markdown table scrolls inside itself and leaves the conversation st
   expect(sizes.table[0]).toBeGreaterThan(sizes.table[1]);
 }, 30_000);
 
+test('the panel sheet, Agents and Settings keep clear of a notch and the status bar', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
+  try {
+    const top = (selector: string) => page.evaluate<number>(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top`);
+    await page.click('[data-testid=panel-toggle]');
+    await page.waitFor(`document.querySelector('[data-testid=panel-close]')`);
+    expect(await top('[data-testid=right-panel] header')).toBeGreaterThanOrEqual(47);
+    await capture('mobile-safe-panel.png');
+    await page.click('[data-testid=panel-close]');
+    await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+    await page.click('[data-testid=mobile-agents]');
+    await page.waitFor(`document.querySelector('.agents-page h1')`);
+    expect(await top('.agents-page h1')).toBeGreaterThanOrEqual(47);
+    await page.click('[data-testid=mobile-settings]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h1')`);
+    expect(await top('[data-testid=mobile-settings-home] h1')).toBeGreaterThanOrEqual(47);
+    await capture('mobile-safe-settings.png');
+  } finally {
+    await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  }
+}, 30_000);
+
 test('a phone pins and archives a thread without a right-click, from the header and from the list', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);

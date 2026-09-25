@@ -846,6 +846,9 @@
       min-width: 0;
       border-left: none;
       box-shadow: none;
+      /* The sheet covers the whole screen, the status bar and the home indicator included. */
+      box-sizing: border-box;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
     }
 
     .sheet-scrim {
