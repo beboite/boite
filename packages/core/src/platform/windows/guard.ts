@@ -51,6 +51,13 @@ let enabled = true;
 let muteEnabled = true;
 let audioFailure: string | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Every note already written to the core log. It outlives the Worker: one is
+ * rebuilt on every turn after an idle stop, and a machine with no audio endpoint
+ * or no interactive desktop would otherwise say so once per turn. Cleared only
+ * by the core's teardown.
+ */
+const noted = new Set<string>();
 /** Every traced pid still running, with its thread: what a new Worker is told. */
 const pids = new Map<number, string>();
 /** The pids the Worker said it muted, minus the ones that have since exited. */
@@ -91,17 +98,26 @@ export function setGuardMute(next: boolean): void {
   settingsChanged();
 }
 
-/** A turn is starting: have the hook in before its first process can open a window. */
+/**
+ * A turn is starting: have the hook in before its first process can open a
+ * window. With nothing traced running, the idle window starts over from here:
+ * a stop armed by the previous turn's last exit must not take the Worker this
+ * turn just warmed.
+ */
 export function warmGuard(): void {
   if (!wanted()) return;
   ensureWorker();
-  if (pids.size === 0) armIdleStop();
+  if (pids.size > 0) return;
+  cancelIdleStop();
+  armIdleStop();
 }
 
 export function guardPidAdded(threadId: string, pid: number): void {
   if (pid <= 0) return;
   pids.set(pid, threadId);
-  cancelIdleStop();
+  // With both protections off the stop armed by the switch stays armed, however
+  // many pids keep coming.
+  if (wanted()) cancelIdleStop();
   // A Worker built here is told every pid, this one included.
   if (ensureWorker()) return;
   post({ kind: 'pid-add', threadId, pid });
@@ -213,7 +229,7 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
       return;
     case 'hook-failed':
       hookFailure = message.reason;
-      sink?.note(`the focus guard is off, the audio mute stays on: ${message.reason}`);
+      noteOnce(`the focus guard is off, the audio mute stays on: ${message.reason}`);
       return;
     case 'foreground-pushed':
       sink?.pushed(message.threadId, message.pid, message.title, message.restored);
@@ -226,7 +242,11 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
       return;
     case 'audio-failed':
       audioFailure = message.message;
-      sink?.note(`the audio mute is off: ${message.message}`);
+      noteOnce(`the audio mute is off: ${message.message}`);
+      return;
+    case 'session-skipped':
+      // The walk went on and muted the others: the mute is still on.
+      noteOnce(`an audio session could not be read: ${message.message}`);
       return;
     case 'failed':
       fail(message.reason);
@@ -234,6 +254,12 @@ function onWorkerMessage(message: GuardWorkerMessage): void {
     default:
       return;
   }
+}
+
+function noteOnce(message: string): void {
+  if (noted.has(message)) return;
+  noted.add(message);
+  sink?.note(message);
 }
 
 function armIdleStop(): void {
@@ -282,6 +308,7 @@ function teardown(): Promise<void> {
   audioFailure = null;
   pids.clear();
   mutedPids.clear();
+  noted.clear();
   if (running !== null) track(stopWorker(running, flag));
   return Promise.all([...stopping]).then(() => undefined);
 }

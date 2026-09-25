@@ -8,10 +8,15 @@
  */
 import type { AudioSession } from './audio-sessions.ts';
 
-/** One mute, or one distinct failure, on its way to the main thread. */
+/**
+ * One mute, one distinct failure of the walk, or one distinct session the walk
+ * went past, on its way to the main thread. A skipped session leaves the mute
+ * on for every other one, so it is a note, never a failure.
+ */
 export type MuteEvent =
   | { kind: 'session-muted'; threadId: string; pid: number }
-  | { kind: 'audio-failed'; message: string };
+  | { kind: 'audio-failed'; message: string }
+  | { kind: 'session-skipped'; message: string };
 
 export class MuteLogic {
   /** pid to the thread that owns it. A session of any of these is muted. */
@@ -24,7 +29,11 @@ export class MuteLogic {
   readonly #held = new Map<number, AudioSession[]>();
   /** What was muted or failed, drained by the Worker after every pump tick. */
   readonly events: MuteEvent[] = [];
-  /** One line per distinct failure: a broken endpoint must not fill the log. */
+  /**
+   * One event per distinct failure or skip for this Worker's life: a broken
+   * endpoint polled every second must not flood the main thread. The main
+   * thread keeps its own set across Workers for the log.
+   */
   readonly #reported = new Set<string>();
 
   #enabled: boolean;
@@ -78,10 +87,10 @@ export class MuteLogic {
     let sessions: AudioSession[];
     try {
       sessions = this.listSessions((message) => {
-        this.fail(message);
+        this.report('session-skipped', message);
       });
     } catch (error) {
-      this.fail(error instanceof Error ? error.message : String(error));
+      this.report('audio-failed', error instanceof Error ? error.message : String(error));
       return;
     }
 
@@ -119,9 +128,10 @@ export class MuteLogic {
     }
   }
 
-  private fail(message: string): void {
-    if (this.#reported.has(message)) return;
-    this.#reported.add(message);
-    this.events.push({ kind: 'audio-failed', message });
+  private report(kind: 'audio-failed' | 'session-skipped', message: string): void {
+    const key = `${kind}:${message}`;
+    if (this.#reported.has(key)) return;
+    this.#reported.add(key);
+    this.events.push({ kind, message });
   }
 }

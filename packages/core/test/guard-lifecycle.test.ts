@@ -192,6 +192,66 @@ describe('the guard Worker lifecycle', () => {
     await waitFor(() => (workers[0] as FakeWorker).terminated, 1000);
   });
 
+  test('a turn warmed inside the idle delay restarts it, so the stop armed before cannot take its Worker', async () => {
+    // Wide margins: the old stop is due at 400 ms, the warm one at about 650 ms.
+    setGuardWorkerForTests(() => {
+      const worker = new FakeWorker();
+      workers.push(worker);
+      return worker;
+    }, 400);
+    guardPidAdded('thr_one', 11);
+    guardPidRemoved('thr_one', 11);
+    await Bun.sleep(250);
+    warmGuard();
+    await Bun.sleep(250);
+    expect(workers).toHaveLength(1);
+    expect(workers[0]?.stopAsked()).toBe(false);
+    // The restarted delay still runs out when the turn traced nothing.
+    await waitFor(() => (workers[0] as FakeWorker).terminated, 2000);
+  });
+
+  test('with both protections off, pids that keep coming do not hold the Worker', async () => {
+    guardPidAdded('thr_one', 11);
+    const worker = workers[0] as FakeWorker;
+    setGuardEnabled(false);
+    setGuardMute(false);
+    guardPidAdded('thr_one', 12);
+    guardPidAdded('thr_one', 13);
+    await waitFor(() => worker.terminated, 1000);
+    expect(guardStatus().running).toBe(false);
+    expect(workers).toHaveLength(1);
+  });
+
+  test('a skipped audio session is a note, not a failure, and each note is written once per core', async () => {
+    const reasons = (): GuardWorkerMessage[] => [
+      { kind: 'hook-failed', reason: 'SetWinEventHook returned no hook' },
+      { kind: 'session-skipped', message: 'IAudioSessionControl2::GetProcessId failed with 0x88890004' },
+    ];
+    guardPidAdded('thr_one', 11);
+    const first = workers[0] as FakeWorker;
+    for (const message of reasons()) first.emit(message);
+    expect(guardStatus().audio).toBe('on');
+
+    first.emit({ kind: 'audio-failed', message: 'this machine has no default audio render endpoint' });
+    expect(guardStatus().audio).toBe('failed');
+
+    // The Worker goes idle and the next turn builds another, which meets the
+    // same machine and says the same things again.
+    guardPidRemoved('thr_one', 11);
+    await waitFor(() => first.terminated, 1000);
+    guardPidAdded('thr_two', 12);
+    const second = workers[1] as FakeWorker;
+    for (const message of reasons()) second.emit(message);
+    second.emit({ kind: 'audio-failed', message: 'this machine has no default audio render endpoint' });
+    expect(guardStatus().audio).toBe('failed');
+
+    expect(notes).toEqual([
+      'the focus guard is off, the audio mute stays on: SetWinEventHook returned no hook',
+      'an audio session could not be read: IAudioSessionControl2::GetProcessId failed with 0x88890004',
+      'the audio mute is off: this machine has no default audio render endpoint',
+    ]);
+  });
+
   test('the release resolves only once the Worker said it stopped', async () => {
     guardPidAdded('thr_one', 11);
     const worker = workers[0] as FakeWorker;

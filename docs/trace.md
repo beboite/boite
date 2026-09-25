@@ -138,8 +138,11 @@ while that thread pumps. The main thread posts it the pid set and the setting.
 
 The Worker is built when a turn starts or on the first traced pid, whichever
 comes first, and stopped 30 seconds after the last traced process exits, or 30
-seconds after both the guard and the audio mute are turned off. Back-to-back turns
-keep the same Worker. With both protections off no Worker is built at all. When
+seconds after both the guard and the audio mute are turned off, however many
+processes still run. A turn that starts restarts those 30 seconds, so back-to-back
+turns keep the same Worker. What the Worker reports to the core log (a refused
+hook, a missing endpoint, a skipped session) is written once per core run, not
+once per Worker. With both protections off no Worker is built at all. When
 the system refuses the hook (a core with no interactive desktop), the Worker
 keeps running for the audio mute and `guardStatus().failure` names the refusal.
 

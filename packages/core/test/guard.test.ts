@@ -358,7 +358,7 @@ describe('the audio mute rule', () => {
     expect(mute.takeEvents()).toHaveLength(2);
   });
 
-  test('one unreadable session does not stop the walk, and is reported once', () => {
+  test('one unreadable session does not stop the walk, and is reported once as a skip', () => {
     const endpoint = new FakeEndpoint();
     endpoint.unreadable = 'IAudioSessionControl2::GetProcessId failed with 0x88890004';
     const mixer = endpoint.add(MUTED_PID);
@@ -371,7 +371,7 @@ describe('the audio mute rule', () => {
     expect(mixer.muted).toBe(true);
     expect(mute.mutedPids()).toEqual([MUTED_PID]);
     expect(mute.takeEvents()).toEqual([
-      { kind: 'audio-failed', message: 'IAudioSessionControl2::GetProcessId failed with 0x88890004' },
+      { kind: 'session-skipped', message: 'IAudioSessionControl2::GetProcessId failed with 0x88890004' },
       { kind: 'session-muted', threadId: 'thr_one', pid: MUTED_PID },
     ]);
   });
