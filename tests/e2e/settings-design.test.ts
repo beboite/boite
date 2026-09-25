@@ -40,10 +40,17 @@ test("settings reveal sections and protection switches persist across navigation
     await page.waitFor(
       '!document.querySelector("[data-testid=setting-mute-agents]").checked',
     );
+    await page.click("[data-testid=setting-reap-orphans]");
+    await page.waitFor(
+      '!document.querySelector("[data-testid=setting-reap-orphans]").checked',
+    );
     await page.click("[data-testid=settings-tab-general]");
     await page.click("[data-testid=settings-tab-resources]");
     await page.waitFor(
       '!document.querySelector("[data-testid=setting-mute-agents]").checked',
+    );
+    await page.waitFor(
+      '!document.querySelector("[data-testid=setting-reap-orphans]").checked',
     );
     expect(await page.evaluate('document.fonts.check("14px Geist")')).toBe(
       true,

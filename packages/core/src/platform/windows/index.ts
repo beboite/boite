@@ -19,6 +19,7 @@ export const platform: ProcessPlatform = {
   },
   attach: jobs.assignToThreadJob,
   terminate: jobs.terminateThreadJob,
+  terminateProcess: jobs.terminateJobProcess,
   terminateUnassigned(pid) {
     // Only a pid captured by the registry may reach this fallback.
     try {

@@ -112,6 +112,7 @@ function loadKernel32() {
     },
     AssignProcessToJobObject: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
     TerminateJobObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+    TerminateProcess: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     CreateIoCompletionPort: { args: [FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.ptr },
     OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.ptr },
     CloseHandle: { args: [FFIType.ptr], returns: FFIType.i32 },
@@ -166,6 +167,8 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
       k32.AssignProcessToJobObject(asPointer(job), asPointer(proc)) !== 0,
     terminateJob: (job: number, exitCode: number): boolean =>
       k32.TerminateJobObject(asPointer(job), exitCode) !== 0,
+    terminateProcess: (proc: number, exitCode: number): boolean =>
+      k32.TerminateProcess(asPointer(proc), exitCode) !== 0,
     createPort: (): number => asHandle(k32.CreateIoCompletionPort(INVALID_HANDLE_VALUE, null, 0n, 1)),
     openProcess: (access: number, pid: number): number => asHandle(k32.OpenProcess(access, 0, pid)),
     close: (handle: number): void => {
@@ -313,6 +316,18 @@ export function terminateThreadJob(threadId: string): boolean {
   const api = ensureNative();
   if (api === null) return false;
   return api.terminateJob(job.handle, KILL_EXIT_CODE);
+}
+
+/**
+ * The handle opened when the job reported the process, never a fresh open by
+ * pid: a pid the process gave back may already belong to something else.
+ */
+export function terminateJobProcess(threadId: string, pid: number): boolean {
+  const entry = tracked.get(pid);
+  if (entry === undefined || entry.threadId !== threadId) return false;
+  const api = ensureNative();
+  if (api === null) return false;
+  return api.terminateProcess(entry.handle, KILL_EXIT_CODE);
 }
 
 /** CPU over the interval since the previous sample, memory as the live working sets. */

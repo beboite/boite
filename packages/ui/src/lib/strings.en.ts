@@ -1185,6 +1185,8 @@ export const strings = {
     focusGuardHint: 'Windows an agent opens are sent behind Boite instead of taking your focus',
     muteAgents: 'Mute agent audio',
     muteAgentsHint: 'Sounds an agent process plays never reach your speakers',
+    reapOrphans: 'Stop what agents leave running',
+    reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped, the way an interrupted command leaves them. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
     asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn `boite ask` when a session starts. Codex asks this way natively.',
     save: 'Save',

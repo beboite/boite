@@ -37,6 +37,10 @@
       <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span><InfoTip topic={strings.settings.muteAgents} text={strings.settings.muteAgentsHint} /></span>
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
+    <label for="{uid}-reap-orphans" class="switch-row">
+      <span class="text"><span id="{uid}-reap-orphans-name">{strings.settings.reapOrphans}</span><InfoTip topic={strings.settings.reapOrphans} text={strings.settings.reapOrphansHint} /></span>
+      <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
+    </label>
   </section>
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>

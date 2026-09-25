@@ -9,6 +9,7 @@ export function createPosixPlatform(os: 'linux' | 'macos'): ProcessPlatform {
     applySettings() {},
     attach: () => false,
     terminate: () => false,
+    terminateProcess: () => false,
     terminateUnassigned() {},
     sample: () => null,
     pidAdded() {},

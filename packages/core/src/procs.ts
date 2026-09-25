@@ -1,7 +1,7 @@
 import { spawn as spawnNodeChild } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability } from '@boite/contracts';
+import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { processPlatform } from './platform/index.ts';
@@ -58,6 +58,16 @@ const MEMORY_EPSILON_BYTES = 1024 * 1024;
 const LOAD_INTERVAL_MS = 1000;
 /** How long a thread with nothing running keeps its pid history, for a late job event. */
 const FORGET_DELAY_MS = 30_000;
+/**
+ * How long a thread stays idle after its turn before what it left behind is
+ * stopped, and how old such a process must be. A launcher handing over to a
+ * child it means to keep does so well inside that.
+ */
+const ORPHAN_GRACE_MS = 10_000;
+
+export interface ProcRegistryOptions {
+  orphanGraceMs?: number;
+}
 
 /**
  * The one launcher. Nothing in the core reaches `Bun.spawn` directly: a child
@@ -77,12 +87,23 @@ export class ProcRegistry {
   /** What was last sent as `thread.updated`. A plain read must never move it. */
   private readonly lastPushed = new Map<ThreadId, ThreadLoad>();
   private readonly loadTimer: ReturnType<typeof setInterval>;
+  /** A sweep waiting for the thread to stay idle, cancelled by its next turn. */
+  private readonly sweepTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
+  private reapOrphans = true;
+  private readonly orphanGraceMs: number;
+  private readonly stopListening: () => void;
 
   constructor(
     private readonly journal: Journal,
     private readonly bus: Bus,
     private readonly platform: ProcessPlatform = processPlatform,
+    options: ProcRegistryOptions = {},
   ) {
+    this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
+    this.stopListening = this.bus.onAny((name, payload) => {
+      if (name === 'turn.started') this.cancelSweep((payload as Turn).threadId);
+      else if (name === 'turn.finished') this.scheduleSweep((payload as Turn).threadId);
+    });
     this.platform.retain({
       started: (threadId, pid, info) => {
         this.onJobStarted(threadId, pid, info);
@@ -126,6 +147,8 @@ export class ProcRegistry {
 
   applySettings(settings: Settings): void {
     this.platform.applySettings(settings);
+    this.reapOrphans = settings.reapOrphans !== false;
+    if (!this.reapOrphans) for (const threadId of [...this.sweepTimers.keys()]) this.cancelSweep(threadId);
   }
 
   /** What the guard Worker is doing, focus and audio. Read by the tests, not by a client. */
@@ -134,6 +157,9 @@ export class ProcRegistry {
   }
 
   close(): void {
+    this.stopListening();
+    for (const timer of this.sweepTimers.values()) clearTimeout(timer);
+    this.sweepTimers.clear();
     clearInterval(this.loadTimer);
     for (const timer of this.exitTimers.values()) clearTimeout(timer);
     this.exitTimers.clear();
@@ -442,6 +468,70 @@ export class ProcRegistry {
     }
   }
 
+  /**
+   * Stops what the thread left running with nobody above it: a process the job
+   * reported whose parent exited, or whose parent pid now names a younger
+   * process, with everything under it. That is what an interrupted or refused
+   * command leaves, since stopping a shell does not stop what it started. The
+   * agent itself and anything the core spawned have the core as their parent
+   * and are never taken. Returns the pids stopped.
+   */
+  sweepOrphans(threadId: ThreadId, now: number = Date.now()): number[] {
+    const byPid = this.live.get(threadId);
+    if (byPid === undefined || this.journal.isClosed()) return [];
+    const records = [...byPid.values()].map((entry) => entry.record);
+    const stopping = new Map<number, ProcessRecord>();
+    for (const record of records) {
+      const parentPid = record.parentPid;
+      if (parentPid === null || parentPid === process.pid) continue;
+      if (now - record.startedAt < this.orphanGraceMs) continue;
+      const parent = byPid.get(parentPid)?.record;
+      if (parent !== undefined && parent.startedAt <= record.startedAt) continue;
+      stopping.set(record.pid, record);
+    }
+    if (stopping.size === 0) return [];
+    // An orphan's own children still have a live parent: they go with it.
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const record of records) {
+        if (stopping.has(record.pid) || record.parentPid === null) continue;
+        const parent = stopping.get(record.parentPid);
+        if (parent === undefined || parent.startedAt > record.startedAt) continue;
+        stopping.set(record.pid, record);
+        grew = true;
+      }
+    }
+    const stopped: number[] = [];
+    for (const record of stopping.values()) {
+      if (!this.platform.terminateProcess(threadId, record.pid)) continue;
+      stopped.push(record.pid);
+      this.bus.emit('core.log', {
+        level: 'info',
+        message: `thread ${threadId}: pid ${record.pid} (${baseName(record.exe)}) was left running with no parent and was stopped`,
+        at: Date.now(),
+      });
+    }
+    return stopped;
+  }
+
+  private scheduleSweep(threadId: ThreadId): void {
+    this.cancelSweep(threadId);
+    if (!this.reapOrphans || !this.live.has(threadId)) return;
+    const timer = setTimeout(() => {
+      this.sweepTimers.delete(threadId);
+      this.sweepOrphans(threadId);
+    }, this.orphanGraceMs);
+    timer.unref();
+    this.sweepTimers.set(threadId, timer);
+  }
+
+  private cancelSweep(threadId: ThreadId): void {
+    const timer = this.sweepTimers.get(threadId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.sweepTimers.delete(threadId);
+  }
+
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit): void {
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
@@ -528,6 +618,10 @@ export class ProcRegistry {
       this.lastPushed.delete(threadId);
     }
   }
+}
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 function worthPushing(previous: ThreadLoad | undefined, next: ThreadLoad): boolean {

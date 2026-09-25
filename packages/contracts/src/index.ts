@@ -1010,6 +1010,13 @@ export interface Settings {
    */
   muteAgents: boolean;
   /**
+   * A process a thread left running after its turn, whose parent has exited, is
+   * stopped once the thread has been idle for a few seconds: what an interrupted
+   * or refused command started and nobody is left to stop. Windows only, where
+   * the job reports grandchildren. Missing on older cores, which read as on.
+   */
+  reapOrphans?: boolean;
+  /**
    * The core updates its agents by itself: checked a minute after start and
    * every six hours, each one updated once no turn of its provider is in
    * flight. It needs no client connected, which is how a server stays current.

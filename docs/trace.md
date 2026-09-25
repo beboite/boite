@@ -84,6 +84,30 @@ elsewhere, and both apply to jobs that already exist as well as to new ones.
   allocation, which the agent reports as its own out-of-memory error. 0 means no
   cap.
 
+## Orphans
+
+Stopping a shell does not stop what it started. When an agent's command is
+interrupted or refused, the agent ends the shell and whatever that shell
+launched keeps running inside the thread's job: a test runner, a dev server, a
+browser. The job holds it, so the trace and the load still count it, but
+nothing will ever stop it before `resources.killTree` or the core's exit.
+
+Ten seconds after `turn.finished`, if no new turn has started in the thread,
+the registry sweeps it. A process is an orphan when the job reported it, it is
+at least ten seconds old, and its parent pid is not a live process of the
+thread, or belongs to one that started after it (a pid Windows gave to someone
+else). Each orphan is stopped with everything under it, through the process
+handle the job listener opened when the process started, never through a fresh
+open by pid. Each stop is a `core.log` line naming the thread, the pid and the
+executable.
+
+The agent process and anything else the core spawned have the core as their
+parent and are never taken. Neither is a process whose shell is still
+running, such as a background command the agent is still waiting on. A process
+an agent detaches on purpose and means to keep across turns is stopped too:
+that is what the switch below is for. Off Windows, only direct children are
+tracked, and their parent is the core, so the sweep finds nothing.
+
 ## The focus guard
 
 An agent that opens a window takes the foreground, and the user loses whatever
@@ -138,14 +162,15 @@ the mixer and silence in the speakers.
 
 ## Turning them off
 
-Both live under Settings, General, Background, and both are on by default.
+All three live under Settings, Protection, and all three are on by default.
 
 | Setting | Effect when off |
 |---|---|
 | `focusGuard` | an agent's window keeps the foreground it took |
 | `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
+| `reapOrphans` | what a thread leaves running after its turn runs until the thread's tree is killed or the core exits |
 
-The third switch of that card, the notifications, is the UI's own and never
+The notifications switch, under Settings, General, is the UI's own and never
 reaches the core: a system toast when a thread finishes, fails or asks
 something while another thread is open or the window is not in front. The
 shell carries it as a Windows toast through its `notify` command, the phone
