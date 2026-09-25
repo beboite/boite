@@ -26,7 +26,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { GRANT_QUERY_PARAM, GRANT_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import type { PairedSession, PairingGrant, PairingRole, Principal, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { refused, unauthorized } from './errors.ts';
+import { invalidParams, refused, unauthorized } from './errors.ts';
 import { newId, newToken } from './ids.ts';
 
 interface Grant {
@@ -43,9 +43,22 @@ interface Delivery {
   expiresAt: number;
 }
 
-/** A nonce shorter than this is no secret: the grant stays strictly one-shot. */
-const NONCE_MIN = 16;
-const NONCE_MAX = 256;
+/** A nonce shorter than this is no secret, so a hello carrying one is refused. */
+export const NONCE_MIN = 16;
+export const NONCE_MAX = 256;
+
+/**
+ * What is wrong with a hello's `nonce`, or null when it is a usable one. A bad
+ * nonce is refused rather than dropped: dropped, the grant would still work but
+ * only once, and the client would never learn its retry protection was off.
+ */
+export function nonceProblem(nonce: unknown): string | null {
+  if (typeof nonce !== 'string') return `nonce must be a string of ${NONCE_MIN} to ${NONCE_MAX} characters, got ${nonce === null ? 'null' : typeof nonce}`;
+  if (nonce.length < NONCE_MIN || nonce.length > NONCE_MAX) {
+    return `nonce must be ${NONCE_MIN} to ${NONCE_MAX} characters, got ${nonce.length}`;
+  }
+  return null;
+}
 
 function nonceHash(nonce: string): Buffer {
   return createHash('sha256').update(nonce).digest();
@@ -104,12 +117,14 @@ export class SessionStore {
    * repeats the nonce of the first exchange gets that exchange's session.
    */
   exchange(grant: string, client: ClientIdentity, now = Date.now(), nonce: string | null = null): { id: string; token: string; role: PairingRole } {
+    // Before anything is spent: a bad nonce leaves the grant as it was.
+    const problem = nonce === null ? null : nonceProblem(nonce);
+    if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
     this.sweep(now);
-    const usable = nonce !== null && nonce.length >= NONCE_MIN && nonce.length <= NONCE_MAX ? nonce : null;
     const known = this.grants.get(grant);
     if (known === undefined) {
       const delivery = this.deliveries.get(grant);
-      if (delivery !== undefined && usable !== null && timingSafeEqual(delivery.nonceHash, nonceHash(usable))) {
+      if (delivery !== undefined && nonce !== null && timingSafeEqual(delivery.nonceHash, nonceHash(nonce))) {
         return { id: delivery.id, token: delivery.token, role: delivery.role };
       }
       throw unauthorized('the pairing link was already used, expired, or never issued');
@@ -129,7 +144,7 @@ export class SessionStore {
         last_seen_at: now,
       });
     });
-    if (usable !== null) this.deliveries.set(grant, { nonceHash: nonceHash(usable), id, token, role, expiresAt: known.expiresAt });
+    if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), id, token, role, expiresAt: known.expiresAt });
     this.core.bus.emit('sessions.updated', { sessionId: id, state: 'created' });
     return { id, token, role };
   }

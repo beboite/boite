@@ -1612,7 +1612,9 @@ export interface RpcMethods extends AgentsRpcMethods {
    * client picks once and repeats on every retry. When the answer carrying the
    * session is lost, the same grant and nonce get the same session back until
    * the grant would have expired or the session first says hello with its
-   * token. Without a nonce a grant is strictly one-shot.
+   * token. Without a nonce a grant is strictly one-shot. A nonce of another
+   * length, or one sent with a token, is refused with `InvalidParams` naming
+   * `nonce`, before the grant is spent.
    */
   hello: {
     params: {

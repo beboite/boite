@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
+import type { RpcFailure } from '../src/errors.ts';
 import { pair } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, UI_DIST } from '../src/server.ts';
 import { startTestCore } from './harness.ts';
@@ -505,16 +506,44 @@ describe('server', () => {
     expect(after).toBe(spent);
     expect(harness.core.journal.listSessions()).toHaveLength(2);
 
-    // A nonce too short to be a secret keeps the grant strictly one-shot.
+    // A nonce too short to be a secret is refused, and the grant is not spent by it.
     const short = sessions.grant(Date.now());
-    sessions.exchange(short.grant, client, Date.now(), 'short');
-    let shortRetry = 'none';
-    try {
-      sessions.exchange(short.grant, client, Date.now(), 'short');
-    } catch (error) {
-      shortRetry = (error as Error).message;
-    }
-    expect(shortRetry).toBe(spent);
+    const failure = (run: () => unknown): RpcFailure | null => {
+      try { run(); return null; } catch (error) { return error as RpcFailure; }
+    };
+    const tooShort = failure(() => sessions.exchange(short.grant, client, Date.now(), 'short'));
+    expect(tooShort?.code).toBe(RpcErrorCode.InvalidParams);
+    expect(tooShort?.message).toBe('nonce must be 16 to 256 characters, got 5');
+    expect(failure(() => sessions.exchange(short.grant, client, Date.now(), 'x'.repeat(257)))?.message)
+      .toBe('nonce must be 16 to 256 characters, got 257');
+    expect(failure(() => sessions.exchange(short.grant, client, Date.now(), nonce))).toBeNull();
+  });
+
+  test('a hello whose nonce is unusable is refused by name, and the grant survives it', async () => {
+    const owner = await harness.connect();
+    const link = await owner.call('pairing.grant', {});
+    const refusal = async (params: Record<string, unknown>): Promise<unknown> => {
+      const socket = rawSocket();
+      await opened(socket);
+      const frame = firstFrame(socket);
+      const closed = closeCode(socket);
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+        protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' }, ...params,
+      } }));
+      const answer = await frame;
+      expect(await closed).toBe(RpcCloseCode.Unauthorized);
+      return answer.error;
+    };
+    const named = { code: RpcErrorCode.InvalidParams, data: { field: 'nonce', min: 16, max: 256 } };
+    expect(await refusal({ grant: link.grant, nonce: 'short' }))
+      .toEqual({ ...named, message: 'nonce must be 16 to 256 characters, got 5' });
+    expect(await refusal({ grant: link.grant, nonce: 42 }))
+      .toEqual({ ...named, message: 'nonce must be a string of 16 to 256 characters, got number' });
+    expect(await refusal({ token: harness.token, nonce: 'n'.repeat(32) }))
+      .toEqual({ ...named, message: 'nonce goes with a grant; a hello with a token takes none' });
+    // None of that spent the grant.
+    const phone = await connect(harness.url, '', { grant: link.grant, nonce: 'n'.repeat(32) });
+    expect(phone.session?.token).toBeDefined();
   });
 
   test('a grant expires, and hello with both a token and a grant is refused', async () => {

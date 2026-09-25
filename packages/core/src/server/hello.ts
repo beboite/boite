@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
-import { principalOf, type Identity } from '../sessions.ts';
+import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 
 export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
@@ -24,7 +24,6 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   };
   const token = typeof params?.token === 'string' ? params.token : null;
   const grant = typeof params?.grant === 'string' ? params.grant : null;
-  const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
   const client = {
     name: typeof params?.client?.name === 'string' ? params.client.name : 'unknown',
     version: typeof params?.client?.version === 'string' ? params.client.version : '',
@@ -32,6 +31,22 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
 
   let session: ReturnType<typeof core.sessions.exchange> | undefined;
   let identity: Identity;
+  // Absent, a grant is strictly one-shot. Present, a nonce must be usable, or
+  // the client would believe a retry is safe when it is not.
+  if (params?.nonce !== undefined) {
+    const problem = grant === null && token !== null
+      ? 'nonce goes with a grant; a hello with a token takes none'
+      : nonceProblem(params.nonce);
+    if (problem !== null) {
+      connection.sendResponse({
+        jsonrpc: '2.0', id, error: {
+          code: RpcErrorCode.InvalidParams, message: problem, data: { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX },
+        }
+      });
+      connection.close(RpcCloseCode.Unauthorized, 'bad nonce');
+      return;
+    }
+  }
   if (grant !== null && token === null) {
     // Check the protocol before consuming a one-shot grant.
     if (params?.protocolVersion !== PROTOCOL_VERSION) {
@@ -44,6 +59,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       return;
     }
     try {
+      const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
       session = core.sessions.exchange(grant, client, Date.now(), nonce);
     } catch (error) {
       refuse(messageOf(error), 'bad grant');

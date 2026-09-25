@@ -78,7 +78,9 @@ The page therefore sends a `nonce` with the grant, 16 random bytes it picks once
 and keeps in memory, and its retry repeats both. The core keeps that exchange's
 answer until the grant's ten minutes run out or the key first says hello on its
 own, and hands the same key to a retry with the same nonce. Anyone else holding
-the link, without the nonce, is still refused.
+the link, without the nonce, is still refused. A nonce of another length than
+16 to 256 characters, or one sent with a token, is refused by name before the
+grant is spent, so a client never believes a retry is safe when it is not.
 
 A link carries a role. `device` is the default and the only one the QR code is
 drawn for: a phone, whose key says hello as `session` and reaches the list below.
