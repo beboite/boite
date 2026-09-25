@@ -995,6 +995,17 @@ export class Journal {
     return rows.map(toProcess);
   }
 
+  /**
+   * Drops the trace of an id no thread stands behind: a plugin call, a brain
+   * sync, a dictation. No RPC reads those rows, and a caller minting an id per
+   * call would otherwise add rows for the life of the install.
+   */
+  forgetProcessesWithoutThread(threadId: string): void {
+    this.db
+      .query('DELETE FROM processes WHERE thread_id = ? AND NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)')
+      .run(threadId, threadId);
+  }
+
   /** Process count, CPU time and peak memory of every thread that ran something, in one scan. */
 
   processTotalsByThread(): Map<string, { processes: number; cpuMs: number; peakMemoryBytes: number }> {

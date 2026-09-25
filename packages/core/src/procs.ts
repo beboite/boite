@@ -401,9 +401,8 @@ export class ProcRegistry {
     }
     seen.add(record.pid);
 
-    this.journal.append({ type: 'process.started', threadId, version: 1, payload: record }, () => {
-      this.journal.putProcess(record);
-    });
+    // The trace row only: a copy in the event log would be read by nothing.
+    this.journal.putProcess(record);
     this.bus.emit('process.started', { ...record });
   }
 
@@ -595,9 +594,8 @@ export class ProcRegistry {
       if (fromJob.peakMemoryBytes !== null) record.peakMemoryBytes = fromJob.peakMemoryBytes;
       if (fromJob.ioBytes !== null) record.ioBytes = fromJob.ioBytes;
     }
-    this.journal.append({ type: 'process.exited', threadId, version: 1, payload: record }, () => {
-      this.journal.putProcess(record);
-    });
+    this.journal.putProcess(record);
+
     this.bus.emit('process.exited', { ...record });
   }
 
@@ -622,6 +620,7 @@ export class ProcRegistry {
       // The thread's Job Object too: an id minted per call would otherwise hold
       // one kernel handle for the life of the core.
       this.platform.forget(threadId);
+      if (!this.journal.isClosed()) this.journal.forgetProcessesWithoutThread(threadId);
     }, this.forgetDelayMs);
     timer.unref();
     this.forgetTimers.set(threadId, timer);

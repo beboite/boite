@@ -19,6 +19,13 @@ Every driver uses the same registry. Adding native tracking for another OS
 means implementing this interface, not adding OS branches to drivers or RPC
 handlers. Unsupported protections stay off even when their settings are enabled.
 
+Each process is one row of the `processes` table, written at start and again at
+exit, with no copy in the event log. A thread's rows stay while the thread
+does and go with its project. An id no thread stands behind (a plugin call, a
+plugin fetch, a brain sync, a dictation, a quota probe, a thread's terminal)
+loses its rows when the registry forgets it, 30 seconds after its last process
+exits: no RPC reads them. Rows written by older cores are not cleaned up.
+
 The shell follows the same boundary under `apps/shell/src-tauri/src/platform/`:
 core ownership, launch flags, data paths, toast delivery and native appbar queries
 live there. IPC caller checks remain in the shared shell commands. This split
