@@ -4,6 +4,7 @@
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { strings } from '../lib/strings';
+  import { levelName } from '../lib/format';
 
   /**
    * The reasoning chip and its popover: one dot per level of the model's scale,
@@ -141,13 +142,13 @@
     {onkeydown}
   >
     <Brain size={14} strokeWidth={1.75} />
-    {current?.label ?? selectedSpeed?.label ?? strings.composer.standardSpeed}
+    {current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}
   </button>
 
   {#if speeds.length > 0}
-    <button type="button" class="chip speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? selectedSpeed?.label ?? strings.composer.standardSpeed} onclick={cycleSpeed}>
+    <button type="button" class="chip speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
       <Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} />
-      {#if selectedSpeed}<span data-testid="effort-speed-label">{selectedSpeed.label}</span>{/if}
+      {#if selectedSpeed}<span data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
     </button>
   {/if}
 
@@ -165,7 +166,7 @@
       {onkeydown}
     >
       <div class="heading">
-        <span class="level">{current?.label ?? strings.composer.standardSpeed}</span>
+        <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}
@@ -179,7 +180,7 @@
         aria-valuemin={0}
         aria-valuemax={last}
         aria-valuenow={index}
-        aria-valuetext={current?.label ?? ''}
+        aria-valuetext={current ? levelName(current) : ''}
         data-testid="effort-track"
         onkeydown={ontrackkeydown}
         {onpointerdown}
@@ -191,7 +192,7 @@
           <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
           <span class="thumb" style="left: {offset(index)}"></span>
           {#each levels as level, at (level.id)}
-            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={level.label} aria-label={level.label} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
+            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={levelName(level)} aria-label={levelName(level)} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
           {/each}
         </div>
       </div>

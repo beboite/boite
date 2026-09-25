@@ -46,8 +46,18 @@ up to 16 MB behind which the probe's answer would queue, so only that call's
 own 120 second timeout starts the check, on any host. Returning to the page, an `online` event or
 a page restored from the back/forward cache also send the `hello` first, and
 replace the socket only if it stays silent for 4 seconds, so a tab switch no
-longer drops a healthy connection or reloads the lists. A hidden page is not
-checked.
+longer drops a healthy connection or reloads the lists. An `offline` event asks
+a remote socket the same way and drops it after 4 silent seconds without
+reconnecting, so the header stops saying Connected while the network is gone.
+A hidden page is not checked.
+
+A prompt whose socket went while it was being sent is not reported as an
+error at once. The failure carries `data.transport: 'dropped'`, the store waits
+up to 15 seconds for the connection to come back, then sends `turns.start`
+once more with the same `clientRequestId`. The core answers with the turn it
+already took, or starts it if the first request never arrived, and the
+composer clears as for any sent prompt. Only a refused retry, or a connection
+that does not come back in time, shows the error and keeps the text.
 
 Retries wait 1, 2, 4, 8, then 10 seconds, each 20 % longer or shorter at random
 so the clients of a restarted core do not all return at once. An attempt gets

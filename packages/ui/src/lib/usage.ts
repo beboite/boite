@@ -1,6 +1,8 @@
 import type { Usage, UsageHistory, UsageHistoryThread } from '@boite/contracts';
 import { strings } from './strings';
 import { formatTokens } from './tokens';
+import { count } from './format';
+import { formatLocale } from './i18n.svelte';
 
 export type UsageMetric = 'tokens' | 'cost' | 'turns';
 export const USAGE_METRICS: readonly UsageMetric[] = ['tokens', 'cost', 'turns'];
@@ -64,27 +66,37 @@ function tokenCount(value: number): string {
 }
 
 /*
- * Numbers read the way the rest of the English interface writes them, like
- * `format.cost` and the context meter, whatever the system locale.
+ * Money in dollars, written the way the language the app speaks writes it:
+ * `$113.23` in English, `113,23 $US` in French. `k` follows the last digit.
  */
-const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-const trimmed = (value: number, digits: number) => String(Number(value.toFixed(digits)));
+const dollarSets = new Map<string, Intl.NumberFormat>();
+function dollars(value: number, least: number, most: number, thousands = false): string {
+  const key = `${formatLocale()}:${least}:${most}`;
+  let money = dollarSets.get(key);
+  if (!money) {
+    money = new Intl.NumberFormat(formatLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: least, maximumFractionDigits: most });
+    dollarSets.set(key, money);
+  }
+  const parts = money.formatToParts(thousands ? value / 1000 : value);
+  const last = parts.findLastIndex((part) => part.type === 'integer' || part.type === 'fraction');
+  return parts.map((part, index) => part.value + (thousands && index === last ? 'k' : '')).join('');
+}
 
 export function formatMetric(metric: UsageMetric, value: number): string {
-  if (metric === 'turns') return whole.format(value);
+  if (metric === 'turns') return count(value);
   if (metric === 'tokens') return tokenCount(value);
-  if (value >= 10_000) return `$${trimmed(value / 1000, 1)}k`;
-  if (value >= 1000) return `$${whole.format(Math.round(value))}`;
-  if (value > 0 && value < 0.01) return `$${value.toFixed(3)}`;
-  return `$${value.toFixed(2)}`;
+  if (value >= 10_000) return dollars(value, 0, 1, true);
+  if (value >= 1000) return dollars(value, 0, 0);
+  if (value > 0 && value < 0.01) return dollars(value, 3, 3);
+  return dollars(value, 2, 2);
 }
 
 /** A shorter label for an axis: `2M` rather than `2.0M`, `$2.5`, `$1.5k`. */
 export function formatTick(metric: UsageMetric, value: number): string {
   if (metric === 'tokens') return formatMetric(metric, value).replace(/\.0(?=[kMB]$)/, '');
   if (metric !== 'cost') return formatMetric(metric, value);
-  if (value >= 1000) return `$${trimmed(value / 1000, 1)}k`;
-  return `$${trimmed(value, 3)}`;
+  if (value >= 1000) return dollars(value, 0, 1, true);
+  return dollars(value, 0, 3);
 }
 
 export interface UsageSeries {

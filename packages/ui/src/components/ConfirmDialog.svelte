@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
   import { focusedElement, restoreFocus } from '../lib/focus';
 
@@ -43,6 +44,7 @@
     if (!active || active === document.body || card?.contains(active)) restoreFocus(previous);
     previous = null;
   }
+  $effect(() => { if (overlay.open) return mobileOverlay(() => confirm.answer(false)); });
 
   function onkeydown(event: KeyboardEvent) {
     if (!confirm.current) return;

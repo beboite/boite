@@ -7,6 +7,7 @@
   import BoiteMark from './BoiteMark.svelte';
   import { Closing } from '../lib/closing.svelte';
   import { focusedElement, restoreFocus } from '../lib/focus';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
@@ -40,6 +41,7 @@
   const previous = focusedElement();
   onMount(() => panel?.focus({ preventScroll: true }));
   function finish() { overlay.hide(); restoreFocus(previous); }
+  $effect(() => { if (overlay.open) return mobileOverlay(finish); });
   function go(next: number) {
     index = Math.min(screens.length - 1, Math.max(0, next));
     void tick().then(() => {
@@ -261,7 +263,7 @@
   .dot.on::after { background: var(--color-accent); width: 14px; left: 6px; }
   @media (max-width: 480px) {
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
-    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; }
+    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }

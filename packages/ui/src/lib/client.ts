@@ -139,6 +139,31 @@ function transportFailure(message: string): RpcFailure {
 }
 
 /**
+ * A call the connection lost before its answer came back: the core may or may
+ * not have run it. A caller whose method the core deduplicates can ask again.
+ */
+export function droppedFailure(message: string): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Internal, message, data: { transport: 'dropped' } });
+}
+
+export function wasDropped(error: unknown): boolean {
+  return error instanceof RpcFailure && (error.data as { transport?: unknown } | undefined)?.transport === 'dropped';
+}
+
+/** True once `client` is ready again, false when it closes or `waitMs` passes first. */
+export function readyAgain(client: Client, waitMs = 15_000): Promise<boolean> {
+  if (client.state === 'ready') return Promise.resolve(true);
+  if (!('onState' in client) || client.state === 'closed') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = (ready: boolean) => { clearTimeout(timer); stop(); resolve(ready); };
+    const timer = setTimeout(() => done(false), waitMs);
+    const stop = (client as ObservableClient).onState((state) => {
+      if (state === 'ready' || state === 'closed') done(state === 'ready');
+    });
+  });
+}
+
+/**
  * Silence on a remote socket before the client asks whether the core is still
  * there. A phone whose NAT mapping expired, or a core host that went to sleep,
  * leaves a socket that never fires close.
@@ -305,8 +330,21 @@ export class WsClient implements ObservableClient {
     }
     if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
-    this.#teardown('connection resumed; check the conversation before resending');
+    this.#teardown('connection resumed; check the conversation before resending', true);
     await this.#startOpen();
+  }
+
+  /**
+   * The browser lost its network. A remote socket seldom closes by itself then,
+   * so it is asked at once and dropped when it stays silent: the header stops
+   * saying connected, and the 'online' event reconnects through `resume()`.
+   */
+  offline(): void {
+    const socket = this.#socket;
+    if (!this.#remote || socket === null || this.#state !== 'ready') return;
+    void this.#probeSocket(socket, RESUME_PROBE_MS).then((alive) => {
+      if (!alive) this.#lost(socket);
+    });
   }
 
   #startOpen(): Promise<CoreInfo> {
@@ -416,7 +454,7 @@ export class WsClient implements ObservableClient {
         const reason = event?.code === MESSAGE_TOO_BIG
           ? `the core refused a frame over ${megabytes(RPC_MAX_FRAME_BYTES)} MB and closed the connection`
           : 'connection closed';
-        this.#dropPending(reason);
+        this.#dropPending(reason, !incompatible && event?.code !== MESSAGE_TOO_BIG);
         this.#stopLiveness();
         this.#socket = null;
         fail(incompatible ? `core protocol version must be ${PROTOCOL_VERSION}` : reason);
@@ -526,7 +564,7 @@ export class WsClient implements ObservableClient {
   /** The socket stopped answering without closing: the same path as a close. */
   #lost(socket: SocketLike): void {
     if (this.#socket !== socket || this.#manuallyClosed) return;
-    this.#teardown('connection lost; check the conversation before resending');
+    this.#teardown('connection lost; check the conversation before resending', true);
     if (!this.#options.reconnect) {
       this.#setState('closed');
       return;
@@ -589,13 +627,14 @@ export class WsClient implements ObservableClient {
     }, delay);
   }
 
-  #dropPending(message: string): void {
+  /** `dropped`: the socket went under the calls, which a reconnect may answer when asked again. */
+  #dropPending(message: string, dropped = false): void {
     const pending = [...this.#pending.values()];
     this.#pending.clear();
-    for (const entry of pending) entry.reject(transportFailure(message));
+    for (const entry of pending) entry.reject(dropped ? droppedFailure(message) : transportFailure(message));
   }
 
-  #teardown(message: string): void {
+  #teardown(message: string, dropped = false): void {
     this.#stopLiveness();
     this.#cancelOpen?.();
     this.#cancelOpen = null;
@@ -609,7 +648,7 @@ export class WsClient implements ObservableClient {
       socket.onerror = null;
       socket.close();
     }
-    this.#dropPending(message);
+    this.#dropPending(message, dropped);
   }
 
   #receive(raw: unknown): void {

@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import type { ImportableSession } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { ago } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -25,6 +26,8 @@
     overlay.show();
     void tick().then(() => list?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true }));
   });
+
+  $effect(() => { if (overlay.open) return mobileOverlay(() => store.closeImports()); });
 
   let projectName = $derived(store.projects.find((p) => p.id === held?.projectId)?.name ?? '');
 

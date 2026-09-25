@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RpcCloseCode, RpcErrorCode, type CoreInfo } from '@boite/contracts';
-import { RpcFailure, WsClient, defaultBackoff, openDeadline, rpcUrl, type SocketLike } from './client';
+import { RpcFailure, WsClient, defaultBackoff, openDeadline, readyAgain, rpcUrl, wasDropped, type SocketLike } from './client';
 
 const CORE: CoreInfo = {
   version: '2.0.0-beta.1',
@@ -221,6 +221,72 @@ describe('WsClient', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       expect(sockets).toHaveLength(2);
     } finally { client.close(); vi.useRealTimers(); }
+  });
+
+  test('a call the socket lost is marked dropped, and one the app closed is not', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 60_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    void client.connect();
+    const first = take(sockets, 0);
+    first.open();
+    first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+    await client.connect();
+    const lost = client.call('threads.list', {}).catch((error: unknown) => error);
+    first.close();
+    expect(wasDropped(await lost)).toBe(true);
+    expect(await readyAgain(client, 10)).toBe(false);
+
+    void client.resume().catch(() => undefined);
+    const second = take(sockets, 1);
+    second.open();
+    const back = readyAgain(client);
+    second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+    expect(await back).toBe(true);
+    const closed = client.call('threads.list', {}).catch((error: unknown) => error);
+    client.close();
+    expect(wasDropped(await closed)).toBe(false);
+    expect(await readyAgain(client)).toBe(false);
+  });
+
+  test('going offline asks a remote socket at once and stops saying connected when it stays silent', async () => {
+    vi.useFakeTimers();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    const sockets: FakeSocket[] = [];
+    const client = new WsClient({ url: 'https://core.test', token: 'session', backoff: () => 1_000, socketFactory: () => {
+      const socket = new FakeSocket(); sockets.push(socket); return socket;
+    } });
+    try {
+      void client.connect();
+      const first = take(sockets, 0);
+      first.open();
+      first.receive({ id: first.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+
+      online.mockReturnValue(false);
+      client.offline();
+      expect(first.sent.map(raw => JSON.parse(raw).method)).toEqual(['hello', 'hello']);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(first.closed).toBe(true);
+      expect(client.state).toBe('connecting');
+      // No retry while offline: the 'online' event calls resume().
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sockets).toHaveLength(1);
+
+      // A socket that answers the question keeps the connection.
+      online.mockReturnValue(true);
+      void client.resume().catch(() => undefined);
+      const second = take(sockets, 1);
+      second.open();
+      second.receive({ id: second.frame(0).id, result: { core: CORE, principal: 'session' } });
+      await client.connect();
+      client.offline();
+      second.receive({ id: second.frame(1).id, result: { core: CORE, principal: 'session' } });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(second.closed).toBe(false);
+      expect(client.state).toBe('ready');
+    } finally { online.mockRestore(); client.close(); vi.useRealTimers(); }
   });
 
   test('a remote call whose one large answer takes 45 s to arrive keeps its socket and resolves', async () => {

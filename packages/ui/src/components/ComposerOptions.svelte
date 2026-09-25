@@ -10,6 +10,7 @@
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { fill, strings } from '../lib/strings';
+  import { levelName } from '../lib/format';
   import type { PinId } from '../lib/work-prefs.svelte';
 
   let { variant = 'phone', levels, effort, speeds, speed, modes, modeLabel, modeHint, mode, worktree, canAttach, busy, pins = { effort: true, worktree: true }, onattach, oneffort, onspeed, onmode, onworktree, onpin } : {
@@ -86,7 +87,7 @@
       {#if levels.length}
         <div class="group">
           <fieldset disabled={busy}><legend>{strings.composer.effortTitle}</legend><div class="choices">
-            {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="{prefix}-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} />{level.label}</label>{/each}
+            {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="{prefix}-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} />{levelName(level)}</label>{/each}
           </div></fieldset>
           {@render pin('effort', strings.composer.effortTitle)}
         </div>

@@ -143,13 +143,36 @@ and asks nothing.
 
 The browser uses mobile navigation under 720 px. Conversations lists threads
 across connected machines; Activity puts waiting requests first, followed by
-running and queued turns. Settings is the third destination. The header names
+running and queued turns. A phone has no right-click, so the actions a desktop
+finds there open from a tap: the conversation's title in its header lists
+rename, regenerate title, pin, copy path and archive, and the `...` button of a
+row in the list offers pin, regenerate title and archive. The same title sheet
+holds the Agents and Terminal toggles, so the header row keeps only the title,
+the context ring and the Panel button: at 360 px in French, 192 px of a 193 px
+title stay visible, where 96 px did with the toggles in the row. A draft's header shows its "New thread" label. Settings is the third destination. The header names
 the machine, connection and project, and starts a new conversation.
 
-Model, effort and action menus open as bottom sheets. Back dismisses an open
-sheet. Controls have 44 px touch targets; `visualViewport` keeps the composer
-above the keyboard, and the bottom navigation hides while the keyboard is open.
-Safe-area insets keep controls clear of the home indicator and screen cutouts.
+Model, effort and action menus open as bottom sheets. The browser's Back, the
+Android Back gesture and a mouse's back button close the top sheet, dialog,
+context popup or right panel first, then return from a conversation to the
+list it was opened from. Each of those owns one history entry
+(`lib/mobile-history.ts`); closing it by a button removes that entry, so Back
+never lands on something already closed. The conversation the app opens on has
+no list behind it, and Back from there leaves the app as before.
+
+Every button on the chat, the list, the panel and Appearance registers a tap
+19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls
+keep a small look and get a larger hit box, such as the project name in the
+header, a panel tab's icon, which closes the tab, and the accent dots. Under a
+finger, the outline rail beside the conversation gives each prompt a 44 px row
+and scrolls, and the text starts past the rail. A switch sits in a label that
+covers its whole row, so the row is its target. The end-to-end sweep in
+`tests/e2e/mobile.test.ts` measures this with touch emulation on.
+`visualViewport` keeps the composer above the keyboard, and the bottom
+navigation hides while the keyboard is open.
+Safe-area insets keep controls clear of the home indicator and screen cutouts:
+the chat header, the full-screen right panel, and the Agents and Settings pages
+all start below the status bar of an installed app on a notched iPhone.
 
 Draft text stays with its conversation. Four recent timelines are retained in
 memory, each limited to 2,000 messages and 4 MB of text/image data, to preserve

@@ -255,6 +255,10 @@
   /* A finger has no hover to open the rail: wider rows, and the rail scrolls when a short timeline cannot hold it. */
   @media (pointer: coarse) {
     .outline { max-height: min(60%, 320px); overflow-y: auto; scrollbar-width: none; }
-    .track { --pitch: 18px; }
+    /* A finger's width and height per entry, flush with the screen edge; the timeline keeps its text clear of it. */
+    .outline { left: 0; width: var(--touch-target); }
+    .outline button { width: 100%; }
+    .step { height: var(--touch-target); min-height: var(--touch-target); }
+    .track { --pitch: var(--touch-target); }
   }
 </style>

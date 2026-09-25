@@ -18,7 +18,8 @@ A newer version is a notice pinned under the title bar, top right. It carries
 the agent, the new version, the installed one, and two buttons. It does not
 time out. It leaves on Update, on Skip, or when the core reports the agent
 current. Three notices show at most; a phone shows one at a time and only on
-the conversation screen.
+the conversation screen, below the conversation's header row so its title and
+buttons stay in reach.
 
 - Update releases the provider's warm processes and runs the update in the
   background: the notice leaves at once. The threads stay; the next turn starts

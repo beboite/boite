@@ -6,6 +6,7 @@
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { experimentOn } from '../lib/experiments.svelte';
   import { cacheSpan, promptCacheState, PROMPT_CACHE_TICK_MS } from '../lib/prompt-cache';
   let { store }: { store: Store } = $props();
@@ -63,6 +64,7 @@
     event.stopPropagation();
     popup.hide();
   }
+  $effect(() => { if (popup.open) return mobileOverlay(() => popup.hide()); });
   async function compact() {
     if (reason || submitting) return;
     submitting = true;
@@ -117,6 +119,8 @@
 <style>
   .context { position: relative; flex: none; color: var(--color-muted-foreground); }
   .trigger { display: flex; align-items: center; gap: 5px; padding: 4px; }
+  /* On a phone the ring alone says how full the context is; the popup has the number. */
+  @media (max-width: 720px) { .trigger { min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; } .amount { display: none; } }
   svg { width: 24px; height: 24px; transform: rotate(-90deg); }
   circle { fill: none; stroke-width: 3; }
   .track { stroke: var(--color-border); }

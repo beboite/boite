@@ -179,8 +179,19 @@
   .hue { appearance: none; width: 100%; min-height: 0; height: 8px; padding: 0; background: var(--accent-spectrum); border: none; border-radius: 999px; cursor: pointer; }
   .hue::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; box-shadow: var(--shadow-e1); }
   .hue::-moz-range-thumb { width: 14px; height: 14px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; }
-  /* Scoped under the page so it outranks the shared row, which centres its children. */
-  @media (max-width: 720px) { :global(.settings .page) .accent-row { flex-direction: column; align-items: stretch; } }
+  /* Scoped under the page so it outranks the shared row, which centres its children.
+     On a phone a label sits above its choices: side by side, a French label was
+     squeezed to one word a line and ran under the three-option control. */
+  @media (max-width: 720px) {
+    :global(.settings .page) .accent-row,
+    :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
+    :global(.settings .page) .segmented { display: flex; }
+    .segmented button { flex: 1; min-width: 0; }
+    /* A 26 px dot keeps its look and gets a finger-sized hit box. */
+    .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: 0 -9px -9px; }
+    .swatch { position: relative; }
+    .swatch::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
+  }
   /* The options in one track, the chosen one filled like a primary button. */
   .segmented {
     display: inline-flex;

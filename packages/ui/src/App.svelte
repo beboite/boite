@@ -29,6 +29,7 @@
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { mobileOverlay } from './lib/mobile-history';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -138,8 +139,10 @@
       else if (hidden) { hidden = false; resume(); }
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+    const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
+    window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
@@ -156,6 +159,7 @@
       stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
+      window.removeEventListener('offline', offline);
       window.removeEventListener('pageshow', pageshow);
       navigator.serviceWorker?.removeEventListener('message', notification);
     };
@@ -205,6 +209,11 @@
   $effect(() => {
     if (store.panelOpen && store.openThread) panelSlot.show();
     else panelSlot.hide();
+  });
+
+  // On a phone the panel covers the chat: Back shuts it.
+  $effect(() => {
+    if (panelSlot.open) return mobileOverlay(() => store.panel.hide());
   });
 
   // The tray menu is native: it speaks the UI's language only when told, at
@@ -408,7 +417,7 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -649,6 +658,9 @@
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
+    /* Agents and Settings draw no mobile header: the body keeps clear of the
+       status bar and the notch itself. */
+    .app.off-chat .body { padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;

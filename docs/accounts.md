@@ -132,6 +132,13 @@ here goes on to the sign-in by itself. Once the account answers, `Use <provider>
 through `store.useProvider`, the same remembered choice a pick in the model
 picker writes, and the text being typed stays where it was.
 
+Each step replaces the button that led to it, so the dialog moves the keyboard
+to the new step's first control whenever focus has fallen out of it: a
+keyboard user goes from `Install` to `Cancel`, to the sign-in link, then to
+`Use <provider>` without reaching for the mouse. On a phone the dialog is a
+sheet at the bottom of the screen, and its last button stays above the home
+indicator.
+
 An account that answered `unauthenticated` gets a `Sign in again` chip beside
 the model chip, and an error in its thread carries the same button. Both open
 the dialog on that account, so the login lands on it instead of creating a

@@ -326,6 +326,12 @@ and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
+In forced colors (Windows high contrast) the browser drops the shadows and
+border tints the UI uses to mark focus. `app.css` then gives every
+`:focus-visible` control a 2 px `Highlight` outline, and
+`tests/e2e/readability.test.ts` checks it on the composer and the thread
+search.
+
 The fake client is excluded from production bundles. Its imports sit behind
 `import.meta.env.DEV`, and because Rolldown still writes a chunk for a dynamic
 import in a dead branch, `vite.config.ts` deletes that orphan chunk and fails

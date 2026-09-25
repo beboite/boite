@@ -277,6 +277,33 @@ test('a machine with no AI offers to connect one, and the composer keeps its tex
   expect(query<HTMLTextAreaElement>('[data-testid=composer-input]').value).toBe('Sort my holiday photos');
 });
 
+test('the keyboard stays in the connect dialog while its steps replace the button it pressed', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-service]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  const install = query<HTMLButtonElement>('[data-testid=connect-install]');
+  install.focus();
+  install.click();
+  const dialog = () => query('[data-testid=connect-dialog]');
+  await waitFor(() => document.querySelector('[data-testid=connect-step]')?.getAttribute('data-step') === 'installing');
+  await waitFor(() => dialog().contains(document.activeElement));
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  await waitFor(() => dialog().contains(document.activeElement));
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.focus();
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=connect-use]'));
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+}, 30_000);
+
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
 

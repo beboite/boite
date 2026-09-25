@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     Activity,
     ChevronLeft,
@@ -14,7 +15,6 @@
     UsersRound,
     X
   } from '@lucide/svelte';
-  import { untrack } from 'svelte';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
@@ -156,10 +156,13 @@
 
   function measure(): void {
     const node = tabs;
-    if (!node) return;
+    // A strip with no width yet, a phone's sheet still coming in, has nothing to
+    // measure: the observer calls again once it has one. Measured at zero, 44 px
+    // chevrons wider than the tabs flipped the state on every run.
+    if (!node || node.clientWidth === 0) return;
     const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
     const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
-    overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, overflowing);
+    overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, untrack(() => overflowing));
   }
 
   $effect(() => {
@@ -862,10 +865,23 @@
       min-width: 0;
       border-left: none;
       box-shadow: none;
+      /* The sheet covers the whole screen, the status bar and the home indicator included. */
+      box-sizing: border-box;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
     }
 
     .sheet-scrim {
       display: none;
+    }
+
+    /* The tab's icon is its close button: a finger needs the whole height of the tab. */
+    .tab {
+      padding-left: 0;
+    }
+
+    .closer {
+      width: var(--touch-target);
+      height: var(--touch-target);
     }
   }
 </style>

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
-import { RpcFailure } from './client';
+import { RpcFailure, droppedFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
 import * as endpoints from './endpoint';
@@ -528,6 +528,40 @@ test.each(['same', 'selection', 'kind'])('a lost start response reuses its reque
     expect(requests).toHaveLength(2);
     expect(requests[0]).toBeTruthy();
     expect(requests[1] === requests[0]).toBe(change === 'same');
+  } finally { store.detach(); client.close(); }
+});
+
+test.each(['back', 'gone'])('a start the socket dropped is asked once more when the connection comes back: %s', async (outcome) => {
+  const { store, client } = await ready();
+  const original = client.call.bind(client);
+  const requests: string[] = [];
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const answer = await original(method, params);
+    if (method !== 'turns.start') return answer;
+    requests.push((params as { clientRequestId: string }).clientRequestId);
+    if (requests.length > 1) return answer;
+    // The core took the turn, and the socket went before its answer arrived.
+    client.drop();
+    setTimeout(() => { if (outcome === 'back') void client.restore(); else client.close(); }, 5);
+    throw droppedFailure('connection closed');
+  });
+  try {
+    const thread = store.threads.find(thread => thread.status === 'idle')!;
+    await store.open(thread.id);
+    const accepted = await store.send('Survive the reconnect', thread.id);
+    if (outcome === 'gone') {
+      expect(accepted).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(store.error).toContain('connection closed');
+      return;
+    }
+    expect(accepted).toBe(true);
+    expect(store.error).toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toBe(requests[0]);
+    await client.settled();
+    const turns = await original('threads.get', { threadId: thread.id });
+    expect(turns.messages.filter(message => message.role === 'user' && JSON.stringify(message.parts).includes('Survive the reconnect'))).toHaveLength(1);
   } finally { store.detach(); client.close(); }
 });
 

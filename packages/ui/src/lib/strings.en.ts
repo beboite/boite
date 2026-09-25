@@ -1319,6 +1319,11 @@ export const strings = {
     intro: 'Subscription limits reported by your providers. Separate from tokens used in Boite.',
     remaining: '{percent}% left',
     resets: 'Resets {time}',
+    /** The limit windows the core names in English: `5 hours`, `Weekly`, `Monthly`, `Credits`, alone or on one side of ` · `. */
+    windowHours: '{hours} hours',
+    windowWeekly: 'Weekly',
+    windowMonthly: 'Monthly',
+    windowCredits: 'Credits',
     checked: 'Updated {time}',
     stale: 'Last successful reading',
     empty: 'Connect a provider to see its subscription limits.',
@@ -1467,6 +1472,21 @@ export const strings = {
     minutes: 'min',
     hours: 'h',
     tokens: 'tokens'
+  },
+
+  /** Effort and speed levels by the id the providers share; another id keeps the provider's own word. */
+  effortLevels: {
+    none: 'None',
+    off: 'Off',
+    minimal: 'Minimal',
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    xhigh: 'Extra high',
+    max: 'Max',
+    ultra: 'Ultra',
+    ultrathink: 'Ultrathink',
+    fast: 'Fast'
   },
 
   common: {

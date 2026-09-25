@@ -4,6 +4,7 @@
   import { clockTime, elapsed } from '../lib/format';
   import { formatTokens } from '../lib/tokens';
   import { fill, strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
   let { turn, waiting = false, background = [], stop }: {
     turn: Turn;
     waiting?: boolean;
@@ -53,7 +54,7 @@
     {/if}
     {#if turn.finishedAt !== null}
       <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString()}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
+      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString(formatLocale())}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
     {/if}
     {#if total > 0}
       <span class="dot" aria-hidden="true">·</span>
