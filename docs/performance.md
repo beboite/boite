@@ -91,6 +91,14 @@ about 8 ms per core start measured on 2026-09-25, for code most starts never
 run. `packages/core/test/startup-imports.test.ts` fails if a static import
 brings it back.
 
+The core lists its providers twice before it listens (the registry loads, then
+the default accounts ask which ones are available), and again for every client
+that boots. Each listing looks up every candidate program on the PATH, with
+every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
+keeps each answer for two seconds, so a burst of listings scans the PATH once,
+and forgets them all on a providers reload, an install or an agent update.
+`packages/core/test/providers-which.test.ts` counts the lookups.
+
 ## Shell startup
 
 The shell spawns the core before it builds the WebView2 window, and polls for
