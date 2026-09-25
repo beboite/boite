@@ -12,7 +12,7 @@ import type {
 import type { MessagePart, RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { createClaudeDriver } from '../src/drivers/claude.ts';
-import type { QueryFn } from '../src/drivers/claude.ts';
+import type { QueryFn } from '../src/drivers/claude/query.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { scriptedClaude, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
