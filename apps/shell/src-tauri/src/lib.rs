@@ -29,7 +29,7 @@ use tauri::{
     tray::TrayIconBuilder,
     utils::config::WindowEffectsConfig,
     window::Effect,
-    AppHandle, Emitter, Manager, Runtime, State, Webview, WindowEvent,
+    AppHandle, Manager, Runtime, State, Webview, WindowEvent,
 };
 
 mod browser;
@@ -1234,8 +1234,7 @@ fn build_main_window<R: Runtime>(
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(state) = app.try_state::<quota_window::HoverState>() { state.cancel_open(); }
     if let Some(popup) = app.get_webview_window(quota_window::LABEL) {
-        let _ = popup.hide();
-        let _ = popup.emit("tray://closed", ());
+        let _ = quota_window::hide(app, &popup);
     }
     if hidden() {
         return;

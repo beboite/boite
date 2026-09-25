@@ -247,6 +247,8 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   env.BOITE_DRAFTS_DIR = join(ownDataDir, 'Documents', 'Boite');
   env.BOITE_ECHO = '1';
   env.BOITE_HOST_AGENTS = '0';
+  // A hidden quota popup gives its page back after this long, not 45 s.
+  env.BOITE_QUOTA_IDLE_MS = '1500';
   delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
@@ -394,6 +396,17 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    await popup.close(); popup = undefined;
+    // A popup left hidden gives its renderer back (BOITE_QUOTA_IDLE_MS), and
+    // the next show builds it again.
+    const quotaTargets = async () => ((await (await fetch(`http://127.0.0.1:${secondPort}/json/list`)).json()) as { url: string }[])
+      .filter(target => target.url.includes('view=quotas')).length;
+    const releaseBy = Date.now() + 15_000;
+    while (await quotaTargets() > 0 && Date.now() < releaseBy) await Bun.sleep(POLL_MS);
+    expect(await quotaTargets()).toBe(0);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
+    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]')`);
     await popup.close(); popup = undefined;
     await quitShell(ownPage);
     await waitUntil(() => !pidAlive(ownPid), CORE_GONE_TIMEOUT_MS);

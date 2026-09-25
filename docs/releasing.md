@@ -224,6 +224,8 @@ can keep it in the notification area instead. The choice lives in
 `<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
 exits. Hovering or clicking the tray icon opens a compact quota window; its Show
 action restores the main window. Quota polling runs only while that popup is open.
+The popup is a second WebView2 page with its own socket, about 85 MB: 45 seconds
+after it hides, the shell destroys it, and the next hover builds it again.
 A window in the tray or minimized hides its page and its browser panels from
 WebView2 as well, which does not notice a hidden host by itself: the page stops
 painting and sees `document.hidden`, and the panels that were open come back
