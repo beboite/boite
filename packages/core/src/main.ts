@@ -25,8 +25,6 @@ const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 interface CoreFile {
   port: number;
-  /** True once `--port` named one: then no other port is tried. */
-  portExplicit: boolean;
   host: string;
   token: string;
   pid: number;
@@ -37,6 +35,8 @@ interface CoreFile {
 export interface Flags {
   publicUrl?: string;
   port: number;
+  /** True once `--port` named one: then no other port is tried. */
+  portExplicit: boolean;
   host: string;
   /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
   hostExplicit: boolean;
