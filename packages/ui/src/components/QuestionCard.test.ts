@@ -186,3 +186,46 @@ test('a card asked without waiting says so until it is answered', () => {
   expect(card.textContent).toContain('Asks you, without waiting');
   expect(document.querySelector('[data-testid=question-async-hint]')).not.toBeNull();
 });
+
+test('a send that failed gives the card back, and a second press sends again', async () => {
+  const sent: string[][] = [];
+  let answer!: (delivered: boolean) => void;
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: {
+      text: 'Which shape should the echo take?',
+      options: OPTIONS,
+      allowText: true,
+      multiple: false,
+      answer: null,
+      pending: true,
+      submit: (optionIds: string[]) => {
+        sent.push(optionIds);
+        return new Promise<boolean>((resolve) => { answer = resolve; });
+      }
+    }
+  });
+  flushSync();
+  options()[0]?.click();
+  flushSync();
+  submit().click();
+  flushSync();
+  // In flight: nothing can be pressed twice.
+  expect(submit().disabled).toBe(true);
+  expect(options()[0]?.disabled).toBe(true);
+
+  answer(false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(submit().disabled).toBe(false);
+  expect(options()[0]?.disabled).toBe(false);
+  expect(options()[0]?.getAttribute('aria-checked')).toBe('true');
+
+  submit().click();
+  flushSync();
+  expect(sent).toEqual([['short'], ['short']]);
+  answer(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(submit().disabled).toBe(true);
+});

@@ -719,7 +719,7 @@
                       answer={part.answer ?? null}
                       pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
                       submit={(optionIds, text) =>
-                        void store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
+                        store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
                     />
                   {:else if part.type === 'compaction'}
                     <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>

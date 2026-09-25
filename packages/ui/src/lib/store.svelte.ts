@@ -2503,9 +2503,9 @@ export class Store {
     questionId: string,
     optionIds: string[],
     text?: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     const client = this.#client;
-    if (!client) return;
+    if (!client) return false;
     try {
       await client.call('questions.answer', {
         threadId,
@@ -2514,8 +2514,11 @@ export class Store {
         ...(text === undefined || text.length === 0 ? {} : { text })
       });
       this.pendingQuestions = this.pendingQuestions.filter((q) => q.id !== questionId);
+      return true;
     } catch (error) {
+      // False gives the card back: a drop on a bad link must not leave it greyed out.
       this.#fail(error);
+      return false;
     }
   }
 

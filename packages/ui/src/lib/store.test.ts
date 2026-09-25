@@ -817,6 +817,19 @@ describe('Store', () => {
     expect(store.pendingPermissions).toEqual([]);
   });
 
+  test('an answer sent while the socket is down says so and can be sent again', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    client.drop();
+    expect(await store.answerQuestion('t-scheduler', 'qst-seed-1', ['short'])).toBe(false);
+    expect(store.pendingQuestions.map((q) => q.id)).toEqual(['qst-seed-1']);
+    expect(store.error).toBeTruthy();
+
+    await client.restore();
+    expect(await store.answerQuestion('t-scheduler', 'qst-seed-1', ['short'])).toBe(true);
+    expect(store.pendingQuestions).toEqual([]);
+  });
+
   test('a thread removed elsewhere lets its subscription go before the next one is taken', async () => {
     const { store, client } = await ready();
     await store.open('t-descriptors');
