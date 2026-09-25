@@ -145,6 +145,25 @@ test('returning to a long conversation preserves the reading position', async ()
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
 
+test('a wide markdown table scrolls inside itself and leaves the conversation still', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  const table = '| File | Status | Lines | Owner | Notes |\n|---|---|---|---|---|\n| packages/ui/src/components/ThreadHeader.svelte | modified | 229 | ui | header row on phones |';
+  await page.type('[data-testid=composer-input]', table);
+  await page.evaluate(`document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+  await page.waitFor(`document.querySelector('[data-testid=timeline] table')?.textContent.includes('header row on phones')`, 20_000);
+  await page.evaluate(`document.querySelector('[data-testid=timeline] table').scrollIntoView({ block: 'center', inline: 'end' })`);
+  const sizes = await page.evaluate<{ timeline: number[]; table: number[] }>(`(() => {
+    const t = document.querySelector('[data-testid=timeline]'), table = t.querySelector('table');
+    return { timeline: [t.scrollWidth, t.clientWidth, t.scrollLeft], table: [table.scrollWidth, table.clientWidth] };
+  })()`);
+  await capture('mobile-table.png');
+  expect(sizes.timeline[0]).toBeLessThanOrEqual(sizes.timeline[1]);
+  expect(sizes.timeline[2]).toBe(0);
+  // The table itself holds what did not fit.
+  expect(sizes.table[0]).toBeGreaterThan(sizes.table[1]);
+}, 30_000);
+
 test('a phone pins and archives a thread without a right-click, from the header and from the list', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);
