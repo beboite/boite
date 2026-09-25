@@ -115,6 +115,25 @@ describe('accounts', () => {
     expect(after.status).toBe('ok');
   });
 
+  test('a check that finds the same status writes nothing and tells nobody, and a changed one does both', async () => {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'claude', label: 'Checked', useDefaultLocation: false });
+    const updated: string[] = [];
+    client.on('accounts.updated', (event) => updated.push(event.status));
+    const rows = harness.core.journal.countEvents('account.checked');
+
+    for (let index = 0; index < 3; index += 1) {
+      expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+    }
+    expect(harness.core.journal.countEvents('account.checked')).toBe(rows);
+
+    writeFileSync(join(account.isolationDir ?? '', '.credentials.json'), '{"fake":true}', 'utf8');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    await waitFor(() => updated.length === 1);
+    expect(updated).toEqual(['ok']);
+    expect(harness.core.journal.countEvents('account.checked')).toBe(rows + 1);
+  });
+
   test('the isolation environment substitutes the account directory', async () => {
     const client = await harness.connect();
     const account = await client.call('accounts.add', {

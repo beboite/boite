@@ -972,10 +972,15 @@ export function registerProviderMethods(core: Core): void {
   });
 
   core.router.register('providers.list', () => core.providers.list());
+  // The loaded descriptors in full, what each resolves to and the rejections:
+  // a reload that changes none of it leaves every client and cached model list alone.
+  const fingerprint = (result: ProviderLoadResult): string =>
+    JSON.stringify([result, result.loaded.map((summary) => core.providers.get(summary.id))]);
   core.router.register('providers.reload', () => {
+    const before = fingerprint(core.providers.list());
     const result = core.providers.load();
     core.accounts.ensureDefaults();
-    core.bus.emit('providers.updated', result);
+    if (fingerprint(result) !== before) core.bus.emit('providers.updated', result);
     return result;
   });
   core.router.register('providers.install', (params) => {

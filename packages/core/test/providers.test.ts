@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolveCommand } from '../src/providers/loader.ts';
 import { delimiter, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { startTestCore } from './harness.ts';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -116,6 +116,28 @@ describe('providers', () => {
     const accounts = await client.call('accounts.list', {});
     expect(accounts.filter((account) => account.providerId === 'mine')).toHaveLength(1);
     expect(updates).toContain('mine');
+  });
+
+  test('a reload that changes nothing broadcasts nothing, and a changed descriptor still does', async () => {
+    const client = await harness.connect();
+    const broadcasts: number[] = [];
+    client.on('providers.updated', (result) => { broadcasts.push(result.loaded.length); });
+    await client.call('providers.reload', {});
+    const settled = broadcasts.length;
+    for (let index = 0; index < 3; index += 1) {
+      expect((await client.call('providers.reload', {})).loaded.length).toBeGreaterThan(0);
+    }
+    // A later event proves the unchanged reloads had their chance to arrive.
+    await client.call('settings.set', { asyncQuestions: false });
+    expect(broadcasts.length).toBe(settled);
+
+    const body = validDescriptor();
+    body.profiles = Object.fromEntries(['windows', 'linux', 'macos'].map((os) => [os, {
+      detect: {}, executable: [{ kind: 'file', value: process.execPath }], isolation: {},
+    }]));
+    writeUserDescriptor('changed.json', body);
+    await client.call('providers.reload', {});
+    await waitFor(() => broadcasts.length === settled + 1);
   });
 
   test('an unsupported executable resolver is rejected at its field', () => {

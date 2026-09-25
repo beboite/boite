@@ -405,8 +405,10 @@ question:
 
 The child is killed through the registry on every path. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
-cached per provider and account until `providers.reload` or a change to that
-account, and reaches every client as `providers.probed`. Two callers at once share
+cached per provider and account until a `providers.reload` that changes a
+descriptor, what one resolves to or a rejection, or a change to that
+account, and reaches every client as `providers.probed`. A reload that changes
+none of that emits no `providers.updated`. Two callers at once share
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
 already in flight. The UI keeps a persistent display cache and reads asynchronously.
 A probe that finds no executable, whose agent dies or that runs past
