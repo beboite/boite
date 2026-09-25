@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AudioSession } from '../src/platform/windows/audio-sessions.ts';
+import { setGuardWorkerForTests } from '../src/platform/windows/guard.ts';
 import { GuardLogic, HWND_BOTTOM, PUSH_BACK_FLAGS } from '../src/platform/windows/guard-logic.ts';
 import type { GuardWin32, WindowOwner } from '../src/platform/windows/guard-logic.ts';
 import { MuteLogic } from '../src/platform/windows/mute-logic.ts';
@@ -406,5 +407,23 @@ describeWindows('the focus guard Worker', () => {
     await harness.stop();
     stopped = true;
     expect(harness.core.procs.guardStatus().running).toBe(false);
+  }, 30000);
+
+  test('stops once nothing traced runs, and comes back with the next process', async () => {
+    setGuardWorkerForTests(null, 50);
+    try {
+      const procs = harness.core.procs;
+      await procs.spawn('guard-idle', 'cmd', ['/c', 'exit 0']).exited;
+      await waitFor(() => procs.liveCount('guard-idle') === 0, 5000);
+      await waitFor(() => !procs.guardStatus().running, 5000);
+
+      const next = procs.spawn('guard-idle', 'ping', ['-n', '30', '127.0.0.1']);
+      expect(procs.guardStatus().running).toBe(true);
+      await waitFor(() => procs.guardStatus().hook !== null, 10000);
+      procs.killTree('guard-idle');
+      await next.exited;
+    } finally {
+      setGuardWorkerForTests(null);
+    }
   }, 30000);
 });

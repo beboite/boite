@@ -106,7 +106,10 @@ export class ProcRegistry {
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
     this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.stopListening = this.bus.onAny((name, payload) => {
-      if (name === 'turn.started') this.cancelSweep((payload as Turn).threadId);
+      if (name === 'turn.started') {
+        this.cancelSweep((payload as Turn).threadId);
+        this.platform.warm();
+      }
       else if (name === 'turn.finished') this.scheduleSweep((payload as Turn).threadId);
     });
     this.platform.retain({

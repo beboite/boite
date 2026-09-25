@@ -41,7 +41,9 @@ is closed, unless the job still reports a process in it.
 
 A completion port on the job reports every process that enters or leaves it,
 grandchildren included, and a Worker drains it. The Worker is built on the first
-traced pid rather than at core start, like everything else heavy here. Those
+traced pid rather than at core start, like everything else heavy here. Its wait
+has no timeout, so an idle core never wakes it; the shutdown posts a packet of
+its own to end the wait. Those
 events become `process.started` and `process.exited` on the wire, each carrying
 pid, parent pid, thread, executable, the command line when it is readable, start
 and exit times, exit code, CPU milliseconds, peak memory and bytes moved.
@@ -118,6 +120,13 @@ they were typing into. The guard is a second Worker holding a system-wide
 core's own process, plus the message pump that hook needs, because an
 out-of-context event is delivered on the thread that installed the hook and only
 while that thread pumps. The main thread posts it the pid set and the setting.
+
+The Worker is built when a turn starts or on the first traced pid, whichever
+comes first, and stopped 30 seconds after the last traced process exits, or 30
+seconds after both the guard and the audio mute are turned off. Back-to-back turns
+keep the same Worker. With both protections off no Worker is built at all. When
+the system refuses the hook (a core with no interactive desktop), the Worker
+keeps running for the audio mute and `guardStatus().failure` names the refusal.
 
 When the window that just took the foreground belongs to a pid a thread
 launched, two remedies fire in order. `SetWindowPos` to `HWND_BOTTOM` without

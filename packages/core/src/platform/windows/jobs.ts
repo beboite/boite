@@ -89,6 +89,7 @@ const OFF_USER_TIME = 24;
 const MAX_COMMAND_LINE_BYTES = 32768;
 
 const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
+const INFINITE = 0xffffffff;
 const ASSIGN_ACCESS = PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION;
 const INSPECT_ACCESS = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TERMINATE;
 
@@ -114,6 +115,7 @@ function loadKernel32() {
     TerminateJobObject: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     TerminateProcess: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     CreateIoCompletionPort: { args: [FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.ptr },
+    PostQueuedCompletionStatus: { args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
     OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.ptr },
     CloseHandle: { args: [FFIType.ptr], returns: FFIType.i32 },
     GetLastError: { args: [], returns: FFIType.u32 },
@@ -170,6 +172,8 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
     terminateProcess: (proc: number, exitCode: number): boolean =>
       k32.TerminateProcess(asPointer(proc), exitCode) !== 0,
     createPort: (): number => asHandle(k32.CreateIoCompletionPort(INVALID_HANDLE_VALUE, null, 0n, 1)),
+    /** Key 0 on the port: the drain's signal to stop. Thread job keys start at 1. */
+    wakeToStop: (port: number): boolean => k32.PostQueuedCompletionStatus(asPointer(port), 0, 0n, null) !== 0,
     openProcess: (access: number, pid: number): number => asHandle(k32.OpenProcess(access, 0, pid)),
     close: (handle: number): void => {
       k32.CloseHandle(asPointer(handle));
@@ -242,11 +246,12 @@ export function retainJobs(events: ProcessEventSink): void {
   sink = events;
 }
 
-export function releaseJobs(): void {
+/** Resolves once the drain left its wait and the port is closed, one second at most. */
+export function releaseJobs(): Promise<void> {
   refCount = Math.max(0, refCount - 1);
-  if (refCount > 0) return;
+  if (refCount > 0) return Promise.resolve();
   sink = null;
-  teardown();
+  return teardown();
 }
 
 /**
@@ -497,7 +502,9 @@ function ensureWorker(port: number): void {
     created.onerror = (event: unknown): void => {
       failWorker(describeWorkerError(event));
     };
-    const start: JobsWorkerStart = { port, stop: shared, waitMs: 250 };
+    // No timeout: the Worker sleeps in the kernel until a packet comes, and
+    // teardown posts one of its own to wake it.
+    const start: JobsWorkerStart = { port, stop: shared, waitMs: INFINITE };
     created.postMessage(start);
     if (typeof created.unref === 'function') created.unref();
     worker = created;
@@ -733,7 +740,7 @@ function workingSetOf(api: Native, handle: number): { workingSet: number; peak: 
 
 // -- teardown ---------------------------------------------------------------
 
-function teardown(): void {
+function teardown(): Promise<void> {
   if (pollTimer !== null) {
     clearInterval(pollTimer);
     pollTimer = null;
@@ -769,21 +776,26 @@ function teardown(): void {
   };
   if (running === null) {
     release();
-    return;
+    return Promise.resolve();
   }
   if (flag !== null) Atomics.store(flag, 0, 1);
-  let released = false;
-  const once = (): void => {
-    if (released) return;
-    released = true;
-    clearTimeout(timer);
-    release();
-  };
-  // The loop leaves within one wait and posts 'stopped'; the port closes then,
-  // never while the worker may still be blocked on it.
-  running.onmessage = (event: { data: unknown }): void => {
-    if ((event.data as JobsWorkerMessage).kind === 'stopped') once();
-  };
-  const timer = setTimeout(once, 1000);
-  if (typeof timer.unref === 'function') timer.unref();
+  // The wait has no timeout: this packet is what wakes it to read the flag.
+  if (api !== null && port !== 0) api.wakeToStop(port);
+  return new Promise<void>((resolve) => {
+    let released = false;
+    const once = (): void => {
+      if (released) return;
+      released = true;
+      clearTimeout(timer);
+      release();
+      resolve();
+    };
+    // The loop leaves on that packet and posts 'stopped'; the port closes then,
+    // never while the worker may still be blocked on it. Closing it on the
+    // fallback also ends a wait nothing woke.
+    running.onmessage = (event: { data: unknown }): void => {
+      if ((event.data as JobsWorkerMessage).kind === 'stopped') once();
+    };
+    const timer = setTimeout(once, 1000);
+  });
 }

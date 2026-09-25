@@ -8,6 +8,7 @@ import { Journal } from '../src/journal.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { threadJobCount } from '../src/platform/windows/jobs.ts';
 import { ProcRegistry } from '../src/procs.ts';
+import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { waitFor } from './harness.ts';
 
 const onWindows = process.platform === 'win32';
@@ -73,6 +74,18 @@ describeWindows('thread jobs of forgotten threads', () => {
     await waitFor(() => threadJobCount() === jobsBefore, 5000);
     // The kernel's own count, the way the leak was measured: one handle per id.
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
+  }, 30000);
+
+  test('the drain Worker sleeps until a packet and stops as soon as it is asked', async () => {
+    // Neither protection on, so no guard Worker: what the close waits for is the drain.
+    procs.applySettings({ ...DEFAULT_SETTINGS, focusGuard: false, muteAgents: false });
+    await procs.spawn('drain', 'cmd', ['/c', 'exit 0']).exited;
+    await waitFor(() => procs.liveCount('drain') === 0, 5000);
+    // Its wait has no timeout, so only the packet teardown posts can end it.
+    await Bun.sleep(300);
+    const started = performance.now();
+    await procs.close();
+    expect(performance.now() - started).toBeLessThan(100);
   }, 30000);
 
   test('a thread spawning again after it was forgotten gets a job of its own', async () => {

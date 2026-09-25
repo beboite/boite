@@ -44,7 +44,10 @@ export type GuardWorkerCommand =
 export type GuardWorkerMessage =
   /** `hook` is the `HWINEVENTHOOK` in decimal, never "0" once the hook is in. */
   | { kind: 'ready'; hook: string }
+  /** Nothing native can run: the Worker does nothing more and waits to be stopped. */
   | { kind: 'failed'; reason: string }
+  /** The focus hook was refused; the pump and the audio mute run without it. */
+  | { kind: 'hook-failed'; reason: string }
   | { kind: 'stopped' }
   | ForegroundPushed
   | MuteEvent;
@@ -212,27 +215,29 @@ scope.onmessage = (event: { data: unknown }): void => {
     },
   );
 
+  // A refused hook turns the focus half off, not the audio one: a core with no
+  // interactive desktop still mutes what its agents play.
+  let hook = 0n;
   if (callback.ptr === null) {
     callback.close();
-    send({ kind: 'failed', reason: 'the WinEventProc callback has no pointer' });
-    return;
+    send({ kind: 'hook-failed', reason: 'the WinEventProc callback has no pointer' });
+  } else {
+    hook = u32.SetWinEventHook(
+      EVENT_SYSTEM_FOREGROUND,
+      EVENT_SYSTEM_FOREGROUND,
+      0n,
+      callback.ptr,
+      0,
+      0,
+      WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+    );
+    if (hook === 0n) {
+      callback.close();
+      send({ kind: 'hook-failed', reason: 'SetWinEventHook returned no hook' });
+    } else {
+      send({ kind: 'ready', hook: hook.toString() });
+    }
   }
-
-  const hook = u32.SetWinEventHook(
-    EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_FOREGROUND,
-    0n,
-    callback.ptr,
-    0,
-    0,
-    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-  );
-  if (hook === 0n) {
-    callback.close();
-    send({ kind: 'failed', reason: 'SetWinEventHook returned no hook' });
-    return;
-  }
-  send({ kind: 'ready', hook: hook.toString() });
 
   // COM comes after the hook, on this same thread: the apartment is the
   // message-pumping one, and only outgoing calls are ever made from it.
@@ -259,8 +264,10 @@ scope.onmessage = (event: { data: unknown }): void => {
   let nextWalk = 0;
   const tick = (): void => {
     if (Atomics.load(stop, 0) !== 0) {
-      u32.UnhookWinEvent(hook);
-      callback.close();
+      if (hook !== 0n) {
+        u32.UnhookWinEvent(hook);
+        callback.close();
+      }
       logic = null;
       shutDownAudio(audio);
       send({ kind: 'stopped' });
