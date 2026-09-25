@@ -1,6 +1,7 @@
 /**
  * The one line splitter every stdio driver reads its agent through: pi, Muse,
- * Codex, agy and the ACP stdout filter.
+ * Codex, agy and the ACP stdout filter, and `stderrLines` for every child's
+ * stderr.
  *
  * It splits on `\n` only. `U+2028` and `U+2029` are valid inside a JSON string,
  * so nothing else may end a record. A trailing `\r` is stripped and a line that
@@ -12,9 +13,13 @@
  * on every chunk, so a 16 MB record read in 64 KiB chunks cost 256 scans of a
  * growing string instead of one.
  */
+import type { Readable } from 'node:stream';
 
 /** A stdout line longer than this is a protocol line nobody should be buffering. */
 export const STDOUT_LINE_MAX = 16 * 1024 * 1024;
+
+/** Far above any real stderr line. A longer one is cut here and the rest of it dropped. */
+const STDERR_LINE_MAX = 64 * 1024;
 
 export interface LineSplitterOptions {
   /**
@@ -24,6 +29,12 @@ export interface LineSplitterOptions {
    */
   maxLine?: number;
   onOverflow?: () => void;
+  /**
+   * Report a line past `maxLine` instead of dropping it: a whole one as it
+   * came, one still waiting for its newline with what has arrived of it, and
+   * the rest of that one dropped. The caller cuts it to length.
+   */
+  keepHead?: boolean;
 }
 
 export class LineSplitter {
@@ -49,7 +60,7 @@ export class LineSplitter {
         this.discarding = false;
         continue;
       }
-      if (this.pending + piece.length > this.maxLine) {
+      if (this.pending + piece.length > this.maxLine && this.options.keepHead !== true) {
         this.reset();
         this.options.onOverflow?.();
         continue;
@@ -63,9 +74,11 @@ export class LineSplitter {
     this.pieces.push(rest);
     this.pending += rest.length;
     if (this.pending > this.maxLine) {
+      const head = this.options.keepHead === true ? this.pieces.join('') : null;
       this.reset();
       this.discarding = true;
       this.options.onOverflow?.();
+      if (head !== null) this.emit(head);
     }
   }
 
@@ -87,4 +100,25 @@ export class LineSplitter {
     if (line.trim().length === 0) return;
     this.onLine(line);
   }
+}
+
+/**
+ * A child's stderr as whole lines, trimmed, empty ones dropped. A pipe read
+ * ends wherever it ends, so a line that spans two reads is held until its
+ * newline instead of being reported as two pieces; the decoder keeps a
+ * character cut between two reads whole too. A line past `max` is reported cut
+ * at `max` and the rest of it is dropped, so one runaway line cannot grow the
+ * buffer. What is left when the stream ends is the last line.
+ */
+export function stderrLines(stream: Readable, onLine: (line: string) => void, max = STDERR_LINE_MAX): void {
+  const lines = new LineSplitter((line) => {
+    onLine(line.trim().slice(0, max));
+  }, { maxLine: max, keepHead: true });
+  stream.setEncoding('utf8');
+  stream.on('data', (chunk: string) => {
+    lines.feed(chunk);
+  });
+  stream.on('end', () => {
+    lines.end();
+  });
 }

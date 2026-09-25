@@ -13,7 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { modelsFromListing, parseModelLines } from '../src/drivers/agy.ts';
+import { modelsFromListing, parseModelLines } from '../src/drivers/agy/models.ts';
 import { browserNoopPath } from '../src/paths.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
