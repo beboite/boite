@@ -210,6 +210,12 @@ reading to 300 ([context.md](context.md)).
 BOITE_ECHO=1 bun run dev:core
 ```
 
+`BOITE_HOST_AGENTS=0` keeps a core away from the agents installed on the
+machine: the shipped providers still load but resolve no program, so no
+version check, quota read or model probe runs the developer's own CLIs. The
+test harness, the end to end suite and the bench set it; an opt-in live test
+(`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back off.
+
 ## Checks and tests
 
 ```bash
