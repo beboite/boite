@@ -1692,7 +1692,7 @@ function defaultModel(provider: ProviderDescriptor): string | null {
 
 export function registerThreadMethods(core: Core): void {
   const pullRequests = new PullRequests(core);
-  core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId));
+  core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) =>

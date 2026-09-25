@@ -9,10 +9,11 @@ export function resetPullRequestSupport(client: Client): void {
   support.delete(client);
 }
 
-export async function lookupPullRequest(client: Client, threadId: ThreadId): Promise<Lookup> {
+/** `refresh` is a user's own request: the core reads the repository again instead of answering from what it kept. */
+export async function lookupPullRequest(client: Client, threadId: ThreadId, refresh = false): Promise<Lookup> {
   const known = support.get(client);
   if (known && !(await known)) return { supported: false };
-  const request = client.call('threads.pullRequest', { threadId });
+  const request = client.call('threads.pullRequest', refresh ? { threadId, refresh } : { threadId });
   if (!known) {
     support.set(client, request.then(() => true, (error: unknown) => {
       if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return false;
