@@ -117,7 +117,9 @@ use separate sockets without thread subscriptions; failed connections retry
 every thirty seconds. The menu names disconnected machines and opens connection
 settings. The title bar has no second connection indicator.
 
-Two menus open over the composer while typing. `/` on an empty box lists the
+Two menus open over the composer while typing, above the box, shortened to the
+room left under the title bar, or below the box when that side has more room
+(`lib/menu-fit.ts`). `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
 reported), then Boite's, the same list as the palette. `@` at the start of a
 word lists the project's files, ranked by `projects.files` on the word after
