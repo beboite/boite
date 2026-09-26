@@ -35,11 +35,12 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   const height = () => 800 + box.querySelectorAll('article').length * 200;
   Object.defineProperty(box, 'clientHeight', { get: () => 400 });
   Object.defineProperty(box, 'scrollHeight', { get: height });
-  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (value: number) => { top = value; } });
+  // A browser clamps scrollTop to the scrollable range.
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (value: number) => { top = Math.max(0, Math.min(value, box.scrollHeight - box.clientHeight)); } });
 
   mounted = mount(AgentConversation, { target: box, props: { view: view as unknown as AgentsView, scope } });
   await settle();
-  expect(top).toBe(1000);
+  expect(top).toBe(600);
 
   // Reading older messages: the next reply does not pull the reader down.
   top = 100;
@@ -51,11 +52,11 @@ test('an agent message follows a reader at the bottom and leaves one reading old
   top = height() - 400;
   view.seen.messages = [...view.seen.messages, message('m3', 'a-ada')];
   await settle();
-  expect(top).toBe(1400);
+  expect(top).toBe(1000);
 
   // The user's own message always shows, wherever they were.
   top = 0;
   view.seen.messages = [...view.seen.messages, message('m4', null)];
   await settle();
-  expect(top).toBe(1600);
+  expect(top).toBe(1200);
 });
