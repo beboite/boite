@@ -125,7 +125,9 @@ thread boundary; transcripts and tool payloads stay in their own threads.
 The core serializes live steering with ordinary coordination and queues input
 for drivers without steering. Results can also join the next user prompt.
 Restart retains the records but pauses automatic work. [Delegation](delegation.md)
-describes controls, delivery semantics and costs.
+describes controls, delivery semantics and costs. [Workflows](workflows.md)
+run a checked JSON plan over the same children: the core launches each step
+when its dependencies end, with no orchestrating model.
 
 ## Process tracking follows the host OS
 

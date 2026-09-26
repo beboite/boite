@@ -159,6 +159,12 @@ export function checkSurface(cwd: string, surface: PanelSurface): PanelSurface {
     }
     return { kind, url: parsed.href };
   }
+  if (kind === 'workflow') {
+    const runId = (asked as { runId?: unknown }).runId;
+    if (runId === undefined || runId === null) return { kind };
+    if (typeof runId !== 'string' || !/^wfr_[A-Za-z0-9_-]{1,64}$/.test(runId)) throw refused(`panel.open workflow runId: expected a run id from boite workflow list, got ${String(runId)}`, { runId });
+    return { kind, runId };
+  }
   return { kind: kind as 'trace' | 'tasks' };
 }
 

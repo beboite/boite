@@ -46,14 +46,16 @@ import type { FakeFinishedTurn } from '../fake-usage';
 import { finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
 import { FAKE_TREE } from './files';
+import { delegationConfig, workflowAnswer, workflowChild } from './delegation';
 import { FakePlugins } from './plugins';
 import { initialHarnessUpdates } from './provider-installs';
 import { DATA_DIR, T0, toSummary } from './shared';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
+import { FakeWorkflows } from './workflows';
 
-/** One handler per contract method; plugins and agents answer from their own classes. */
-export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+/** One handler per contract method; plugins, agents and workflows answer from their own classes. */
+export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
@@ -89,6 +91,9 @@ export class FakeContext {
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   readonly plugins: FakePlugins;
+  readonly workflows: FakeWorkflows;
+  /** How far in the past the demo seeds its run, so its steps show real durations. */
+  workflowLag = 0;
 
   brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
@@ -185,6 +190,21 @@ export class FakeContext {
       now: () => this.now(),
       nextId: () => ++this.seq,
       delayMs: () => this.delayMs,
+    });
+    this.workflows = new FakeWorkflows({
+      thread: threadId => this.thread(threadId),
+      config: rootId => delegationConfig(this, rootId),
+      resumeTeam: rootId => {
+        this.delegationConfigs.set(rootId, { ...delegationConfig(this, rootId), paused: false });
+        this.emit('delegation.changed', { threadId: rootId });
+      },
+      child: (root, profile, title, task) => workflowChild(this, root, profile, title, task),
+      answer: (threadId, text, ok) => workflowAnswer(this, threadId, text, ok),
+      changed: (rootId, runId) => this.emitToThread(rootId, 'workflows.changed', { threadId: rootId, runId }),
+      // The wall clock, as the team demo uses: a running step's elapsed time counts from it.
+      now: () => Date.now() + this.workflowLag,
+      delayMs: () => this.delayMs,
+      principal: () => this.bus.principal,
     });
     this.delayMs = options.delayMs ?? 18;
     this.chunkSize = options.chunkSize ?? tokenStream();

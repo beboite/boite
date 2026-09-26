@@ -333,6 +333,7 @@ export function threadMethods(ctx: FakeContext) {
         childrenStopped = await stopDelegation(ctx, root, thread.parentThreadId ? thread.id : undefined);
         ctx.emit('delegation.changed', { threadId: root });
       }
+      if (!thread.parentThreadId) ctx.workflows.stopRoot(thread.id, 'Stopped with its thread');
       const stopped = await ctx.stopTurn(params.threadId) || childrenStopped > 0;
       // As the core: Stop on an idle thread ends what it still runs in the background.
       if (!stopped && (thread.background?.length ?? 0) > 0) {

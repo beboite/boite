@@ -42,6 +42,7 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   await page.waitFor(`document.querySelector('${id('panel-launcher')}')`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('panel-launcher')} .card')).map(card => card.dataset.testid)`)).toEqual([
     'launch-agents',
+    'launch-workflow',
     'launch-browser',
     'launch-changes',
     'launch-files',

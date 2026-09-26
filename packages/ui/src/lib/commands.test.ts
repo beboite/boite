@@ -57,6 +57,7 @@ test('the list carries every app command, the thread ones only while one is open
     'rename',
     'retitle',
     'panel',
+    'workflows',
     'changes',
     'files',
     'tasks',

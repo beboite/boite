@@ -1,5 +1,8 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
+import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 export * from './agents';
+export * from './workflows';
+export * from './workflow-plan';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -1310,9 +1313,10 @@ export type PanelSurface =
   | { kind: 'diff'; path?: string }
   | { kind: 'browser'; url: string }
   | { kind: 'trace' }
-  | { kind: 'tasks' };
+  | { kind: 'tasks' }
+  | { kind: 'workflow'; runId?: string };
 
-export const PANEL_SURFACE_KINDS = ['file', 'files', 'diff', 'browser', 'trace', 'tasks'] as const;
+export const PANEL_SURFACE_KINDS = ['file', 'files', 'diff', 'browser', 'trace', 'tasks', 'workflow'] as const;
 export type PanelSurfaceKind = (typeof PANEL_SURFACE_KINDS)[number];
 
 /**
@@ -1588,7 +1592,7 @@ export interface TerminalState {
   output: string;
 }
 
-export interface RpcMethods extends AgentsRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
@@ -2028,7 +2032,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };

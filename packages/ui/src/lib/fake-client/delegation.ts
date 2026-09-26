@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their budget and letters. */
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -88,6 +88,67 @@ export function seedDelegationDemo(ctx: FakeContext): void {
     { threadId: done.id, profileId: implementer.id, task: 'Review the panel wording and report confusing states.' }
   ]);
   ctx.delegationTurns.set(root.id, 2);
+  seedWorkflowDemo(ctx, root.id);
+}
+
+/** A workflow step's thread, the way `delegation.spawn` makes one: the task sent, the turn running. */
+export function workflowChild(ctx: FakeContext, root: Thread, profile: DelegationProfile, title: string, task: string): ThreadId {
+  const id = `t-${++ctx.seq}`;
+  const at = ctx.now();
+  const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
+  const child: Thread = {
+    ...root, id, parentThreadId: root.id, title, titleSource: 'user',
+    providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort,
+    status: 'running', unread: false, archived: false, pinned: false,
+    sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, activity: undefined,
+    createdAt: at, updatedAt: at, messagesBefore: null, turns: [turn], commands: [],
+    messages: [{ id: `m-${id}-task`, threadId: id, turnId: turn.id, role: 'user', parts: [{ type: 'text', text: task }], state: 'complete', createdAt: at }]
+  };
+  delete child.pullRequest;
+  delete child.lastUserMessageAt;
+  ctx.threads.set(id, child);
+  ctx.emit('thread.created', structuredClone(toSummary(child)));
+  return id;
+}
+
+/** The step's answer, and its thread idle again. */
+export function workflowAnswer(ctx: FakeContext, threadId: ThreadId, text: string, ok: boolean): void {
+  const thread = ctx.threads.get(threadId);
+  if (!thread) return;
+  const turn = thread.turns.at(-1);
+  const at = ctx.now();
+  if (turn && (turn.status === 'running' || turn.status === 'queued')) {
+    Object.assign(turn, { status: ok ? 'done' : 'error', finishedAt: at, error: ok ? null : text,
+      usage: ok ? { inputTokens: 1400, outputTokens: 320, cacheReadTokens: 2600, cacheWriteTokens: 0, costUsdEquivalent: 0.018 } : null });
+  }
+  const message: Message = { id: `m-${threadId}-${++ctx.seq}`, threadId, turnId: turn?.id ?? `turn-${threadId}`, role: 'assistant', parts: [{ type: 'text', text }], state: 'complete', createdAt: at };
+  thread.messages.push(message);
+  thread.status = 'idle';
+  ctx.emitToThread(threadId, 'message.started', structuredClone(message));
+  ctx.emitToThread(threadId, 'message.completed', { threadId, messageId: message.id, state: 'complete' });
+  ctx.touch(thread);
+}
+
+/** The column graph's demo on `?fake=1&team=1`: a scan done, a review fanned out over three files, two still running. */
+function seedWorkflowDemo(ctx: FakeContext, rootId: ThreadId): void {
+  ctx.workflowLag = -150_000;
+  ctx.workflows.hold(() => {
+    const run = ctx.workflows.start(rootId, {
+      name: 'Review the parser',
+      limits: { maxConcurrent: 2 },
+      steps: [
+        { id: 'scan', title: 'List changed files', profile: 'implementer', task: 'List the source files of src/parser that changed this week.', output: { files: ['string'] } },
+        { id: 'review', title: 'Review each file', profile: 'reviewer', forEach: 'scan.files', task: 'Review {{item}} for malformed-input bugs. Do not edit files.', output: { bugs: [{ line: 'number', text: 'string' }] } },
+        { id: 'fix', title: 'Fix the bugs', profile: 'implementer', when: { path: 'review.bugs', notEmpty: true }, task: 'Fix these bugs, one commit each: {{review.bugs}}' },
+        { id: 'report', title: 'Write the report', profile: 'reviewer', after: ['fix'], task: 'Summarize what was reviewed and fixed: {{review}}' }
+      ]
+    }, 'demo-workflow', undefined, 'agent');
+    ctx.workflowLag = -110_000;
+    ctx.workflows.finish(run.id, 'scan');
+    ctx.workflowLag = -45_000;
+    ctx.workflows.finish(run.id, 'review#0');
+  });
+  ctx.workflowLag = 0;
 }
 
 export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {

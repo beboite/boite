@@ -122,8 +122,38 @@ const store = {
   answer: async () => {},
   messagesBefore: null,
   loadingOlder: false,
-  loadOlder: async () => 0
+  loadOlder: async () => 0,
+  workflowsOf: () => []
 } as unknown as Store;
+
+test('a workflow the thread started is one card that opens its graph, and a step shows none', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const owner = new Store();
+  owner.attach(client);
+  try {
+    await owner.connect();
+    await owner.open('t-trace');
+    await owner.loadWorkflows('t-trace');
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
+    flushSync();
+    const cards = document.querySelectorAll<HTMLButtonElement>('[data-testid=workflow-activity]');
+    expect(cards).toHaveLength(1);
+    const run = owner.workflowsOf('t-trace')[0]!;
+    expect(cards[0]!.textContent).toContain('Review the parser');
+    expect(cards[0]!.textContent).toContain('1/4 steps');
+    expect(cards[0]!.querySelectorAll('.phases i')).toHaveLength(4);
+    cards[0]!.click();
+    flushSync();
+    expect(owner.panel.active).toMatchObject({ kind: 'workflow', runId: run.id });
+    await unmount(running); running = null;
+    const step = run.nodes.find(node => node.id === 'review')!.instances[1]!.threadId!;
+    await owner.open(step);
+    await owner.loadWorkflows(step);
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: step, messages: owner.openThread!.messages } });
+    flushSync();
+    expect(document.querySelector('[data-testid=workflow-activity]')).toBeNull();
+  } finally { owner.detach(); client.close(); window.localStorage.clear(); }
+});
 
 test('system coordination messages show their display text outside the user bubble', () => {
   stubLayout(200);
@@ -231,6 +261,7 @@ function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
       paged['loadingOlder'] = true;
       return new Promise<number>(() => {});
     },
+    workflowsOf: () => [],
     ...overrides
   };
   return { store: paged as unknown as Store, calls: () => calls };

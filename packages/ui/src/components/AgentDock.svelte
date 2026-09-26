@@ -8,6 +8,7 @@
   let active = $derived((store.delegation?.agents ?? []).filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)));
 
   $effect(() => { void store.loadDelegation(threadId); });
+  $effect(() => { void store.loadWorkflows(threadId); });
 
   function open(threadId: string): void {
     store.panel.open('agents');

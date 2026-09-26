@@ -81,6 +81,7 @@ failing checks; report any blocker that needs the user's decision.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
 - [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.
+- [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
 - [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.

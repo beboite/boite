@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -301,6 +301,28 @@ export function migrate(db: Database, file: string): void {
       UPDATE agent_requests SET created_at = ${Date.now()};
       CREATE INDEX IF NOT EXISTS agent_requests_created ON agent_requests (created_at);`);
     version = 18;
+  }
+  // Workflows: a run is one JSON record (its plan and every step's state), a
+  // step thread maps back to its run, a template is a plan kept for a project.
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'workflow_runs'").get()) {
+    db.exec(`CREATE TABLE workflow_runs (
+        id TEXT PRIMARY KEY, root_id TEXT NOT NULL, status TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, data TEXT NOT NULL CHECK(json_valid(data))
+      );
+      CREATE INDEX workflow_runs_root ON workflow_runs(root_id, created_at);
+      CREATE INDEX workflow_runs_status ON workflow_runs(status);
+      CREATE TABLE workflow_steps (thread_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_key TEXT NOT NULL);
+      CREATE INDEX workflow_steps_run ON workflow_steps(run_id);
+      CREATE TABLE workflow_requests (
+        scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, run_id TEXT NOT NULL,
+        PRIMARY KEY(scope, request_id)
+      );
+      CREATE TABLE workflow_templates (
+        id TEXT PRIMARY KEY, project_id TEXT, name TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, data TEXT NOT NULL CHECK(json_valid(data))
+      );
+      CREATE INDEX workflow_templates_project ON workflow_templates(project_id, name);`);
+    version = 19;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

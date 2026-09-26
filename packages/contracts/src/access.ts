@@ -19,6 +19,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'agents.runtime.get', 'agents.brain.get', // Read the same identity settings and memory shown on its host.
   // Follow and steer an owner-enabled team from the phone, without changing routes or limits.
   'delegation.get', 'delegation.send', 'delegation.stop',
+  // Follow a workflow, pause or stop it; resume and retry spend budget and stay the owner's (checked in workflows.control).
+  'workflows.list', 'workflows.get', 'workflows.control', 'workflows.templates.list',
   // Coordination is visible with the conversation; only the owner enables it.
   'collaboration.get',
   'collaboration.directory',
@@ -80,6 +82,8 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'agents.changed', // Invalidation only; agents.snapshot applies the device read policy.
   // Team invalidation contains only the subscribed root ID; delegation.get enforces its read scope.
   'delegation.changed',
+  // Invalidation naming the subscribed root; workflows.list applies the read scope.
+  'workflows.changed',
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
