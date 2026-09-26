@@ -66,11 +66,11 @@ export class Workflows {
   constructor(private readonly core: Core) {
     for (const row of core.journal.db.query('SELECT * FROM workflow_steps').all() as StepRow[]) this.stepOf.set(row.thread_id, { runId: row.run_id, key: row.step_key });
     // A restart never resumes paid work by itself; the turns it interrupted fail on their own.
-    const now = Date.now();
+    // An interrupted step waits on its own thread, so a resume runs it again with the interruption in its prompt.
     for (const run of this.runsWhere("status IN ('running', 'paused')")) {
       let interrupted = false;
       for (const node of run.nodes) for (const inst of node.instances) {
-        if (inst.status === 'running') Object.assign(inst, { status: 'failed', error: 'Interrupted by a core restart; retry runs it again', finishedAt: now }), interrupted = true;
+        if (inst.status === 'running') Object.assign(inst, { status: 'waiting', error: 'Interrupted by a core restart', finishedAt: null }), interrupted = true;
       }
       if (run.status === 'running') this.save({ ...run, status: 'paused', error: 'The core restarted. Resume to continue.' });
       else if (interrupted) this.save(run);
@@ -124,10 +124,11 @@ export class Workflows {
     const thread = this.core.threads.require(threadId);
     return thread.parentThreadId ? this.core.threads.require(thread.parentThreadId) : thread;
   }
-  private own(threadId: string, runId: unknown): WorkflowRun {
+  private own(threadId: string, runId: unknown, principal: Principal): WorkflowRun {
     const run = typeof runId === 'string' ? this.load(runId) : null;
     if (!run) throw invalidParams(`runId: no workflow run ${String(runId)}; boite workflow list shows this thread's runs`);
     if (run.rootThreadId !== threadId) throw refused('runId belongs to another thread; only the thread that started a run controls it');
+    if (principal === 'agent' && run.launchedBy !== 'agent') throw refused('the user started this run; an agent changes only the runs it started');
     return run;
   }
   private team(rootId: string): DelegationConfig {
@@ -198,8 +199,8 @@ export class Workflows {
     return { id: step.id, title: step.title ?? step.id, profileId: step.profile, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
   }
 
-  extend(params: RpcParams<'workflows.extend'>): WorkflowRun {
-    const run = this.own(params.threadId, params.runId);
+  extend(params: RpcParams<'workflows.extend'>, principal: Principal): WorkflowRun {
+    const run = this.own(params.threadId, params.runId, principal);
     const fingerprint = hash(params.steps);
     const existing = this.request(run.id, params.requestId, fingerprint);
     if (existing) return this.view(existing);
@@ -554,7 +555,7 @@ export class Workflows {
   // -- control -----------------------------------------------------------------
 
   control(params: RpcParams<'workflows.control'>, principal: Principal): WorkflowRun {
-    const run = this.own(params.threadId, params.runId);
+    const run = this.own(params.threadId, params.runId, principal);
     const now = Date.now();
     switch (params.action) {
       case 'pause':
@@ -563,7 +564,7 @@ export class Workflows {
         break;
       case 'resume': {
         if (run.status !== 'paused') throw refused(`the run is ${run.status}, not paused`);
-        if (principal === 'session') throw refused('resuming a workflow is an owner action');
+        if (principal !== 'owner') throw refused('resuming a workflow is an owner action');
         this.resumeTeam(run.rootThreadId, principal);
         this.save({ ...run, status: 'running', error: null });
         break;
@@ -575,6 +576,8 @@ export class Workflows {
       case 'retry': {
         if (principal === 'session') throw refused('retrying a workflow step is an owner action');
         if (run.status === 'done') throw refused('the run finished; start it again instead');
+        // A retry leaves the run running: on a paused run that is a resume, which stays the owner's.
+        if (run.status === 'paused' && principal !== 'owner') throw refused('the run is paused; the owner resumes it');
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalidParams(`stepId: no step ${params.stepId} in this run`);
         this.resumeTeam(run.rootThreadId, principal);
@@ -712,7 +715,7 @@ export function registerWorkflowMethods(core: Core): void {
   core.router.register('workflows.get', params => core.workflows.get(params.threadId, params.runId));
   core.router.register('workflows.check', params => core.workflows.check(params.threadId, params.plan));
   core.router.register('workflows.start', (params, ctx) => core.workflows.start(params, principal(ctx) === 'agent' ? 'agent' : 'user'));
-  core.router.register('workflows.extend', params => core.workflows.extend(params));
+  core.router.register('workflows.extend', (params, ctx) => core.workflows.extend(params, principal(ctx)));
   core.router.register('workflows.control', (params, ctx) => core.workflows.control(params, principal(ctx)));
   core.router.register('workflows.output', params => core.workflows.output(params.threadId, params.value));
   core.router.register('workflows.templates.list', params => core.workflows.templates(params.threadId));

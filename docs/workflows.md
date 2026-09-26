@@ -88,10 +88,14 @@ fails and its summary goes back to the conversation. `boite workflow retry
 <run-id> <step>` runs the failed executions again in their own conversations,
 with the previous error in the prompt.
 
-Stop cancels every running step and leaves the rest waiting. Stopping or
-archiving the parent conversation stops its runs too. A core restart never resumes paid
-work by itself: running executions fail with "Interrupted by a core restart"
-and running runs pause. Resume and retry are owner actions. A paired phone can
+Stop cancels every running step and marks the steps that did not start as
+stopped; retry runs them again. Stopping or archiving the parent conversation
+stops its runs too. A core restart never resumes paid work by itself: running
+runs pause, and each interrupted execution waits on its own thread. Resume runs
+it again with "Interrupted by a core restart" in its prompt.
+
+Resume is an owner action. An agent pauses, stops, retries and extends only the
+runs it started, and retries none while the run is paused. A paired phone can
 follow a run, pause it and stop it.
 
 The summary reaches the conversation once it is idle. When the run ends during

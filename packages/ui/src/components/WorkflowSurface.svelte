@@ -36,9 +36,11 @@
   $effect(() => {
     if (threadId) void store.loadWorkflows(threadId);
   });
+  // A reload hands a new object per run; only the id says it is another run.
+  let runId = $derived(run?.id ?? null);
   // Another run, another graph: a step picked in the last one means nothing here.
   $effect(() => {
-    void run?.id;
+    void runId;
     selectedId = null;
     naming = false;
   });

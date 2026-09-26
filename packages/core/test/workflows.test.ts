@@ -203,19 +203,50 @@ test('workflows need the owner-enabled team, and a paused team pauses the run un
   } finally { agent.close(); }
 });
 
-test('a restarted core pauses running workflows instead of spending on its own', async () => {
-  scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+test('a restarted core pauses running workflows instead of spending on its own, and a resume runs the interrupted step again', async () => {
+  const { prompts, held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId } = await setup();
   const run = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
+  await waitFor(() => held.size === 1);
   await h.core.close();
   const next = new Core({ dataDir: h.dataDir, token: h.token });
   try {
     const record = next.workflows.get(threadId, run.id);
     expect(record.status).toBe('paused');
     expect(record.error).toContain('restarted');
-    expect(record.nodes[0]!.instances[0]!.status).toBe('failed');
-    expect(next.workflows.owns(record.nodes[0]!.instances[0]!.threadId!)).toBe(true);
+    const inst = record.nodes[0]!.instances[0]!;
+    expect([inst.status, inst.error]).toEqual(['waiting', 'Interrupted by a core restart']);
+    expect(next.workflows.owns(inst.threadId!)).toBe(true);
+    next.workflows.control({ threadId, runId: run.id, action: 'resume' }, 'owner');
+    await waitFor(() => held.size === 1);
+    const again = prompts.filter(p => p.threadId === inst.threadId).at(-1)!.prompt;
+    expect(again).toContain('Interrupted by a core restart');
+    [...held.values()][0]!('A done');
+    await waitFor(() => next.workflows.get(threadId, run.id).status === 'done');
+    // The same child thread ran it again.
+    expect(next.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.threadId).toBe(inst.threadId);
   } finally { await next.close(); }
+});
+
+test('an agent changes only the runs it started, and a paused run waits for the owner', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    const mine = await owner.call('workflows.start', { threadId, plan: { name: 'Mine', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'mine' });
+    await waitFor(() => held.size === 1);
+    for (const action of ['pause', 'stop', 'retry'] as const) {
+      await expect(agent.call('workflows.control', { threadId, runId: mine.id, action })).rejects.toThrow('the user started this run');
+    }
+    await expect(agent.call('workflows.extend', { threadId, runId: mine.id, steps: [{ id: 'b', profile: 'fast', task: 'b' }], requestId: 'more' })).rejects.toThrow('the user started this run');
+    await owner.call('workflows.control', { threadId, runId: mine.id, action: 'stop' });
+    const theirs = await agent.call('workflows.start', { threadId, plan: { name: 'Theirs', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'theirs' });
+    await waitFor(() => held.size === 1);
+    expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'pause' })).status).toBe('paused');
+    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'retry' })).rejects.toThrow('the owner resumes it');
+    await expect(agent.call('workflows.control', { threadId, runId: theirs.id, action: 'resume' })).rejects.toThrow('owner action');
+    expect((await agent.call('workflows.control', { threadId, runId: theirs.id, action: 'stop' })).status).toBe('stopped');
+  } finally { agent.close(); }
 });
 
 test('templates are kept per project, refreshed by name, started by id, and the CLI speaks the same plan', async () => {

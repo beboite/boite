@@ -26,8 +26,10 @@
   );
   let canRetry = $derived(store.owner && run.status !== 'done' && (node.status === 'failed' || node.status === 'stopped' || node.instances.some(inst => inst.status === 'failed' || inst.status === 'stopped')));
 
+  // Keyed on the id: a reload hands a new node object for the same step.
+  let nodeId = $derived(node.id);
   $effect(() => {
-    void node.id;
+    void nodeId;
     picked = null;
   });
 

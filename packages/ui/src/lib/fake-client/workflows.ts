@@ -259,6 +259,7 @@ export class FakeWorkflows {
     const run = typeof runId === 'string' ? this.#runs.get(runId) : undefined;
     if (!run) throw invalid(`runId: no workflow run ${String(runId)}; boite workflow list shows this thread's runs`);
     if (run.rootThreadId !== threadId) throw refusal('runId belongs to another thread; only the thread that started a run controls it');
+    if (this.host.principal() === 'agent' && run.launchedBy !== 'agent') throw refusal('the user started this run; an agent changes only the runs it started');
     return run;
   }
 
@@ -420,7 +421,7 @@ export class FakeWorkflows {
         return run;
       case 'resume':
         if (run.status !== 'paused') throw refusal(`the run is ${run.status}, not paused`);
-        if (principal === 'session') throw refusal('resuming a workflow is an owner action');
+        if (principal !== 'owner') throw refusal('resuming a workflow is an owner action');
         this.#resumeTeam(run.rootThreadId);
         Object.assign(run, { status: 'running', error: null });
         break;
@@ -431,6 +432,7 @@ export class FakeWorkflows {
       case 'retry': {
         if (principal === 'session') throw refusal('retrying a workflow step is an owner action');
         if (run.status === 'done') throw refusal('the run finished; start it again instead');
+        if (run.status === 'paused' && principal !== 'owner') throw refusal('the run is paused; the owner resumes it');
         const nodes = params.stepId === undefined ? run.nodes.filter(n => broken(n.status) || n.instances.some(i => broken(i.status))) : run.nodes.filter(n => n.id === params.stepId);
         if (params.stepId !== undefined && !nodes.length) throw invalid(`stepId: no step ${params.stepId} in this run`);
         this.#resumeTeam(run.rootThreadId);
