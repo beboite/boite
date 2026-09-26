@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { release, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
@@ -966,12 +966,52 @@ async function reloadShellPage(): Promise<void> {
   await page?.waitFor(`document.querySelector('${testid('sidebar')}')`, 30_000);
 }
 
+/** `DWMWA_SYSTEMBACKDROP_TYPE` for each material from Windows build 22523. */
+const BACKDROP: Record<string, number> = { acrylic: 3, mica: 2, solid: 1 };
+
+/**
+ * A reader of `DWMWA_SYSTEMBACKDROP_TYPE` (38) on the shell's main window, run
+ * from this process: DWM answers for another process's window, hidden or not.
+ * The main window is the top-level window of `pid` titled after the product,
+ * never the quota popup.
+ */
+async function mainWindowBackdrop(pid: number): Promise<() => number> {
+  const { dlopen, FFIType, ptr } = await import('bun:ffi');
+  const user32 = dlopen('user32.dll', {
+    FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
+    GetWindowTextW: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+  });
+  const dwm = dlopen('dwmapi.dll', {
+    DwmGetWindowAttribute: { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+  });
+  const owner = new Uint32Array(1);
+  const text = new Uint16Array(256);
+  let hwnd = user32.symbols.FindWindowExW(null, null, null, null);
+  while (hwnd) {
+    user32.symbols.GetWindowThreadProcessId(hwnd, ptr(owner));
+    const length = user32.symbols.GetWindowTextW(hwnd, ptr(text), text.length);
+    const title = String.fromCharCode(...text.subarray(0, length));
+    if (owner[0] === pid && /^boite/i.test(title) && title !== 'Boite quotas') break;
+    hwnd = user32.symbols.FindWindowExW(null, hwnd, null, null);
+  }
+  const main = hwnd;
+  if (!main) throw new Error(`the shell (pid ${pid}) has no main window to read the material of`);
+  return () => {
+    const value = new Uint32Array(1);
+    const result = dwm.symbols.DwmGetWindowAttribute(main, 38, ptr(value), 4);
+    if (result !== 0) throw new Error(`DwmGetWindowAttribute(38) on the main window failed: 0x${(result >>> 0).toString(16)}`);
+    return value[0] ?? 0;
+  };
+}
+
 shellTest(
   'the stored window material is stamped on every load, and solid stamps nothing',
   async () => {
     // The list depends on the Windows build: solid always, mica from 22000,
     // acrylic from 22523. Nothing off Windows. A runner on Windows Server 2022
     // (20348) offers solid alone, and a stored mica then stamps nothing.
+    await page?.waitFor(TAURI_READY);
     const supported = await page?.evaluate<string[]>(
       `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
     );
@@ -1007,6 +1047,18 @@ shellTest(
       refusal = error instanceof Error ? error.message : String(error);
     }
     expect(refusal).toContain('frosted');
+
+    // Every change between the offered materials, both ways: solid and back
+    // once left the window see-through with no backdrop. The command reads DWM
+    // back itself; from build 22523 this reads it again from outside the shell.
+    // The sequence ends on solid, the stored choice.
+    const kinds = supported ?? [];
+    const build = Number(release().split('.')[2] ?? 0);
+    const backdrop = process.platform === 'win32' && build >= 22523 ? await mainWindowBackdrop(shellPid) : null;
+    for (const kind of kinds.flatMap((from) => kinds.flatMap((to) => [from, to]))) {
+      await invokeShell('window_material', { kind });
+      if (backdrop) expect(`${kind}: ${backdrop()}`).toBe(`${kind}: ${BACKDROP[kind]}`);
+    }
   },
   TIMEOUT,
 );

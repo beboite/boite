@@ -14,6 +14,8 @@
   let rows = $derived(shownQuotas(reader.rows ?? [], accounts));
   let error = $state('');
   let client: Client | null = null;
+  // Windows 11 rounds the popup and draws its border: the shell says so in the URL.
+  const frame = new URLSearchParams(location.search).get('frame') === 'native' ? 'native' : undefined;
   let visible = true;
   let disposed = false;
   async function refresh(force = false) {
@@ -65,7 +67,7 @@
   });
 </script>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') void action('hide'); }} />
-<main data-testid="quota-popup">
+<main data-testid="quota-popup" data-frame={frame}>
   <header><h1>{strings.quotas.trayHeading}</h1><div class="actions">
     <button class="ghost icon" aria-label={strings.quotas.refresh} aria-busy={reader.loading} data-testid="quota-refresh" onclick={() => void refresh(true)}><RefreshCw size={15} class={reader.loading ? 'spinning' : ''} /></button>
     <button class="ghost icon" aria-label={strings.common.close} onclick={() => void action('hide')}><X size={15} /></button>
@@ -78,7 +80,9 @@
   <footer><button class="ghost" onclick={() => void action('providers')}><Settings2 size={15} />{strings.quotas.providers}</button><button class="ghost icon" aria-label={strings.quotas.quit} onclick={() => void action('quit')}><Power size={15} /></button></footer>
 </main>
 <style>
-  main { height: 100dvh; display: flex; flex-direction: column; background: var(--color-background); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); overflow: hidden; }
+  /* The window is opaque and square; Windows 11 rounds and borders it itself. */
+  main { height: 100dvh; display: flex; flex-direction: column; background: var(--color-background); border: 1px solid var(--color-edge); overflow: hidden; }
+  main[data-frame='native'] { border: none; }
   header, footer { display: flex; align-items: center; justify-content: space-between; flex: none; padding: 10px 12px; gap: 8px; }
   header { border-bottom: 1px solid var(--color-border); }
   footer { border-top: 1px solid var(--color-border); }

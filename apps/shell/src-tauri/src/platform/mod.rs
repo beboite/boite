@@ -17,6 +17,8 @@ pub(crate) mod process;
 pub(crate) mod process;
 
 #[cfg(windows)]
+pub(crate) mod dwm;
+#[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
 pub(crate) use windows::{alert, notify, prepare_command};

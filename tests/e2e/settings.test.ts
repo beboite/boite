@@ -111,8 +111,11 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
   await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('progress')`);
-  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
-  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('inset(0px round 12px)');
+  // The popup window is opaque and square: the page paints to every corner and rounds nothing.
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).not.toBe('rgba(0, 0, 0, 0)');
+  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('none');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderRadius`)).toBe('0px');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('1px');
   await capture('quota-popup.png');
   // Only signed-in providers the user reads: Antigravity's CLI source is off, echo and pi report nothing.
   const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
@@ -134,6 +137,10 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.evaluate(`document.documentElement.dataset.theme = 'grain'`);
   await capture('quota-popup-grain.png');
   expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
+  // Where Windows 11 draws the rounded frame, the page draws no border inside it.
+  await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas&frame=native`);
+  await page.waitFor(`document.querySelector('${id('quota-popup')}')`);
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('0px');
 }, 30_000);
 
 test('machines list each execution host and disconnect only the selected host', async () => {
