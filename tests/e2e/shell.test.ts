@@ -346,6 +346,9 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(secondPort);
     await ownPage.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
     await ownPage.click('[data-testid="nav-settings"]');
+    // Settings open on Home; the window's own switches live under General.
+    await ownPage.waitFor(`document.querySelector('[data-testid="settings-tab-general"]')`);
+    await ownPage.click('[data-testid="settings-tab-general"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]') && !document.querySelector('[data-testid="close-to-tray"]').disabled`);
     await ownPage.click('[data-testid="close-to-tray"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]').checked`);
@@ -713,7 +716,8 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.click(testid('machine-add'));
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
-    await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.textContent.includes('2 machines connected')`);
+    // One machine draws no machine button; the second one brings it back.
+    await page?.waitFor(`document.querySelector('[data-testid=status-connection] [data-testid=machine-status]')`);
     await page?.click(testid('add-project'));
     await page?.waitFor(`document.querySelector('[data-testid=project-path]') && !document.querySelector('[data-testid=project-add]').disabled`);
     expect(await page?.evaluate(`!!document.querySelector('[data-testid=pick-project]')`)).toBe(true);
@@ -734,7 +738,7 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('shell turn')`);
     await remote.stop();
     await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.classList.contains('problem')`);
-    expect(await page?.evaluate(`document.querySelector('[data-testid=status-connection]').textContent`)).toContain('1 machine connected');
+    expect(await page?.evaluate(`document.querySelector('[data-testid=machine-status]').getAttribute('aria-label')`)).toContain('1 need attention');
     await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-machine-disconnected.png'));
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
