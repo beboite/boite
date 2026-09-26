@@ -264,14 +264,14 @@
   /* One measure for every block, the settings cards' own. */
   .page > :global(*) {
     width: 100%;
-    max-width: 880px;
+    max-width: var(--settings-width);
   }
   :global(.settings) .page > header.top {
     margin-bottom: 4px;
   }
   .page .list.card,
   .page > .card {
-    max-width: 880px;
+    max-width: var(--settings-width);
     margin-bottom: 0;
   }
   .top {
@@ -290,7 +290,9 @@
     line-height: 1.6;
   }
 
+  /* The page is a flex column: without flex: none a long list squeezes the field. */
   .search {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
