@@ -22,7 +22,8 @@
     answer: QuestionAnswer | null;
     /** False on a card whose turn ended before anyone answered: nothing to press. */
     pending: boolean;
-    submit: (optionIds: string[], text: string) => void;
+    /** False when the answer did not reach the core: the card is given back to answer again. */
+    submit: (optionIds: string[], text: string) => unknown;
   } = $props();
 
   let picked = $state<string[]>([]);
@@ -39,10 +40,10 @@
     picked = picked[0] === id ? [] : [id];
   }
 
-  function send(): void {
+  async function send(): Promise<void> {
     if (!ready || sent) return;
     sent = true;
-    submit(picked, typed.trim());
+    if ((await submit(picked, typed.trim())) === false) sent = false;
   }
 
   /** What the folded card says: the labels picked, then whatever was typed. */

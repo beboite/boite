@@ -6,6 +6,8 @@
   import OnboardingScene from './OnboardingScene.svelte';
   import BoiteMark from './BoiteMark.svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { focusedElement, restoreFocus } from '../lib/focus';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { steps, type OnboardingStep } from '../lib/onboarding';
   import { closeTour } from '../lib/onboarding.svelte';
@@ -35,8 +37,11 @@
   const overlay = new Closing();
   overlay.show();
   $effect(() => { if (!overlay.shown) closeTour(); });
+  /** What had the keyboard when the tour opened; the composer when that was nothing. */
+  const previous = focusedElement();
   onMount(() => panel?.focus({ preventScroll: true }));
-  function finish() { overlay.hide(); }
+  function finish() { overlay.hide(); restoreFocus(previous); }
+  $effect(() => { if (overlay.open) return mobileOverlay(finish); });
   function go(next: number) {
     index = Math.min(screens.length - 1, Math.max(0, next));
     void tick().then(() => {
@@ -199,12 +204,15 @@
   .scrim.closing { animation-name: fade-out; pointer-events: none; }
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }
-  .panel { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100dvh - 32px); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
+  /* In the shell the scrim starts under the title bar, so the panel's room is that much shorter. */
+  .scrim.shell .panel { height: min(808px, calc(100dvh - 32px - var(--titlebar))); }
+  /* One height for every step, so Next stays under the pointer from one screen to the next; a longer step scrolls. */
+  .panel { display: flex; flex-direction: column; width: min(640px, 100%); height: min(808px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
   header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   header button { margin-left: auto; }
-  .screen { overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
+  .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
   h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 8px; }
   h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
   @keyframes soul {
@@ -255,7 +263,7 @@
   .dot.on::after { background: var(--color-accent); width: 14px; left: 6px; }
   @media (max-width: 480px) {
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
-    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; }
+    footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }

@@ -1,12 +1,15 @@
 <script lang="ts">
-  import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { tick } from 'svelte';
+  import { ArrowLeft, ChevronDown, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { separator } from '../lib/menu';
+  import { archiveThread } from '../lib/archive';
+  import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
+  import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
@@ -34,38 +37,61 @@
     if (thread) await store.rename(thread.id, renameText);
   }
 
-  function onRenameKey(event: KeyboardEvent) {
+  let titleButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  /** Enter and Escape give the keyboard back to the title, never to the page, where Escape stops the turn. */
+  async function onRenameKey(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
       void commitRename();
     } else if (event.key === 'Escape') {
       renaming = false;
-    }
+    } else return;
+    await tick();
+    titleButton?.focus({ preventScroll: true });
+  }
+
+  /** The title's actions: a right-click on a desktop, a tap on the title on a phone. */
+  let titleItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const retitling = store.retitling.includes(thread.id);
+    return [
+      { id: 'rename', label: strings.sidebar.rename },
+      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
+  });
+
+  let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
+
+  /**
+   * A phone's header has room for the title or for every toggle, not both: the
+   * Agents and Terminal toggles move into the title's sheet there, ticked when on.
+   */
+  let phoneItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const toggles: MenuItem[] = [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }];
+    if (store.owner) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
+    return [...toggles, separator('sep-toggles'), ...titleItems];
+  });
+
+  function titleAction(action: string) {
+    const open = store.openThread;
+    if (!open) return;
+    if (action === 'agents') store.panel.toggleKind('agents');
+    else if (action === 'terminal') store.toggleTerminal();
+    else if (action === 'rename') beginRename();
+    else if (action === 'retitle') void store.retitle(open.id);
+    else if (action === 'pin') void store.pin(open.id, !open.pinned);
+    else if (action === 'copy') void store.copy(open.cwd);
+    else if (action === 'archive') void archiveThread(store, open.id);
   }
 
   function openTitleMenu(event: MouseEvent) {
-    const open = store.openThread;
-    if (!open) return;
-    contextMenu.open(
-      event,
-      [
-        { id: 'rename', label: strings.sidebar.rename },
-        {
-          id: 'retitle',
-          label: store.retitling.includes(open.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
-          disabled: store.retitling.includes(open.id)
-        },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: open.cwd },
-        separator(),
-        { id: 'archive', label: strings.sidebar.archive, danger: true }
-      ],
-      (action) => {
-        if (action === 'rename') beginRename();
-        else if (action === 'retitle') void store.retitle(open.id);
-        else if (action === 'copy') void store.copy(open.cwd);
-        else if (action === 'archive') void store.archive(open.id);
-      }
-    );
+    if (store.openThread) contextMenu.open(event, titleItems, titleAction);
   }
 
 </script>
@@ -87,6 +113,7 @@
           <button
             type="button"
             class="ghost title"
+            bind:this={titleButton}
             data-testid="thread-title"
             title={strings.sidebar.rename}
             onclick={beginRename}
@@ -94,6 +121,12 @@
           >
             {thread.title}
           </button>
+          <!-- A phone has no right-click: the title opens the same actions as a sheet. -->
+          <span class="title-menu">
+            <Menu items={phoneItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
+              <span class="title-text">{thread.title}</span><ChevronDown size={14} />
+            </Menu>
+          </span>
         {/if}
       {:else}
         <span class="draft-mark"></span>
@@ -122,15 +155,16 @@
       {#if thread}
         <button
           type="button"
-          class="ghost trace"
-          class:on={store.panelOpen && store.panel.active?.kind === 'agents'}
+          class="ghost trace in-title-menu"
+          class:on={agentsOn}
           title={strings.delegation.panelHint}
-          aria-pressed={store.panelOpen && store.panel.active?.kind === 'agents'}
+          aria-label={strings.delegation.heading}
+          aria-pressed={agentsOn}
           data-testid="agents-toggle"
           onclick={() => store.panel.toggleKind('agents')}
         >
           <UsersRound size={16} strokeWidth={1.75} />
-          {strings.delegation.heading}
+          <span class="label">{strings.delegation.heading}</span>
         </button>
       {/if}
       <!-- Every surface of the panel reads something only the owner may ask
@@ -140,7 +174,7 @@
         {@const terminalKey = store.keyLabel('terminal')}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost trace in-title-menu"
           class:on={store.terminalShown(thread.id)}
           title={terminalKey ? `${strings.thread.terminalHint} (${terminalKey})` : strings.thread.terminalHint}
           aria-label={strings.thread.terminalHint}
@@ -155,12 +189,13 @@
           class="ghost trace"
           class:on={store.panelOpen}
           title={strings.thread.panelHint}
+          aria-label={strings.thread.panel}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
           <PanelRight size={16} strokeWidth={1.75} />
-          {strings.thread.panel}
+          <span class="label">{strings.thread.panel}</span>
         </button>
       {/if}
 </div>
@@ -225,5 +260,24 @@
 
 
   .title { min-width: 0; }
-  @media (max-width: 720px) { .path { display: none; } .trace { padding: 0 6px; } }
+  .title-menu { display: none; }
+  @media (max-width: 720px) {
+    /* The title is what tells one conversation from another: the buttons give
+       up their words for it, and keep a finger-sized square. */
+    .thread-header { gap: 4px; }
+    .path { display: none; }
+    .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .trace .label { display: none; }
+    /* The title's sheet holds these on a phone. */
+    .in-title-menu { display: none; }
+    .rename { width: 100%; }
+    /* The thread's title button gives way to its menu; a draft's label has no menu and stays. */
+    .title:not(.draft) { display: none; }
+    .title.draft { max-width: none; }
+    .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
+    .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
+    .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
+    .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+  }
 </style>

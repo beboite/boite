@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { paragraphBlocks, currentThought } from '../lib/message-display';
+  import { ParagraphScan, currentThought } from '../lib/message-display';
   import { strings } from '../lib/strings';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
@@ -17,7 +17,10 @@
   });
 
   let current = $derived(currentThought(text));
-  let body = $derived(paragraphBlocks(current.text, live).join('\n\n'));
+  // One block per paragraph, like Prose: a new paragraph renders alone and the
+  // earlier ones keep their nodes, folded or not.
+  const scan = new ParagraphScan();
+  let blocks = $derived(scan.blocks(current.text, live));
   let preview = $derived(current.title ?? strings.chat.thinking);
 </script>
 
@@ -40,7 +43,9 @@
   <div class="fold" class:open inert={!open}>
     <div class="clip">
       {#if built}
-        <div class="body" data-testid="thinking-text">{@html renderMarkdown(body)}</div>
+        <div class="body" data-testid="thinking-text">
+          {#each blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -122,4 +127,8 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  :global(html[data-motion='reduced']) .dot { animation: none; }
 </style>

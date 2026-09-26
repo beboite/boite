@@ -22,6 +22,16 @@ pub(crate) fn toast_app_id(exe_dir: &Path, identifier: &str) -> String {
     }
 }
 
+/// A message box, the only thing a process with no window and no console can
+/// still show. It blocks until the user closes it.
+pub(crate) fn alert(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    let wide = |value: &str| value.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (title, text) = (wide(title), wide(text));
+    // SAFETY: both buffers are NUL-terminated and outlive the call.
+    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR) };
+}
+
 pub(crate) fn notify(app: AppHandle, title: String, body: String, thread_id: String) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| format!("the shell executable is unknown: {error}"))?;
     let exe_dir = exe.parent().ok_or_else(|| "the shell executable has no directory".to_string())?;
@@ -31,10 +41,26 @@ pub(crate) fn notify(app: AppHandle, title: String, body: String, thread_id: Str
         .title(&title)
         .text1(&body)
         .on_activated(move |_| {
-            crate::show_main(&handle);
+            crate::window::show_main(&handle);
             let _ = handle.emit("notification://open", &thread_id);
             Ok(())
         })
         .show()
         .map_err(|error| format!("the toast {title:?} was refused: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toast_app_id;
+    use std::path::Path;
+
+    #[test]
+    fn a_toast_carries_the_identifier_once_installed_and_powershells_id_under_target() {
+        let id = "com.boite.two";
+        assert_eq!(toast_app_id(Path::new(r"C:\Users\x\AppData\Local\Boite"), id), id);
+        assert_eq!(toast_app_id(Path::new(r"D:\src\boite\apps\shell\src-tauri\target\release"), id).contains("powershell.exe"), true);
+        assert_eq!(toast_app_id(Path::new(r"D:\src\boite\apps\shell\src-tauri\target\debug"), id).contains("powershell.exe"), true);
+        // A directory merely named release, not under target, is an install.
+        assert_eq!(toast_app_id(Path::new(r"D:\apps\release"), id), id);
+    }
 }

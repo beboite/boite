@@ -23,8 +23,9 @@ phone menu also applies to owner sessions; it does not change RPC permissions.
 
 Device sessions receive only events corresponding to the state they may read.
 Account login output, process traces, plugin state, quotas and core diagnostics
-remain owner-only. Event permissions are deny-by-default in `access.ts`, just
-like RPC permissions.
+remain owner-only. Event permissions are deny-by-default in
+`packages/contracts/src/access.ts`, just like RPC permissions, and `?fake=1`
+with `principal=session` withholds the same events.
 
 [Phone settings](images/phone-settings.png) · [Desktop settings](images/phone-settings-desktop.png)
 
@@ -45,6 +46,14 @@ The address is read once and a running core never rebinds, so a switch flipped
 while the core is up takes effect the next time it starts. That is what the line
 under the switch says, and one `core.log` line at start names the address and the
 setting that chose it.
+
+The port stays the same across restarts. With no `--port`, a core asks for the
+port its previous run wrote to `core.json`, so a paired phone and an installed
+page keep their address after a reboot or an engine stop. When another program
+took that port meanwhile, the core picks a new one and says so in its log; the
+phone then needs a new pairing link. A `--port` is only ever that port, and a
+taken one stops the core with an error. When the core listens on every
+interface, a pairing link names this machine's LAN address, never `127.0.0.1`.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first
@@ -73,6 +82,15 @@ forgotten on the spot. A link opened twice, or after its time, is refused by
 name. The core token itself stays in `<dataDir>/core.json`, where the shell
 reads it, and travels nowhere.
 
+On a weak link the answer carrying the key can be lost after the core made it.
+The page therefore sends a `nonce` with the grant, 16 random bytes it picks once
+and keeps in memory, and its retry repeats both. The core keeps that exchange's
+answer until the grant's ten minutes run out or the key first says hello on its
+own, and hands the same key to a retry with the same nonce. Anyone else holding
+the link, without the nonce, is still refused. A nonce of another length than
+16 to 256 characters, or one sent with a token, is refused by name before the
+grant is spent, so a client never believes a retry is safe when it is not.
+
 A link carries a role. `device` is the default and the only one the QR code is
 drawn for: a phone, whose key says hello as `session` and reaches the list below.
 `owner` is for another computer of the owner's that drives a core running
@@ -90,8 +108,9 @@ deletes the row, after which its key opens nothing.
 
 ## What a paired device may call
 
-`packages/core/src/access.ts` holds the whole boundary, as one list the router
-checks before any handler runs. Read it as the phone's screen: the sidebar, a
+`packages/contracts/src/access.ts` holds the whole boundary, as one list the
+router checks before any handler runs; the in-memory client applies the same
+list. Read it as the phone's screen: the sidebar, a
 thread, the composer, the cards an agent raises, and the settings it only
 displays. Nothing on that list writes outside a thread, names a path on the
 machine, starts a process of its own or changes what the core trusts.
@@ -111,21 +130,51 @@ The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this
 page. `?core=<url>` is the other form, for a UI served from somewhere else and
 pointed at a core elsewhere, and `?token=` opens a page on a token one already
-holds. The UI strips all three from the address bar on the first load, stores
-the endpoint in `localStorage`, and never stores a grant: what it keeps is the
-session key that came back.
+holds. The UI strips all three from the address bar on the first load and
+never stores a grant: what it keeps is the session key that came back.
+
+A link never replaces the stored core before its target has answered a hello.
+When `core=` names a core that is neither this page's origin nor one this device
+already holds a key for, the page first asks whether to connect to that host.
+Anyone can send a link that points at a core they run, and that core would see
+every prompt typed afterwards. Cancel opens the stored core as before. A
+`core=` link to a core the device already knows reuses the key it holds for it
+and asks nothing.
 
 ## The app on the phone
 
 The browser uses mobile navigation under 720 px. Conversations lists threads
 across connected machines; Activity puts waiting requests first, followed by
-running and queued turns. Settings is the third destination. The header names
+running and queued turns. A phone has no right-click, so the actions a desktop
+finds there open from a tap: the conversation's title in its header lists
+rename, regenerate title, pin, copy path and archive, and the `...` button of a
+row in the list offers pin, regenerate title and archive. The same title sheet
+holds the Agents and Terminal toggles, so the header row keeps only the title,
+the context ring and the Panel button: at 360 px in French, 192 px of a 193 px
+title stay visible, where 96 px did with the toggles in the row. A draft's header shows its "New thread" label. Settings is the third destination. The header names
 the machine, connection and project, and starts a new conversation.
 
-Model, effort and action menus open as bottom sheets. Back dismisses an open
-sheet. Controls have 44 px touch targets; `visualViewport` keeps the composer
-above the keyboard, and the bottom navigation hides while the keyboard is open.
-Safe-area insets keep controls clear of the home indicator and screen cutouts.
+Model, effort and action menus open as bottom sheets. The browser's Back, the
+Android Back gesture and a mouse's back button close the top sheet, dialog,
+context popup or right panel first, then return from a conversation to the
+list it was opened from. Each of those owns one history entry
+(`lib/mobile-history.ts`); closing it by a button removes that entry, so Back
+never lands on something already closed. The conversation the app opens on has
+no list behind it, and Back from there leaves the app as before.
+
+Every button on the chat, the list, the panel and Appearance registers a tap
+19 px from its centre on either axis, and `--touch-target` is 44 px. Some controls
+keep a small look and get a larger hit box, such as the project name in the
+header, a panel tab's icon, which closes the tab, and the accent dots. Under a
+finger, the outline rail beside the conversation gives each prompt a 44 px row
+and scrolls, and the text starts past the rail. A switch sits in a label that
+covers its whole row, so the row is its target. The end-to-end sweep in
+`tests/e2e/mobile.test.ts` measures this with touch emulation on.
+`visualViewport` keeps the composer above the keyboard, and the bottom
+navigation hides while the keyboard is open.
+Safe-area insets keep controls clear of the home indicator and screen cutouts:
+the chat header, the full-screen right panel, and the Agents and Settings pages
+all start below the status bar of an installed app on a notched iPhone.
 
 Draft text stays with its conversation. Four recent timelines are retained in
 memory, each limited to 2,000 messages and 4 MB of text/image data, to preserve
@@ -140,6 +189,33 @@ content fingerprint atomically, so repeating the request returns that turn.
 Reusing the id with different content is refused. This applies to every driver.
 Changing the thread's model, effort or other selection before retrying creates
 a new request ID for that selection.
+
+### Oldest browsers
+
+The UI starts on Safari 15.4 (iOS and iPadOS 15.4) and Chrome 111 or newer. The
+build target lowers syntax only, so what those engines lack is refused where it
+would ship: `packages/ui/vite.config.ts` fails the build on a regex lookbehind or
+a copying array method (`toSorted`, `toReversed`, `toSpliced`) in any chunk, and
+`src/lib/browser-floor.test.ts` checks the sources the same way. A lookbehind is
+a parse error before Safari 16.4, and one in a startup chunk used to leave iOS 15
+with a blank page.
+
+Starting is not the whole layout. That check covers syntax and methods, not CSS
+or DOM features, and three of those arrive later. Every layout below works from
+Safari 17 and Chrome 114:
+
+| Feature | Safari | Chrome | Without it |
+| --- | --- | --- | --- |
+| `color-mix()` | 16.2 | 111 | The shared accent tint has a plain fallback; a few one-off tints are not drawn. |
+| Container queries | 16.0 | 105 | The narrow rules are ignored and the wide layout stays at phone width: the panel's Agents surface and the usage limits (`<= 520px`), the usage table's hidden columns (`<= 560px`, `<= 420px`), the plugin rows (`<= 560px`), the onboarding scenes (`<= 400px`). The changes list keeps the diff under it, which is its phone layout anyway. |
+| Popover API | 17.0 | 114 | `lib/floating.ts` calls `showPopover` only when it exists, so the phone menus and their backdrop are not moved to the top layer. A menu inside the composer is then placed against the composer's glass layer instead of the viewport, and can land off its anchor. |
+
+None of these was tried on a real Safari 15 or 16 device; the table comes from
+the features the built CSS and `lib/floating.ts` use.
+
+A browser under the floor fails to parse the app, so `main.ts` never runs. An
+inline script in `index.html` notices on `load` and writes one sentence in the
+page instead: this browser cannot start Boite, and the versions it needs.
 
 ## HTTPS and installation
 
@@ -163,8 +239,11 @@ needs a certificate the phone trusts for PWA features.
 Set the matching origin in General, Phone app, Public HTTPS address. A headless
 core accepts `--public-url https://boite.example.com` or `BOITE_PUBLIC_URL`.
 This saves `settings.publicUrl`, uses it in new pairing links, and permits that
-exact browser origin at the WebSocket gate. Clearing the setting returns links
-to the core's local address. No wildcard origin or forwarded header is trusted.
+exact browser origin at the WebSocket gate. An address copied from the browser
+bar with its trailing `/` is stored as the bare origin; an address with a path
+is refused, because pairing links cannot point into a proxy's subpath. Clearing
+the setting returns links to the core's local address. No wildcard origin or
+forwarded header is trusted.
 
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
 On Android, use Install Boite in Phone app or the browser's installation menu.
@@ -172,7 +251,8 @@ Open the installed icon and pair there if the browser did not carry the session
 across. Installing a PWA and using Web Push require no Apple Developer account.
 
 `packages/ui/public/sw.js` caches the files for later opens. It is plain
-JavaScript that Vite copies to `dist/sw.js` untouched, and `lib/sw.ts` registers
+JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
+its cache name, and `lib/sw.ts` registers
 it after the first paint, never before: the registration must not delay what the
 user sees. It registers only where it helps, which is the core's own http(s)
 origin. The Tauri shell loads the identical build from `tauri://`, where the
@@ -182,8 +262,14 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache, `boite-ui-v3`. Activation deletes older `boite-ui-` caches and leaves
-other applications' caches alone before the worker claims its clients.
+One cache per build, `boite-ui-v3-<build id>`. The build id is a hash of the
+file names under `dist/assets`, written into `dist/sw.js` before it is
+compressed (`packages/ui/vite.config.ts`). A core update therefore serves a
+different `sw.js`, the browser installs it, and activation deletes older
+`boite-ui-` caches, the previous build's hashed files with them. Other
+applications' caches are left alone. Before this, `sw.js` was the same file in
+every build, so no new worker ever installed and every update's chunks stayed
+in the one cache for good. A dev server serves the unstamped `boite-ui-v3`.
 
 | Request | Rule |
 |---|---|
@@ -228,8 +314,17 @@ operate only on the authenticated pairing. Subscription URLs and encryption
 keys are not placed in events or logs. The encryption library loads on demand.
 
 Finished turns, errors, permission requests and questions trigger notifications
-through the shared core event bus. Stopped turns do not. A click opens the
-conversation, preserving an existing page and its drafts. The worker only opens
+through the shared core event bus. Stopped turns do not, and neither do the
+turns under a thread that are not news of their own: a delegated agent's turns
+(its parent's next turn reports the result), a parent's turn that ends while
+its agents still work, a persistent agent's finished work (read in the agents
+inbox; its failures still notify) and a context compaction. Permission
+requests and questions notify whichever thread asks. A desktop toast follows
+the same rule, from `notifiesOnFinish` in the contracts. A click opens the
+conversation, preserving an existing page and its drafts. With no page open,
+the worker opens `/?thread=<id>`: the page's own core opens that thread as it
+boots, in place of the new-thread draft, and does not wait for other
+remembered machines to connect. The worker only opens
 URLs on its own origin. Enable notifications from the machine's own page, not
 while viewing it through another machine's UI.
 

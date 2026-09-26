@@ -18,7 +18,8 @@ A newer version is a notice pinned under the title bar, top right. It carries
 the agent, the new version, the installed one, and two buttons. It does not
 time out. It leaves on Update, on Skip, or when the core reports the agent
 current. Three notices show at most; a phone shows one at a time and only on
-the conversation screen.
+the conversation screen, below the conversation's header row so its title and
+buttons stay in reach.
 
 - Update releases the provider's warm processes and runs the update in the
   background: the notice leaves at once. The threads stay; the next turn starts
@@ -28,6 +29,9 @@ the conversation screen.
   offers a skipped version again.
 - A failed update brings its notice back with the updater's last line and Try
   again.
+- When the agent that runs is the user's own install (the `self` route), its
+  provider row offers no Update for a copy Boite downloaded earlier: that copy
+  is not what runs, and the Agent updates card owns the version shown.
 
 `Update agents automatically` in the same card makes the core update by
 itself. It is off by default.
@@ -71,7 +75,29 @@ newest release Boite can read. Muse Code has no updater, so it is not listed.
 
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
-process. A version read has 20 seconds, an update 15 minutes.
+process. A version read has 20 seconds, an agent's own updater 15 minutes. At
+the limit the core ends the run's whole process tree, and gives up on its
+output two seconds later even when a descendant it could not reach still holds
+the pipe. Only the last 256 KB of each output stream is kept.
+
+A check reads two agents at a time. Its readings land in
+`<dataDir>/harness-versions.json`, so a restart shows the last reading and its
+notices without running any agent. At start the core reads each managed agent
+again, which spawns nothing, so a Boite build that pins a newer release offers
+it at once; a kept row whose agent is gone or changed route is dropped. An
+agent that updates itself keeps its kept reading until the next check. The
+first automatic check comes ten minutes
+after start, or six hours after the kept reading when that is later, and waits
+ten more minutes while any turn is queued, running or waiting. A check started
+from the card counts: the timer does not read again within six hours of it.
+
+A managed update has no time limit: it waits for its download, which retries a
+dropped connection by itself and fails once the retries run out
+([providers](providers.md#managed-installs)). Update pressed while the install
+card is already downloading that release joins that download instead of
+failing. A download cancelled from the install card fails the update with
+`the download was cancelled`, and a release the install card lands clears the
+notice at once, without waiting for the next check.
 
 ## Rules
 
@@ -98,7 +124,7 @@ list per machine and sends Update to the machine that owns the agent. The
 notice names the machine when more than one is connected.
 
 A server with no window needs no client at all: with
-`autoUpdateHarnesses` on, its core checks a minute after start and every six
+`autoUpdateHarnesses` on, its core checks ten minutes after start and every six
 hours, and updates each agent whose newest release it can read once none of
 its turns is in flight. Turn it on
 from Settings, Providers while that machine is the selected one. On Linux and
@@ -111,8 +137,10 @@ The client treats that machine as having no updates and shows no error.
 
 ## RPC
 
-- `providers.updates { refresh? }`: the list. The first call reads, later calls
-  answer from memory unless `refresh` is true.
+- `providers.updates { refresh? }`: the list, answered from the last reading
+  without running any agent. `refresh: true` reads every agent first. On a core
+  with no reading yet the list is empty; Settings, Providers asks for a refresh
+  when it opens on an empty list.
 - `providers.update { providerId }`: start one update.
 - `providers.updateSkip { providerId, version }`: skip a version, `null`
   forgets the skip.

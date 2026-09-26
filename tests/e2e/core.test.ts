@@ -62,7 +62,7 @@ test(
     const second = Bun.spawn({
       windowsHide: true,
       cmd: ['bun', 'run', join(import.meta.dir, '..', '..', 'packages', 'core', 'src', 'main.ts'), '--port', '0'],
-      env: { ...process.env, BOITE_DATA_DIR: core.dataDir, BOITE_ECHO: '1' },
+      env: { ...process.env, BOITE_DATA_DIR: core.dataDir, BOITE_ECHO: '1', BOITE_HOST_AGENTS: '0' },
       stdout: 'pipe',
       stderr: 'pipe',
     });

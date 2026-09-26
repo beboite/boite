@@ -42,6 +42,38 @@ test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[do
   } finally { client.close(); }
 });
 
+test('fake process events reach a client subscribed to that thread only, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const seen: string[] = [];
+    client.on('process.started', event => seen.push(`started ${event.threadId}`));
+    client.on('process.exited', event => seen.push(`exited ${event.threadId}`));
+    const run = async () => {
+      const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[spawn:fixture]' });
+      await vi.waitFor(async () => {
+        expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+      }, { timeout: 500 });
+    };
+    await run();
+    expect(seen).toEqual([]);
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    await run();
+    expect(seen).toEqual(['started t-trace', 'exited t-trace']);
+  } finally { client.close(); }
+});
+
+test('fake resources.list leaves out an archived thread with nothing running, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = await client.call('resources.list', {});
+    expect(before.find(entry => entry.threadId === 't-trace')?.live).toEqual([]);
+    await client.call('threads.archive', { threadId: 't-trace', archived: true });
+    expect((await client.call('resources.list', {})).map(entry => entry.threadId)).not.toContain('t-trace');
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
@@ -367,6 +399,22 @@ test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settin
   client.close();
 });
 
+test('fake settings store a pasted address as its origin and refuse what the core refuses', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  expect((await client.call('settings.get', {})).warmProcessMinutes).toBe(0);
+  const saved = await client.call('settings.set', {
+    publicUrl: 'https://boite.example.com/',
+    browserOrigins: ['http://192.168.1.20:8777/app', 'http://192.168.1.20:8777/']
+  });
+  expect(saved.publicUrl).toBe('https://boite.example.com');
+  expect(saved.browserOrigins).toEqual(['http://192.168.1.20:8777']);
+  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
+    await expect(client.call('settings.set', patch)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+  }
+  client.close();
+});
+
 test('fake refuses a second active turn and archived threads without adding messages', async () => {
   vi.useFakeTimers();
   const client = new FakeClient({ delayMs: 1 });
@@ -597,5 +645,23 @@ test('fake async answers given while a turn runs start one turn together after i
     expect(after.turns).toHaveLength(4);
     const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
     expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
+  } finally { client.close(); }
+});
+
+test('an account check or provider reload that changes nothing stays silent, as on the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const heard: string[] = [];
+    client.on('accounts.updated', account => heard.push(`account:${account.id}:${account.status}`));
+    client.on('providers.updated', () => heard.push('providers'));
+    // As the core's `add`, which returns its own check: the new account is read and announced once.
+    const account = await client.call('accounts.add', { providerId: 'opencode', label: 'Checked', useDefaultLocation: true });
+    expect(account.status).toBe('ok');
+    expect(heard).toEqual([`account:${account.id}:ok`]);
+    heard.length = 0;
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    await client.call('providers.reload', {});
+    expect(heard).toEqual([]);
   } finally { client.close(); }
 });

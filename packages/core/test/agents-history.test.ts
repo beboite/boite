@@ -6,7 +6,8 @@ import type { AgentHistoryCursor, AgentProfile, AgentRecord, AgentScope, AgentWo
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
-import { SCHEMA_VERSION } from '../src/journal.ts';
+import { SCHEMA_VERSION } from '../src/journal/schema.ts';
+import { PRUNE_RECORD_EVENTS } from '../src/agents/repository.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -163,6 +164,7 @@ test('targeted lookups and pages go through their indexes', async () => {
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'memory' AND json_extract(data, '$.scope.kind') = ? AND json_extract(data, '$.scope.id') = ? ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_memory_scope'],
       ["SELECT data FROM agent_entities INDEXED BY {index} WHERE kind = 'message' AND (updated_at, id) < (?, ?) ORDER BY updated_at DESC, id DESC LIMIT ?", 'agent_recent'],
       ["SELECT COALESCE(MAX(id), 0) AS revision FROM events WHERE type IN ('agents.record', 'agents.limits')", 'events_agents'],
+      [PRUNE_RECORD_EVENTS, 'events_agents'],
     ];
     for (const [sql, index] of lookups) {
       const detail = plan(sql.replace('{index}', index));
@@ -171,6 +173,35 @@ test('targeted lookups and pages go through their indexes', async () => {
       // A lookup sorts the few rows it matched; a page must walk its index in order to stop at the limit.
       if (sql.includes('LIMIT')) expect(detail, sql).not.toContain('TEMP B-TREE');
     }
+  } finally { await h.stop(); }
+});
+
+test('record events past the retention leave the journal, and the newest stays so the revision never goes back', async () => {
+  const h = await startTestCore();
+  try {
+    const c = await h.connect();
+    h.core.workforce.setLimits({ ...h.core.workforce.limits(), paused: true });
+    const agent = await agentOf(h, c);
+    const scope: AgentScope = { kind: 'agent', id: agent.id };
+    grow(h, agent.id, scope, 5);
+    const db = h.core.journal.db;
+    const records = () => (db.query("SELECT count(*) AS n FROM events WHERE type = 'agents.record'").get() as { n: number }).n;
+    expect(records()).toBeGreaterThan(20);
+    // A month of routine runs later: every record event is past the retention.
+    db.query("UPDATE events SET ts = 1 WHERE type = 'agents.record'").run();
+    const r = h.core.workforce.records;
+    const revision = r.revision();
+    const repository = r as unknown as { pruned: number; prune(now: number): void };
+    repository.pruned = 0;
+    repository.prune(Date.now());
+    expect(records()).toBe(1);
+    expect(r.revision()).toBe(revision);
+    // Records themselves stay, and the next write still moves the revision forward.
+    expect(r.recent('work', { scope }, null, 10).items).toHaveLength(5);
+    r.create('memory', { scope, title: 'after', text: 'kept', sourceScopes: [scope], sourceRunId: null, expiresAt: null });
+    expect(r.revision()).toBeGreaterThan(revision);
+    // The next pass waits an hour.
+    expect(records()).toBe(2);
   } finally { await h.stop(); }
 });
 

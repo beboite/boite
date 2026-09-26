@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import type { Message } from '@boite/contracts';
-import { Journal, SCHEMA_VERSION } from '../src/journal.ts';
+import { Journal } from '../src/journal.ts';
+import { JournalTooNewError, SCHEMA_VERSION } from '../src/journal/schema.ts';
 
 let dir: string;
 let file: string;
@@ -43,7 +45,7 @@ describe('journal', () => {
   });
 
   test('corrupt JSON names its table, row and column', () => {
-    journal.putMessage(sampleMessage('broken-message'));
+    journal.putMessage({ ...sampleMessage('broken-message'), state: 'complete' });
     journal.db.query('UPDATE messages SET parts = ? WHERE id = ?').run('{', 'broken-message');
     expect(() => journal.getMessage('broken-message')).toThrow('messages.parts row broken-message');
     journal.db.query('INSERT INTO settings (key, value) VALUES (?, ?)').run('settings', '{');
@@ -64,17 +66,16 @@ describe('journal', () => {
     expect(journal.countEvents('project.added')).toBe(1);
   });
 
-  test('deltas are buffered into one event and one row', () => {
+  test('deltas are buffered into the message, with no event of their own', () => {
     journal.append({ type: 'message.started', threadId: 'thr_test', version: 1, payload: {} }, () => {
       journal.putMessage(sampleMessage('msg_1'));
     });
     journal.appendDelta('thr_test', 'msg_1', 0, 'he');
     journal.appendDelta('thr_test', 'msg_1', 0, 'llo ');
     journal.appendDelta('thr_test', 'msg_1', 0, 'world');
-    expect(journal.countEvents('message.delta')).toBe(0);
 
     journal.flushDeltas();
-    expect(journal.countEvents('message.delta')).toBe(1);
+    expect(journal.countEvents('message.delta')).toBe(0);
     const message = journal.getMessage('msg_1');
     expect(message?.parts).toEqual([{ type: 'text', text: 'hello world' }]);
   });
@@ -92,6 +93,53 @@ describe('journal', () => {
       { type: 'text', text: 'before' },
       { type: 'error', message: 'boom' },
     ]);
+  });
+
+  test('a journal from a newer release is refused before anything is written', () => {
+    journal.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
+    journal.close();
+    let refused: unknown;
+    try {
+      new Journal(file);
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toBeInstanceOf(JournalTooNewError);
+    expect(String(refused)).toContain(`journal schema ${SCHEMA_VERSION + 1}`);
+    const raw = new Database(file);
+    expect((raw.query('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SCHEMA_VERSION + 1);
+    raw.close();
+    journal = new Journal(join(dir, 'other.db'));
+  });
+
+  test('removing a project clears every row its threads left, with foreign keys off', () => {
+    const count = (sql: string) => (journal.db.query(sql).get() as { n: number }).n;
+    const thread = { id: 'thr_gone', projectId: 'prj_gone', title: 't', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, speed: null, cwd: 'D:/x', branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    journal.append({ type: 'thread.created', threadId: 'thr_gone', version: 1, payload: {} }, () => journal.putThread({ ...thread }));
+    journal.db.query("INSERT INTO coordination_letters (id, thread_id, direction, status, created_at, data) VALUES ('l', 'thr_gone', 'in', 'received', 1, '{}')").run();
+    journal.db.query("INSERT INTO coordination_wakes VALUES ('thr_gone', 1)").run();
+    journal.setSetting('activity:thr_gone', { tasks: [] });
+    journal.deleteThreadsOfProject('prj_gone');
+    expect(count("SELECT COUNT(*) AS n FROM coordination_letters WHERE thread_id = 'thr_gone'")).toBe(0);
+    expect(count("SELECT COUNT(*) AS n FROM coordination_wakes WHERE thread_id = 'thr_gone'")).toBe(0);
+    expect(count("SELECT COUNT(*) AS n FROM events WHERE thread_id = 'thr_gone'")).toBe(0);
+    expect(journal.getSetting('activity:thr_gone')).toBeUndefined();
+    expect((journal.db.query('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys).toBe(0);
+  });
+
+  test('event retention deletes old events from the front and keeps the agents revision', () => {
+    const now = Date.now();
+    const old = now - 40 * 86_400_000;
+    for (let i = 0; i < 5; i++) journal.append({ type: 'thread.updated', threadId: 't', version: 1, payload: {}, ts: old }, () => undefined);
+    journal.append({ type: 'agents.record', threadId: null, version: 1, payload: {}, ts: old }, () => undefined);
+    const revision = (journal.db.query("SELECT MAX(id) AS id FROM events WHERE type = 'agents.record'").get() as { id: number }).id;
+    for (let i = 0; i < 3; i++) journal.append({ type: 'thread.updated', threadId: 't', version: 1, payload: {}, ts: now }, () => undefined);
+    const cutoff = now - 30 * 86_400_000;
+    expect(journal.pruneEvents(cutoff, 3)).toBe(3);
+    expect(journal.pruneEvents(cutoff, 3)).toBe(2);
+    expect(journal.pruneEvents(cutoff, 3)).toBe(0);
+    expect(journal.countEvents()).toBe(4);
+    expect((journal.db.query("SELECT MAX(id) AS id FROM events WHERE type = 'agents.record'").get() as { id: number }).id).toBe(revision);
   });
 
   test('reopening the file keeps the data', () => {

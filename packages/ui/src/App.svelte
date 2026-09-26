@@ -22,12 +22,14 @@
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
+  import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { mobileOverlay } from './lib/mobile-history';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
@@ -36,8 +38,8 @@
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
-  // it. Each loads the moment it is asked for, and all of them once the app is
-  // idle, so a key pressed a second after boot finds them and the service
+  // it. Each loads the moment it is asked for, and the rest once the app has
+  // booted and is idle, so a key pressed a second later finds them and the service
   // worker has them for a phone that loses its link. The tour is the same case
   // taken further: a device draws it once, then only when asked.
   const deferredLoaders = {
@@ -73,8 +75,15 @@
       });
   }
   function needAll(): void {
-    for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);
+    const names = Object.keys(deferredLoaders) as (keyof Deferred)[];
+    for (const name of prefetchNames(names, { tourSeen: tourSeen(), owner: store.owner })) need(name);
   }
+  // Once the first load has landed rather than against it, and only on a link
+  // that can spare the bytes (lib/prefetch.ts).
+  $effect(() => {
+    if (!store.booted || !prefetchAllowed()) return;
+    return whenIdle(needAll);
+  });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
@@ -117,10 +126,6 @@
       ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
       : undefined;
     if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
-    // After the first paint, not in its way. Safari has no requestIdleCallback.
-    const idle = typeof requestIdleCallback === 'function'
-      ? requestIdleCallback(needAll, { timeout: 1500 })
-      : setTimeout(needAll, 300);
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -134,8 +139,10 @@
       else if (hidden) { hidden = false; resume(); }
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+    const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
+    window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
@@ -145,8 +152,6 @@
     };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
-      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(idle as number);
-      else clearTimeout(idle);
       stopViewport();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
@@ -154,6 +159,7 @@
       stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
+      window.removeEventListener('offline', offline);
       window.removeEventListener('pageshow', pageshow);
       navigator.serviceWorker?.removeEventListener('message', notification);
     };
@@ -205,6 +211,23 @@
     else panelSlot.hide();
   });
 
+  // On a phone the panel covers the chat: Back shuts it.
+  $effect(() => {
+    if (panelSlot.open) return mobileOverlay(() => store.panel.hide());
+  });
+
+  // The tray menu is native: it speaks the UI's language only when told, at
+  // start and whenever the language changes.
+  $effect(() => {
+    if (!inShell) return;
+    const labels = { show: strings.quotas.trayShow, quit: strings.quotas.trayQuit };
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('tray_labels', labels))
+      .catch(() => {
+        // An older shell without the command keeps its English menu.
+      });
+  });
+
   // Every http(s) link the UI shows goes to the system browser, once, from here.
   $effect(() => {
     const root = appRoot;
@@ -221,14 +244,11 @@
   });
 
   onMount(() => {
+    // A notification tapped with no window open: taken off the address at
+    // once, so a reload during the boot does not jump there again.
     const requestedThread = new URLSearchParams(location.search).get('thread');
-    void workspace.boot().then(async () => {
-      if (requestedThread) {
-        const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url);
-        const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
-        if (machine) await workspace.select(machine.store, requestedThread);
-      }
-    });
+    if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
@@ -397,7 +417,7 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -638,6 +658,9 @@
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
+    /* Agents and Settings draw no mobile header: the body keeps clear of the
+       status bar and the notch itself. */
+    .app.off-chat .body { padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;

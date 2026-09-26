@@ -2,10 +2,12 @@
  * The prompt cache lifetimes the providers publish, for the drivers whose
  * agent does not report one per request. `docs/prompt-cache.md` has the
  * sources and what each agent sends; a provider missing here has no published
- * lifetime, and its threads show no timer rather than a guess.
+ * lifetime, and its threads show no timer rather than a guess. Also the cache
+ * a finished turn leaves on its thread (`promptCacheOf`).
  */
 
-import type { PromptCacheLife } from './drivers/types.ts';
+import type { PromptCache, ThreadSummary } from '@boite/contracts';
+import type { PromptCacheLife, TurnResult } from './drivers/types.ts';
 
 /**
  * Anthropic's default lifetime, what a `cache_control` with no `ttl` asks
@@ -33,4 +35,35 @@ export function openAiCacheLife(model: string | null): PromptCacheLife | null {
   const minor = match[2] === undefined ? 0 : Number(match[2]);
   if (major > 5 || (major === 5 && minor >= 6)) return { ttlSeconds: 1800, source: 'documented' };
   return { ttlSeconds: 1800, maxSeconds: 86_400, source: 'documented' };
+}
+
+/**
+ * The prompt cache a finished turn left, or null when the driver names no
+ * lifetime or nothing shows a request went out: a turn stopped before its
+ * first call reported no usage and touched no cache. A lifetime that is not a
+ * whole positive number of seconds is dropped, never shown.
+ */
+export function promptCacheOf(
+  result: TurnResult,
+  thread: Pick<ThreadSummary, 'model' | 'accountId'>,
+  at: number,
+  previous: PromptCache | null = null,
+): PromptCache | null {
+  // A turn that only read from the cache restarts the clock of the lifetime
+  // the earlier write had, as long as it ran on the same model and account.
+  const reread = (result.usage?.cacheReadTokens ?? 0) > 0 && previous !== null
+    && previous.model === thread.model && previous.accountId === thread.accountId ? previous : null;
+  const life = result.promptCache ?? reread;
+  if (!life || (result.usage === null && result.status !== 'done')) return null;
+  if (!Number.isInteger(life.ttlSeconds) || life.ttlSeconds <= 0) return null;
+  const max = life.maxSeconds !== undefined && Number.isInteger(life.maxSeconds) && life.maxSeconds > life.ttlSeconds ? life.maxSeconds : undefined;
+  return {
+    at,
+    ttlSeconds: life.ttlSeconds,
+    ...(max === undefined ? {} : { maxSeconds: max }),
+    source: life.source,
+    readTokens: result.usage?.cacheReadTokens ?? 0,
+    model: thread.model,
+    accountId: thread.accountId,
+  };
 }

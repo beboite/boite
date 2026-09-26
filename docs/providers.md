@@ -4,7 +4,9 @@ A provider is an agent Boite can run, described by JSON rather than by code, so
 adding one is a file instead of a release. Shipped descriptors live in
 `packages/core/src/providers/shipped/` and are read-only; a user drops their own
 under `<dataDir>/providers/*.json`. The types are in the contract, the loader in
-`packages/core/src/providers/loader.ts`.
+`packages/core/src/providers/loader.ts`, the field checks in `validate.ts`, the
+load-time tokens in `expand.ts` and executable resolution in `resolve.ts`, all
+beside it.
 
 A descriptor loads or is refused with the file, the field and what was expected.
 An unknown field is a refusal, a user file may not take a shipped id, and `roots`
@@ -27,7 +29,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
       "detect": {},
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
-        { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
       "launch": { "args": ["acp", "--port", "0"] },
@@ -105,7 +107,15 @@ session protocol either.
 - `detect` is `{ command }` or `{ file }`. A provider whose detect does not
   resolve reports unavailable rather than failing at spawn.
 - `executable` is an ordered candidate list, first hit wins. `kind: "file"` is
-  an exact path and `kind: "path"` a name looked up on PATH. `kind: "npm"` names
+  an exact path and `kind: "path"` a name looked up on PATH. On Windows a PATH
+  lookup passes over `.cmd`, `.bat` and `.ps1` launchers to the next PATH
+  directory holding a real program of that name, and misses when there is none:
+  the drivers spawn through node, which refuses a launcher script with EINVAL,
+  so the agent reads as not installed and its row offers the install instead.
+  A turn started on it is refused with the launcher script's path, so the
+  reason is on screen rather than a bare "not available".
+  A profile that names a launcher script as a `file` candidate keeps them, as
+  Muse Code does, since its driver maps its launcher to its program. `kind: "npm"` names
   a globally installed package, `@scope/name#bin`, for the agents npm installs
   as a `.cmd` shim Bun cannot spawn. The core looks for the package under the
   npm prefix (`npm_config_prefix`, `%APPDATA%/npm`, the directory of `npm`,
@@ -116,6 +126,19 @@ session protocol either.
   the summary shows the script as the executable. Only the `pi` and `acp`
   protocols take an `npm` candidate: the SDK and app-server drivers spawn the
   program with no leading argument.
+- A `file` candidate that starts with `{npmRoot}` is looked for under each
+  global npm `node_modules` directory, the same list an `npm` candidate walks,
+  with the profile's `path` names as the bin hints. That is how Codex and
+  OpenCode find the program their npm package vendors under nvm-windows, fnm,
+  scoop or a custom prefix, where the shim on PATH is a `.cmd`. The token is
+  expanded at each resolution, not at load, and only at the start of a `file`
+  value.
+- A PATH lookup, for a candidate, a `detect.command` or the npm roots, is
+  remembered for 30 seconds per name and PATH, so the provider list and each
+  turn start do not walk PATH again. A remembered program that is gone is looked
+  up again. A reload, a managed install or uninstall and an update forget every
+  lookup; a program installed outside Boite shows up within 30 seconds, or at
+  once on a reload.
 - `launch.args` put the agent into the mode Boite speaks to. The `agy` driver
   adds its print-mode flags itself, because the same binary also answers
   `agy models` for the probe, so the Antigravity CLI declares none; anything a
@@ -153,7 +176,8 @@ declared line as it is.
 ## Managed installs
 
 An `install` block is how Boite ships an agent whose binary is not on the machine
-and which has no installer of its own: a `version`, a zip `url`, its `sha256`, its
+and which has no installer of its own: a `version` (letters, digits and `. _ + -`,
+since it names the release directory), a zip `url`, its `sha256`, its
 `archiveBytes`, and every `files` entry expected out of the archive with its exact
 size, the first one the executable.
 Additional executable files declare `executable: true`; the installer gives
@@ -204,11 +228,30 @@ junction on Windows and a symlink elsewhere, and `.install-complete.json` is
 written beside the files: that record, with its version matching the descriptor's,
 is the only thing that makes a provider read as `installed`.
 
+A bad connection does not start the download over. A dropped connection, a
+server answer of 408, 429 or 5xx, or 30 seconds without a byte ends one attempt,
+and the download tries again after 1, 2, 4, 8 and 16 seconds. Each retry asks
+only for the missing bytes (`Range`, with `If-Range` carrying the server's ETag
+or date); a server that sends the whole file again is read from the start. Once
+the retries run out the install fails with how far it got, and keeps the `.part`
+beside a `.part.json` naming its URL and digest. The next install of the same
+archive hashes those bytes again and resumes after them. A body longer than
+`archiveBytes`, or a `Content-Length` that disagrees with it, is refused at once.
+
 Free space is checked first, against the archive plus the unpacked files plus a
-256 MB margin. A cancel aborts the fetch and leaves no `.part`, and nothing goes
-into the journal, so a core that dies mid-download comes back saying `absent`.
+256 MB margin, less what a kept `.part` already holds. A cancel aborts the fetch
+and leaves no `.part`. Nothing goes into the journal, so a core that stops
+mid-download comes back saying `absent`, and its `.part` stays for the next
+install to resume.
 `providers.uninstall` deletes `<dataDir>/agents/<id>` and is refused while a lease
 is held, and one is held for every process a thread, probe or login launched.
+
+An update installs the new release beside the old one and repoints `current`.
+The old release is deleted as soon as no lease is held: right after the update,
+or when the last process of that provider ends. A core that starts also deletes
+every release `current` does not point at, and every download except the `.part`
+of the version the descriptor pins. A file Windows still holds is logged and
+left for the next of those moments.
 
 ## What ships
 
@@ -250,6 +293,12 @@ runs on. Four descriptor fields exist for it and are open to any provider:
 - `unsetEnv`, on an OS profile, names variables taken out of the inherited
   environment before the spawn, so a key the user set for their own tools cannot
   redirect the agent Boite runs.
+- `session`, on an OS profile, replaces `auth.session` on that OS. An empty list
+  says the login can live outside any file there: the `auth.session` files still
+  read `ok` when present, and without them its accounts read `unknown` and turns
+  still start. Claude's macOS profile sets it: Claude Code keeps its login in the
+  Keychain there, and writes `.credentials.json` only when the Keychain is out
+  of reach.
 - `seedFiles`, on the descriptor, maps a relative path to content written under
   the isolation directory before anything starts. Antigravity needs
   `antigravity-acp/settings.json` holding `{"auth":{"type":"oauth-personal"}}`.
@@ -284,6 +333,32 @@ change drops the process. Nothing ever sends `authenticate` to Grok: an account
 with no `auth.json` is refused before a turn starts, and `authenticate` on an
 empty home opens a browser.
 
+An ACP thread resumes its session with `session/load` when the agent
+advertises `loadSession`. When the agent refuses that load while its process is
+alive, what the refusal says decides. -32002 (resource not found), a missing
+`session/load` method, or a reason that names a missing session means the
+conversation is gone: the core forgets the session id, starts a new session
+generation and runs the same turn again, once, on a fresh session whose prompt
+carries the conversation so far. A turn the user stopped meanwhile stays
+stopped. -32000 (authentication
+required) and -32800 (cancelled) leave the session alone: the turn fails with
+the agent's reason and the next turn loads the session again. Any other error,
+such as an internal one, keeps the session the first time; the same session
+refused that way on the next load too counts as gone, since OpenCode answers a
+missing session with its generic -32603 "OpenCode service failure". An agent
+without `loadSession` opens a new session whenever a turn finds no process
+holding the thread's session, whatever ended it (the turn itself, the idle
+window, an archive, a restart); that turn's prompt carries the conversation so
+far, and the log says the agent cannot load a session. Stop sends
+`session/cancel` and gives the agent three seconds to end the turn before the
+process is dropped; a
+stop while the process or the session is still starting drops it at once. An
+agent that exits before it answers `initialize`, in a turn, a probe or a login,
+fails with its exit code and the last line it wrote to stderr. Stderr is read in
+whole lines, a line cut at 64 KB. A tool's text output and a markdown document
+are cut at 64K characters with a note saying where, and a diff whose two sides
+pass that size is drawn as a sentence giving its size.
+
 ## The Antigravity CLI
 
 Two rows carry Antigravity, and they are two different programs.
@@ -302,6 +377,15 @@ and no `login` block, `auth.kind` is `none`, and `accounts.add` refuses an
 account of its own ([accounts.md](accounts.md)). A signed-out agy is found by
 the probe instead: `agy models` answers "Please sign in", and the probe says to
 run `agy` in a terminal and sign in there.
+
+Every agy Boite starts (turns, `agy models`, the usage read) runs with
+`AGY_CLI_DISABLE_AUTO_UPDATE=true`, and only that exact value works: `1` does
+not. Left on, agy spawns `agy --bg-updater` at most every 15 minutes, and that
+detached process runs `agy --version` in a console of its own. No hidden-window
+flag on Boite's side reaches it, so on Windows the user got a terminal window
+over whatever they were doing. agy is updated from the agent updates card
+instead ([agent-updates.md](agent-updates.md)), whose `agy update` run keeps
+the variable unset.
 
 The `agy` driver (`packages/core/src/drivers/agy.ts`) speaks the CLI's
 headless mode, `--input-format stream-json --output-format stream-json -p=`.
@@ -324,7 +408,9 @@ change starts a new process on the same conversation. With
 `warmProcessMinutes` above zero the process stays up between turns; otherwise
 stdin closes when the turn ends, the process gets eight seconds to leave, and
 the next one of the thread waits for it. Stop kills the whole tree, since agy
-starts the MCP servers from its own settings as children. `BROWSER` points at
+starts the MCP servers from its own settings as children. A stop that lands
+while the models are still being listed, before the launch, ends the turn at
+once and starts no process. `BROWSER` points at
 `{browserNoop}` for every process, so nothing agy does opens a window.
 `/compact` is refused: print mode rejects the CLI's interactive-only commands.
 
@@ -350,6 +436,10 @@ question:
   `session/set_config_option` in a fresh probe process and reads the scale the
   answer carries. One read per model is cached with the list, the composer asks
   for the model it lands on, and a failed read keeps the list already cached.
+  A model's scale is read once, even when the agent names none for it. The
+  config options a turn's own `session/new` or `session/load` answers are kept
+  for the account too, so a later process that resumes a session seeds its
+  controls from them instead of opening a discovery `session/new` every time.
 - Codex: `initialize`, the `initialized` notification, then `model/list` until no
   cursor comes back. Each model carries its own efforts and its own default, so
   two models on one account can offer two different scales. `serviceTiers` supplies
@@ -379,8 +469,10 @@ question:
 
 The child is killed through the registry on every path. The answer keeps the
 descriptor's `default` first, so the choice can always go back to the agent, is
-cached per provider and account until `providers.reload` or a change to that
-account, and reaches every client as `providers.probed`. Two callers at once share
+cached per provider and account until a `providers.reload` that changes a
+descriptor, what one resolves to or a rejection, or a change to that
+account, and reaches every client as `providers.probed`. A reload that changes
+none of that emits no `providers.updated`. Two callers at once share
 one process. `refresh: true` bypasses a completed cache entry, sharing any probe
 already in flight. The UI keeps a persistent display cache and reads asynchronously.
 A probe that finds no executable, whose agent dies or that runs past
@@ -413,6 +505,13 @@ Each protocol takes them differently, and the difference is not cosmetic.
   plus read-only, `bypassPermissions` and `dontAsk` never plus danger-full-access.
   No call changes that pair on a live thread, so the mode is part of the session
   key: changing it drops the process and the next turn resumes with the new pair.
+  Under on-request, a command, a file change, a wider sandbox
+  (`item/permissions/requestApproval`, granted for the turn) and an MCP tool
+  call each draw a permission card. Codex asks for the MCP tool call through
+  `mcpServer/elicitation/request`, as does an MCP server asking a plain yes or
+  no; an elicitation that needs a form with required fields, a url or a device
+  check has no card yet and is declined, with a line in the log. Stop answers
+  an open card with `cancel`, not with the user's refusal.
 - Muse splits a mode in two. The approval mode goes on the wire, on
   `session/start` and through `session/setApprovalMode` when the host reports
   another, so a warm host follows it: `default` and `acceptEdits` are
@@ -484,6 +583,49 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - `threads.compact` sends `session/compact`; a `noop` answer fails the turn
   with Muse's reason. `session/todoListChanged` fills the thread's tasks, a
   cancelled item left out, and `session/contextUsage` feeds the context meter.
+- Each startup step, `initialize` and then `session/start` or `session/resume`,
+  has 90 s. A host that misses it is closed and the turn fails with the step's
+  name. A stop during startup closes the host at once and ends the turn
+  stopped, and a stop that lands before `turn/start` or `session/compact` sends
+  neither, so a stopped turn never reaches the model.
+- `session/closed` retires the host, idle or not. The turn it interrupts fails
+  with Muse's reason, and the next turn resumes the session on a new host.
+- Closing the host ends the thread's whole process tree on Windows. On Linux
+  and macOS only the direct child is killed.
 - The profile sets `MUSE_NO_AUTO_UPDATE=1`, so the launcher never updates what
   Boite pinned, and unsets `META_API_KEY`, so a key in the user's environment
   never replaces the account's login.
+
+### pi
+
+`packages/core/src/drivers/pi.ts` and the modules under `drivers/pi/` speak
+pi's RPC mode: JSON lines over the stdio of `pi --mode rpc`.
+
+- A turn ends on `agent_settled`, never on `agent_end`. pi retries an overloaded
+  or dropped request by itself inside the same run (`auto_retry_start`,
+  `auto_retry_end`) and recovers from a context overflow by compacting, so only
+  the outcome of the last assistant message counts. A 529 that pi recovered
+  from ends the turn done; one it gave up on fails the turn with pi's final
+  error.
+- An extension command, or an input handler that consumes the prompt, answers
+  `prompt` without starting a run and never sends `agent_settled`. The driver
+  sends `get_state` after each accepted prompt and ends the turn when
+  `isStreaming` is false.
+- Stop sends `abort`, after `clear_queue` when coordination steered the run. A
+  pi that has not settled 15 s later is closed and the turn ends stopped. The
+  same holds for a pi still in its prompt preflight, which answers `abort` and
+  `get_state` but holds the answer to `prompt`. A stopped turn also ends
+  stopped when the core shuts down before then.
+  Closing a session ends the thread's whole process tree on Windows, so a dev
+  server a tool left running goes with it. On Linux and macOS only the direct
+  child is killed.
+- Extension dialogs (`select`, `confirm`, `input`, `editor`) become question
+  cards. A dialog with a `timeout` loses its card when the time runs out,
+  because pi then answers it with its default. `notify` is drawn in the turn,
+  and an error notice becomes an error card that does not fail the turn.
+  `setStatus`, `setWidget`, `setTitle` and `set_editor_text` get no answer and
+  are not drawn.
+- A warm process follows a change of model or level with `set_model` and
+  `set_thinking_level`. There is no call that goes back to pi's own model or to
+  no level, so either change starts a new process.
+- After each turn `get_session_stats` feeds the context meter.

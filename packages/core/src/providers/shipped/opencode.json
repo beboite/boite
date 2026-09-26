@@ -11,7 +11,7 @@
       "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
       "executable": [
         { "kind": "file", "value": "{agentsDir}/opencode.exe" },
-        { "kind": "file", "value": "{appdata}/npm/node_modules/opencode-ai/bin/opencode.exe" },
+        { "kind": "file", "value": "{npmRoot}/opencode-ai/bin/opencode.exe" },
         { "kind": "path", "value": "opencode" }
       ],
       "install": {

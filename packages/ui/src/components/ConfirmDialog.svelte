@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { confirm, type ConfirmRequest } from '../lib/confirm.svelte';
+  import { focusedElement, restoreFocus } from '../lib/focus';
 
   const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
@@ -9,14 +11,26 @@
   /** The request is nulled the moment it is answered, so the exit plays on a copy. */
   let held = $state<ConfirmRequest | null>(null);
   let card = $state<HTMLDivElement | undefined>(undefined);
+  /** Whether a request is on the screen, and what had the keyboard before it came. */
+  let asking = false;
+  let previous: HTMLElement | null = null;
 
-  /** A dangerous action opens with the keyboard on Cancel, a plain one on Confirm. */
+  /**
+   * A dangerous action opens with the keyboard on Cancel, a plain one on Confirm.
+   * Answered either way, the keyboard goes back to what had it, else the
+   * composer: left on the page, the next Escape would stop the running turn.
+   * A caller that moved the focus itself after the answer keeps it there.
+   */
   $effect(() => {
     const current = confirm.current;
     if (!current) {
       overlay.hide();
+      if (asking) untrack(giveBack);
+      asking = false;
       return;
     }
+    if (!asking) previous = untrack(focusedElement);
+    asking = true;
     held = current;
     overlay.show();
     void tick().then(() => {
@@ -24,6 +38,13 @@
       target?.focus({ preventScroll: true });
     });
   });
+
+  function giveBack() {
+    const active = document.activeElement;
+    if (!active || active === document.body || card?.contains(active)) restoreFocus(previous);
+    previous = null;
+  }
+  $effect(() => { if (overlay.open) return mobileOverlay(() => confirm.answer(false)); });
 
   function onkeydown(event: KeyboardEvent) {
     if (!confirm.current) return;

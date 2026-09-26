@@ -1,14 +1,17 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
 import { FakeClient } from '../lib/fake-client';
-import { LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
+import { loadLocale, LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION, readOnboarding, steps } from '../lib/onboarding';
 import { closeTour, openTour, tourRequested, tourSeen } from '../lib/onboarding.svelte';
 import { Store } from '../lib/store.svelte';
 import { THEME_STORAGE_KEY } from '../lib/theme';
 import { PREFS_STORAGE_KEY } from '../lib/prefs';
 import { work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
+
+// French is its own chunk: loaded once, the tour's language buttons switch at once.
+beforeAll(() => loadLocale('fr'));
 
 /**
  * The tour: the screens it walks, the switches it carries, and the record it
@@ -262,6 +265,17 @@ test('refusing the deal keeps basic counters, turns the row red and closes after
   expect(query<HTMLButtonElement>('[data-testid=onboarding-telemetry-enhanced]').disabled).toBe(true);
   // The refusal clip plays before the tour goes away.
   expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
+});
+
+test('the note under the rows turns everything off in one click and closes the tour', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query('[data-testid=onboarding-telemetry-basic]').textContent).toContain('basic counters');
+  await answer('onboarding-telemetry-off');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
+  expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+  expect(tourSeen()).toBe(true);
 });
 
 test('under reduced motion refusing closes at once, and a replay keeps a saved opt-out', async () => {

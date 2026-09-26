@@ -102,13 +102,22 @@ export function assertDriverRunnable(
   protocol: Protocol,
   provider: ProviderSummary | undefined,
   account: Account,
+  /** The launcher script PATH holds instead of a program, asked only once the provider reads as missing. */
+  launcherScript: () => string | null = () => null,
 ): void {
   if (!RUNNABLE.has(protocol)) throw unavailable(`no driver for protocol ${protocol}`, { protocol });
   if (provider === undefined || !provider.available) {
-    throw unavailable(`the provider ${account.providerId} is not available on this machine`, {
-      providerId: account.providerId,
-      executable: provider?.executable ?? null,
-    });
+    const script = provider === undefined ? null : launcherScript();
+    throw unavailable(
+      script === null
+        ? `the provider ${account.providerId} is not available on this machine`
+        : `the provider ${account.providerId} is not available on this machine: PATH has only the launcher script ${script}, which Boite cannot start. Install the agent's own program, or let Boite install it`,
+      {
+        providerId: account.providerId,
+        executable: provider?.executable ?? null,
+        ...(script === null ? {} : { launcherScript: script }),
+      },
+    );
   }
   if (account.status === 'unauthenticated') {
     throw unavailable(`the account ${account.label} is not logged in`, {

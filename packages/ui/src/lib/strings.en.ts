@@ -184,6 +184,7 @@ export const strings = {
     settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
     settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
     settingsAppearanceHint: 'Theme and accent for this phone.',
+    settingsArchivedHint: 'Bring back a conversation archived on the connected machine.',
     settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
@@ -197,11 +198,16 @@ export const strings = {
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, General, Phones and other devices, create a pairing link and paste it here. Turn on Full control there to manage its accounts and settings from this one.',
     labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
-    remove: 'Disconnect', open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
+    remove: 'Remove machine', removeTitle: 'Remove {machine}?',
+    removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
+    open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
     duplicate: 'This machine is already connected.', noPr: 'No PR', refreshPr: 'Refresh pull request',
     prUnavailable: 'Pull request unavailable', manual: 'Connect with URL and token',
     filter: 'Filter machines', all: 'All machines',
     timeout: 'Machine did not answer within 12 seconds. Check its address and browser origins, then reconnect.',
+    linkTitle: 'Connect to {host}?',
+    linkBody: 'The link you opened points this page at a machine this device has never connected to. That machine will see everything you type here. Connect only if you made this link or trust who sent it. Cancel keeps your current machine.',
+    linkConfirm: 'Connect', linkCancel: 'Cancel',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'For a browser or phone viewing several machines, add the origin that serves Boite on each remote machine. One exact http(s) origin per line. Desktop connections need no extra origin.',
     agentLinks: 'Agent links', agentLinksHint: 'Let agents on two connected owner machines find each other. Each core exchanges its public signing key and address. No owner token or private key is shared.',
@@ -265,7 +271,7 @@ export const strings = {
     readyAction: 'Install update',
     detailsAction: 'Details',
     installTitle: 'Install the Boite update?',
-    installBody: 'Boite will close and stop agent turns running on this computer. Interrupted turns do not restart automatically.',
+    installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
     readyTitlebar: 'Install the ready app update',
     detailsTitlebar: 'Open app update details'
   },
@@ -377,6 +383,8 @@ export const strings = {
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
+    archiveTitle: 'Archive this thread?',
+    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 
@@ -602,6 +610,7 @@ export const strings = {
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
     diffHidden: '{count} unchanged lines',
+    diffShowAll: 'Show all {count} lines',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'No output',
@@ -771,6 +780,7 @@ export const strings = {
     models: 'Models',
     searchModels: 'Search models',
     noModels: 'No model matches',
+    showAllModels: 'Show all {count} models',
     legacyModels: 'Legacy models',
     refreshModels: 'Refresh models',
     probing: "Reading the agent's models",
@@ -813,6 +823,7 @@ export const strings = {
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
     attachTooMany: 'A turn carries at most {max} files, so {name} was left out.',
+    attachTotalTooLarge: 'The files of one turn weigh {max} at most together, so {name} was left out.',
     attachNoImages: '{provider} takes no images: send the prompt without them.'
   },
 
@@ -1188,7 +1199,8 @@ export const strings = {
     reapOrphans: 'Stop what agents leave running',
     reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped, the way an interrupted command leaves them. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
-    asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn `boite ask` when a session starts. Codex asks this way natively.',
+    asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn the boite ask command when a session starts. Codex asks this way natively.',
+    numberRange: 'A whole number from {min} to {max}.',
     save: 'Save',
     saved: 'Saved',
     core: 'Core',
@@ -1199,6 +1211,13 @@ export const strings = {
     dataDir: 'Data directory',
     endpoint: 'Endpoint',
     noCore: 'Not connected to a core.',
+    archived: {
+      heading: 'Archived threads',
+      intro: 'An archived thread leaves the sidebar and its agent stops. Restore it to bring the conversation back; its agent starts again with the next message.',
+      show: 'Show archived threads',
+      empty: 'No archived thread on this machine.',
+      restore: 'Restore'
+    },
     pairing: {
       heading: 'Phones and other devices',
       intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',
@@ -1207,7 +1226,7 @@ export const strings = {
       expires: 'Works once, until {time}',
       qr: 'The pairing link as a QR code',
       scan: 'Scan the code with the phone, or open the link on it.',
-      lanHint: 'The core listens on this machine only: turn on the LAN switch in Scheduler below, then restart it, before a phone can reach this link.',
+      lanHint: 'The core listens on this machine only. Turn on "Listen on the LAN" in Scheduler below, then quit and reopen Boite, before a phone can reach this link.',
       devices: 'Paired devices',
       noDevices: 'No device paired yet.',
       thisDevice: 'this device',
@@ -1283,6 +1302,9 @@ export const strings = {
   quotas: {
     trayHeading: 'Usage',
     trayIntro: 'Subscription limits',
+    /** The tray icon's right-click menu. */
+    trayShow: 'Show',
+    trayQuit: 'Quit',
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Off',
     noReading: 'Unavailable',
@@ -1297,6 +1319,11 @@ export const strings = {
     intro: 'Subscription limits reported by your providers. Separate from tokens used in Boite.',
     remaining: '{percent}% left',
     resets: 'Resets {time}',
+    /** The limit windows the core names in English: `5 hours`, `Weekly`, `Monthly`, `Credits`, alone or on one side of ` · `. */
+    windowHours: '{hours} hours',
+    windowWeekly: 'Weekly',
+    windowMonthly: 'Monthly',
+    windowCredits: 'Credits',
     checked: 'Updated {time}',
     stale: 'Last successful reading',
     empty: 'Connect a provider to see its subscription limits.',
@@ -1428,10 +1455,11 @@ export const strings = {
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',
     noEndpoint: 'No core endpoint could be resolved.',
+    coreStart: 'The core on this computer did not start: {reason}',
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
-    pairingLink: 'That is not a pairing link: it needs an http or https address carrying a grant.'
+    pairingLink: 'That is not a pairing link. Paste the link shown by New pairing link on the other machine; it starts with http and contains ?grant=.'
   },
 
   units: {
@@ -1444,6 +1472,21 @@ export const strings = {
     minutes: 'min',
     hours: 'h',
     tokens: 'tokens'
+  },
+
+  /** Effort and speed levels by the id the providers share; another id keeps the provider's own word. */
+  effortLevels: {
+    none: 'None',
+    off: 'Off',
+    minimal: 'Minimal',
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    xhigh: 'Extra high',
+    max: 'Max',
+    ultra: 'Ultra',
+    ultrathink: 'Ultrathink',
+    fast: 'Fast'
   },
 
   common: {
@@ -1471,12 +1514,13 @@ export const strings = {
       intro: 'Boite counts a few anonymous usage stats so we know what to fix first. Your messages, files and accounts never leave your machine, the app works the same either way, and you can change your mind anytime in Settings.',
       question: 'Deal?',
       video: 'Trade offer meme',
-      basic: 'NO! Enough is enough',
+      basic: 'NO! Just the basic counters',
       basicDefault: '(default)',
       basicHint: 'Counts of active installs, launches, conversations and turn outcomes. The usage IDs change every day. No profile.',
       deal: 'DEAL',
       dealHint: 'Adds the public models you pick, reasoning level, speed and permission modes, durations and token volumes, under a stable random ID. Private models count as "other". It helps a lot. Thank you!',
-      optOut: "If you REALLY don't want to help Boite, Settings > General > Privacy and analytics turns everything off. :c",
+      optOut: "If you REALLY don't want to help Boite:",
+      offLabel: 'turn everything off :c',
       doc: 'What is collected'
     },
     demo: {

@@ -118,6 +118,25 @@ describe('echo driver', () => {
     ]);
   });
 
+  test('threads.compact draws a manual divider, an inline compact directive an automatic one', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+
+    let finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'first' });
+    await finished;
+
+    finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    const turn = await client.call('threads.compact', { threadId });
+    expect(turn.execution?.operation).toBe('compact');
+    expect((await finished).status).toBe('done');
+    const parts = (await client.call('threads.get', { threadId })).messages.flatMap((message) => message.parts);
+    expect(parts.filter((part) => part.type === 'compaction')).toEqual([
+      { type: 'compaction', trigger: 'manual', preTokens: 1800, postTokens: 300 },
+    ]);
+  });
+
   test('a tool directive produces a running then a done tool part', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -262,6 +281,11 @@ describe('echo driver', () => {
     await expect(
       client.call('turns.start', { threadId, prompt: 'x', attachments: Array.from({ length: 9 }, () => image({})) }),
     ).rejects.toThrow('a turn carries at most 8 attachments, this one has 9');
+    // Three phone photos under the per-file cap still make a frame the socket would not carry.
+    const photo = 'A'.repeat(4_893_356);
+    await expect(
+      client.call('turns.start', { threadId, prompt: 'x', attachments: [1, 2, 3].map((at) => image({ data: photo, name: `photo-${at}.jpg` })) }),
+    ).rejects.toThrow('the attachments weigh 10.5 MB together, over the 10 MB one turn may carry');
 
     // Nothing above started a turn, so the thread is still idle and empty.
     const thread = await client.call('threads.get', { threadId });
@@ -486,6 +510,45 @@ describe('echo driver', () => {
     expect(seen).not.toContain('message.started');
   });
 
+  // The spawn directive goes through `cmd /c` on Windows, which a test here
+  // does not start; Linux and macOS CI run this one.
+  test.skipIf(process.platform === 'win32')('a stop ends a spawn turn without waiting for the child', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+    const started = client.next('process.started', (record) => record.threadId === threadId, 10000);
+    const exited = client.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+
+    await client.call('turns.start', { threadId, prompt: '[spawn:exec sleep 30]' });
+    await started;
+    const stoppedAt = Date.now();
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    expect(Date.now() - stoppedAt).toBeLessThan(3000);
+    await exited;
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('process events reach the connections subscribed to that thread only', async () => {
+    const subscriber = await harness.connect();
+    const watcher = await harness.connect();
+    const { threadId } = await echoThread(harness, subscriber);
+    await subscriber.call('threads.subscribe', { threadId });
+
+    const seen: string[] = [];
+    watcher.onAny((event) => seen.push(event));
+
+    const exited = subscriber.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const finished = subscriber.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await subscriber.call('turns.start', { threadId, prompt: '[spawn:echo hello]' });
+    await exited;
+    await finished;
+
+    expect(seen).toContain('thread.updated');
+    expect(seen.filter((event) => event.startsWith('process.'))).toEqual([]);
+  });
+
   test('a spawn directive traces the child and appends its output', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -544,6 +607,11 @@ describe('echo driver', () => {
     const client = await harness.connect();
     const project = await client.call('projects.add', { path: harness.dataDir, name: 'claude project' });
     const account = await client.call('accounts.add', { providerId: 'claude', label: 'no login' });
+    if (process.platform === 'darwin') {
+      // The login may be in the Keychain there: the account reads unknown and a turn still starts.
+      expect(account.status).toBe('unknown');
+      return;
+    }
     expect(account.status).toBe('unauthenticated');
 
     const thread = await client.call('threads.create', {

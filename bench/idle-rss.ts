@@ -4,24 +4,60 @@
  * that matters: everything a fresh core loads before a thread ever runs. The
  * three ways to run it are measured side by side, because the gap between the
  * sources and the bundle is what `bun run build` buys.
+ *
+ * Two points per process: `fresh`, 4.5 s after the spawn, and `steady`, 75 s
+ * after it, once the first automatic update check (60 s, providers/updates.ts)
+ * has read the providers' versions, started the jobs Worker and fetched the
+ * registry metadata. Each reports the working set, the private bytes and the
+ * thread count. The cores get BOITE_HOST_AGENTS=0, so the check resolves no
+ * program and runs none of the agents installed on this machine: an agent's
+ * own updater can open a console window that windowsHide does not stop.
+ * BOITE_BENCH_HOST_AGENTS=1, set by a person and never by an agent, lets the
+ * check read the providers found on PATH, as an installed core would.
+ * `--fresh-only` skips the 75 s wait.
+ *
+ * Run: bun run bench/idle-rss.ts [--fresh-only]
  */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const SETTLE_MS = 4_500;
-const BARE_SLEEP_MS = 9_000;
+const FRESH_ONLY = process.argv.includes('--fresh-only');
+const POINTS = FRESH_ONLY
+  ? [{ name: 'fresh', atMs: 4_500 }]
+  : [{ name: 'fresh', atMs: 4_500 }, { name: 'steady', atMs: 75_000 }];
+const LAST_MS = POINTS[POINTS.length - 1]!.atMs;
+const BARE_SLEEP_MS = LAST_MS + 10_000;
 const RUNS = 3;
 const CORE_DIR = join(import.meta.dir, '..', 'packages', 'core');
 const DIST = join(CORE_DIR, 'dist');
 const BUNDLE = join(DIST, 'main.js');
 const EXE = join(DIST, 'boite-core.exe');
 const MB = 1024 * 1024;
+const HOST_AGENTS = process.env.BOITE_BENCH_HOST_AGENTS === '1';
+
+/**
+ * The environment a core under measure starts with: a fresh data directory, no
+ * telemetry, and no host agent unless BOITE_BENCH_HOST_AGENTS=1 asked for them.
+ */
+export function coreEnv(base: NodeJS.ProcessEnv, dataDir: string, hostAgents: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, BOITE_DATA_DIR: dataDir, BOITE_TELEMETRY_URL: '' };
+  if (hostAgents) delete env.BOITE_HOST_AGENTS;
+  else env.BOITE_HOST_AGENTS = '0';
+  return env;
+}
 
 interface Subject {
   label: string;
   cmd: string[];
   missing: string | null;
+}
+
+/** One process at one point: working set, private bytes, threads. */
+interface Sample {
+  ws: number;
+  priv: number;
+  threads: number;
 }
 
 function subjects(): Subject[] {
@@ -41,22 +77,25 @@ function subjects(): Subject[] {
   ];
 }
 
-function workingSets(pids: number[]): Map<number, number> {
+function samples(pids: number[]): Map<number, Sample> {
   const list = pids.join(',');
-  const script = `Get-Process -Id ${list} | ForEach-Object { "$($_.Id) $($_.WorkingSet64)" }`;
+  const script = `Get-Process -Id ${list} | ForEach-Object { "$($_.Id) $($_.WorkingSet64) $($_.PrivateMemorySize64) $($_.Threads.Count)" }`;
+  // Windows PowerShell cannot load its modules from a PowerShell 7 module path.
+  const env = { ...process.env };
+  delete env.PSModulePath;
   const read = Bun.spawnSync({
     cmd: ['powershell', '-NoProfile', '-Command', script],
+    env,
     stdout: 'pipe',
     stderr: 'pipe',
     windowsHide: true,
   });
-  const sets = new Map<number, number>();
+  const sets = new Map<number, Sample>();
   for (const line of read.stdout.toString().split('\n')) {
-    const [pid, bytes] = line.trim().split(' ');
-    if (pid === undefined || bytes === undefined) continue;
-    const id = Number(pid);
-    const size = Number(bytes);
-    if (Number.isFinite(id) && Number.isFinite(size)) sets.set(id, size);
+    const [id, ws, priv, threads] = line.trim().split(' ').map(Number);
+    if ([id, ws, priv, threads].every((value) => value !== undefined && Number.isFinite(value))) {
+      sets.set(id!, { ws: ws!, priv: priv!, threads: threads! });
+    }
   }
   return sets;
 }
@@ -71,15 +110,19 @@ function median(values: number[]): number | undefined {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-async function oneRun(live: Subject[]): Promise<Map<string, number>> {
+/** point name, then subject label, then its sample. */
+type RunReads = Map<string, Map<string, Sample>>;
+
+async function oneRun(live: Subject[]): Promise<RunReads> {
   const dataDirs: string[] = [];
+  const spawnedAt = performance.now();
   const started = live.map((subject) => {
     const isCore = subject.label !== 'bare bun';
     const dataDir = isCore ? mkdtempSync(join(tmpdir(), 'boite-idle-')) : '';
     if (isCore) dataDirs.push(dataDir);
     const proc = Bun.spawn({
       cmd: isCore ? [...subject.cmd, '--port', '0'] : subject.cmd,
-      env: isCore ? { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_TELEMETRY_URL: '' } : { ...process.env },
+      env: isCore ? coreEnv(process.env, dataDir, HOST_AGENTS) : { ...process.env },
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
@@ -89,14 +132,18 @@ async function oneRun(live: Subject[]): Promise<Map<string, number>> {
   });
 
   try {
-    await Bun.sleep(SETTLE_MS);
-    const sets = workingSets(started.map((entry) => entry.proc.pid));
-    const measured = new Map<string, number>();
-    for (const entry of started) {
-      const bytes = sets.get(entry.proc.pid);
-      if (bytes !== undefined) measured.set(entry.subject.label, bytes);
+    const reads: RunReads = new Map();
+    for (const point of POINTS) {
+      await Bun.sleep(Math.max(0, point.atMs - (performance.now() - spawnedAt)));
+      const sets = samples(started.map((entry) => entry.proc.pid));
+      const measured = new Map<string, Sample>();
+      for (const entry of started) {
+        const sample = sets.get(entry.proc.pid);
+        if (sample !== undefined) measured.set(entry.subject.label, sample);
+      }
+      reads.set(point.name, measured);
     }
-    return measured;
+    return reads;
   } finally {
     for (const entry of started) entry.proc.kill();
     await Promise.all(started.map((entry) => entry.proc.exited));
@@ -107,35 +154,45 @@ async function oneRun(live: Subject[]): Promise<Map<string, number>> {
 async function main(): Promise<void> {
   const all = subjects();
   const live = all.filter((subject) => subject.missing === null);
-  const reads = new Map<string, number[]>();
+  const reads = new Map<string, Map<string, Sample[]>>();
+  process.stdout.write(
+    HOST_AGENTS
+      ? 'BOITE_BENCH_HOST_AGENTS=1: the cores read the providers on PATH\n'
+      : 'BOITE_HOST_AGENTS=0: the cores resolve no host agent\n',
+  );
 
   for (let run = 0; run < RUNS; run += 1) {
     const measured = await oneRun(live);
-    const line = live
-      .map((subject) => `${subject.label} ${megabytes(measured.get(subject.label))}`)
-      .join(', ');
-    process.stdout.write(`run ${run + 1}: ${line}\n`);
-    for (const [label, bytes] of measured) {
-      const seen = reads.get(label) ?? [];
-      seen.push(bytes);
-      reads.set(label, seen);
+    for (const [point, bySubject] of measured) {
+      const line = live.map((subject) => `${subject.label} ${megabytes(bySubject.get(subject.label)?.ws)}`).join(', ');
+      process.stdout.write(`run ${run + 1} ${point}: ${line}\n`);
+      const pointReads = reads.get(point) ?? new Map<string, Sample[]>();
+      for (const [label, sample] of bySubject) pointReads.set(label, [...(pointReads.get(label) ?? []), sample]);
+      reads.set(point, pointReads);
     }
   }
 
-  process.stdout.write(`\nmedian of ${RUNS} runs\n`);
-  const bare = median(reads.get('bare bun') ?? []);
-  for (const subject of all) {
-    if (subject.missing !== null) {
-      process.stdout.write(`${subject.label.padEnd(28)} not built, run ${subject.missing}\n`);
-      continue;
+  for (const point of POINTS) {
+    process.stdout.write(`\n${point.name}, ${point.atMs / 1000} s after the spawn, median of ${RUNS} runs\n`);
+    process.stdout.write(`${''.padEnd(28)} ${'working set'.padStart(20)} ${'private'.padStart(10)} ${'threads'.padStart(8)}\n`);
+    const pointReads = reads.get(point.name) ?? new Map<string, Sample[]>();
+    const bare = median((pointReads.get('bare bun') ?? []).map((sample) => sample.ws));
+    for (const subject of all) {
+      if (subject.missing !== null) {
+        process.stdout.write(`${subject.label.padEnd(28)} not built, run ${subject.missing}\n`);
+        continue;
+      }
+      const seen = pointReads.get(subject.label) ?? [];
+      const ws = median(seen.map((sample) => sample.ws));
+      const above =
+        ws === undefined || bare === undefined || subject.label === 'bare bun' ? '' : ` (+${((ws - bare) / MB).toFixed(1)})`;
+      const priv = median(seen.map((sample) => sample.priv));
+      const threads = median(seen.map((sample) => sample.threads));
+      process.stdout.write(
+        `${subject.label.padEnd(28)} ${`${megabytes(ws)}${above}`.padStart(20)} ${megabytes(priv).padStart(10)} ${String(threads ?? 'unread').padStart(8)}\n`,
+      );
     }
-    const value = median(reads.get(subject.label) ?? []);
-    const above =
-      value === undefined || bare === undefined || subject.label === 'bare bun'
-        ? ''
-        : `  (+${((value - bare) / MB).toFixed(1)} MB)`;
-    process.stdout.write(`${subject.label.padEnd(28)} ${megabytes(value)}${above}\n`);
   }
 }
 
-await main();
+if (import.meta.main) await main();

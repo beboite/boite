@@ -165,6 +165,13 @@ export interface OsProfile {
    * redirect the agent Boite runs.
    */
   unsetEnv?: string[];
+  /**
+   * The files that carry the login on this OS, in place of `auth.session`. An
+   * empty list says the login can be kept outside any file here (Claude Code
+   * uses the macOS Keychain): the `auth.session` files still read `ok` when
+   * present, and their absence reads `unknown`, never `unauthenticated`.
+   */
+  session?: string[];
   /** Process names the core closes when an account is removed. */
   close?: { processes?: string[] };
 }
@@ -670,6 +677,33 @@ export interface Turn {
   execution?: TurnExecution;
 }
 
+/** A thread status that means one of its turns is still under way. */
+export function threadActive(status: ThreadStatus): boolean {
+  return status === 'queued' || status === 'running' || status === 'waiting';
+}
+
+/**
+ * Whether a finished turn is worth a notification, for the core's Web Push and
+ * a client's own toast alike. A delegated agent's result goes to its parent,
+ * whose next turn reports it; a parent's turn that ends while `activeChildren`
+ * of its agents still work is not the answer yet; a persistent agent's work is
+ * read in the agents inbox, so only its failures notify; compacting the
+ * context is housekeeping. A stop is the user's own doing. Requests that wait
+ * for an answer are notified whatever the thread.
+ */
+export function notifiesOnFinish(
+  thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>,
+  turn: Pick<Turn, 'status' | 'execution'>,
+  activeChildren: number,
+): boolean {
+  if (turn.status !== 'done' && turn.status !== 'error') return false;
+  if (thread.parentThreadId) return false;
+  if (turn.execution?.operation === 'compact') return false;
+  if (turn.status === 'error') return true;
+  if (thread.agentSessionId) return false;
+  return activeChildren === 0;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type ToolStatus = 'running' | 'done' | 'error' | 'denied';
@@ -682,7 +716,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -1017,8 +1051,9 @@ export interface Settings {
    */
   reapOrphans?: boolean;
   /**
-   * The core updates its agents by itself: checked a minute after start and
-   * every six hours, each one updated once no turn of its provider is in
+   * The core updates its agents by itself: checked ten minutes after start,
+   * or six hours after the reading kept from the last run when that is later,
+   * then every six hours, each one updated once no turn of its provider is in
    * flight. It needs no client connected, which is how a server stays current.
    */
   autoUpdateHarnesses: boolean;
@@ -1607,11 +1642,20 @@ export interface RpcMethods extends AgentsRpcMethods {
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
    * two, never both.
+   *
+   * `nonce` goes with a grant: a random string of 16 to 256 characters the
+   * client picks once and repeats on every retry. When the answer carrying the
+   * session is lost, the same grant and nonce get the same session back until
+   * the grant would have expired or the session first says hello with its
+   * token. Without a nonce a grant is strictly one-shot. A nonce of another
+   * length, or one sent with a token, is refused with `InvalidParams` naming
+   * `nonce`, before the grant is spent.
    */
   hello: {
     params: {
       token?: string;
       grant?: string;
+      nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
     };
@@ -1709,7 +1753,9 @@ export interface RpcMethods extends AgentsRpcMethods {
   };
   /**
    * Claude, ACP, Codex and pi list models through a temporary agent process.
-   * Results are kept until refresh, `providers.reload` or an account change.
+   * Results are kept until refresh, a `providers.reload` that changes a
+   * descriptor, or an account whose status or login changes: an unchanged
+   * reload or `accounts.check` keeps them.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
@@ -1726,13 +1772,13 @@ export interface RpcMethods extends AgentsRpcMethods {
   /**
    * Download and unpack the release this profile's `install` block names. On a
    * provider already installed at an older version this is the update: the new
-   * release lands beside the old one and `current` is repointed, the old
-   * directory staying until `providers.uninstall` because a process may still
-   * be running out of it. Refused when the profile carries no such block, when
-   * the installed version is already the one the descriptor names, when an
+   * release lands beside the old one and `current` is repointed. The old
+   * release is deleted once no process of that provider is left, since one may
+   * still be running out of it. Refused when the profile carries no such block,
+   * when the installed version is already the one the descriptor names, when an
    * install is already running for that provider, or when the free space under
-   * the data directory is under the archive plus the unpacked files plus a
-   * 256 MB margin. Progress arrives as `providers.installProgress`.
+   * the data directory is under the archive, less what a kept `.part` of that
+   * same archive already holds, plus the unpacked files plus a 256 MB margin. Progress arrives as `providers.installProgress`.
    */
   'providers.install': { params: { providerId: ProviderId }; result: ProviderInstallState };
   /** Abort the running install. The operation id is the one its state carries. */
@@ -1745,7 +1791,8 @@ export interface RpcMethods extends AgentsRpcMethods {
   /**
    * Where every available agent stands against its newest release, on the
    * machine this core runs on. `refresh` asks the agents and the registries
-   * again; without it the last reading answers, and the first call reads.
+   * again; without it the last reading answers, an empty list when the core
+   * has none yet. A plain call never runs an agent.
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**
@@ -1803,7 +1850,8 @@ export interface RpcMethods extends AgentsRpcMethods {
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the working branch's PR using the execution machine's GitHub CLI. */
-  'threads.pullRequest': { params: { threadId: ThreadId }; result: ThreadSummary['pullRequest'] };
+  /** `refresh`: a user asked, so what the core kept for this repository is read again, and a missing gh is tried again. */
+  'threads.pullRequest': { params: { threadId: ThreadId; refresh?: boolean }; result: ThreadSummary['pullRequest'] };
   'threads.create': {
     params: {
       projectId: ProjectId;
@@ -2160,3 +2208,5 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
+export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';

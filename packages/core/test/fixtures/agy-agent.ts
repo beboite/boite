@@ -7,7 +7,8 @@
  *
  * Run as `bun <this file> <agy arguments>`. `AGY_FAKE_LOG` names a file it
  * appends to: one `argv conversation=<id> model=<m> mode=<m> skip=<bool> stream=<bool>`
- * line per conversation process, one `env BROWSER=<value>` line with it, one
+ * line per conversation process, `env BROWSER=<value>` and
+ * `env AGY_CLI_DISABLE_AUTO_UPDATE=<value>` lines with it, one
  * `prompt <text>` line per prompt, and `models` for each listing.
  * `AGY_FAKE_SIGNED_OUT=1` makes it answer like an agy nobody signed in to, and
  * `AGY_FAKE_MODELS_DELAY_MS` holds the listing back that long.
@@ -43,6 +44,7 @@ function flag(name: string): string {
 
 if (args[0] === 'models') {
   log('models');
+  log(`probe env AGY_CLI_DISABLE_AUTO_UPDATE=${process.env['AGY_CLI_DISABLE_AUTO_UPDATE'] ?? ''}`);
   process.stdout.write('Fetching available models...\n');
   const delay = Number(process.env['AGY_FAKE_MODELS_DELAY_MS'] ?? '0');
   if (delay > 0) await Bun.sleep(delay);
@@ -81,6 +83,7 @@ const stream = flag('--input-format') === 'stream-json' && flag('--output-format
 log(`argv conversation=${flag('--conversation') || 'new'} model=${model} mode=${mode} skip=${skip} stream=${stream}`);
 log(`workspace ${flag('--add-dir')}`);
 log(`env BROWSER=${process.env['BROWSER'] ?? ''}`);
+log(`env AGY_CLI_DISABLE_AUTO_UPDATE=${process.env['AGY_CLI_DISABLE_AUTO_UPDATE'] ?? ''}`);
 
 let stepIndex = 0;
 const total = { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 };

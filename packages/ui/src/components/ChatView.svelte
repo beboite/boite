@@ -3,7 +3,7 @@
   import type { ProjectId } from '@boite/contracts';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
-  import { projectName } from '../lib/format';
+  import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
@@ -20,7 +20,7 @@
   let draftModel = $derived(store.modelOf(draftChoice));
   let draftProvider = $derived(draftChoice ? store.providerOf(draftChoice.providerId) : null);
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
-  let effortLabel = $derived(draftModel?.effort?.levels.find((level) => level.id === draftEffort)?.label ?? draftEffort);
+  let effortLabel = $derived.by(() => { const level = draftModel?.effort?.levels.find((level) => level.id === draftEffort); return level ? levelName(level) : draftEffort; });
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
 
   const OPEN_FOLDER = 'open-folder';

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import InfoTip from './InfoTip.svelte';
   import type { HarnessUpdate } from '@boite/contracts';
   import { strings } from '../lib/strings';
@@ -20,6 +21,13 @@
       checking = false;
     }
   }
+
+  // The core answers from its last reading and never runs the agents for a plain list:
+  // opening this card on a core that has not read them yet is the moment to.
+  onMount(() => {
+    // A store with no core yet has nothing to ask, and must not show the button busy.
+    if (store.client !== null && store.owner && store.harnessUpdates.length === 0 && !busy) void check();
+  });
 
   function newer(update: HarnessUpdate): boolean {
     return update.latest !== null && update.current !== null && update.latest !== update.current && (update.pending || update.skipped === update.latest || update.state === 'failed');
@@ -96,7 +104,12 @@
     gap: 12px;
   }
 
+  /* One grid for the whole list, so the version and state columns line up
+     across rows whether or not a row has an action. */
   ul {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 160px minmax(0, 1fr) auto;
+    column-gap: 10px;
     list-style: none;
     margin: 8px 0 0;
     padding: 0;
@@ -105,9 +118,10 @@
 
   li {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) 160px minmax(0, 1fr) auto;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
     align-items: center;
-    gap: 10px;
+    row-gap: 10px;
     min-height: var(--row);
     padding: 6px 0;
     border-bottom: 1px solid var(--color-border);
@@ -133,7 +147,7 @@
   .none { margin: 8px 0 0; }
 
   @media (max-width: 720px) {
-    li { grid-template-columns: auto minmax(0, 1fr) auto; }
+    ul { grid-template-columns: auto minmax(0, 1fr) auto; }
     .state { grid-column: 2 / -1; white-space: normal; }
     .row-actions { grid-column: 2 / -1; justify-content: flex-start; }
   }

@@ -17,6 +17,13 @@ import { newId } from './ids.ts';
 
 const ORDER: Record<Todo['status'], number> = { open: 0, claimed: 1, done: 2 };
 
+/**
+ * How many open or claimed cards a project may hold before an agent's add is
+ * refused. Every change rewrites and sends the whole list, so an agent looping
+ * on `todos.add` would make each one heavier; the user's own adds are not capped.
+ */
+export const AGENT_OPEN_TODOS_MAX = 200;
+
 function key(projectId: ProjectId): string {
   return `todos:${projectId}`;
 }
@@ -70,8 +77,19 @@ export function listTodos(core: Core, threadId: ThreadId): Todo[] {
   return orderTodos(stored(core, projectOfThread(core, threadId)));
 }
 
-export function addTodo(core: Core, params: RpcParams<'todos.add'>): Todo {
+export function addTodo(core: Core, params: RpcParams<'todos.add'>, principal: Principal = 'owner'): Todo {
   const projectId = projectOfThread(core, params.threadId);
+  const todos = stored(core, projectId);
+  if (principal !== 'owner') {
+    const pending = todos.filter((todo) => todo.status !== 'done').length;
+    if (pending >= AGENT_OPEN_TODOS_MAX) {
+      throw refused(`an agent adds a card only while the project holds fewer than ${AGENT_OPEN_TODOS_MAX} open or claimed cards, this one has ${pending}`, {
+        limit: AGENT_OPEN_TODOS_MAX,
+        count: pending,
+        principal,
+      });
+    }
+  }
   const now = Date.now();
   const todo: Todo = {
     id: newId('todo_'),
@@ -82,7 +100,7 @@ export function addTodo(core: Core, params: RpcParams<'todos.add'>): Todo {
     createdAt: now,
     updatedAt: now,
   };
-  save(core, projectId, [...stored(core, projectId), todo]);
+  save(core, projectId, [...todos, todo]);
   return todo;
 }
 
@@ -143,7 +161,7 @@ export function removeTodo(core: Core, params: RpcParams<'todos.remove'>): void 
 
 export function registerTodoMethods(core: Core): void {
   core.router.register('todos.list', (params) => listTodos(core, params.threadId));
-  core.router.register('todos.add', (params) => addTodo(core, params));
+  core.router.register('todos.add', (params, ctx) => addTodo(core, params, ctx.connection.identity.principal));
   core.router.register('todos.update', (params, ctx) => updateTodo(core, params, ctx.connection.identity.principal));
   // Deleting a card is the user's: an agent that is done with one claims it.
   core.router.register('todos.remove', (params) => {

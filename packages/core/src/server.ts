@@ -1,5 +1,6 @@
 import type { RpcEvents, ThreadId } from '@boite/contracts';
-import { FILE_ROUTE, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
+import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
@@ -14,6 +15,23 @@ import { handleFrame } from './server/frame.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
+/** A hello is a few hundred bytes; nothing larger is parsed from a socket nobody has authenticated. */
+const PREAUTH_FRAME_MAX_BYTES = 64 * 1024;
+/**
+ * Sockets from other machines waiting for their hello at once. A real client
+ * spends milliseconds there, so this only bounds a peer opening them by the
+ * thousand. The owner's own machine is never counted, so no peer can lock the
+ * shell or an agent out of the core by holding every place.
+ */
+const PREAUTH_SOCKETS_MAX = 32;
+/** The same bound per LAN address, so one host cannot hold every place from the others. */
+const PREAUTH_SOCKETS_PER_ADDRESS = 8;
+/**
+ * Seconds an HTTP connection may sit without a byte either way. No route here
+ * holds a request open: the coordination POST answers at once, and a ticketed
+ * file a paused video stops reading is fetched again by `Range`.
+ */
+const HTTP_IDLE_TIMEOUT_S = 60;
 
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
@@ -88,6 +106,44 @@ export function isLoopbackHost(header: string | null): boolean {
   return name === '127.0.0.1' || name === 'localhost' || name === '::1';
 }
 
+/** The peer address `Server.requestIP` gives, IPv4-mapped IPv6 included. */
+export function isLoopbackAddress(address: string | null): boolean {
+  if (address === null) return false;
+  const bare = address.toLowerCase().replace(/^::ffff:/, '');
+  return bare === '::1' || /^127\.\d+\.\d+\.\d+$/.test(bare);
+}
+
+/**
+ * What a socket waiting for hello is counted under: null for the owner's own
+ * machine, which is never counted, else the peer address. The address comes
+ * from the TCP connection and cannot be forged; a local tunnel or proxy
+ * connects from loopback too but forwards a public `Host`, so its peers are
+ * counted, all under the one loopback address.
+ */
+export function preauthPeer(address: string | null, host: string | null): string | null {
+  if (isLoopbackAddress(address) && isLoopbackHost(host)) return null;
+  return address ?? 'unknown';
+}
+
+/**
+ * Why a socket from `peer` may not wait for its hello beside the `waiting`
+ * ones, or null when it may. Peers behind a local tunnel share the loopback
+ * address, which says nothing about who they are, so only the total bounds them.
+ */
+export function preauthRefusal(waiting: Iterable<string>, peer: string): string | null {
+  let total = 0;
+  let same = 0;
+  for (const other of waiting) {
+    total += 1;
+    if (other === peer) same += 1;
+  }
+  if (total >= PREAUTH_SOCKETS_MAX) return `${total} sockets from other machines are already waiting for their hello`;
+  if (!isLoopbackAddress(peer) && same >= PREAUTH_SOCKETS_PER_ADDRESS) {
+    return `${same} sockets from ${peer} are already waiting for their hello`;
+  }
+  return null;
+}
+
 const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 
 /**
@@ -102,11 +158,20 @@ const IMMUTABLE_FOR_A_YEAR = 'public, max-age=31536000, immutable';
 function cacheHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith('/assets/')) return { 'cache-control': IMMUTABLE_FOR_A_YEAR };
   if (pathname === '/sw.js') return { 'cache-control': 'no-cache', 'service-worker-allowed': '/' };
-  if (pathname === '/' || pathname === '/index.html' || pathname === '/manifest.webmanifest') {
-    return { 'cache-control': 'no-cache' };
-  }
+  if (pathname === '/' || pathname === '/index.html') return { 'cache-control': 'no-cache', ...NO_FOREIGN_FRAMES };
+  if (pathname === '/manifest.webmanifest') return { 'cache-control': 'no-cache' };
   return {};
 }
+
+/**
+ * The page is the owner's whole UI, so no other site may frame it and lay a
+ * decoy over Allow or Revoke. Ticketed files keep no such header: the panel
+ * frames them, from the same origin in a browser.
+ */
+const NO_FOREIGN_FRAMES = {
+  'content-security-policy': "frame-ancestors 'self'",
+  'x-frame-options': 'SAMEORIGIN',
+} as const;
 
 function staticFile(pathname: string): string | null {
   if (!existsSync(UI_DIST)) return null;
@@ -203,12 +268,66 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
   });
 }
 
+/**
+ * `core.shutdown` for a caller with no WebSocket: the desktop shell before it
+ * hands its files to the installer, the installer itself, and a shell that
+ * found an older core than itself. Only the core token opens it, only through
+ * a loopback name, so a proxy on this machine forwarding a public name cannot
+ * reach it. The answer is 202: the process drains and exits after it.
+ */
+export const SHUTDOWN_PATH = '/shutdown';
+
+function sameToken(given: string, expected: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function shutdownResponse(core: Core, request: Request): Response {
+  if (request.method !== 'POST') return new Response('POST only', { status: 405, headers: { allow: 'POST' } });
+  if (!isLoopbackHost(request.headers.get('host'))) {
+    return new Response('shutdown is only served on a loopback name', { status: 403 });
+  }
+  const header = request.headers.get('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  if (token === '' || !sameToken(token, core.token)) {
+    return new Response('shutdown needs "Authorization: Bearer <core token>" from core.json', { status: 401 });
+  }
+  if (!core.requestShutdown()) return new Response('this embedded core has no process to stop', { status: 501 });
+  return Response.json({ ok: true, pid: process.pid }, { status: 202 });
+}
+
+/**
+ * The server of a core started from `main.ts`. A `--port` the operator named is
+ * the only one tried, and a taken one is a loud error: a reverse proxy points
+ * at it. Otherwise the port the previous run of this data directory bound, so a
+ * paired phone and an installed PWA keep their origin across a restart; when
+ * another program took it meanwhile, a random one, said in the log.
+ */
+export function startServerOnStickyPort(
+  options: ServerOptions & { explicitPort: boolean; previousPort: number | null },
+): RunningServer {
+  const { explicitPort, previousPort, ...server } = options;
+  if (explicitPort || previousPort === null) return startServer(server);
+  try {
+    return startServer({ ...server, port: previousPort });
+  } catch (error) {
+    server.core.log('warn', `port ${previousPort} of the previous run is taken (${messageOf(error)}), listening on another`);
+    return startServer({ ...server, port: 0 });
+  }
+}
+
 export function startServer(options: ServerOptions): RunningServer {
   const core = options.core;
   const host = options.host ?? '127.0.0.1';
   const helloTimeoutMs = options.helloTimeoutMs ?? envTimeout() ?? DEFAULT_HELLO_TIMEOUT_MS;
   const connections = new Set<ServerConnection>();
   const helloTimers = new Map<ServerConnection, ReturnType<typeof setTimeout>>();
+  /** The counted peer of each open socket from another machine, until it closes. */
+  const peers = new Map<ServerConnection, string>();
+  function* waitingPeers(): Generator<string> {
+    for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
+  }
   const frames = new Set<Promise<void>>();
   const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
@@ -216,7 +335,8 @@ export function startServer(options: ServerOptions): RunningServer {
   const server = Bun.serve<SocketData>({
     hostname: host,
     port: options.port ?? 0,
-    idleTimeout: 0,
+    // HTTP only: the websocket block below keeps Bun's own 120 s and its pings.
+    idleTimeout: HTTP_IDLE_TIMEOUT_S,
 
     fetch(request, self) {
       if (stopping) return new Response('core stopping', { status: 503 });
@@ -233,6 +353,8 @@ export function startServer(options: ServerOptions): RunningServer {
         return Response.json({ ok: true, version: core.version, pid: process.pid });
       }
 
+      if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);
+
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
         return ticketedFile(core, url.pathname.slice(FILE_ROUTE.length + 1), request.headers.get('range'));
@@ -244,15 +366,21 @@ export function startServer(options: ServerOptions): RunningServer {
           core.log('warn', `refused a websocket from origin ${origin ?? '(none)'}`);
           return new Response('forbidden origin', { status: 403 });
         }
+        const peer = preauthPeer(self.requestIP(request)?.address ?? null, request.headers.get('host'));
+        const refusal = peer === null ? null : preauthRefusal(waitingPeers(), peer);
+        if (refusal !== null) {
+          core.log('warn', `refused a websocket: ${refusal}`);
+          return new Response('too many connections waiting for hello', { status: 503 });
+        }
         const connection = new ServerConnection(core, !isLoopbackHost(request.headers.get('host')));
-        if (self.upgrade(request, { data: { connection } })) return undefined;
+        if (self.upgrade(request, { data: { connection, peer } })) return undefined;
         return new Response('expected a websocket upgrade', { status: 400 });
       }
 
       const file = staticFile(url.pathname);
       if (file !== null) return staticResponse(file, url.pathname, request.headers.get('accept-encoding'));
       if (url.pathname === '/') {
-        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        return new Response(PLACEHOLDER_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...NO_FOREIGN_FRAMES } });
       }
       return new Response('not found', { status: 404 });
     },
@@ -266,11 +394,16 @@ export function startServer(options: ServerOptions): RunningServer {
       // (`ServerConnection.sendEvent`). Whether a frame is deflated at all is
       // the connection's call, in `ServerConnection.write`.
       perMessageDeflate: true,
+      // Bun closes the socket on a larger frame before any handler sees it.
+      // The contract derives the attachment total of a turn from this number,
+      // and the UI refuses a larger frame before sending it.
+      maxPayloadLength: RPC_MAX_FRAME_BYTES,
 
       open(socket) {
         const connection = socket.data.connection;
         connection.attach(socket);
         connections.add(connection);
+        if (socket.data.peer !== null) peers.set(connection, socket.data.peer);
         helloTimers.set(connection, setTimeout(() => {
           helloTimers.delete(connection);
           if (connection.authenticated) return;
@@ -280,6 +413,11 @@ export function startServer(options: ServerOptions): RunningServer {
 
       message(socket, raw) {
         if (stopping) return;
+        const connection = socket.data.connection;
+        if (!connection.authenticated && raw.length > PREAUTH_FRAME_MAX_BYTES) {
+          connection.close(RpcCloseCode.Unauthorized, 'hello frame too large');
+          return;
+        }
         const frame = handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
         frames.add(frame);
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
@@ -292,6 +430,7 @@ export function startServer(options: ServerOptions): RunningServer {
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
         connections.delete(socket.data.connection);
+        peers.delete(socket.data.connection);
       },
     },
   });
@@ -327,7 +466,10 @@ export function startServer(options: ServerOptions): RunningServer {
       name.startsWith('question.') ||
       // A panel request is for the clients watching that thread: a second
       // window on another thread must not have its panel taken over.
-      name.startsWith('panel.');
+      name.startsWith('panel.') ||
+      // Every grandchild's record, command line included: only that thread's
+      // trace panel reads it.
+      name.startsWith('process.');
     const threadId = eventThreadId(payload);
     for (const connection of connections) {
       if (!connection.authenticated) continue;
@@ -335,6 +477,9 @@ export function startServer(options: ServerOptions): RunningServer {
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
       if ((name === 'collaboration.changed' || name === 'delegation.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
+      // The whole activity, loop history included, is for the clients that have
+      // that thread open; an agent socket still gets its own thread's.
+      if (name === 'thread.activity' && connection.identity.principal !== 'agent' && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);
     }
@@ -351,6 +496,7 @@ export function startServer(options: ServerOptions): RunningServer {
       helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');
       connections.clear();
+      peers.clear();
       // Bun 1.3.11 never resolves server.stop() once a socket has been upgraded,
       // so the listener is closed without waiting on that promise.
       void server.stop(true);

@@ -228,6 +228,20 @@ describe('grok', () => {
     expect(trace.filter((record) => record.exitedAt === null)).toEqual([]);
   });
 
+  test('a probe naming a model with no scale of its own starts one process, not one per call', async () => {
+    const client = await startCore();
+    const { accountId } = await grokAccount(client);
+    const processes = (): number => fakeLog().split('\n').filter((line) => line === 'initialize').length;
+
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId });
+    expect(processes()).toBe(1);
+    // `default` is listed without a scale: the agent keeps its own model.
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId, model: 'default' });
+    expect(processes()).toBe(2);
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId, model: 'default' });
+    expect(processes()).toBe(2);
+  });
+
   test('the model and the effort go out as one session/set_model, never as a config option', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await grokThread(client, 'grok-4.5', 'medium');

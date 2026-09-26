@@ -8,7 +8,7 @@
   font-family: 'Geist';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/Geist-Variable.woff2') format('woff2');
 }
 
@@ -16,7 +16,7 @@
   font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
 }
 
@@ -32,8 +32,9 @@
   --color-hover: rgba(255, 255, 255, 0.05);
   --color-active: rgba(255, 255, 255, 0.09);
   --color-foreground: #ececf1;
+  /* Both text tiers clear 4.5:1 on every surface in both themes: subtle carries paths and timestamps (lib/contrast.test.ts). */
   --color-muted-foreground: #a2a2ad;
-  --color-subtle: #6f6f7a;
+  --color-subtle: #8c8c96;
   --color-selection: rgba(228, 228, 231, 0.18);
   --accent-hue: 260;
   --color-accent: oklch(68% 0.19 var(--accent-hue));
@@ -105,6 +106,8 @@
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   --input: 34px;
   --touch-target: 44px;
+  /* The timeline's left margin, which the message outline rail sits in. */
+  --outline-room: 38px;
   --settings-width: 880px;
   --settings-padding: 24px;
 
@@ -128,8 +131,8 @@
   --color-hover: rgba(0, 0, 0, 0.045);
   --color-active: rgba(0, 0, 0, 0.08);
   --color-foreground: #1c1c21;
-  --color-muted-foreground: #66666f;
-  --color-subtle: #8b8b95;
+  --color-muted-foreground: #50505a;
+  --color-subtle: #67676f;
   --color-selection: rgba(28, 28, 33, 0.14);
   --color-live: #ca8a04;
   --color-success: #16a34a;
@@ -152,6 +155,14 @@
   color-scheme: light;
 }
 
+/* Safari 15.4 to 16.1 have oklch but not color-mix: the shared accent tint keeps
+   its 18 percent there, and the few one-off mixes simply draw no tint. */
+@supports not (color: color-mix(in oklch, red 50%, blue)) {
+  :root {
+    --color-accent-soft: oklch(68% 0.19 var(--accent-hue) / 0.18);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-1: 0.01ms;
@@ -160,6 +171,8 @@
   }
 }
 
+/* The same, forced from the page: the tests set it, since jsdom has no media
+   queries. Components that loop forever guard both. */
 html[data-motion='reduced'] {
   --dur-1: 0.01ms;
   --dur-2: 0.01ms;
@@ -373,6 +386,11 @@ select:focus-visible,
 textarea:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--color-foreground) 35%, var(--color-edge));
+}
+
+/* Forced colors drop the shadows and border tints that mark focus here, so every focused control gets the system's own ring. */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; outline-offset: 2px; }
 }
 
 textarea {
@@ -1009,10 +1027,12 @@ input[type=checkbox][role=switch]:checked { background: var(--color-foreground);
 input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
 input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
 input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
+/* Under a finger the outline rail is a touch target wide (MessageOutline.svelte): the text starts past it. */
+@media (pointer: coarse) { :root { --outline-room: calc(var(--touch-target) + 4px); } }
 @media (max-width: 720px) {
   .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); }
   [data-mobile-sheet='true'] { position: fixed !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }

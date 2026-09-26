@@ -24,10 +24,23 @@ export class AgentRuntime {
       if (name === 'agents.changed' || name === 'scheduler.updated') queueMicrotask(() => { void this.pump(); });
     });
     this.timer = setInterval(() => {
-      try { this.store.routines.tick(); this.checkRuns(); void this.pump(); }
+      try { this.store.routines.tick(); this.watch(); }
       catch (error) { this.core.log('error', `Agent scheduler: ${messageOf(error)}`); }
     }, 500);
     this.timer.unref?.();
+  }
+  /** The record-write count at which the last pass found no run to watch and no work to start. */
+  private quiet = -1;
+  /**
+   * Run limits and delayed work are the only things that change with time alone,
+   * and both need a record to exist: with neither, the pass waits for a record write.
+   */
+  private watch(): void {
+    const writes = this.r.writes;
+    if (writes === this.quiet) return;
+    if (this.active().length === 0 && this.r.withStatus('work', ['pending']).length === 0) { this.quiet = writes; return; }
+    this.checkRuns();
+    void this.pump();
   }
   private get store() { return this.core.workforce; }
   private get r() { return this.store.records; }

@@ -1,6 +1,6 @@
 import type { AccountId, ProviderId, RpcEvents, RpcResult, ThreadId } from '@boite/contracts';
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Core } from '../core.ts';
@@ -76,7 +76,10 @@ async function probeProvider(
     return { models, probedAt };
   } finally {
     await Promise.all(exits);
-    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // A descendant can hold the directory after the direct child closed. Neither
+    // waiting for it nor removing the directory may replace the models just read.
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `probing ${provider.id}: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(directory, (message) => core.log('warn', `probing ${provider.id}: ${message}`));
   }
 }
 

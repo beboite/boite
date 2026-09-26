@@ -5,9 +5,8 @@ import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
-import { checkEffort, checkModel } from '../threads.ts';
+import { checkEffort, checkModel } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
-import { releaseThread } from '../drivers/index.ts';
 import { OPEN_WORK } from './repository.ts';
 
 export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model'>, b: Pick<AgentSelection,'providerId'|'accountId'|'model'>) => a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model;
@@ -127,7 +126,7 @@ export class ResidentAgents {
     const session=this.core.workforce.session(threadId);
     this.core.journal.setSetting(`agents:checkpoint:${session.id}`,{text:result.slice(0,12000),at:Date.now(),workId:work.id});
     const thread=this.core.threads.require(threadId);
-    releaseThread(threadId);
+    this.core.threads.releaseAgent(threadId);
     // The explicit checkpoint replaces history. Keep the journal for inspection, without replaying it.
     const next={...thread,sessionId:null,sessionGeneration:(thread.sessionGeneration ?? 0)+1,context:null,promptCache:null};
     this.core.journal.putThread(next);this.core.bus.emit('thread.updated',next);

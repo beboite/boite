@@ -2,61 +2,14 @@ import {
   RpcErrorCode,
   TODO_TEXT_MAX,
   type AgentCommand,
-  type RpcMethodName,
   type Thread,
   type ThreadSummary,
   type Usage,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 
-/*
- * The device boundary, copied. `packages/core/src/access.ts` owns it, and the
- * UI package cannot import the core, so this list is a mirror kept by hand: a
- * method added there and forgotten here only makes the fake stricter than the
- * core, which shows up as a test failing rather than a screen that lies.
- * `hello` is not in it because the core answers it before the router's gate.
- */
-export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
-  'agents.snapshot', 'agents.message.send', 'agents.decision.answer', 'agents.work.control', 'agents.history',
-  'agents.runtime.get', 'agents.brain.get',
-  'delegation.get', 'delegation.send', 'delegation.stop',
-  'sessions.list',
-  'push.status', 'push.subscribe', 'push.unsubscribe', 'push.test',
-  'projects.list',
-  'projects.files',
-  'projects.drafts',
-  'providers.list',
-  'accounts.list',
-  'threads.list',
-  'threads.pullRequest',
-  'threads.create',
-  'threads.get',
-  'threads.activity.set',
-  'threads.activity.control',
-  'messages.list',
-  'threads.update',
-  'threads.retitle',
-  'threads.compact',
-  'threads.archive',
-  'threads.pin',
-  'threads.markRead',
-  'threads.subscribe',
-  'threads.unsubscribe',
-  'turns.start',
-  'turns.stop',
-  'permissions.list',
-  'permissions.answer',
-  'questions.list',
-  'questions.answer',
-  'scheduler.get',
-  'usage.get',
-  'usage.history',
-  'settings.get',
-  'collaboration.get',
-  'collaboration.directory',
-  'speech.status', 'speech.transcribe', 'speech.cancel',
-  'keybindings.get'
-]);
+/** The device boundary, the core's own sets: `packages/contracts/src/access.ts`. */
+export { DEVICE_METHODS } from '@boite/contracts';
 
 export const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
 
@@ -142,9 +95,10 @@ export function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
-export function chunkText(text: string, pieces: number): string[] {
+/** `pieces` parts, or parts of `size` characters when one is given (the echo driver's rate). */
+export function chunkText(text: string, pieces: number, chunkSize?: number): string[] {
   if (text.length === 0) return [''];
-  const size = Math.max(1, Math.ceil(text.length / pieces));
+  const size = chunkSize ?? Math.max(1, Math.ceil(text.length / pieces));
   const out: string[] = [];
   for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
   return out;

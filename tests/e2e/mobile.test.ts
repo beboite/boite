@@ -144,3 +144,236 @@ test('returning to a long conversation preserves the reading position', async ()
   expect(restoredAnchor.id).toBe(anchor.id);
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
+
+test('a wide markdown table scrolls inside itself and leaves the conversation still', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  const table = '| File | Status | Lines | Owner | Notes |\n|---|---|---|---|---|\n| packages/ui/src/components/ThreadHeader.svelte | modified | 229 | ui | header row on phones |';
+  await page.type('[data-testid=composer-input]', table);
+  await page.evaluate(`document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+  await page.waitFor(`document.querySelector('[data-testid=timeline] table')?.textContent.includes('header row on phones')`, 20_000);
+  await page.evaluate(`document.querySelector('[data-testid=timeline] table').scrollIntoView({ block: 'center', inline: 'end' })`);
+  const sizes = await page.evaluate<{ timeline: [number, number, number]; table: [number, number] }>(`(() => {
+    const t = document.querySelector('[data-testid=timeline]'), table = t.querySelector('table');
+    return { timeline: [t.scrollWidth, t.clientWidth, t.scrollLeft], table: [table.scrollWidth, table.clientWidth] };
+  })()`);
+  await capture('mobile-table.png');
+  expect(sizes.timeline[0]).toBeLessThanOrEqual(sizes.timeline[1]);
+  expect(sizes.timeline[2]).toBe(0);
+  // The table itself holds what did not fit.
+  expect(sizes.table[0]).toBeGreaterThan(sizes.table[1]);
+}, 30_000);
+
+test('the panel sheet, Agents and Settings keep clear of a notch and the status bar', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
+  try {
+    const top = (selector: string) => page.evaluate<number>(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().top`);
+    await page.click('[data-testid=panel-toggle]');
+    await page.waitFor(`document.querySelector('[data-testid=panel-close]')`);
+    expect(await top('[data-testid=right-panel] header')).toBeGreaterThanOrEqual(47);
+    await capture('mobile-safe-panel.png');
+    await page.click('[data-testid=panel-close]');
+    await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+    await page.click('[data-testid=mobile-agents]');
+    await page.waitFor(`document.querySelector('.agents-page h1')`);
+    expect(await top('.agents-page h1')).toBeGreaterThanOrEqual(47);
+    await page.click('[data-testid=mobile-settings]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home] h1')`);
+    expect(await top('[data-testid=mobile-settings-home] h1')).toBeGreaterThanOrEqual(47);
+    await capture('mobile-safe-settings.png');
+  } finally {
+    await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  }
+}, 30_000);
+
+test('the connect sheet keeps its last button above the home indicator', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&uninstalled=1`);
+  await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
+  try {
+    await page.waitFor(`document.querySelector('[data-testid=composer-connect], [data-testid=mobile-new]')`);
+    if (!(await page.evaluate<boolean>(`!!document.querySelector('[data-testid=composer-connect]')`))) await page.click('[data-testid=mobile-new]');
+    await page.click('[data-testid=composer-connect]');
+    await page.click('[data-testid=connect-service][data-provider=claude]');
+    await page.click('[data-testid=connect-install]');
+    await page.waitFor(`document.querySelector('[data-testid=connect-step]')?.dataset.step === 'installing'`);
+    const bottom = await page.evaluate<number>(`[...document.querySelectorAll('[data-testid=connect-step] > *')].at(-1).getBoundingClientRect().bottom`);
+    await capture('mobile-connect-safe.png');
+    expect(bottom).toBeLessThanOrEqual(await page.evaluate<number>('innerHeight') - 34);
+  } finally {
+    await page.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+  }
+}, 30_000);
+
+test('Appearance in French at 360 px keeps every label beside its choices readable', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 1, mobile: true });
+  try {
+    await page.click('[data-testid=mobile-settings]');
+    await page.click('[data-testid=settings-tab-appearance]');
+    await page.click('[data-testid=locale-fr]');
+    await page.waitFor(`document.querySelector('[data-testid=appearance-page] h1')?.textContent.includes('Apparence')`);
+    const rows = await page.evaluate<Array<{ text: string; clipped: boolean; overlap: boolean; narrow: boolean }>>(`[...document.querySelectorAll('[data-testid=appearance-page] .switch-row')].filter(row => row.querySelector('.segmented')).map(row => {
+      const text = row.querySelector('.text'), t = text.getBoundingClientRect(), s = row.querySelector('.segmented').getBoundingClientRect();
+      return { text: text.textContent.trim(), clipped: text.scrollWidth > text.clientWidth + 1, overlap: t.right > s.left + 1 && t.left < s.right - 1 && t.bottom > s.top + 1 && t.top < s.bottom - 1, narrow: t.width < 120 };
+    })`);
+    await page.evaluate(`document.querySelector('[data-testid=panel-start-launcher], [data-testid^=panel-start-]').scrollIntoView({ block: 'center' })`);
+    await capture('mobile-appearance-fr-360.png');
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.filter(row => row.clipped || row.overlap || row.narrow)).toEqual([]);
+    expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  } finally {
+    await page.click('[data-testid=locale-en]');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  }
+}, 30_000);
+
+test('a phone pins and archives a thread without a right-click, from the header and from the list', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
+  const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
+  const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
+  expect(trigger.height).toBeGreaterThanOrEqual(44);
+  // Agents and Terminal move into the title's sheet, so the title keeps most of the row.
+  expect(trigger.width).toBeGreaterThan(200);
+  expect(await page.evaluate(`['agents-toggle', 'terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'archive']);
+  await capture('mobile-thread-menu.png');
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=pin]');
+  await page.waitFor(`__boiteTest.workspace.active.openThread.pinned === true`);
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click(`[data-testid=mobile-thread-menu-${id}]`);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-thread-menu-${id}-menu] [data-value=pin]')?.textContent.includes('Unpin')`);
+  await capture('mobile-thread-row-menu.png');
+  await page.click(`[data-testid=mobile-thread-menu-${id}-menu] [data-value=archive]`);
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-thread-${id}]')`);
+  expect(page.errors()).toEqual([]);
+}, 20_000);
+
+test('a phone header shows the label of a draft and most of a French title at 360 px', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent`);
+  // A draft has no title menu: its own label is the header's title.
+  await page.click('[data-testid=mobile-new]');
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.classList.contains('draft')`);
+  const draft = await page.evaluate<{ text: string; width: number }>(`(() => { const t = document.querySelector('[data-testid=thread-title]'); return { text: t.textContent.trim(), width: t.getBoundingClientRect().width }; })()`);
+  expect(draft.text).toBe('New thread');
+  expect(draft.width).toBeGreaterThan(40);
+  await capture('mobile-draft-header.png');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 1, mobile: true });
+  try {
+    await page.navigate(`${origin}/?fake=1&open=recent`);
+    await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger]')?.offsetParent && document.documentElement.lang === 'fr'`);
+    const title = await page.evaluate<{ visible: number; full: number }>(`(() => { const t = document.querySelector('[data-testid=thread-menu-trigger] .title-text'); return { visible: t.getBoundingClientRect().width, full: t.scrollWidth }; })()`);
+    await capture('mobile-title-fr-360.png');
+    expect(title.visible).toBeGreaterThanOrEqual(160);
+    expect(title.visible).toBeGreaterThanOrEqual(title.full * 0.6);
+  } finally {
+    await page.evaluate(`localStorage.setItem('boite.locale', 'en')`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  }
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
+test('Back returns from a conversation to the list and closes the context popup, the panel and the project picker first', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')`);
+  const back = async (gone: string) => {
+    await page.evaluate('history.back()');
+    await page.waitFor(`!document.querySelector(${JSON.stringify(gone)})`);
+    expect(await page.evaluate<string>('location.origin')).toBe(origin);
+  };
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
+  await page.click('[data-testid=context-trigger]');
+  await page.waitFor(`document.querySelector('[data-testid=context-popup]')`);
+  await back('[data-testid=context-popup]');
+  await page.click('[data-testid=panel-toggle]');
+  await page.waitFor(`document.querySelector('[data-testid=right-panel]')`);
+  await back('[data-testid=right-panel]');
+  // The project sheet pops its own entry while the picker pushes one.
+  await page.click('[data-testid=mobile-project]');
+  await page.click('[data-value="add-project"]');
+  await page.waitFor(`document.querySelector('[data-testid=project-picker]')`);
+  await Bun.sleep(400);
+  await back('[data-testid=project-picker]');
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=chat]') && !document.querySelector('[data-testid=mobile-list]')`)).toBe(true);
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+  expect(await page.evaluate<string>('location.origin')).toBe(origin);
+  // Closing the panel by its button pops its own entry: the next Back still reaches the list.
+  await page.click('[data-testid=mobile-list] .thread');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  await page.click('[data-testid=panel-toggle]');
+  await page.click('[data-testid=panel-close]');
+  await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+  await Bun.sleep(300);
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-list]')`);
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
+// A control takes a finger when a tap 19 px off its centre, on either axis, still lands on it.
+// A control inside a label is skipped: the whole label row is its target.
+const smallTargets = `(() => {
+  const small = [];
+  for (const el of document.querySelectorAll('button, summary, [role=button]')) {
+    if (el.closest('label')) continue;
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    if (!r.width || !r.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+    const at = (px, py) => { const hit = document.elementFromPoint(px, py); return !!hit && (hit === el || el.contains(hit)); };
+    if (!at(x, y)) continue;
+    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight);
+    if (reach.every(([px, py]) => at(px, py))) continue;
+    small.push((el.dataset.testid || el.getAttribute('aria-label') || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+  }
+  return small;
+})()`;
+
+test('every phone control on the chat, the panel, the list and Appearance takes a finger', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  try {
+    await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
+    await page.waitFor(`document.querySelector('[data-testid=message-marker]')`);
+    expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(true);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=panel-toggle]');
+    await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=launch-changes]');
+    // The strip shows its scroll chevrons for a frame while the new tab lays out.
+    await page.waitFor(`document.querySelector('[data-testid=panel-tab-close]') && !document.querySelector('[data-testid=right-panel] .chev')`);
+    await capture('mobile-panel-tab-touch.png');
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=panel-close]');
+    await page.waitFor(`!document.querySelector('[data-testid=right-panel]')`);
+    await page.click('[data-testid=mobile-conversations]');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-list] .thread')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=mobile-settings]');
+    await page.click('[data-testid=settings-tab-appearance]');
+    await page.waitFor(`document.querySelector('[data-accent-swatch]')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+  } finally {
+    await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  }
+}, 30_000);

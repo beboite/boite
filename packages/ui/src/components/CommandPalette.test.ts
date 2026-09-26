@@ -161,3 +161,28 @@ test('a load tick leaves the row the keyboard is on where it is', async () => {
   await type('thread');
   expect(selectedId()).toBe(rows()[0]);
 });
+
+test('Escape on a row closes, Tab stays in the search field, and closing gives the focus back', async () => {
+  const before = document.createElement('button');
+  document.body.append(before);
+  before.focus();
+  store.paletteOpen = true;
+  flushSync();
+  await tick();
+
+  const input = document.querySelector<HTMLInputElement>('[data-testid=palette-input]')!;
+  const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+  input.dispatchEvent(tab);
+  flushSync();
+  expect(tab.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(input);
+
+  // A row the pointer focused still answers Escape.
+  const row = document.querySelector<HTMLElement>('[data-testid=palette-row]')!;
+  row.focus();
+  row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync();
+  await tick();
+  expect(store.paletteOpen).toBe(false);
+  expect(document.activeElement).toBe(before);
+});

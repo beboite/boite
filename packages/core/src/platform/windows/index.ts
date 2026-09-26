@@ -7,9 +7,8 @@ export const platform: ProcessPlatform = {
     jobs.retainJobs(events);
     guard.retainGuard(protections);
   },
-  release() {
-    jobs.releaseJobs();
-    guard.releaseGuard();
+  async release() {
+    await Promise.all([jobs.releaseJobs(), guard.releaseGuard()]);
   },
   capability: jobs.jobsCapability,
   applySettings(settings) {
@@ -34,5 +33,10 @@ export const platform: ProcessPlatform = {
   sample: jobs.sampleThreadJob,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
+  warm() {
+    jobs.warmJobs();
+    guard.warmGuard();
+  },
+  forget: jobs.releaseThreadJob,
   guardStatus: guard.guardStatus,
 };

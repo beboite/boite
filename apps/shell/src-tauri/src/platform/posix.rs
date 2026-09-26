@@ -19,6 +19,9 @@ pub(crate) fn prepare_command(command: &mut Command) {
     if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
 }
 
+/// No dialog without a window here: the log file and stderr say it.
+pub(crate) fn alert(_title: &str, _text: &str) {}
+
 pub(crate) fn notify(_app: AppHandle, _title: String, _body: String, _thread_id: String) -> Result<(), String> {
     Err("no system toast on this platform yet".to_string())
 }

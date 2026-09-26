@@ -2,6 +2,7 @@
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
   import type { Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
+  import { focusComposer } from '../lib/focus';
   import { messagePreview, promptCommand } from '../lib/message-display';
   import { outlineEntries, outlineUnfold, outlineWave, type OutlineEntry } from '../lib/message-outline';
   import { tick } from 'svelte';
@@ -158,7 +159,8 @@
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     event.preventDefault(); event.stopPropagation(); shown = null;
-    (event.target as HTMLElement).blur();
+    // Blurred onto the page, the next Escape would stop the running turn.
+    if (!focusComposer()) (event.target as HTMLElement).blur();
   }
 </script>
 
@@ -253,6 +255,10 @@
   /* A finger has no hover to open the rail: wider rows, and the rail scrolls when a short timeline cannot hold it. */
   @media (pointer: coarse) {
     .outline { max-height: min(60%, 320px); overflow-y: auto; scrollbar-width: none; }
-    .track { --pitch: 18px; }
+    /* A finger's width and height per entry, flush with the screen edge; the timeline keeps its text clear of it. */
+    .outline { left: 0; width: var(--touch-target); }
+    .outline button { width: 100%; }
+    .step { height: var(--touch-target); min-height: var(--touch-target); }
+    .track { --pitch: var(--touch-target); }
   }
 </style>

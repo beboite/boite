@@ -117,7 +117,7 @@
         {:else}
           <ul class="contacts">
             {#each store.coordinationDirectory?.agents ?? [] as agent (`${agent.coreId}:${agent.threadId}`)}
-              <li data-testid="coordination-contact"><span><strong>{agent.title}</strong><small>{agent.machine} · {agent.resources || modeLabel(agent.mode)}</small></span><span class="contact-status">{agent.status}</span></li>
+              <li data-testid="coordination-contact"><span><strong>{agent.title}</strong><small>{agent.machine} · {agent.resources || modeLabel(agent.mode)}</small></span><span class="contact-status">{strings.threadStatus[agent.status]}</span></li>
             {/each}
           </ul>
         {/if}

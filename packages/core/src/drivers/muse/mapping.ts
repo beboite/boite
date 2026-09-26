@@ -10,7 +10,7 @@ import type {
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { messageOf, unavailable } from '../../errors.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { TurnContext } from '../types.ts';
 import type {
   ApprovalChoice,

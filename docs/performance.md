@@ -50,6 +50,13 @@ else, and gets two things.
   other event and before any response, so the order on the wire stays the order
   of the turn.
 
+When a socket backs up (Bun's `send` returns -1), every frame is still queued
+except `message.delta`, which is dropped. On `drain` the core resends the text
+parts those deltas belonged to, one `message.part` each, and nothing else: a
+finished tool output in the same message never goes out twice. Deltas the bus
+still holds are dispatched before that resend, so they fold into the part
+instead of arriving after it as a second copy.
+
 ## What the UI asks for
 
 - `Store.open` writes subscribe, `threads.get`, `permissions.list` and
@@ -59,6 +66,13 @@ else, and gets two things.
   it had before it. A reconnect to a quiet thread costs one message instead of
   the last 120. An unknown message, or a tail longer than a page, gets the whole
   page as before.
+- On a reconnect, the open thread's `threads.get` leaves before the boot lists,
+  so the missed text does not wait for the slowest of them. The fresh
+  `threads.list` is laid over the rows already held: a row keeps its object and
+  only the fields that changed are written, so the sidebar redraws the rows that
+  moved and no others. A `thread.updated` load tick patches its row the same way.
+- A streamed delta, part or turn looks up its message or turn from the end of
+  the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
 
 ## Static files
@@ -70,16 +84,43 @@ phone on the LAN gets the gzip.
 
 The command palette, the project picker, the import dialog and the right panel
 are separate chunks. They load when first asked for, and all of them once the
-page is idle, so a PWA that goes offline later still has them in its cache.
+app has booted and the page is idle, so a PWA that goes offline later still has
+them in its cache. A link that asks to save data, or reads as 3G or slower,
+skips that prefetch and fetches each one when it opens (`lib/prefetch.ts`). The
+tour is prefetched only for a device that has not seen it.
+
+The French catalogue and the quota window are chunks of their own too, so an
+English page does not download or parse either (`docs/language.md`).
 
 The service worker still asks the core for the app shell first, but waits
 2.5 s at most before serving the cached one; the late answer is stored for the
 next open.
 
+## Core startup
+
+`fflate`, the unzip library behind provider installs and the local speech
+runtime, is imported where it unzips. Evaluating it builds its Huffman tables,
+about 8 ms per core start measured on 2026-09-25, for code most starts never
+run. `packages/core/test/startup-imports.test.ts` fails if a static import
+brings it back.
+
+The core lists its providers twice before it listens (the registry loads, then
+the default accounts ask which ones are available), and again for every client
+that boots. Each listing looks up every candidate program on the PATH, with
+every PATHEXT extension on Windows. `packages/core/src/providers/which.ts`
+keeps each answer for two seconds, so a burst of listings scans the PATH once,
+and forgets them all on a providers reload, an install or an agent update.
+`packages/core/test/providers-which.test.ts` counts the lookups.
+
 ## Shell startup
 
 The shell spawns the core before it builds the WebView2 window, and polls for
 `core.json` every 10 ms instead of every 120 ms.
+
+The window is built hidden. It appears once the page has painted and either the
+core answered or two seconds passed, so a fast start shows no empty frame and a
+slow one shows the page's "connecting" state. After ten seconds it appears
+whatever the page said, so a broken bundle still gets a window to quit from.
 
 ## Benches
 
@@ -130,3 +171,32 @@ compiled core beside it, then on one staged with the runtime and the bundle:
 | UI holding its data | 1245 | 716 |
 
 Linux and macOS keep the compiled core: nothing was measured there.
+
+## The x64 runtime is Bun's baseline build
+
+Bun publishes two x64 builds. The default one needs AVX2, so it stops with an
+illegal instruction on a pre-Haswell CPU and on many Celeron, Pentium and Atom
+laptops. The Windows sidecar, the compiled core on x64 Linux and Windows, and
+the server core are the baseline build, and the Docker image's `oven/bun` base
+already ships the baseline build for x64. On this core the choice costs nothing
+measurable. Bundle under each runtime, both runtimes copied away from the
+parent's own image, a fresh data directory, `BOITE_HOST_AGENTS=0`, 2026-09-25 on
+a Ryzen 7 9800X3D:
+
+| runtime | spawn to `/health`, median of 6 | echo turn round trip, median of 7 |
+| --- | ---: | ---: |
+| `bun-windows-x64` 1.4.2 | 245 ms | 162 ms |
+| `bun-windows-x64-baseline` 1.4.2 | 244 ms | 162 ms |
+
+The echo turn is `docker/smoke.ts create` run against that core with
+`BOITE_SMOKE_PROVIDERS=echo`: project, account, thread, one turn and its
+completion. Local dictation's whisper.cpp runtime needs no AVX2 either: its
+`whisper-bin-x64.zip` ships `ggml-cpu-*.dll` backends from plain x64 to Alder
+Lake, and ggml loads the one the CPU supports.
+
+The bundle and the compiled core minify whitespace and syntax and keep
+identifiers, so a logged stack still names its functions. On the Windows
+sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
+runs on the same day. The compiled core also carries bytecode, which saves
+parsing where no signature check dominates the start; on Windows the compiled
+core stayed at about 790 ms either way.

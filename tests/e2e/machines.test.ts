@@ -66,7 +66,7 @@ test('project and recent cards show both hosts, PRs and user-message ordering on
     mobile: true
   });
   await page.click('[data-testid="mobile-conversations"]');
-  await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] [data-testid^="mobile-thread-"]').length === 8`);
+  await page.waitFor(`document.querySelectorAll('[data-testid="mobile-list"] .thread').length === 8`);
   await capture('recent-machines-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -112,6 +112,10 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     const ta = await create(a, first.dataDir, 'Primary project');
     const tb = await create(b, second.dataDir, 'Remote project');
     await page.navigate(`${url}/?core=${encodeURIComponent(first.url)}&token=${encodeURIComponent(first.token)}`);
+    // A link to a core this page never met is asked about before anything connects.
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await capture('link-confirm.png');
+    await page.click(id('confirm-ok'));
     await page.waitFor(`document.querySelector('[data-thread-id="${ta.id}"]')`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
@@ -159,6 +163,9 @@ test('two real cores pair, route turns independently, reconnect and survive a re
       expect(await page.evaluate(`document.querySelectorAll('${id('machine-card')}').length`)).toBe(2);
     } finally { admin.close(); }
     await page.click(id('machine-remove'));
+    // Forgetting a machine asks first, in the app's own dialog.
+    await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+    await page.click(id('confirm-ok'));
     // Back on the first machine: its thread, or the draft it opened on after the reload.
     await page.waitFor(
       `document.querySelectorAll('${id('machine-card')}').length === 1 || document.querySelector('${id('thread-title')}')?.textContent === 'Primary project' || document.querySelector('${id('draft-sentence')}')?.textContent.includes('Primary project')`

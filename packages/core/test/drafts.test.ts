@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
 import { xdgDocuments } from '../src/platform/folders.ts';
-import { draftFolderName } from '../src/threads.ts';
+import { draftFolderName } from '../src/threads/inputs.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -39,6 +39,21 @@ describe('the drafts project', () => {
     const listed = await client.call('projects.list', {});
     expect(listed.filter((project) => project.kind === 'drafts').map((project) => project.id)).toEqual([first.id]);
   });
+
+  test.skipIf(process.platform !== 'win32')('stays the drafts when its folder was registered earlier in another case', async () => {
+    const folder = join(harness.dataDir, 'Documents', 'Boite');
+    mkdirSync(folder, { recursive: true });
+    const manual = await client.call('projects.add', { path: folder.toLowerCase(), name: 'Mine' });
+    const drafts = await client.call('projects.drafts', {});
+    expect(drafts.id).toBe(manual.id);
+    expect(drafts.kind).toBe('drafts');
+    const listed = await client.call('projects.list', {});
+    expect(listed.filter((project) => project.kind === 'drafts').map((project) => project.id)).toEqual([manual.id]);
+    const accountId = await echoAccount();
+    const thread = await client.call('threads.create', { projectId: drafts.id, providerId: 'echo', accountId, title: 'Case' });
+    expect(basename(thread.cwd)).toMatch(/^\d{4}-\d{2}-\d{2} Case$/);
+  });
+
 
   test('gives each thread a dated folder of its own, never the same one twice', async () => {
     const drafts = await client.call('projects.drafts', {});

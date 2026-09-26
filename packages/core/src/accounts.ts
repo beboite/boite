@@ -4,8 +4,8 @@ import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, Ter
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
-import { runAcpLogin, type AcpLoginRun } from './drivers/acp.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/loader.ts';
+import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
@@ -142,7 +142,7 @@ export class AccountStore {
       this.core.journal.putAccount(account);
     });
     this.prepare(account, provider);
-    return this.check(account.id);
+    return this.check(account.id, true);
   }
 
   async remove(accountId: AccountId): Promise<void> {
@@ -183,10 +183,18 @@ export class AccountStore {
     this.core.bus.emit('accounts.removed', { accountId });
   }
 
-  check(accountId: AccountId): Account {
+  /**
+   * Reads the account's session again. An unchanged status writes nothing and
+   * tells nobody, so a page that checks on every focus costs no journal row, no
+   * broadcast and no model-list reset. `announce` writes and broadcasts anyway,
+   * for a new account and after a login, which may change what an unchanged
+   * status stands for.
+   */
+  check(accountId: AccountId, announce = false): Account {
     const account = this.require(accountId);
     const provider = this.core.providers.get(account.providerId);
     const status = provider === undefined ? 'error' : this.sessionStatus(account, provider);
+    if (!announce && status === account.status) return account;
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);
@@ -362,7 +370,7 @@ export class AccountStore {
           this.core.providers.installs.release(provider.id);
           if (this.core.journal.isClosed()) return;
           try {
-            this.check(accountId);
+            this.check(accountId, true);
           } catch {
             // the account was removed while its terminal ran
           }
@@ -455,7 +463,7 @@ export class AccountStore {
     this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
     if (this.core.journal.isClosed()) return;
     try {
-      this.check(accountId);
+      this.check(accountId, true);
     } catch {
       // the account was removed while its login ran
     }
@@ -576,7 +584,7 @@ export class AccountStore {
     this.emitLogin(accountId, exitCode === 0 ? 'done' : 'failed', run.lastLine, run, exitCode);
     if (this.core.journal.isClosed()) return;
     try {
-      this.check(accountId);
+      this.check(accountId, true);
     } catch {
       // the account was removed while its login ran
     }
@@ -584,14 +592,16 @@ export class AccountStore {
 
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
-    const session = provider.auth.session ?? [];
+    // A profile may say where the login lives on its OS, or, with an empty list,
+    // that it can live outside any file there: then a file still proves a login
+    // and its absence proves nothing.
+    const own = profileFor(provider)?.session;
+    const session = own !== undefined && own.length > 0 ? own : provider.auth.session ?? [];
     if (session.length === 0) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';
-    for (const file of session) {
-      if (!existsSync(join(base, file))) return 'unauthenticated';
-    }
-    return 'ok';
+    if (session.every((file) => existsSync(join(base, file)))) return 'ok';
+    return own?.length === 0 ? 'unknown' : 'unauthenticated';
   }
 
   /**

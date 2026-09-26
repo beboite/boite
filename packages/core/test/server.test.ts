@@ -1,11 +1,16 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import { connect } from '../src/client.ts';
-import { pair } from '../src/main.ts';
-import { isAllowedOrigin, PLACEHOLDER_HTML, ServerConnection, UI_DIST } from '../src/server.ts';
-import { startTestCore } from './harness.ts';
+import type { RpcFailure } from '../src/errors.ts';
+import { Core } from '../src/core.ts';
+import { newToken } from '../src/ids.ts';
+import { pair, readPreviousRun } from '../src/main.ts';
+import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
+import { lanAddress } from '../src/server/lan.ts';
+import { removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const HELLO_TIMEOUT_MS = 200;
@@ -76,6 +81,80 @@ describe('server', () => {
     connection.sendEvent('message.delta', delta);
     expect(closed).toEqual([1013]);
   });
+  test('catch-up resends only the part whose deltas were dropped, and only once', () => {
+    const journal = harness.core.journal;
+    const tool = { type: 'tool' as const, toolId: 'tool_big', name: 'Read', input: {}, output: 'x'.repeat(200_000), status: 'done' as const };
+    journal.putMessage({ id: 'msg_parts', threadId: 'thr_parts', turnId: 'turn_parts', role: 'assistant',
+      state: 'streaming', createdAt: Date.now(), parts: [tool, { type: 'text', text: '' }] });
+    const writes: { method: string; params: { partIndex?: number; part?: { text?: string } } }[] = [];
+    let result = -1;
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ send: (frame: string) => { writes.push(JSON.parse(frame)); return result; },
+      close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const delta = { threadId: 'thr_parts', messageId: 'msg_parts', partIndex: 1, text: 'one' };
+    journal.appendDelta(delta.threadId, delta.messageId, 1, delta.text);
+    connection.sendEvent('message.delta', delta);
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' two');
+    connection.sendEvent('message.delta', { ...delta, text: ' two' });
+    expect(writes).toHaveLength(1);
+
+    // Still congested: the part goes out queued, and a later drain has nothing new to resend.
+    connection.drain();
+    expect(writes.slice(1).map((frame) => [frame.method, frame.params.partIndex])).toEqual([['message.part', 1]]);
+    connection.drain();
+    expect(writes).toHaveLength(2);
+
+    // Congested again, a dropped delta brings the part back once, never the tool output before it.
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' three');
+    connection.sendEvent('message.delta', { ...delta, text: ' three' });
+    journal.appendDelta(delta.threadId, delta.messageId, 1, ' four');
+    connection.sendEvent('message.delta', { ...delta, text: ' four' });
+    expect(writes).toHaveLength(3);
+    result = 20;
+    connection.drain();
+    expect(writes.slice(3).map((frame) => [frame.method, frame.params.partIndex])).toEqual([['message.part', 1]]);
+    expect(writes[3]?.params.part?.text).toBe('one two three four');
+    connection.drain();
+    expect(writes).toHaveLength(4);
+  });
+  test('recovering from backpressure never sends a delta the resent part already holds', () => {
+    const journal = harness.core.journal;
+    const bus = harness.core.bus;
+    journal.putMessage({ id: 'msg_dup', threadId: 'thr_dup', turnId: 'turn_dup', role: 'assistant',
+      state: 'streaming', createdAt: Date.now(), parts: [] });
+    const frames: { method: string; params: { partIndex: number; text?: string; part?: { text: string } } }[] = [];
+    let result = -1;
+    const connection = new ServerConnection(harness.core);
+    connection.attach({ send: (frame: string) => { frames.push(JSON.parse(frame)); return result; },
+      close: () => undefined } as unknown as Parameters<ServerConnection['attach']>[0]);
+    const off = bus.onAny((name, payload) => connection.sendEvent(name, payload));
+    // The same two buffers threads/turn-context.ts feeds for every delta.
+    const stream = (text: string) => {
+      journal.appendDelta('thr_dup', 'msg_dup', 0, text);
+      bus.emit('message.delta', { threadId: 'thr_dup', messageId: 'msg_dup', partIndex: 0, text });
+    };
+    try {
+      stream('alpha ');
+      bus.flush();
+      stream('beta ');
+      bus.flush();
+      // Still inside the bus window when the socket drains.
+      stream('gamma ');
+      result = 20;
+      connection.drain();
+      bus.flush();
+    } finally {
+      off();
+    }
+    let shown = '';
+    for (const frame of frames) {
+      if (frame.method === 'message.delta') shown += frame.params.text ?? '';
+      if (frame.method === 'message.part') shown = frame.params.part?.text ?? '';
+    }
+    const stored = journal.getMessage('msg_dup')?.parts[0];
+    expect(stored?.type === 'text' ? stored.text : null).toBe('alpha beta gamma ');
+    expect(shown).toBe('alpha beta gamma ');
+  });
   test('a valid token with an incompatible protocol closes 4010', async () => {
     const socket = rawSocket();
     await opened(socket);
@@ -104,6 +183,83 @@ describe('server', () => {
     expect(body.pid).toBe(process.pid);
   });
 
+  test('shutdown takes a POST with the core token, and an embedded core says it cannot stop', async () => {
+    const at = `${harness.url}/shutdown`;
+    expect((await fetch(at)).status).toBe(405);
+    expect((await fetch(at, { method: 'POST' })).status).toBe(401);
+    expect((await fetch(at, { method: 'POST', headers: { authorization: 'Bearer nope' } })).status).toBe(401);
+    // A proxy on this machine forwards a public name: the route is not for it.
+    const proxied = await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}`, host: 'boite.example' } });
+    expect(proxied.status).toBe(403);
+    // The harness core has no process of its own to stop.
+    expect((await fetch(at, { method: 'POST', headers: { authorization: `Bearer ${harness.token}` } })).status).toBe(501);
+  });
+
+  test('shutdown with the core token stops a core that owns its process', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-shutdown-'));
+    let stopped = 0;
+    const token = newToken();
+    const core = new Core({ dataDir, token, onShutdown: () => { stopped += 1; } });
+    const server = startServer({ core, host: '127.0.0.1', port: 0 });
+    try {
+      const ask = () => fetch(`${server.url}/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+      const first = await ask();
+      expect(first.status).toBe(202);
+      expect(((await first.json()) as { pid: number }).pid).toBe(process.pid);
+      // A second request while the first is draining is not a second stop.
+      expect((await ask()).status).toBe(202);
+      await Bun.sleep(60);
+      expect(stopped).toBe(1);
+    } finally {
+      await server.stop();
+      await core.close();
+      await removeDir(dataDir);
+    }
+  });
+
+  test('a restarted core listens on the port of its previous run, and on another when that one is taken', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'boite-sticky-'));
+    const core = new Core({ dataDir, token: newToken() });
+    const warnings: string[] = [];
+    const log = core.log.bind(core);
+    core.log = (level, message) => { if (level === 'warn') warnings.push(message); log(level, message); };
+    const first = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: null });
+    const port = first.port;
+    await first.stop();
+    const coreFile = join(dataDir, 'core.json');
+    writeFileSync(coreFile, JSON.stringify({ port, host: '127.0.0.1', token: 'kept', pid: 1 }));
+    expect(readPreviousRun(coreFile)).toEqual({ token: 'kept', port });
+    const again = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: readPreviousRun(coreFile).port });
+    const squatter = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('mine') });
+    try {
+      expect(again.port).toBe(port);
+      await again.stop();
+      // Another program took the port meanwhile: a new one, said in the log.
+      const moved = startServerOnStickyPort({ core, host: '127.0.0.1', port: 0, explicitPort: false, previousPort: squatter.port! });
+      expect(moved.port).not.toBe(squatter.port!);
+      expect(warnings.some((line) => line.includes(`port ${squatter.port}`))).toBe(true);
+      await moved.stop();
+      // A port the operator named is never swapped for another.
+      expect(() => startServerOnStickyPort({ core, host: '127.0.0.1', port: squatter.port!, explicitPort: true, previousPort: port })).toThrow();
+    } finally {
+      void squatter.stop(true);
+      await core.close();
+      await removeDir(dataDir);
+    }
+  });
+
+  test('a pairing link names the LAN address of a core listening on every interface', () => {
+    const iface = (address: string, internal = false) => ({ address, family: 'IPv4', internal, netmask: '', mac: '', cidr: null }) as never;
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)], vpn: [iface('100.64.0.2')], eth: [iface('192.168.1.20')] })).toBe('192.168.1.20');
+    expect(lanAddress({ eth: [iface('169.254.3.4')], wan: [iface('100.64.0.2')] })).toBe('100.64.0.2');
+    expect(lanAddress({ lo: [iface('127.0.0.1', true)] })).toBeNull();
+    const url = new URL(harness.core.sessions.pairingUrl('grant'));
+    expect(url.hostname).toBe('127.0.0.1');
+    harness.core.setEndpoint('0.0.0.0', 4321);
+    const lan = lanAddress();
+    expect(new URL(harness.core.sessions.pairingUrl('grant')).host).toBe(`${lan ?? '127.0.0.1'}:4321`);
+  });
+
   test('the root serves the UI build, or the placeholder when there is none', async () => {
     expect(PLACEHOLDER_HTML).toContain('Boite core is running; the UI is not built');
     const response = await fetch(`${harness.url}/`);
@@ -111,6 +267,77 @@ describe('server', () => {
     const body = await response.text();
     if (existsSync(UI_DIST)) expect(body).toContain('<html');
     else expect(body).toBe(PLACEHOLDER_HTML);
+    // No other site may frame the owner's UI.
+    expect(response.headers.get('content-security-policy')).toBe("frame-ancestors 'self'");
+    expect(response.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+  });
+
+  test('a socket before hello may not send a large frame, and only so many may wait at once', async () => {
+    const big = rawSocket();
+    await opened(big);
+    const closed = closeCode(big);
+    let answered = false;
+    big.addEventListener('message', () => { answered = true; });
+    big.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { token: harness.token, pad: 'x'.repeat(70_000) } }));
+    expect(await closed).toBe(RpcCloseCode.Unauthorized);
+    expect(answered).toBe(false);
+
+    // A core that waits longer for hello than this file's 200 ms, so the sockets stay pending.
+    const patient = await startTestCore({ helloTimeoutMs: 10_000 });
+    const waiting: WebSocket[] = [];
+    const owner: WebSocket[] = [];
+    // Peers of a tunnel on this machine: loopback address, public Host. They
+    // are counted; the owner's shell, loopback both ways, never is.
+    const tunnelled = { headers: { host: 'phone.example' } };
+    const hello = (socket: WebSocket) => socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+      token: patient.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' },
+    } }));
+    try {
+      const url = patient.url.replace('http', 'ws') + RPC_PATH;
+      for (let at = 0; at < 32; at += 1) waiting.push(new WebSocket(url, tunnelled as never));
+      await Promise.all(waiting.map(opened));
+      const refused = await fetch(`${patient.url}${RPC_PATH}`, tunnelled);
+      expect(refused.status).toBe(503);
+
+      // The owner still connects, and more than once, while every place is held.
+      expect((await fetch(`${patient.url}${RPC_PATH}`)).status).toBe(400);
+      for (let at = 0; at < 3; at += 1) owner.push(new WebSocket(url));
+      await Promise.all(owner.map(opened));
+      const shell = owner[0] as WebSocket;
+      const answer = firstFrame(shell);
+      hello(shell);
+      expect((await answer).result).toBeDefined();
+
+      // An authenticated client is not waiting: one hello frees a place.
+      const first = waiting[0] as WebSocket;
+      const freed = firstFrame(first);
+      hello(first);
+      expect((await freed).result).toBeDefined();
+      const next = await fetch(`${patient.url}${RPC_PATH}`, tunnelled);
+      expect(next.status).toBe(400);
+    } finally {
+      for (const socket of [...waiting, ...owner]) socket.close();
+      await patient.stop();
+    }
+  });
+
+  test('one LAN address may hold only 8 of the places waiting for hello, and loopback peers only the total', () => {
+    expect(preauthPeer('127.0.0.1', '127.0.0.1:8777')).toBeNull();
+    expect(preauthPeer('::ffff:127.0.0.1', 'localhost')).toBeNull();
+    expect(preauthPeer('::1', '[::1]:8777')).toBeNull();
+    // A loopback name forged by a LAN peer does not exempt it, nor a tunnel's public name its peers.
+    expect(preauthPeer('192.168.1.20', '127.0.0.1:8777')).toBe('192.168.1.20');
+    expect(preauthPeer('127.0.0.1', 'boite.example')).toBe('127.0.0.1');
+    expect(preauthPeer(null, '127.0.0.1')).toBe('unknown');
+
+    const phone = '192.168.1.20';
+    expect(preauthRefusal(Array(7).fill(phone), phone)).toBeNull();
+    expect(preauthRefusal(Array(8).fill(phone), phone)).toContain(`8 sockets from ${phone}`);
+    // Another host keeps its own places.
+    expect(preauthRefusal(Array(8).fill(phone), '192.168.1.21')).toBeNull();
+    // Tunnelled peers share one address that names nobody: only the total bounds them.
+    expect(preauthRefusal(Array(31).fill('127.0.0.1'), '127.0.0.1')).toBeNull();
+    expect(preauthRefusal(Array(32).fill('127.0.0.1'), '192.168.1.21')).toContain('32 sockets from other machines');
   });
 
   // Without `bun run build:ui` there is nothing to serve and nothing to assert;
@@ -315,6 +542,89 @@ describe('server', () => {
 
     const phoneLink = await pair(['--data-dir', harness.dataDir]);
     expect(phoneLink.role).toBe('device');
+  });
+
+  test('a grant whose answer was lost gives the same session to a retry with the same nonce, and to nobody else', async () => {
+    const sessions = harness.core.sessions;
+    const client = { name: 'pwa', version: '0' };
+    const nonce = 'n'.repeat(32);
+    const { grant } = sessions.grant(1_000);
+
+    // The first answer never reached the phone: its retry repeats the grant and the nonce.
+    const first = sessions.exchange(grant, client, 2_000, nonce);
+    const again = sessions.exchange(grant, client, 3_000, nonce);
+    expect(again).toEqual(first);
+    expect(harness.core.journal.listSessions()).toHaveLength(1);
+
+    // Someone else holding the QR code has no nonce, or the wrong one.
+    const refusedWith = (other: string | null, now = 3_000): string => {
+      try {
+        sessions.exchange(grant, client, now, other);
+        return 'accepted';
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    const spent = 'the pairing link was already used, expired, or never issued';
+    expect(refusedWith(null)).toBe(spent);
+    expect(refusedWith('m'.repeat(32))).toBe(spent);
+    // Past the time the grant had, even the right nonce is refused.
+    expect(refusedWith(nonce, 1_000 + 10 * 60 * 1000)).toBe(spent);
+
+    // Through the socket: once the key opens the core, the grant is spent for good.
+    const owner = await harness.connect();
+    const link = await owner.call('pairing.grant', {});
+    const phone = await connect(harness.url, '', { grant: link.grant, nonce });
+    const retry = await connect(harness.url, '', { grant: link.grant, nonce });
+    expect(retry.session).toEqual(phone.session);
+    await connect(harness.url, phone.session?.token ?? '');
+    let after = 'none';
+    try {
+      await connect(harness.url, '', { grant: link.grant, nonce });
+    } catch (error) {
+      after = (error as Error).message;
+    }
+    expect(after).toBe(spent);
+    expect(harness.core.journal.listSessions()).toHaveLength(2);
+
+    // A nonce too short to be a secret is refused, and the grant is not spent by it.
+    const short = sessions.grant(Date.now());
+    const failure = (run: () => unknown): RpcFailure | null => {
+      try { run(); return null; } catch (error) { return error as RpcFailure; }
+    };
+    const tooShort = failure(() => sessions.exchange(short.grant, client, Date.now(), 'short'));
+    expect(tooShort?.code).toBe(RpcErrorCode.InvalidParams);
+    expect(tooShort?.message).toBe('nonce must be 16 to 256 characters, got 5');
+    expect(failure(() => sessions.exchange(short.grant, client, Date.now(), 'x'.repeat(257)))?.message)
+      .toBe('nonce must be 16 to 256 characters, got 257');
+    expect(failure(() => sessions.exchange(short.grant, client, Date.now(), nonce))).toBeNull();
+  });
+
+  test('a hello whose nonce is unusable is refused by name, and the grant survives it', async () => {
+    const owner = await harness.connect();
+    const link = await owner.call('pairing.grant', {});
+    const refusal = async (params: Record<string, unknown>): Promise<unknown> => {
+      const socket = rawSocket();
+      await opened(socket);
+      const frame = firstFrame(socket);
+      const closed = closeCode(socket);
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: {
+        protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' }, ...params,
+      } }));
+      const answer = await frame;
+      expect(await closed).toBe(RpcCloseCode.Unauthorized);
+      return answer.error;
+    };
+    const named = { code: RpcErrorCode.InvalidParams, data: { field: 'nonce', min: 16, max: 256 } };
+    expect(await refusal({ grant: link.grant, nonce: 'short' }))
+      .toEqual({ ...named, message: 'nonce must be 16 to 256 characters, got 5' });
+    expect(await refusal({ grant: link.grant, nonce: 42 }))
+      .toEqual({ ...named, message: 'nonce must be a string of 16 to 256 characters, got number' });
+    expect(await refusal({ token: harness.token, nonce: 'n'.repeat(32) }))
+      .toEqual({ ...named, message: 'nonce goes with a grant; a hello with a token takes none' });
+    // None of that spent the grant.
+    const phone = await connect(harness.url, '', { grant: link.grant, nonce: 'n'.repeat(32) });
+    expect(phone.session?.token).toBeDefined();
   });
 
   test('a grant expires, and hello with both a token and a grant is refused', async () => {

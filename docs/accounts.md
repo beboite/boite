@@ -66,14 +66,17 @@ statuses:
 
 | Status | Meaning |
 |---|---|
-| `unknown` | never checked, or the provider is not available on this machine |
+| `unknown` | never checked, the provider is not available on this machine, or its session file is missing on an OS where the login can live outside any file (Claude on macOS, whose login is in the Keychain) |
 | `ok` | the session file is there |
 | `unauthenticated` | the directory exists and the session file does not |
 | `error` | the check itself failed, with the reason |
 
 The check runs when an account is added, when it is asked for, and after a login
-process exits. Its result reaches every client as `accounts.updated`, so a second
-shell or a phone follows it without a reload. `auth.identity`, where a descriptor
+process exits. A changed status reaches every client as `accounts.updated`, so a
+second shell or a phone follows it without a reload. A check asked for that
+finds the same status answers with the account and writes and sends nothing, so
+the Accounts page checking on every focus costs no journal row and keeps the
+cached model lists; a new account and a finished login are always sent. `auth.identity`, where a descriptor
 provides it, is what turns a status into a name the picker can show.
 
 ## The login flow
@@ -128,6 +131,13 @@ same terminal as on the Providers page, inside the dialog. A download asked for
 here goes on to the sign-in by itself. Once the account answers, `Use <provider>` moves the composer to it
 through `store.useProvider`, the same remembered choice a pick in the model
 picker writes, and the text being typed stays where it was.
+
+Each step replaces the button that led to it, so the dialog moves the keyboard
+to the new step's first control whenever focus has fallen out of it: a
+keyboard user goes from `Install` to `Cancel`, to the sign-in link, then to
+`Use <provider>` without reaching for the mouse. On a phone the dialog is a
+sheet at the bottom of the screen, and its last button stays above the home
+indicator.
 
 An account that answered `unauthenticated` gets a `Sign in again` chip beside
 the model chip, and an error in its thread carries the same button. Both open

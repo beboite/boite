@@ -1,29 +1,22 @@
 <script lang="ts">
-  import { ArrowUp, FileText, GitBranch, Paperclip, ShieldAlert, ShieldCheck, Square, X } from '@lucide/svelte';
   import { tick, untrack } from 'svelte';
-  import type { Attachment, PermissionMode, PreviewReference } from '@boite/contracts';
+  import type { Attachment, PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
-  import { bytes, tokens as formatTokens } from '../lib/format';
-  import { confirm } from '../lib/confirm.svelte';
-  import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
-  import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from '@boite/contracts';
-  import { acceptAttachments, decodedBytes, readAttachmentFile } from '../lib/attachments';
-  import { AGENT_PREFIX, appCommands, isAgentCommand, runCommand } from '../lib/commands.svelte';
+  import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
+  import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
+  import { attachFiles } from '../lib/composer-attachments';
+  import { drainQueue, sentPrompts } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
-  import { claudeKeywords, promptSegments, promptText } from '../lib/message-display';
-  import { modeHint, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
+  import { claudeKeywords, promptSegments } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
-  import type { Choice, PickPatch, Store } from '../lib/store.svelte';
-  import EffortSlider from './EffortSlider.svelte';
-  import Menu from './Menu.svelte';
-  import ModelPicker from './ModelPicker.svelte';
+  import type { Choice, Store } from '../lib/store.svelte';
+  import ComposerAttachments from './ComposerAttachments.svelte';
+  import ComposerBar from './ComposerBar.svelte';
+  import ComposerQueue from './ComposerQueue.svelte';
   import MentionMenu from './MentionMenu.svelte';
   import SlashMenu from './SlashMenu.svelte';
   import ThreadActivity from './ThreadActivity.svelte';
-  import Dictation from './Dictation.svelte';
-  import ComposerOptions from './ComposerOptions.svelte';
-  import { work } from '../lib/work-prefs.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
   /**
@@ -49,7 +42,7 @@
   let box = $state<HTMLTextAreaElement | undefined>(undefined);
   let inputWidth = $state(0);
   let inputScroll = $state(0);
-  let picker = $state<HTMLInputElement | undefined>(undefined);
+  let toolbar = $state<ReturnType<typeof ComposerBar> | undefined>(undefined);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
   /** The box has the keyboard: one of the two things that open the slash menu. */
@@ -78,7 +71,7 @@
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   /** The three commands the composer runs itself: each one opens a chip's menu. */
-  const CHIP_COMMANDS: Record<string, { testid: string; description: string }> = {
+  const CHIP_COMMANDS: Record<string, ChipCommand> = {
     model: { testid: 'composer-picker', description: strings.slash.model },
     effort: { testid: 'composer-effort', description: strings.slash.effort },
     mode: { testid: 'composer-mode', description: strings.slash.mode }
@@ -120,22 +113,12 @@
     const threadId = store.openThread?.id;
     if (store.connection === 'ready' && !store.busy && threadId && state &&
         state.queued.length > 0 && !state.sending && !state.paused) {
-      untrack(() => void drain(threadId, state));
+      untrack(() => void drainQueue(store, threadId, state));
     }
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
-  let sent = $derived(
-    (store.openThread?.messages ?? [])
-      .filter((message) => message.role === 'user')
-      .map((message) => ({ text: message.parts
-          .filter((part) => part.type === 'text')
-          .map((part) => (part.type === 'text' ? promptText(part) : ''))
-          .join('\n'), previewReferences: message.parts.flatMap(part => part.type === 'text' ? part.previewReferences ?? [] : [])
-      }))
-      .filter((prompt) => prompt.text.length > 0 || prompt.previewReferences.length > 0)
-      .reverse()
-  );
+  let sent = $derived(sentPrompts(store.openThread?.messages ?? []));
 
   let provider = $derived(choice ? store.providerOf(choice.providerId) : null);
   $effect(() => {
@@ -151,9 +134,6 @@
       untrack(() => void store.probeModelEffort(id, accountId, model));
     }
   });
-  let bound = $derived(store.openThread !== null);
-  /** Every agent can read uploaded files through its local tools. */
-  let canAttach = $derived(provider !== null && provider !== undefined);
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
       readingFiles === 0 &&
@@ -178,10 +158,7 @@
   // space or a second line closes it, since the input of a command is not a query.
 
   /** What was typed after the slash, or null while the box is not a bare `/word`. */
-  let slashQuery = $derived.by((): string | null => {
-    const match = /^\/(\S*)$/.exec(text);
-    return match ? (match[1] ?? '') : null;
-  });
+  let slashQuery = $derived(slashQueryOf(text));
 
   // -- the mention menu ---------------------------------------------------------
   // `@` at the start of a word, wherever the caret is: the word after it is the
@@ -189,11 +166,7 @@
   // path in as `@path`, plain text every agent reads, its own way.
 
   /** The word being typed after an `@`, or null while the caret is not on one. */
-  let mentionQuery = $derived.by((): string | null => {
-    if (previewReferences.some(reference => reference.mention && caret > reference.mention.start && caret <= reference.mention.end)) return null;
-    const match = /(?:^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
-    return match ? (match[1] ?? '') : null;
-  });
+  let mentionQuery = $derived(mentionQueryOf(text, caret, previewReferences));
 
   /** A mention wins over the slash menu on the odd `/@word`: it is the word under the caret. */
   let slashOpen = $derived(slashQuery !== null && mentionQuery === null && focused && !slashDismissed);
@@ -232,15 +205,7 @@
         .call('projects.files', { projectId, query, limit: MENTION_PAGE })
         .then((page) => {
           if (ask !== mentionAsk) return;
-          mentionItems = page.files.map((path) => {
-            const cut = path.lastIndexOf('/');
-            return {
-              id: path,
-              kind: 'command' as const,
-              label: cut < 0 ? path : path.slice(cut + 1),
-              description: cut < 0 ? undefined : path.slice(0, cut)
-            };
-          });
+          mentionItems = mentionRows(page.files);
           mentionMore = Math.max(0, page.total - page.files.length);
           mentionAt = 0;
         })
@@ -255,41 +220,10 @@
   });
 
   /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
-  let agentItems = $derived.by((): PaletteItem[] =>
-    (store.openThread?.commands ?? []).filter((command) => !['goal', 'loop'].includes(command.name)).map((command) => ({
-      id: `${AGENT_PREFIX}${command.name}`,
-      kind: 'command' as const,
-      label: `/${command.name}`,
-      hint: command.hint ?? undefined,
-      description: command.description ?? undefined
-    }))
-  );
+  let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
-  /**
-   * Boite's own under them: the palette's list plus the three the composer runs
-   * itself. A row reads as the `/name` it is typed as, the sentence under it.
-   */
-  let boiteItems = $derived.by((): PaletteItem[] => [
-    { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
-    { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
-    ...Object.entries(CHIP_COMMANDS).map(([name, chip]) => ({
-      id: name,
-      kind: 'command' as const,
-      label: `/${name}`,
-      description: chip.description
-    })),
-    // A command is looked up by the `/name` it is typed as, so the palette's
-    // sentence becomes the line under it and never part of what is ranked: it
-    // is a whole sentence, and one of its words would outrank every real name.
-    ...appCommands(store, inShell).map((item) => ({
-      id: item.id,
-      kind: 'command' as const,
-      label: `/${item.id}`,
-      description: item.label,
-      keywords: item.keywords
-    }))
-  ]);
-
+  /** Boite's own under them: the palette's list plus the three the composer runs itself. */
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(store, inShell, CHIP_COMMANDS));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -320,131 +254,22 @@
     slashAt = 0;
   });
 
-  // Older modes keep their execution policy until the user makes a choice.
-  let displayedMode = $derived<PermissionMode>(shownMode(choice?.permissionMode ?? 'default', provider));
-  let modes = $derived(modesFor(provider));
-  /** The chosen account answered that it is signed out: the next send would fail on it. */
-  let signedOut = $derived.by(() => {
-    const account = choice ? store.accountOf(choice.accountId) : null;
-    return account?.status === 'unauthenticated' ? account : null;
-  });
-  let modeItems = $derived(
-    modes.map((mode) => ({
-      id: mode,
-      label: modeLabel(mode, provider),
-      hint: modeHint(mode, provider),
-      active: displayedMode === mode
-    }))
-  );
-  // The worktree switch exists where the core can honour it: a draft on a git repository.
-  let draftRepository = $derived(
-    store.draft && !store.draftInDrafts ? store.projects.find((project) => project.id === store.draft?.projectId)?.repository !== false : false
-  );
-
-  // The reasoning chip belongs to the model the choice is on, and a model that
-  // offers no scale (an agent that keeps its own) gets no chip at all.
-  let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
-  let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
-  let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
-  // A chip stays in the bar when this device pinned it, or when it holds
-  // something other than the default: a choice nobody can see is a trap.
-  let effortChip = $derived(
-    (effortLevels.length > 0 || speeds.length > 0) &&
-      (work.current.pins.effort || activeEffort !== (store.modelOf(choice)?.effort?.default ?? null) || Boolean(choice?.speed))
-  );
-  let worktreeChip = $derived(Boolean(store.draft && draftRepository && (work.current.pins.worktree || store.draft.worktree)));
-
-  /** A null effort runs at the model's own default, not at a preset the client configured. */
-  function cacheKey(selection: Choice): CacheKey {
-    return {
-      accountId: selection.accountId,
-      model: selection.model ?? null,
-      effort: selection.effort ?? store.modelOf(selection)?.effort?.default ?? null,
-      speed: selection.speed ?? null,
-    };
-  }
-
-  /** On a thread only the model and the effort change and they are saved at once; on a draft the whole choice is remembered. */
-  async function pick(patch: PickPatch) {
-    if (!choice || picking) return;
-    const thread = store.openThread;
-
-    if (thread) {
-      const changedModel = patch.model !== undefined || patch.accountId !== undefined;
-      const target = { ...choice, ...patch, effort: patch.effort !== undefined ? patch.effort : changedModel ? null : choice.effort, speed: patch.speed !== undefined ? patch.speed : changedModel ? null : choice.speed ?? null };
-      picking = true;
-      try {
-        if (switchDropsHistory(thread, target.accountId)) {
-          const from = store.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
-          const to = store.providers.find((entry) => entry.id === target.providerId)?.name ?? target.providerId;
-          const go = await confirm.ask({
-            title: fill(strings.composer.switchTitle, { tokens: formatTokens(thread.context?.tokens ?? 0), provider: to }),
-            body: fill(strings.composer.switchBody, { provider: to }),
-            confirmLabel: strings.composer.switchConfirm,
-            cancelLabel: fill(strings.composer.switchCancel, { provider: from }),
-          });
-          if (!go) return;
-        } else if (switchResetsCache(thread, cacheKey(choice), cacheKey(target))) {
-          const go = await confirm.ask({
-            title: fill(strings.composer.cacheTitle, { tokens: formatTokens(thread.context?.tokens ?? 0) }),
-            body: strings.composer.cacheBody,
-            confirmLabel: strings.composer.cacheConfirm,
-            cancelLabel: strings.composer.cacheCancel,
-          });
-          if (!go) return;
-        }
-        const accepted = await store.update(thread.id, {
-          accountId: target.accountId, model: target.model, effort: target.effort, speed: target.speed,
-          expectedSelectionVersion: thread.selectionVersion ?? 0,
-        });
-        if (accepted) store.remember(target);
-      } finally { picking = false; }
-      return;
-    }
-
-    if (patch.speed !== undefined) { choice = { ...choice, speed: patch.speed }; store.remember(choice); return; }
-    // An effort alone: the model stays, so nothing else moves.
-    if (patch.effort !== undefined) {
-      if (patch.effort === choice.effort) return;
-      choice = { ...choice, effort: patch.effort };
-      store.remember(choice);
-      return;
-    }
-
-    // Another model runs on its own scale, so the effort goes back to that model's default.
-    const target = { ...choice, ...patch };
-    choice = { ...target, effort: store.defaultEffortOf(target.providerId, target.accountId, target.model), speed: null };
-    store.remember(choice);
-  }
-
-  function pickEffort(id: string) {
-    pick({ effort: id });
-  }
-
-  function pickMode(id: string) {
-    const mode = id as PermissionMode;
-    if (!choice || picking) return;
-    choice = { ...choice, permissionMode: mode };
-    if (bound) void store.setPermissionMode(mode);
-    else store.remember(choice);
-  }
-
+  let grown = ''; // Last value measured. Reading the style before the auto write forces one layout, not two.
   function grow() {
     const el = box;
     if (!el) return;
-    el.style.height = 'auto';
     const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
-    syncInput();
+    grown = el.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
   }
 
-  // Context inserted from a preview changes the shared draft without an input
-  // event. Measure after Svelte has written that text into the textarea.
+  // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
   $effect(() => {
     void text;
     if (!box) return;
     let current = true;
-    void tick().then(() => { if (current) grow(); });
+    void tick().then(() => { if (current && box?.value !== grown) grow(); });
     return () => { current = false; };
   });
 
@@ -529,27 +354,6 @@
     store.editComposerText(key, value);
   }
 
-  async function drain(threadId: string, state: NonNullable<typeof composer>) {
-    const entry = state.queued[0];
-    if (entry === undefined) return;
-    state.sending = true;
-    const accepted = await store.send(entry.text, threadId, entry.attachments, entry.previewReferences ?? []);
-    if (accepted) state.queued.shift();
-    else {
-      // Pause after a refusal. The prompt goes back in the box for an explicit
-      // retry only when it is the whole queue: taking it out from under the
-      // ones behind it would send them in the order they were not typed in.
-      state.paused = true;
-      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
-        const back = state.queued.shift()!;
-        state.text = back.text;
-        state.attachments = back.attachments;
-        state.previewReferences = back.previewReferences ?? [];
-      }
-    }
-    state.sending = false;
-  }
-
   async function submit(nextDraft = false) {
     const prompt = text;
     const images = attachments;
@@ -590,46 +394,15 @@
   // Three ways in, one path: the attach button, pasted files,
   // and files dropped on the box. `lib/attachments.ts` owns the caps.
 
-  /**
-   * Reads files one at a time, checking their sizes before allocating base64.
-   */
+  /** Reads files one at a time into this input's attachments (`lib/composer-attachments.ts`). */
   async function take(files: File[]) {
     if (files.length === 0) return;
     const state = stateForInput();
     const attachmentProvider = provider;
     readingFiles += 1;
     try {
-    for (const file of files) {
-      if (file.size > ATTACHMENT_MAX_BYTES) {
-        store.error = fill(strings.composer.attachTooLarge, { name: file.name, max: bytes(ATTACHMENT_MAX_BYTES) });
-        continue;
-      }
-      if (state.attachments.length >= ATTACHMENTS_PER_TURN) {
-        store.error = fill(strings.composer.attachTooMany, { name: file.name, max: String(ATTACHMENTS_PER_TURN) });
-        break;
-      }
-      try {
-        const attachment = await readAttachmentFile(file);
-        if (attachment.kind === 'image' && attachmentProvider && !attachmentProvider.capabilities.images) {
-          store.error = fill(strings.composer.attachNoImages, { provider: attachmentProvider.name });
-          continue;
-        }
-        const { accepted, refused } = acceptAttachments(state.attachments, [attachment]);
-        state.attachments = accepted;
-        if (refused !== null) store.error = refused;
-      } catch {
-        store.error = fill(strings.composer.attachReadError, { name: file.name });
-      }
-    }
+      await attachFiles(store, files, state, attachmentProvider);
     } finally { readingFiles -= 1; }
-  }
-
-  function onchoose(event: Event) {
-    const field = event.currentTarget as HTMLInputElement;
-    const files = Array.from(field.files ?? []);
-    // The same picture picked twice in a row must fire `change` both times.
-    field.value = '';
-    void take(files);
   }
 
   function onpaste(event: ClipboardEvent) {
@@ -758,20 +531,10 @@
     put('');
     const chip = CHIP_COMMANDS[item.id];
     if (chip) {
-      void openChip(chip.testid);
+      void toolbar?.openChip(chip.testid);
       return;
     }
     runCommand(store, item.id, inShell);
-  }
-
-  /** The chip's own trigger opens its menu: one popover, owned by one component. */
-  async function openChip(testid: string) {
-    await tick();
-    const bar = box?.closest('[data-testid="composer"]');
-    if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
-    // An unpinned effort lives in the Options menu.
-    else if (testid === 'composer-effort' && !effortChip) testid = 'composer-more';
-    bar?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 
   /**
@@ -800,31 +563,6 @@
       return listKey(event, slashItems, slashAt, (index) => (slashAt = index), () => (slashDismissed = true), pickSlash);
     }
     return false;
-  }
-
-  function listKey(
-    event: KeyboardEvent,
-    items: PaletteItem[],
-    at: number,
-    move: (index: number) => void,
-    dismiss: () => void,
-    pick: (item: PaletteItem) => void
-  ): boolean {
-    if (event.key === 'Escape') {
-      dismiss();
-      return true;
-    }
-    if (event.key === 'Enter' || event.key === 'Tab') {
-      const item = items[at];
-      if (!item) return false;
-      pick(item);
-      return true;
-    }
-    if (items.length === 0) return false;
-    if (event.key === 'ArrowDown') move((at + 1) % items.length);
-    else if (event.key === 'ArrowUp') move((at - 1 + items.length) % items.length);
-    else return false;
-    return true;
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -867,46 +605,13 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
     {#if composer && composer.queued.length > 0}
-      <div class="queued" data-testid="composer-queued">
-        <span class="subtle">{strings.composer.queued}</span>
-        {#each composer.queued as entry, at (entry)}
-          <button type="button" class="ghost queued-entry"
-            title={strings.composer.editQueued}
-            disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-            onclick={() => restoreQueued(at)}>
-            <span>{entry.text || strings.composer.attachAlt}</span>
-            {#if entry.attachments.length}<span class="subtle">{entry.attachments.length} <Paperclip size={12} /></span>{/if}
-            {#if entry.previewReferences?.length}<span class="subtle">@{entry.previewReferences.length}</span>{/if}
-            <ArrowUp size={12} />
-          </button>
-        {/each}
-      </div>
+      <ComposerQueue queued={composer.queued}
+        disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
+        onrestore={restoreQueued} />
     {/if}
 
     {#if attachments.length > 0}
-      <div class="attachments" data-testid="composer-attachments">
-        {#each attachments as attachment, at (at)}
-          {@const label = attachment.name ?? strings.composer.attachAlt}
-          <div class="attachment" class:document={attachment.kind === 'file'} data-testid="composer-attachment" title={label}>
-            {#if attachment.kind === 'image'}
-              <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
-            {:else}
-              <FileText size={20} strokeWidth={1.5} />
-              <span class="file-info"><span>{label}</span><small>{bytes(decodedBytes(attachment.data))}</small></span>
-            {/if}
-            <button
-              type="button"
-              class="icon small remove"
-              data-testid="composer-attachment-remove"
-              title={fill(strings.composer.attachRemove, { name: label })}
-              aria-label={fill(strings.composer.attachRemove, { name: label })}
-              onclick={() => removeAttachment(at)}
-            >
-              <X size={12} strokeWidth={2.25} />
-            </button>
-          </div>
-        {/each}
-      </div>
+      <ComposerAttachments {attachments} onremove={removeAttachment} />
     {/if}
 
     <div class="input-wrap">
@@ -966,102 +671,14 @@
       </div>
     {/if}
 
-    <div class="bar">
-      {#key `${key}:${store.draft?.projectId ?? ''}`}
-      <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
-      {/key}
-      <div class="chips">
-        <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
-        {#if signedOut && store.owner}
-          <button type="button" class="chip signed-out" data-testid="composer-reconnect" title={fill(strings.connect.signedOut, { provider: provider?.name ?? '' })} onclick={() => store.openConnect(signedOut.providerId, signedOut.id)}>{strings.connect.reconnect}</button>
-        {/if}
-
-        <div class="desktop-options">
-        {#if effortChip}
-          <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
-        {/if}
-
-        {#if modes.length > 0}
-          <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
-            {#if displayedMode === 'bypassPermissions'}<span class="open-mode"><ShieldAlert size={14} strokeWidth={1.75} /></span>{:else}<ShieldCheck size={14} strokeWidth={1.75} />{/if}
-            {modeLabel(displayedMode, provider)}
-          </Menu>
-        {/if}
-
-        <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-        {#if store.draft && worktreeChip}
-          <button
-            type="button"
-            class="chip worktree"
-            class:on={store.draft.worktree}
-            data-testid="composer-worktree"
-            title={store.draft.worktree ? strings.composer.worktreeOn : strings.composer.worktreeOff}
-            aria-label={strings.composer.worktree}
-            aria-pressed={store.draft.worktree}
-            onclick={() => store.setDraftWorktree(!store.draft?.worktree)}
-          >
-            <GitBranch size={14} strokeWidth={1.75} />
-            {strings.composer.worktree}
-          </button>
-        {/if}
-
-        {#key `${key}:${store.draft?.projectId ?? ''}`}
-          <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
-        {/key}
-        </div>
-      </div>
-
-
-
-      {#if store.busy}
-        <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
-          <Square size={12} strokeWidth={2.5} />
-        </button>
-      {/if}
-        {#if canAttach}
-          <button
-            type="button"
-            class="icon attach"
-            data-testid="composer-attach"
-            title={strings.composer.attach}
-            aria-label={strings.composer.attach}
-            onclick={() => picker?.click()}
-          >
-            <Paperclip size={14} strokeWidth={1.75} />
-          </button>
-          <input
-            bind:this={picker}
-            class="file"
-            type="file"
-            multiple
-            tabindex="-1"
-            aria-hidden="true"
-            data-testid="composer-file"
-            onchange={onchoose}
-          />
-        {/if}
-
-
-      {#key store}
-        {#key `${key}:${store.draft?.projectId ?? ''}`}
-          <Dictation {store} onbusy={(busy) => dictating = busy} onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }} ontext={(transcript) => {
-            const current = stateForInput().text;
-            put(current + (current && !/\s$/.test(current) ? ' ' : '') + transcript);
-          }} />
-        {/key}
-      {/key}
-      <button
-        type="button"
-        class="primary icon send"
-        data-testid="composer-send"
-        title={strings.composer.send}
-        aria-label={strings.composer.send}
-        disabled={!canSend}
-        onclick={() => void submit()}
-      >
-        <ArrowUp size={16} strokeWidth={2.25} />
-      </button>
-    </div>
+    <ComposerBar bind:this={toolbar} {store} {key} {provider} {canSend} bind:choice bind:picking bind:dictating
+      onsubmit={() => void submit()}
+      onfiles={(files) => void take(files)}
+      onpreview={(text, status, error) => { speechPreview = text; speechStatus = status; speechError = error; }}
+      ontranscript={(transcript) => {
+        const current = stateForInput().text;
+        put(current + (current && !/\s$/.test(current) ? ' ' : '') + transcript);
+      }} />
   </div>
 </div>
 
@@ -1106,84 +723,6 @@
       0 0 0 2px color-mix(in srgb, var(--color-foreground) 22%, transparent);
   }
 
-  .queued {
-    padding: 6px 14px 0;
-    font-size: var(--text-sm);
-  }
-
-  .queued-entry { display: flex; gap: 8px; width: 100%; text-align: left; min-width: 0; }
-  .queued-entry > span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .queued-entry > span { display: inline-flex; align-items: center; gap: 4px; }
-
-  /* The attachments this prompt carries, above the box they were pasted into. */
-  .attachments {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 10px 14px 0;
-  }
-
-  .attachment {
-    position: relative;
-    width: 56px;
-    height: 56px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    overflow: hidden;
-    animation: pop var(--dur-2) var(--ease-out-quint);
-  }
-
-  .attachment.document { width: min(240px, 100%); display: flex; align-items: center; gap: 10px; padding: 0 48px 0 12px; }
-  .file-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--text-sm); }
-  .file-info > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-info small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .attachment.document .remove { width: 44px; height: 44px; top: 5px; right: 0; background: transparent; }
-  .attachment img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
-  /* The remove button rides the corner, readable over any picture. */
-  .attachment .remove {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: var(--color-scrim);
-    color: var(--color-foreground);
-  }
-
-  .attachment .remove:hover:not(:disabled) {
-    background: var(--color-danger);
-    color: var(--color-on-danger);
-  }
-
-  /* The button in the chip bar is what opens it; the field itself never shows. */
-  .file {
-    display: none;
-  }
-
-  .attach {
-    padding: 0 7px;
-  }
-
-  /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
-  .open-mode { display: inline-flex; color: var(--color-live); }
-  .chip.signed-out { color: var(--color-live); }
-
-  .worktree.on {
-    background: var(--color-active);
-    border-color: var(--color-active);
-    color: var(--color-foreground);
-  }
-
   .input-wrap { position: relative; }
 
   .input-highlight {
@@ -1223,75 +762,9 @@
     border: none;
   }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px 8px 10px;
-  }
-
-  .chips {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .desktop-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-
-  .chips :global(.trigger), .chips :global(.speed), .chips .worktree {
-    height: var(--control);
-    padding: 0 10px;
-    gap: 7px;
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    font-weight: 500;
-  }
-
-  .chips :global(.trigger) {
-    border-color: var(--color-edge);
-    background: var(--color-surface);
-    color: var(--color-foreground);
-  }
-
-  /* Nothing to pick yet: the one chip that gets somewhere wears the accent. */
-  .chips :global(.trigger.connect) {
-    border-color: transparent;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-  }
-
-  .chips :global(.trigger:hover) {
-    background: var(--color-surface-3);
-  }
-
-
-  .send,
-  .stop {
-    margin-left: auto;
-    width: var(--control);
-    height: var(--control);
-    border-radius: var(--radius-md);
-    flex: none;
-  }
-
-  .stop {
-    color: var(--color-foreground);
-  }
-
   @media (max-width: 720px) {
-    .bar { gap: 2px; padding: 0 8px 6px; }
-    .desktop-options, .attach { display: none; }
-    .chips { flex: 1; flex-wrap: nowrap; }
-    .chips :global(.picker) { min-width: 0; max-width: 100%; }
-    .chips :global(.picker > .trigger) { max-width: 100%; height: var(--touch-target); padding: 0 6px; border: none; background: transparent; font-weight: 500; color: var(--color-muted-foreground); }
-    .chips :global(.picker > .trigger > .label) { min-width: 0; max-width: none; }
-    .chips :global(.picker > .trigger.connect) { padding: 0 12px; border-radius: var(--radius-md); background: var(--color-accent-soft); color: var(--color-accent); }
     .composer { box-shadow: none; border-radius: var(--radius-xl); }
     .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
-    .send, .stop { border-radius: 50%; margin-left: 2px; }
-    .dictating .send { display: none; }
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }

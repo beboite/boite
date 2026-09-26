@@ -16,8 +16,12 @@ The squash commit message body is left empty.
 
 The changes job also runs `check:architecture` and its regression tests, even
 for documentation-only changes. Runtime dependency cycles and forbidden
-cross-package imports fail before the build matrix starts. The advisory
-complexity report does not impose a numeric merge threshold.
+cross-package imports fail before the build matrix starts. So does a
+production source file above 900 lines: the files already past it are listed in
+`scripts/architecture/size-budget.json` at their size on 2026-09-25, and may
+shrink but not grow. The contract, the in-memory client and the UI string
+tables are exempt, since every new RPC method or UI sentence adds to them. The advisory complexity report does not impose a numeric
+merge threshold.
 
 The changes job runs `scripts/ci/translations.ts` too. A UI sentence that
 exists in English and not yet in another language is a warning there, with its
@@ -36,6 +40,7 @@ one stays open, which the nightly reservation and a manual release rely on.
 | Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux x64 and macOS ARM64 shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
+| `bench/`, `telemetry/`, `scripts/architecture/` | Type checks and UI tests: `bun run check` covers the benches and the telemetry Worker |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft Windows release |
 | Nightly with an unpublished commit | Complete checks, signed nightly installer, development server image, prerelease |
@@ -80,12 +85,37 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
+Core test files run in parallel worker processes, one per CPU core by default
+(`bun test --parallel`). Each file gets a fresh global object, and the test
+harness gives every core its own temporary data directory and port, so files
+stay isolated. The whole core suite took 189 s serially and 35 s with 16
+workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
+`bun run --cwd packages/core test:serial` runs the files one after another
+when a failure needs a quiet run.
+
+Where the time goes, from `gh run view` on the 23 finished `ci` runs before
+2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows
+desktop job sets that length (12.8 minutes): 5.8 for the end-to-end suite, 3.5
+for the installer build and 1.1 for the Rust tests. Every other job a pull
+request waits on finishes in under 6 minutes; the Windows core job took 4.9, of
+which 4.1 were the serial core tests that parallel workers now shorten. The
+Intel macOS portable leg (16.2 minutes) runs only after a merge and on
+releases. Four of those runs failed: three in the Windows end-to-end suite and
+one in the Ubuntu core tests. Rerun the same query before quoting new numbers.
+
 The Windows job builds the installer and runs Rust tests in the release profile,
 sharing compiled dependencies. Successful main jobs save Cargo caches under a
 release-specific key. Failed or interrupted jobs do not save an incomplete cache
 that GitHub would keep immutable.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
+After the build, `scripts/ci/budgets.ts` fails the job when the UI's entry
+chunk, the whole UI without its `.br` and `.gz` copies, or the core's
+`dist/main.js` grows past its limit in `scripts/ci/budgets.json`. The limits
+sit about 10% above the sizes measured on 2026-09-26 (337 KB, 2221 KB and
+649 KB; `main` built a 681 KB core that day). Raise one in the change that
+explains the growth. Timings are not
+gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.

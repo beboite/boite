@@ -28,7 +28,8 @@ async function open(size: { width: number; height: number }, cache: { minutesAgo
   pages.push(page);
   await page.waitFor(`document.querySelector('[data-testid="context-trigger"]')`);
   await page.evaluate(`(async () => {
-    (await import('/src/lib/i18n.svelte.ts')).setLocaleSetting(${JSON.stringify(locale)});
+    // A language other than English loads its catalogue first.
+    await (await import('/src/lib/i18n.svelte.ts')).setLocaleSetting(${JSON.stringify(locale)});
     (await import('/src/lib/experiments.ts')).setExperiment('prompt-cache', ${experiment});
     const store = ${STORE};
     const thread = store.openThread;

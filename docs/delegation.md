@@ -63,7 +63,10 @@ Terminal results stay available. When the turn budget is exhausted, they wait
 for the next manual parent turn or an owner budget increase instead of waking a
 model beyond the limit.
 Only the selected child's transcript is subscribed to in the panel; inactive
-children contribute summaries instead of a stream per agent.
+children contribute summaries instead of a stream per agent. After a
+reconnect, the panel asks for the selected child's messages from its oldest
+unfinished turn and reads the team and coordination views again, since events
+sent while the socket was down reach no client.
 
 Stop all pauses the team and cancels queued and running children. Stopping or
 archiving the parent does the same. Parent failure and core restart pause the

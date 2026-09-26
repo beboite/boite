@@ -4,6 +4,7 @@
   import type { Account, ProviderSummary } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { fill, strings } from '../lib/strings';
@@ -54,10 +55,16 @@
     void focusFirst();
   });
 
-  async function focusFirst() {
+  $effect(() => { if (overlay.open) return mobileOverlay(() => store.closeConnect()); });
+
+  async function focusFirst(unlessInside = false) {
     await tick();
+    if (unlessInside && dialog?.contains(document.activeElement)) return;
     dialog?.querySelector<HTMLElement>('.body button:not(:disabled), .body a, .body input')?.focus({ preventScroll: true });
   }
+
+  // A step that replaces the pressed button hands the keyboard to its own first control, not to the page behind.
+  $effect(() => { void [step, login?.url]; if (overlay.open) void focusFirst(true); });
 
   let featured = $derived(store.providers.filter((p) => FEATURED.includes(p.id)).sort((a, b) => FEATURED.indexOf(a.id) - FEATURED.indexOf(b.id)));
   let others = $derived(store.providers.filter((p) => !FEATURED.includes(p.id)));
@@ -399,7 +406,12 @@
 
   @media (max-width: 720px) {
     .scrim { align-items: flex-end; padding: 0; }
-    .dialog { width: 100%; max-height: 90dvh; border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .dialog { width: 100%; max-height: calc(90dvh - env(safe-area-inset-top, 0px)); border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
     .service { min-height: var(--touch-target); }
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .bar.indeterminate { animation: none; } }
+  :global(html[data-motion='reduced']) .bar.indeterminate { animation: none; }
 </style>

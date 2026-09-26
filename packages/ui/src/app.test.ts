@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
+import type { FakeClient } from './lib/fake-client';
 import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
 import { workspace } from './lib/workspace.svelte';
@@ -31,13 +32,16 @@ afterEach(() => {
 });
 
 // The first settings mount waits on the dynamic import of the whole settings
-// subtree: on a CI worker that one wait already took 1.2 s, against a budget of
-// 400 ticks. Poll long enough that a slow machine is not a failure.
-async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
+// subtree: on a CI worker that one wait already took 1.2 s. The wait stops at
+// a deadline well inside the test timeout (vitest.config.ts), so a slow wait
+// fails here with the page's text rather than as a bare "Test timed out".
+async function waitFor(check: () => boolean, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  if (check()) return;
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
@@ -163,6 +167,23 @@ test('the app opens on a new thread in the project last worked in', async () => 
   expect(store.page).toBe('settings');
 });
 
+test('a notification link opens its thread on boot, with no landing draft first', async () => {
+  const drafted = vi.spyOn(store, 'startDraft');
+  try {
+    await mountOnFake('/?fake=1&open=landing&thread=t-scheduler');
+    expect(store.openThread?.id).toBe('t-scheduler');
+    expect(drafted).not.toHaveBeenCalled();
+    // A reload after the jump lands as usual instead of replaying the link.
+    expect(new URLSearchParams(window.location.search).get('thread')).toBeNull();
+  } finally { drafted.mockRestore(); }
+});
+
+test('a notification link to a thread that is gone lands on the usual draft', async () => {
+  await mountOnFake('/?fake=1&open=landing&thread=t-gone');
+  expect(store.openThread).toBeNull();
+  expect(store.draft).not.toBeNull();
+});
+
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
   await mountOnFake();
 
@@ -259,6 +280,33 @@ test('a machine with no AI offers to connect one, and the composer keeps its tex
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('No AI connected');
   expect(query<HTMLTextAreaElement>('[data-testid=composer-input]').value).toBe('Sort my holiday photos');
 });
+
+test('the keyboard stays in the connect dialog while its steps replace the button it pressed', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-service]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  const install = query<HTMLButtonElement>('[data-testid=connect-install]');
+  install.focus();
+  install.click();
+  const dialog = () => query('[data-testid=connect-dialog]');
+  await waitFor(() => document.querySelector('[data-testid=connect-step]')?.getAttribute('data-step') === 'installing');
+  await waitFor(() => dialog().contains(document.activeElement));
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  await waitFor(() => dialog().contains(document.activeElement));
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.focus();
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=connect-use]'));
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+}, 30_000);
 
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
@@ -528,6 +576,9 @@ test('a right click on a thread row opens the context menu, and Archive removes 
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  // t-bench waits on a permission: archiving it would drop that card, so the app asks first.
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
 });
@@ -1512,7 +1563,7 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
 
   // The fake ticks for about two seconds, then the provider is one tile like any other.
   await store.installProvider('antigravity');
-  await waitFor(() => store.installOf('antigravity')?.state === 'installed', 2000);
+  await waitFor(() => store.installOf('antigravity')?.state === 'installed');
   store.showChat();
   await waitFor(() => document.querySelector('[data-testid=composer-picker]') !== null);
 
@@ -1545,8 +1596,17 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
   expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // Down and one release behind: the row offers Update, the details name both versions.
+  // The fake's OpenCode runs from the user's own install, so the updates card
+  // owns its version and the row offers no Update beside that card's "Up to date".
   const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
+  await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
+  expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
+  expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
+
+  // With Boite's copy the one that runs, down and one release behind: the row
+  // offers Update, the details name both versions.
+  store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
+  await waitFor(() => document.querySelector(`${behind} [data-testid=install-update]`) !== null);
   expect(query(`${behind} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
   await openProviderDetails('opencode');
   expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Version 0.4.12 · 0.5.0 is available');
@@ -1558,8 +1618,7 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(document.querySelector(`${behind} [data-testid=install-cancel]`)).not.toBeNull();
 
   await waitFor(
-    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0',
-    2000
+    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0'
   );
   expect(document.querySelector('[data-testid=install-update]')).toBeNull();
 
@@ -1719,7 +1778,31 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   await waitFor(() => document.querySelector('[data-testid=account-login-cancel]') !== null);
   query<HTMLButtonElement>('[data-testid=account-login-cancel]').click();
   await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  // The core ends a cancelled login as failed, not done: the store drops the row all the same.
+  expect(store.logins).toEqual({});
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
+});
+
+test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
+  await mountOnFake();
+  const client = store.client!;
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
+  expect(account.status).toBe('unauthenticated');
+  const [project] = await client.call('projects.list', {});
+  const thread = await client.call('threads.create', { projectId: project!.id, providerId: 'claude', accountId: account.id, title: 'Signed out' });
+  await waitFor(() => store.threads.some((entry) => entry.id === thread.id));
+  await store.open(thread.id);
+  await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
+});
+
+test('an error line of the core log shows the error toast, a warning does not', async () => {
+  await mountOnFake();
+  const fake = store.client as unknown as FakeClient;
+  // Events reach the store as they are sent, so the warning has been handled once this returns.
+  fake.emitCoreLog('warn', 'the disk is slow');
+  expect(store.error).toBeNull();
+  fake.emitCoreLog('error', 'the scheduler failed');
+  await waitFor(() => document.querySelector('[data-testid=error-toast]')?.textContent?.includes('the scheduler failed') === true);
 });
 
 test('account lifecycle provider metadata gates login and the command-line login', async () => {
@@ -1855,7 +1938,7 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   await mountOnFake();
   store.showSettings('accounts');
   await store.installProvider('antigravity');
-  await waitFor(() => store.providerOf('antigravity')?.available === true, 2000);
+  await waitFor(() => store.providerOf('antigravity')?.available === true);
   // Installed and nobody signed in: the row's one button is the sign-in.
   const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);
@@ -2017,6 +2100,9 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
   expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid=machine-rename]')).map(input => input.value)).toContain('Builder');
   query<HTMLButtonElement>('[data-testid=machine-remove]').click();
+  // Forgetting a machine asks first; the answer is the in-app dialog's.
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);

@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { RpcErrorCode, type ThreadStatus } from '@boite/contracts';
-import { RpcFailure } from './client';
+import { PROTOCOL_VERSION, RpcErrorCode, type Thread, type ThreadStatus } from '@boite/contracts';
+import { RpcFailure, droppedFailure } from './client';
 import { FakeClient } from './fake-client';
 import { setNotificationSender, type Toast } from './notify';
-import { resumeAnchor, Store } from './store.svelte';
+import * as endpoints from './endpoint';
+import { Store } from './store.svelte';
+import { LOCAL_RECOVERY_MS } from './store/connection.svelte';
+import { resumeAnchor } from './thread-rows';
+import { strings } from './strings';
+import { compareThreads } from './thread-order';
+import { confirm } from './confirm.svelte';
+import { browserBridge } from './browser-bridge';
+import { rightPanel } from './right-panel.svelte';
+import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
 test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
   const { store, client } = await ready();
@@ -27,6 +36,42 @@ test('changing a Store endpoint drops the previous machine composer and element 
     localStorage.clear();
     for (const [key, value] of saved) localStorage.setItem(key, value);
   }
+});
+
+test('changing a Store endpoint drops the previous machine updates, todos, resources and trace', async () => {
+  const { store, client } = await ready();
+  const saved = Object.entries(localStorage);
+  const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+  const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+  store.harnessUpdates = [{ providerId: 'claude', name: 'Claude', route: 'managed', current: '1.0.0', latest: '1.1.0', pending: false, skipped: null, state: 'idle', message: null, checkedAt: null }] as never;
+  store.todos = { 'p-boite': [{ id: 'todo-1' }] } as never;
+  store.resources = [{ threadId: 't-trace' }] as never;
+  store.trace = [{ pid: 1 }] as never;
+  try {
+    await store.connectTo('https://second.test', 'fixture-token');
+    expect(store.harnessUpdates).toEqual([]);
+    expect(store.todos).toEqual({});
+    expect(store.resources).toEqual([]);
+    expect(store.trace).toEqual([]);
+  } finally {
+    connect.mockRestore(); open.mockRestore();
+    store.client?.close(); store.detach(); client.close();
+    localStorage.clear();
+    for (const [key, value] of saved) localStorage.setItem(key, value);
+  }
+});
+
+test('a core without agent updates shows none, not the last machine list', async () => {
+  const { store, client } = await ready();
+  store.harnessUpdates = [{ providerId: 'claude' }] as never;
+  const real = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => method === 'providers.updates'
+    ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'unknown method providers.updates' }))
+    : real(method as never, params)) as typeof client.call);
+  try {
+    await store.loadHarnessUpdates();
+    expect(store.harnessUpdates).toEqual([]);
+  } finally { store.detach(); client.close(); }
 });
 
 test('dropped folders use the local core when a remote machine is selected', async () => {
@@ -166,6 +211,31 @@ test('reloading the current conversation keeps the selected agent transcript sub
   } finally { store.detach(); client.close(); }
 });
 
+test('a reconnect catches up the agent transcript and the team statuses the gap missed', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    await store.loadDelegation('t-trace');
+    await store.selectDelegatedAgent('t-team-running');
+    const answer = store.delegationThread!.messages.at(-1)!;
+    const full = (answer.parts[0] as { text: string }).text;
+    // What the gap loses: the end of a streamed reply and a status change.
+    answer.parts = [{ type: 'text', text: 'I found the' }];
+    store.delegation!.agents.find((agent) => agent.thread.id === 't-team-running')!.thread.status = 'idle';
+    const called = vi.spyOn(client, 'call');
+    client.drop();
+    await client.restore();
+    await waitFor(() => (store.delegation?.agents.find((agent) => agent.thread.id === 't-team-running')?.thread.status === 'running' ? true : undefined));
+    await waitFor(() => ((store.delegationThread?.messages.at(-1)?.parts[0] as { text?: string } | undefined)?.text === full ? true : undefined));
+    expect(store.delegationSelectedAgentId).toBe('t-team-running');
+    expect(store.delegationThread?.messages.map((message) => message.id)).toEqual(['m-t-team-running-1', 'm-t-team-running-2']);
+    expect(called).toHaveBeenCalledWith('threads.get', { threadId: 't-team-running', after: 'm-t-team-running-1' });
+  } finally { store.detach(); client.close(); }
+});
+
 test('starting a draft cancels a pending child subscription even without an open subscription', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   const store = new Store();
@@ -238,6 +308,42 @@ test('a replacement part followed by a delta is appended once in each independen
     for (const snapshot of [store.openThread, store.delegationThread]) {
       expect(snapshot!.messages.at(-1)!.parts[0]).toEqual({ type: 'text', text: 'hello world' });
     }
+  } finally { store.detach(); client.close(); }
+});
+
+test('a streamed delta, message or turn finds the newest item without walking the whole timeline', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const handlers = new Map<string, (payload: never) => void>();
+  const on = client.on.bind(client);
+  vi.spyOn(client, 'on').mockImplementation(((event: string, handler: (payload: never) => void) => {
+    handlers.set(event, handler);
+    return on(event as never, handler);
+  }) as typeof client.on);
+  const store = new Store();
+  store.attach(client);
+  try {
+    await store.connect();
+    await store.open('t-trace');
+    const raw = JSON.parse(JSON.stringify(store.openThread)) as Thread;
+    const last = raw.messages.at(-1)!;
+    const turn = raw.turns.at(-1)!;
+    // A long thread scrolled back: what streams is always its newest item.
+    let reads = 0;
+    const counted = <T,>(items: T[]): T[] => new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      }
+    });
+    const older = Array.from({ length: 2000 }, (_, index) => ({ ...last, id: `m-old-${index}`, parts: [{ type: 'text' as const, text: 'old' }] }));
+    const olderTurns = Array.from({ length: 500 }, (_, index) => ({ ...turn, id: `turn-old-${index}` }));
+    store.openThread = { ...raw, messages: counted([...older, last]), turns: counted([...olderTurns, turn]) };
+    handlers.get('message.delta')!({ threadId: 't-trace', messageId: last.id, partIndex: 0, text: '!' } as never);
+    handlers.get('message.started')!({ ...last, state: 'streaming' } as never);
+    handlers.get('turn.started')!({ ...turn } as never);
+    expect(reads).toBeLessThan(20);
+    expect(store.openThread.messages).toHaveLength(2001);
+    expect(store.openThread.messages.at(-1)!.state).toBe('streaming');
   } finally { store.detach(); client.close(); }
 });
 
@@ -426,6 +532,40 @@ test.each(['same', 'selection', 'kind'])('a lost start response reuses its reque
   } finally { store.detach(); client.close(); }
 });
 
+test.each(['back', 'gone'])('a start the socket dropped is asked once more when the connection comes back: %s', async (outcome) => {
+  const { store, client } = await ready();
+  const original = client.call.bind(client);
+  const requests: string[] = [];
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const answer = await original(method, params);
+    if (method !== 'turns.start') return answer;
+    requests.push((params as { clientRequestId: string }).clientRequestId);
+    if (requests.length > 1) return answer;
+    // The core took the turn, and the socket went before its answer arrived.
+    client.drop();
+    setTimeout(() => { if (outcome === 'back') void client.restore(); else client.close(); }, 5);
+    throw droppedFailure('connection closed');
+  });
+  try {
+    const thread = store.threads.find(thread => thread.status === 'idle')!;
+    await store.open(thread.id);
+    const accepted = await store.send('Survive the reconnect', thread.id);
+    if (outcome === 'gone') {
+      expect(accepted).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(store.error).toContain('connection closed');
+      return;
+    }
+    expect(accepted).toBe(true);
+    expect(store.error).toBeNull();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toBe(requests[0]);
+    await client.settled();
+    const turns = await original('threads.get', { threadId: thread.id });
+    expect(turns.messages.filter(message => message.role === 'user' && JSON.stringify(message.parts).includes('Survive the reconnect'))).toHaveLength(1);
+  } finally { store.detach(); client.close(); }
+});
+
 test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes oversized tool %s', async (field) => {
   const { store, client } = await ready();
   try {
@@ -437,6 +577,21 @@ test.each(['input', 'inputText', 'output', 'documents'])('reading cache excludes
     await store.open('t-scheduler');
     await store.open('t-bench');
     expect(store.openThread!.messages.some(message => message.id === 'cached-only')).toBe(false);
+  } finally { store.detach(); client.close(); }
+});
+
+test('sizing a timeline for the reading cache reads string lengths, never a JSON copy of each part', async () => {
+  const { store, client } = await ready();
+  try {
+    await store.open('t-bench');
+    let copies = 0;
+    const big = 'x'.repeat(256 * 1024);
+    const part = () => ({ type: 'text' as const, text: big, toJSON() { copies++; return { type: 'text', text: big }; } });
+    store.openThread!.messages.unshift(...Array.from({ length: 50 }, (_, index) => ({ id: `big-${index}`, threadId: 't-bench', turnId: 'old', role: 'assistant' as const, parts: [part()], state: 'complete' as const, createdAt: 0 })));
+    await store.open('t-scheduler');
+    expect(copies).toBe(0);
+    await store.open('t-bench');
+    expect(store.openThread!.messages.some((message) => message.id === 'big-0')).toBe(false);
   } finally { store.detach(); client.close(); }
 });
 
@@ -533,15 +688,16 @@ describe('Store', () => {
   test('a pinned thread floats above the live ones of its project, and unpinning drops it back', async () => {
     const { store } = await ready();
     const project = store.threads.find((t) => t.id === 't-trace')?.projectId ?? '';
-    const before = store.sortedThreadsOf(project).map((t) => t.id);
+    const sorted = () => store.threadsOf(project).slice().sort(compareThreads).map((t) => t.id);
+    const before = sorted();
     expect(before[0]).not.toBe('t-trace');
 
     await store.pin('t-trace', true);
     expect(store.threads.find((t) => t.id === 't-trace')?.pinned).toBe(true);
-    expect(store.sortedThreadsOf(project)[0]?.id).toBe('t-trace');
+    expect(sorted()[0]).toBe('t-trace');
 
     await store.pin('t-trace', false);
-    expect(store.sortedThreadsOf(project).map((t) => t.id)).toEqual(before);
+    expect(sorted()).toEqual(before);
   });
 
   test('a prompt streams into one text part and the thread goes running then idle', async () => {
@@ -669,7 +825,10 @@ describe('Store', () => {
       throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the provider or account changed during discovery; refresh models' });
     });
     const request = store.probeModels('opencode', 'a-opencode');
+    // A check that finds the same status is silent, as on the core; a login
+    // changed under the account is announced and is what outdates the probe.
     await original('accounts.check', { accountId: 'a-opencode' });
+    client.announceLogin('a-opencode');
     release(); await request;
     expect(store.error).toBeNull();
     calls.mockRestore();
@@ -793,6 +952,44 @@ describe('Store', () => {
     expect(client.clientSubscriptions).toEqual(['t-trace']);
   });
 
+  test('a reconnect catches up the open thread first and keeps every sidebar row it can', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    const rows = new Map(store.threads.map((row) => [row.id, row]));
+    client.drop();
+    // A load sample of the gap, which reached nobody.
+    client.sampleLoad('t-bench', 3);
+    const called = vi.spyOn(client, 'call');
+    await client.restore();
+    await waitFor(() => (store.threads.find((row) => row.id === 't-bench')?.load?.processes === 3 ? true : undefined));
+    await store.reload();
+    for (const row of store.threads) expect(row).toBe(rows.get(row.id));
+    const methods = called.mock.calls.map(([method]) => method);
+    expect(methods.indexOf('threads.get')).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf('threads.get')).toBeLessThan(methods.indexOf('threads.list'));
+  });
+
+  test('a list answer that lands after the open thread was read does not mark it unread again', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    const real = client.call.bind(client);
+    let listed: (() => void) | null = null;
+    vi.spyOn(client, 'call').mockImplementation(((method: string, params: never) => {
+      const answer = real(method as never, params);
+      if (method !== 'threads.list') return answer;
+      // Read by the core before the open thread's markRead, answered after it.
+      return answer.then((threads) => new Promise((resolve) => {
+        listed = () => resolve((threads as { id: string }[]).map((row) => (row.id === 't-scheduler' ? { ...row, unread: true } : row)) as never);
+      }));
+    }) as typeof client.call);
+    client.drop();
+    await client.restore();
+    await waitFor(() => listed ?? undefined);
+    listed!();
+    await store.reload();
+    expect(store.threads.find((row) => row.id === 't-scheduler')?.unread).toBe(false);
+  });
+
   test('a request the core settled while the socket was down leaves the card', async () => {
     const { store, client } = await ready();
     await store.open('t-scheduler');
@@ -808,6 +1005,119 @@ describe('Store', () => {
 
     expect(store.pendingQuestions).toEqual([]);
     expect(store.pendingPermissions).toEqual([]);
+  });
+
+  test('a public address pasted from the address bar saves without an error', async () => {
+    const { store } = await ready();
+    await store.saveSettings({ publicUrl: 'https://boite.example.com/' });
+    expect(store.error).toBeNull();
+    expect(store.settings?.publicUrl).toBe('https://boite.example.com');
+  });
+
+  test('archiving a thread lets go of its panel, browser views, composer and terminal', async () => {
+    const { store, client } = await ready();
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    try {
+      const thread = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
+      await store.open(thread.id);
+      const view = store.panel.open('browser');
+      store.editComposerText(thread.id, 'half a prompt');
+      store.toggleTerminal();
+      expect(store.terminalShown(thread.id)).toBe(true);
+
+      await store.archive(thread.id);
+
+      expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
+      expect(rightPanel.threads[store.threadKey(thread.id)]).toBeUndefined();
+      expect(store.composerStates[thread.id]).toBeUndefined();
+      expect(store.terminalShown(thread.id)).toBe(false);
+    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+  });
+
+  test('a thread archived from another client drops its panel here too', async () => {
+    const { store, client } = await ready();
+    try {
+      const [shown, other] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
+      await store.open(shown!.id);
+      rightPanel.for(store.threadKey(other!.id)).open('trace');
+      store.editComposerText(other!.id, 'draft');
+      await client.call('threads.archive', { threadId: other!.id, archived: true });
+      await waitFor(() => (rightPanel.threads[store.threadKey(other!.id)] === undefined ? true : undefined));
+      expect(store.composerStates[other!.id]).toBeUndefined();
+    } finally { store.detach(); client.close(); }
+  });
+
+  test('the open thread archived from another client keeps its panel until this client leaves it', async () => {
+    const { store, client } = await ready();
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    try {
+      const [shown, next] = store.threads.filter((t) => t.status === 'idle' && !t.parentThreadId);
+      await store.open(shown!.id);
+      const key = store.threadKey(shown!.id);
+      const view = store.panel.open('browser');
+      const file = store.panel.openFile('src/index.ts');
+      store.panel.keepDraft(file.id, 'unsaved edit');
+      await client.call('threads.archive', { threadId: shown!.id, archived: true });
+      await waitFor(() => (store.openThread?.archived ? true : undefined));
+
+      client.drop();
+      await client.restore();
+      await store.reload();
+      expect(store.openThread?.id).toBe(shown!.id);
+      expect(rightPanel.threads[key]?.surfaces.map((surface) => surface.id)).toEqual([view.id, file.id]);
+      expect(store.panel.draft(file.id)).toBe('unsaved edit');
+      expect(destroy).not.toHaveBeenCalled();
+
+      await store.open(next!.id);
+      expect(rightPanel.threads[key]).toBeUndefined();
+      expect(rightPanel.drafts.has(key)).toBe(false);
+      expect(destroy.mock.calls.map(([id]) => id)).toEqual([view.id]);
+    } finally { destroy.mockRestore(); store.detach(); client.close(); }
+  });
+
+  test('a draft started over an open thread archived elsewhere lets its panel go', async () => {
+    const { store, client } = await ready();
+    try {
+      const shown = store.threads.find((t) => t.status === 'idle' && !t.parentThreadId)!;
+      await store.open(shown.id);
+      store.panel.open('trace');
+      await client.call('threads.archive', { threadId: shown.id, archived: true });
+      await waitFor(() => (store.openThread?.archived ? true : undefined));
+      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeDefined();
+      store.startDraft();
+      expect(rightPanel.threads[store.threadKey(shown.id)]).toBeUndefined();
+    } finally { store.detach(); client.close(); }
+  });
+
+  test('a reload drops the layouts of threads its core no longer lists, and only its own', async () => {
+    const { store, client } = await ready();
+    try {
+      store.machineId = 'http://a.test';
+      const live = store.threads[0]!.id;
+      rightPanel.for(store.threadKey(live)).open('trace');
+      rightPanel.for(store.threadKey('t-archived-long-ago')).open('trace');
+      rightPanel.for(JSON.stringify(['http://b.test', 't-archived-long-ago'])).open('trace');
+      await store.reload();
+      expect(rightPanel.threads[store.threadKey(live)]).toBeDefined();
+      expect(rightPanel.threads[store.threadKey('t-archived-long-ago')]).toBeUndefined();
+      expect(rightPanel.threads[JSON.stringify(['http://b.test', 't-archived-long-ago'])]).toBeDefined();
+    } finally {
+      rightPanel.forget(JSON.stringify(['http://b.test', 't-archived-long-ago']));
+      store.detach(); client.close();
+    }
+  });
+
+  test('an answer sent while the socket is down says so and can be sent again', async () => {
+    const { store, client } = await ready();
+    await store.open('t-scheduler');
+    client.drop();
+    expect(await store.answerQuestion('t-scheduler', 'qst-seed-1', ['short'])).toBe(false);
+    expect(store.pendingQuestions.map((q) => q.id)).toEqual(['qst-seed-1']);
+    expect(store.error).toBeTruthy();
+
+    await client.restore();
+    expect(await store.answerQuestion('t-scheduler', 'qst-seed-1', ['short'])).toBe(true);
+    expect(store.pendingQuestions).toEqual([]);
   });
 
   test('a thread removed elsewhere lets its subscription go before the next one is taken', async () => {
@@ -964,4 +1274,185 @@ test('connecting a second account moves the composer to that account, not the fi
   store.accounts = store.accounts.map((a) => (a.id === 'a-claude-side' ? { ...a, status: 'unauthenticated' } : a));
   expect(store.useProvider('claude', 'a-claude-side')).toBe(true);
   expect(store.prefs.accountId).toBe('a-claude-main');
+});
+
+test('a machine on a slow link keeps its connection when the lists take longer than the handshake deadline', async () => {
+  vi.useFakeTimers();
+  const sockets: SlowLinkSocket[] = [];
+  class SlowLinkSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    closedByClient = false;
+    constructor() {
+      sockets.push(this);
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string };
+      const answer = (delay: number, body: Record<string, unknown>) =>
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), delay);
+      if (frame.method === 'hello') answer(40, { result: { core: { protocolVersion: PROTOCOL_VERSION }, principal: 'owner' } });
+      // A thousand threads on a weak cellular link.
+      else if (frame.method === 'threads.list') answer(13_000, { result: [] });
+      else answer(40, { error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
+    }
+    close(): void {
+      this.closedByClient = true;
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', SlowLinkSocket);
+  const store = new Store();
+  try {
+    const connecting = store.connectEndpoint({ url: 'https://far.example', token: 'key', paired: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.connection).toBe('ready');
+    await vi.advanceTimersByTimeAsync(13_000);
+    await connecting;
+    expect(store.connection).toBe('ready');
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.closedByClient).toBe(false);
+    expect(store.error).not.toBe(strings.machines.timeout);
+    expect(store.error).not.toBe('client closed');
+  } finally {
+    store.client?.close();
+    store.detach();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
+test('a link in the address becomes the stored core only after a hello, and an unknown core is asked about first', async () => {
+  vi.useFakeTimers();
+  const opened: string[] = [];
+  let answers = false;
+  class LinkSocket {
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onclose: ((event?: { code?: number }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(url: string) {
+      opened.push(url);
+      setTimeout(() => this.onopen?.(), 10);
+    }
+    send(raw: string): void {
+      const frame = JSON.parse(raw) as { id: number; method: string };
+      const answer = (body: Record<string, unknown>) =>
+        setTimeout(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...body }) }), 10);
+      if (frame.method === 'hello') {
+        // A core that never says hello back, or one that does.
+        if (answers) answer({ result: { core: { protocolVersion: PROTOCOL_VERSION }, principal: 'owner' } });
+      } else answer({ error: { code: RpcErrorCode.NotFound, message: `${frame.method} is not in this fixture` } });
+    }
+    close(): void {
+      this.onclose?.({ code: 1000 });
+    }
+  }
+  vi.stubGlobal('WebSocket', LinkSocket);
+  const paired = { url: 'https://my-core.example', token: 'session-key', paired: true };
+  const stores: Store[] = [];
+  const boot = (path: string): Promise<void> => {
+    window.history.replaceState(null, '', path);
+    const store = new Store();
+    stores.push(store);
+    return store.boot();
+  };
+  try {
+    localStorage.clear();
+    storeEndpoint(paired);
+
+    // A token link on this origin whose core stays silent: the paired core stays stored.
+    const silent = boot('/?token=fresh');
+    await vi.advanceTimersByTimeAsync(11_000);
+    await silent;
+    expect(readStoredEndpoint()).toEqual(paired);
+    stores.at(-1)?.client?.close();
+
+    // A core link to a stranger: asked about, refused, and the paired core is what opens.
+    opened.length = 0;
+    const refused = boot('/?core=https://other.example');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm.current?.title).toBe(strings.machines.linkTitle.replace('{host}', 'other.example'));
+    confirm.answer(false);
+    await vi.advanceTimersByTimeAsync(11_000);
+    await refused;
+    expect(opened[0]).toContain('my-core.example');
+    expect(opened.some((url) => url.includes('other.example'))).toBe(false);
+    expect(readStoredEndpoint()).toEqual(paired);
+    stores.at(-1)?.client?.close();
+
+    // The same token link once its core answers: stored then, with the key it carried.
+    answers = true;
+    const answered = boot('/?token=fresh');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await answered;
+    expect(stores.at(-1)?.connection).toBe('ready');
+    expect(readStoredEndpoint()).toEqual({ url: window.location.origin, token: 'fresh' });
+  } finally {
+    for (const store of stores) {
+      store.client?.close();
+      store.detach();
+    }
+    window.history.replaceState(null, '', '/');
+    localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
+
+describe('the shell core lost under a local store', () => {
+  async function localStore() {
+    const client = new FakeClient({ delayMs: 0 });
+    const store = new Store();
+    store.attach(client);
+    await store.connect();
+    store.localCore = true;
+    store.endpointUrl = 'http://127.0.0.1:41000';
+    window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+    return { store, client };
+  }
+
+  test('a core unreachable for a while is asked of the shell again, and the store follows it to its new address', async () => {
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockResolvedValue({ url: 'http://127.0.0.1:42000', token: 'next', local: true });
+    const connect = vi.spyOn(store, 'connect').mockResolvedValue();
+    const open = vi.spyOn(store, 'openWhereLeft').mockResolvedValue();
+    try {
+      client.drop();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS - 100);
+      expect(fromTauri).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(fromTauri).toHaveBeenCalledOnce();
+      expect(store.endpointUrl).toBe('http://127.0.0.1:42000');
+      expect(store.localCore).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); connect.mockRestore(); open.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.client?.close(); store.detach(); client.close();
+    }
+  });
+
+  test('a core stopped on purpose stays stopped, and a refresh asks the shell for it again', async () => {
+    vi.useFakeTimers();
+    const { store, client } = await localStore();
+    const fromTauri = vi.spyOn(endpoints, 'fromTauri').mockResolvedValue(null);
+    const refused = vi.spyOn(endpoints, 'shellEndpointError').mockReturnValue('the core exited (exit code: 3) before it was ready');
+    try {
+      client.close();
+      await vi.advanceTimersByTimeAsync(LOCAL_RECOVERY_MS * 2);
+      expect(fromTauri).not.toHaveBeenCalled();
+      await store.connect();
+      expect(fromTauri).toHaveBeenCalledOnce();
+      expect(store.error).toContain('exit code: 3');
+    } finally {
+      vi.useRealTimers();
+      fromTauri.mockRestore(); refused.mockRestore();
+      delete window.__TAURI_INTERNALS__;
+      store.detach(); client.close();
+    }
+  });
 });

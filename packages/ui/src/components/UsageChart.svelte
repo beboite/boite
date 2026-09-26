@@ -1,5 +1,6 @@
 <script lang="ts">
   import { strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
   import { formatMetric, formatTick, niceScale, type UsageBucket, type UsageMetric } from '../lib/usage';
 
   type Serie = { key: string; color: string; label: string };
@@ -26,9 +27,10 @@
     return TOP + plotHeight - (value / scale.max) * plotHeight;
   }
 
-  const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
-  const dayMonth = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
-  const fullDay = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  // In the language the app speaks, not the system's.
+  const weekday = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'short' }));
+  const dayMonth = $derived(new Intl.DateTimeFormat(formatLocale(), { day: 'numeric', month: 'short' }));
+  const fullDay = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'long', day: 'numeric', month: 'long' }));
 
   /** An estimate of a label's width at the tick size, wide enough to keep two labels apart. */
   const CHAR = 6.5;

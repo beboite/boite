@@ -59,7 +59,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agent remember <json>          title and text, optional id and expectedRevision
   agent routines                list this identity's scheduled work
   agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
-  --request-id <id>              reuse for a retried collaboration command
+  --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
   delegate profiles|list         approved models, team status and bounded results
   delegate spawn <profile> <brief>
   delegate send <thread-id> <text>
@@ -243,13 +243,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         const profileId = want(1, 'a profile id from delegate profiles');
         const task = rest.slice(2).join(' ');
         if (!task) throw new Usage('delegate spawn needs a bounded task brief');
-        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: crypto.randomUUID() });
+        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: parsed.requestId ?? crypto.randomUUID() });
         print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
       } else if (action === 'send') {
         const toThreadId = want(1, 'a parent or child thread id');
         const body = rest.slice(2).join(' ');
         if (!body) throw new Usage('delegate send needs message text');
-        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: crypto.randomUUID() });
+        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: parsed.requestId ?? crypto.randomUUID() });
         print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
       } else if (action === 'stop') {
         const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
@@ -280,7 +280,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           if (!coreId || !targetThreadId || extra) throw new Usage('recipient must be <core-id>/<thread-id> from agents list');
           to = { coreId, threadId: targetThreadId };
         }
-        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
+        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: parsed.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
         print([`id: ${letter.id}`, `status: ${letter.status}`, 'Delivery is not consent. Wait for an explicit reply before a disruptive action.', ...(letter.error ? [`error: ${letter.error}`] : [])], letter);
       } else throw new Usage('agents expects list, inbox, send or reply');
       return;

@@ -3,6 +3,7 @@ import {
   parsePairingLink,
   readEnvironments,
   removeEnvironment,
+  servesThisPage,
   storeEndpoint,
   upsertEnvironment,
   readStoredEndpoint,
@@ -110,8 +111,14 @@ export class Workspace {
     this.machines = [{ id: populated.id, label: populated.label, icon: populated.icon, store }, ...this.machines.filter(m => m.store !== store && m !== populated)];
   }
 
-  async boot(): Promise<void> {
+  /**
+   * `thread` comes from a notification's `?thread=` link. The page's own core
+   * opens it as it boots, before any other machine is waited on; a thread of
+   * another remembered machine that served the page opens once that one is in.
+   */
+  async boot(thread: string | null = null): Promise<void> {
     const lifecycle = ++this.#lifecycle;
+    const generation = this.#generation;
     store.visible = true;
     this.active = store;
     try {
@@ -121,7 +128,7 @@ export class Workspace {
     }
     const selected = readStoredEndpoint();
     const remembered = readEnvironments();
-    await store.boot();
+    await (thread === null ? store.boot() : store.boot(false, thread));
     if (!this.#current(lifecycle)) return;
     this.active = store;
     this.machines = [this.#primaryMachine(selected, remembered)];
@@ -144,6 +151,9 @@ export class Workspace {
     );
     if (!this.#current(lifecycle)) return;
     await this.#adoptPopulatedJournal(lifecycle);
+    if (thread === null || generation !== this.#generation || !this.#current(lifecycle) || store.openThread?.id === thread) return;
+    const origin = this.machines.find((m) => m.store !== store && m.store.endpointUrl !== null && servesThisPage(m.store.endpointUrl));
+    if (origin) await this.select(origin.store, thread);
   }
 
   restoreProfile(machine: Machine): void {

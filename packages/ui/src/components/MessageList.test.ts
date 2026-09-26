@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
-import MessageList, { windowStats } from './MessageList.svelte';
+import MessageList from './MessageList.svelte';
+import { windowStats } from '../lib/message-window';
+import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 
@@ -412,7 +414,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   last.state = 'streaming';
   await settle();
 
-  const beforeDeltas = { ...windowStats, ...layout };
+  const beforeDeltas = { ...windowStats, ...layout, ...turnProgressStats };
+  expect(turnProgressStats.finishedScans).toBeGreaterThan(0);
   const streamedAt = performance.now();
   for (let delta = 0; delta < 200; delta += 1) {
     part.text += ' token';
@@ -424,7 +427,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
     recomputes: windowStats.recomputes - beforeDeltas.recomputes,
     slots: windowStats.slots - beforeDeltas.slots,
     reads: layout.reads - beforeDeltas.reads,
-    writes: layout.writes - beforeDeltas.writes
+    writes: layout.writes - beforeDeltas.writes,
+    finishedScans: turnProgressStats.finishedScans - beforeDeltas.finishedScans
   };
 
   expect(articles().length).toBeLessThan(40);
@@ -433,6 +437,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   // The pin ran on the character count before this: two hundred of each.
   expect(deltas.reads).toBeLessThan(40);
   expect(deltas.writes).toBeLessThan(40);
+  // The receipts and reasoning of the other 399 messages are not rebuilt per token.
+  expect(deltas.finishedScans).toBe(0);
 
   const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]');
   const beforeScroll = { ...windowStats };
@@ -463,6 +469,28 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   );
   // Shared CI runners need time for the full streaming and scrolling workload.
 }, 20_000);
+
+test('the second receipt waits for the first streamed character of the answer', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-long');
+  const messages = store.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  messages.push({ id: 'm-ask', threadId: 't-long', turnId: 'turn-ask', role: 'user', parts: [{ type: 'text', text: 'go' }], state: 'complete', createdAt: Date.now() });
+  messages.push({ id: 'm-reply', threadId: 't-long', turnId: 'turn-ask', role: 'assistant', parts: [{ type: 'text', text: '' }], state: 'streaming', createdAt: Date.now() });
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=message-receipts] span:nth-child(2)');
+  expect(second()?.classList.contains('received')).toBe(false);
+  const part = messages.at(-1)?.parts[0];
+  if (part?.type !== 'text') throw new Error('the reply is a text part');
+  part.text += 'H';
+  await settle();
+  expect(second()?.classList.contains('received')).toBe(true);
+});
 
 test('a page in flight shows one line at the top of the list', async () => {
   const messages = thread(200);

@@ -39,7 +39,7 @@ export class ActivityStore {
         const { threadId } = payload as { threadId: string };
         this.clearTimer(threadId);
         this.states.delete(threadId);
-        core.journal.setSetting(`activity:${threadId}`, null);
+        core.journal.deleteSetting(`activity:${threadId}`);
       }
     });
   }
@@ -225,7 +225,9 @@ export class ActivityStore {
 
   private save(threadId: string): void {
     const activity = this.get(threadId);
-    this.core.journal.append({ type: 'thread.activity', threadId, version: 1, payload: activity }, () => this.core.journal.setSetting(`activity:${threadId}`, activity));
+    // The settings row alone restores the state. An event row per save held the
+    // whole loop history, up to 200 KB on every task-list update, and nothing read it.
+    this.core.journal.setSetting(`activity:${threadId}`, activity);
     this.core.bus.emit('thread.activity', { threadId, activity });
   }
 

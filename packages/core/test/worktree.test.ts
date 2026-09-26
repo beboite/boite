@@ -159,7 +159,7 @@ describe('a thread in its own worktree', () => {
     const listed = await client.call('projects.list', {});
     expect(listed.find((project) => project.id === plain.id)?.repository).toBe(false);
     expect(listed.find((project) => project.id === repo.id)?.repository).toBe(true);
-    // Read on each answer: a folder that becomes a repository says so next time.
+    // Checked on each answer: a folder that becomes a repository says so next time.
     git(plainPath, 'init', '-q');
     expect((await client.call('projects.list', {})).find((project) => project.id === plain.id)?.repository).toBe(true);
   });

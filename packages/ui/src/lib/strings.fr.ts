@@ -197,6 +197,7 @@ export const fr: Translation = {
     settingsPhone: 'Application et notifications', settingsPhoneHint: 'Installation et alertes de la machine connectée.',
     settingsMachinesHint: 'Connecter, changer ou déconnecter une machine distante.',
     settingsAppearanceHint: 'Thème et couleur pour ce téléphone.',
+    settingsArchivedHint: 'Ramener une conversation archivée sur la machine connectée.',
     settingsRemoteHint: "Les fournisseurs, les projets et l'administration du serveur se gèrent depuis l'application de bureau.",
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
@@ -210,11 +211,16 @@ export const fr: Translation = {
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: "Sur l'autre machine, ouvrez Réglages, Général, Téléphones et appareils, créez un lien d'appairage et collez-le ici. Activez le contrôle total là-bas pour gérer ses comptes et ses réglages depuis celle-ci.",
     labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
-    remove: 'Déconnecter', open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
+    remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
+    removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
+    open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
     duplicate: 'Cette machine est déjà connectée.', noPr: 'Pas de PR', refreshPr: 'Actualiser la pull request',
     prUnavailable: 'Pull request indisponible', manual: 'Connecter avec une URL et un jeton',
     filter: 'Filtrer les machines', all: 'Toutes les machines',
     timeout: "La machine n'a pas répondu en 12 secondes. Vérifiez son adresse et ses origines navigateur, puis reconnectez-la.",
+    linkTitle: 'Se connecter à {host} ?',
+    linkBody: "Le lien ouvert dirige cette page vers une machine à laquelle cet appareil ne s'est jamais connecté. Cette machine verra tout ce que vous tapez ici. Ne vous connectez que si vous avez créé ce lien ou si vous faites confiance à qui vous l'a envoyé. Annuler garde votre machine actuelle.",
+    linkConfirm: 'Se connecter', linkCancel: 'Annuler',
     browserOrigins: 'Origines navigateur autorisées',
     browserOriginsHint: "Pour un navigateur ou un téléphone qui regarde plusieurs machines, ajoutez sur chaque machine distante l'origine qui sert Boite. Une origine http(s) exacte par ligne. Les connexions de bureau n'ont besoin d'aucune origine en plus.",
     agentLinks: 'Liens entre agents', agentLinksHint: 'Permettre aux agents de deux machines connectées en propriétaire de se trouver. Chaque cœur échange son adresse et sa clé publique de signature. Aucun jeton propriétaire ni clé privée ne sont partagés.',
@@ -276,7 +282,7 @@ export const fr: Translation = {
     readyAction: 'Installer la mise à jour',
     detailsAction: 'Détails',
     installTitle: 'Installer la mise à jour de Boite ?',
-    installBody: "Boite va se fermer et arrêter les tours d'agents en cours sur cet ordinateur. Les tours interrompus ne redémarrent pas automatiquement.",
+    installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
     readyTitlebar: 'Installer la mise à jour prête',
     detailsTitlebar: 'Ouvrir les détails de la mise à jour'
   },
@@ -387,6 +393,8 @@ export const fr: Translation = {
     unpin: 'Désépingler',
     pinned: 'Épinglée',
     archive: 'Archiver',
+    archiveTitle: 'Archiver cette conversation ?',
+    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Conversations archivées, dans les Réglages, ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 
@@ -599,6 +607,7 @@ export const fr: Translation = {
     documentImage: "Ce que l'outil a produit",
     imagePart: 'Image envoyée avec le message',
     diffHidden: '{count} lignes inchangées',
+    diffShowAll: 'Afficher les {count} lignes',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'Aucune sortie',
@@ -760,6 +769,7 @@ export const fr: Translation = {
     models: 'Modèles',
     searchModels: 'Rechercher un modèle',
     noModels: 'Aucun modèle ne correspond',
+    showAllModels: 'Afficher les {count} modèles',
     legacyModels: 'Anciens modèles',
     refreshModels: 'Actualiser les modèles',
     probing: "Lecture des modèles de l'agent",
@@ -800,6 +810,7 @@ export const fr: Translation = {
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
     attachTooLarge: '{name} est trop lourde : une image pèse {max} au maximum.',
     attachTooMany: 'Un tour porte {max} images au maximum, donc {name} a été laissée de côté.',
+    attachTotalTooLarge: "Les fichiers d'un tour pèsent {max} au maximum à eux tous, donc {name} a été laissé de côté.",
     attachNoImages: "{provider} n'accepte pas les images : envoyez le message sans elles."
   },
 
@@ -1166,7 +1177,8 @@ export const fr: Translation = {
     reapOrphans: 'Arrêter ce que les agents laissent tourner',
     reapOrphansHint: "Dix secondes après un tour, un processus dont le parent est sorti est arrêté, comme ceux qu'une commande interrompue laisse derrière elle. Windows seulement.",
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
-    asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent `boite ask` au début d’une session. Codex pose ses questions ainsi nativement.',
+    asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent la commande boite ask au début d’une session. Codex pose ses questions ainsi nativement.',
+    numberRange: 'Un nombre entier de {min} à {max}.',
     save: 'Enregistrer',
     saved: 'Enregistré',
     core: 'Cœur',
@@ -1177,6 +1189,13 @@ export const fr: Translation = {
     dataDir: 'Répertoire de données',
     endpoint: 'Point de connexion',
     noCore: 'Pas connecté à un cœur.',
+    archived: {
+      heading: 'Conversations archivées',
+      intro: "Une conversation archivée quitte la barre latérale et son agent s'arrête. Restaurez-la pour retrouver la conversation ; son agent repart au prochain message.",
+      show: 'Afficher les conversations archivées',
+      empty: 'Aucune conversation archivée sur cette machine.',
+      restore: 'Restaurer'
+    },
     pairing: {
       heading: 'Téléphones et appareils',
       intro: "Un lien d'appairage ouvre Boite sur un autre appareil avec une clé à lui. Il sert une fois et tient dix minutes.",
@@ -1185,7 +1204,7 @@ export const fr: Translation = {
       expires: "Valable une fois, jusqu'à {time}",
       qr: "Le lien d'appairage en QR code",
       scan: 'Scannez le code avec le téléphone, ou ouvrez le lien dessus.',
-      lanHint: "Le cœur n'écoute que sur cette machine : activez le réseau local dans Ordonnanceur, plus bas, puis redémarrez-le, avant qu'un téléphone puisse atteindre ce lien.",
+      lanHint: "Le cœur n'écoute que sur cette machine. Activez « Écouter sur le réseau local » dans Ordonnanceur, plus bas, puis quittez et rouvrez Boite, avant qu'un téléphone puisse atteindre ce lien.",
       devices: 'Appareils appairés',
       noDevices: 'Aucun appareil appairé pour le moment.',
       thisDevice: 'cet appareil',
@@ -1259,6 +1278,8 @@ export const fr: Translation = {
 
   quotas: {
     trayHeading: 'Consommation',
+    trayShow: 'Afficher',
+    trayQuit: 'Quitter',
     trayIntro: "Limites d'abonnement",
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Désactivé',
@@ -1274,6 +1295,10 @@ export const fr: Translation = {
     intro: "Limites d'abonnement communiquées par vos fournisseurs. C'est distinct des jetons dépensés dans Boite.",
     remaining: '{percent} % restants',
     resets: 'Repart {time}',
+    windowHours: '{hours} heures',
+    windowWeekly: 'Hebdomadaire',
+    windowMonthly: 'Mensuelle',
+    windowCredits: 'Crédits',
     checked: 'Mis à jour {time}',
     stale: 'Dernière lecture réussie',
     empty: "Connectez un fournisseur pour voir ses limites d'abonnement.",
@@ -1405,10 +1430,11 @@ export const fr: Translation = {
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",
     noEndpoint: "Aucun point de connexion n'a pu être résolu.",
+    coreStart: "Le cœur de cet ordinateur n'a pas démarré : {reason}",
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",
-    pairingLink: "Ce n'est pas un lien d'appairage : il lui faut une adresse http ou https portant un grant."
+    pairingLink: "Ce n'est pas un lien d'appairage. Collez le lien affiché par Nouveau lien d'appairage sur l'autre machine ; il commence par http et contient ?grant=."
   },
 
   units: {
@@ -1421,6 +1447,20 @@ export const fr: Translation = {
     minutes: 'min',
     hours: 'h',
     tokens: 'jetons'
+  },
+
+  effortLevels: {
+    none: 'Aucun',
+    off: 'Désactivé',
+    minimal: 'Minimal',
+    low: 'Faible',
+    medium: 'Moyen',
+    high: 'Élevé',
+    xhigh: 'Très élevé',
+    max: 'Max',
+    ultra: 'Ultra',
+    ultrathink: 'Ultrathink',
+    fast: 'Rapide'
   },
 
   common: {
@@ -1442,12 +1482,13 @@ export const fr: Translation = {
       intro: "Boite compte quelques statistiques d'utilisation anonymes pour savoir quoi corriger en premier. Vos messages, fichiers et comptes ne quittent jamais votre machine, l'application marche pareil dans tous les cas, et vous pouvez changer d'avis quand vous voulez dans les réglages.",
       question: 'Marché conclu ?',
       video: 'Mème Trade Offer',
-      basic: 'NON ! Ça suffit',
+      basic: 'NON ! Juste les compteurs de base',
       basicDefault: '(par défaut)',
       basicHint: "Des compteurs d'installations actives, de lancements, de conversations et de résultats des tours. Les identifiants d'usage changent chaque jour. Aucun profil.",
       deal: 'MARCHÉ CONCLU',
       dealHint: "Ajoute les modèles publics choisis, le niveau de raisonnement, les modes de vitesse et de permission, les durées et les volumes de jetons, sous un identifiant aléatoire stable. Les modèles privés comptent comme « autre ». Ça aide beaucoup. Merci !",
-      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite, Réglages > Général > Confidentialité et statistiques désactive tout. :c',
+      optOut: 'Si vous ne voulez VRAIMENT pas aider Boite :',
+      offLabel: 'tout désactiver :c',
       doc: 'Ce qui est collecté'
     },
     demo: {

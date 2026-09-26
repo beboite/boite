@@ -2,18 +2,33 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { forgetProbes, releaseThread } from '../drivers/index.ts';
+import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
-import { profileFor, resolveCommand } from './loader.ts';
+import type { InstallOutcome } from './install.ts';
+import { profileFor, resolveCommand } from './resolve.ts';
+import { forgetWhich } from './which.ts';
 
-/** First check after the core is up, so nothing reaches the network at start. */
-const FIRST_CHECK_MS = 60_000;
+/**
+ * The earliest automatic check after the core is up, so nothing spawns or
+ * reaches the network while the app starts. A reading kept from the last run
+ * pushes it back to six hours after that reading.
+ */
+const FIRST_CHECK_MS = 10 * 60 * 1000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
-/** An automatic update that found its provider busy looks again this often. */
+/** An automatic check or update that found a turn in flight looks again this often. */
 const BUSY_RETRY_MS = 10 * 60 * 1000;
 const VERSION_TIMEOUT_MS = 20_000;
+/** How long a timed-out run's pipes may stay open once its tree was killed, for a descendant killTree cannot reach. */
+const PIPE_GRACE_MS = 2_000;
+/** What is kept of each stream of an agent's run: its end, where the error line is. */
+const OUTPUT_MAX_BYTES = 256 * 1024;
+/** Agents read at once by a check, so an old machine never starts all of them together. */
+const CHECK_PARALLEL = 2;
+/** An agent's own updater. A managed update has no such limit: its download stops by itself on a dead connection. */
 const UPDATE_TIMEOUT_MS = 15 * 60 * 1000;
 const SKIPS_FILE = 'harness-updates.json';
+/** The last check's readings, so a restart shows them without spawning anything. */
+const READINGS_FILE = 'harness-versions.json';
 const VERSION_PATTERN = /\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?/;
 
 /** The synthetic thread an update's processes are traced under. */
@@ -64,6 +79,21 @@ interface Target {
   route: HarnessUpdate['route'];
 }
 
+/** Reads a stream to its end, keeping its last OUTPUT_MAX_BYTES, so a chatty program never blocks on a full pipe. */
+async function capture(reader: { read(): Promise<{ done: boolean; value?: Uint8Array }> }): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done || chunk.value === undefined) break;
+    chunks.push(chunk.value);
+    size += chunk.value.length;
+    while (size > OUTPUT_MAX_BYTES && chunks.length > 1) size -= chunks.shift()!.length;
+  }
+  const text = Buffer.concat(chunks);
+  return text.subarray(Math.max(0, text.length - OUTPUT_MAX_BYTES)).toString('utf8');
+}
+
 async function npmLatest(name: string): Promise<string> {
   const response = await fetch(`https://registry.npmjs.org/${name.replaceAll('/', '%2F')}/latest`, {
     signal: AbortSignal.timeout(VERSION_TIMEOUT_MS),
@@ -87,17 +117,66 @@ export class HarnessUpdates {
   private checking: Promise<HarnessUpdate[]> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
-  /** Test seams: the registry read, and the only providers a check may touch. */
+  /** When the last whole check finished, kept across restarts. */
+  private lastCheckAt: number | null = null;
+  /** Test seams: the registry read, the only providers a check may touch, and how long a version read may take. */
   npmLatest: (name: string) => Promise<string> = npmLatest;
   only: ReadonlySet<ProviderId> | null = null;
+  versionTimeoutMs = VERSION_TIMEOUT_MS;
 
   constructor(private readonly core: Core) {
     this.skips = this.readSkips();
+    this.readReadings();
+    core.providers.installs.onSettled((outcome) => this.installSettled(outcome));
   }
 
-  /** Arms the periodic check. The core's entry point calls it; a test core never does. */
+  /**
+   * Arms the periodic check. The core's entry point calls it, an e2e core
+   * included; `BOITE_HOST_AGENTS=0`, which that suite sets, leaves it no agent
+   * to read, so it runs no CLI and asks no registry. A unit test core never arms it.
+   */
   start(): void {
-    this.schedule(FIRST_CHECK_MS);
+    this.refreshRestored();
+    this.schedule(this.firstDelay());
+  }
+
+  /**
+   * Brings the readings kept from the last run up to this build without
+   * spawning anything. A managed row is read again at once, since its read is
+   * the release on disk and the version this Boite pins, and a new build may
+   * pin a newer one. A row whose provider lost its route, or took another, is
+   * dropped. A 'self' row keeps its reading until the scheduled check, which
+   * has to run the agent to read it.
+   */
+  refreshRestored(): void {
+    let changed = false;
+    for (const [id, entry] of [...this.entries]) {
+      if (entry.state === 'updating' || entry.state === 'checking') continue;
+      if (this.targetOf(id)?.route !== entry.route) {
+        this.entries.delete(id);
+        changed = true;
+      }
+    }
+    for (const summary of this.core.providers.list().loaded) {
+      const id = summary.id;
+      if (this.core.providers.installs.installedVersion(id) === null) continue;
+      const target = this.targetOf(id);
+      const previous = this.entries.get(id);
+      if (target?.route !== 'managed' || previous?.state === 'updating' || previous?.state === 'checking') continue;
+      const read = this.readManaged(target);
+      if (previous !== undefined && previous.current === read.current && previous.latest === read.latest) continue;
+      this.entries.set(id, { route: 'managed', ...read, state: 'idle', message: null, checkedAt: Date.now() });
+      changed = true;
+    }
+    if (!changed) return;
+    this.writeReadings();
+    this.emit();
+  }
+
+  /** How long after start the first automatic check waits: ten minutes, or until the kept reading is six hours old. */
+  firstDelay(now = Date.now()): number {
+    const due = this.lastCheckAt === null ? 0 : this.lastCheckAt + CHECK_EVERY_MS - now;
+    return Math.min(CHECK_EVERY_MS, Math.max(FIRST_CHECK_MS, due));
   }
 
   close(): void {
@@ -107,9 +186,13 @@ export class HarnessUpdates {
     for (const id of this.entries.keys()) this.core.procs.killTree(updateThreadId(id));
   }
 
+  /**
+   * What the last check read. Only `refresh` runs the agents: a client that
+   * connects is answered from memory, and the scheduled check pushes its
+   * reading as `providers.updatesChanged`.
+   */
   async list(refresh = false): Promise<HarnessUpdate[]> {
-    if (refresh || this.entries.size === 0) return this.check();
-    return this.snapshot();
+    return refresh ? this.check() : this.snapshot();
   }
 
   check(): Promise<HarnessUpdate[]> {
@@ -128,7 +211,8 @@ export class HarnessUpdates {
     // would be written over as idle, and a second updater could then start.
     if (this.checking !== null) await this.checking.catch(() => {});
     let entry = this.entries.get(providerId);
-    if (entry === undefined) {
+    // A reading kept from before a restart may name a route this machine no longer takes.
+    if (entry === undefined || entry.route !== target.route) {
       await this.check();
       entry = this.entries.get(providerId);
     }
@@ -154,7 +238,7 @@ export class HarnessUpdates {
     }
     // A running program cannot be replaced, and a warm session is one.
     for (const thread of this.core.journal.listThreads()) {
-      if (thread.providerId === providerId) releaseThread(thread.id);
+      if (thread.providerId === providerId) this.core.threads.releaseAgent(thread.id);
     }
     this.put(providerId, { ...entry, state: 'updating', message: null });
     void this.runUpdate(target, entry).catch((error: unknown) => {
@@ -193,7 +277,16 @@ export class HarnessUpdates {
   private async tick(): Promise<void> {
     let deferred = false;
     try {
-      await this.check();
+      // A check started by hand since the timer was armed already counts.
+      const recent = this.lastCheckAt !== null && Date.now() - this.lastCheckAt < CHECK_EVERY_MS - BUSY_RETRY_MS;
+      if (!recent) {
+        // Reading every agent while a turn runs competes with it: wait for a quiet moment.
+        if (this.anyBusy()) {
+          this.schedule(BUSY_RETRY_MS);
+          return;
+        }
+        await this.check();
+      }
       if (this.closed || this.core.stopping) return;
       if (this.core.settings.get().autoUpdateHarnesses) {
         for (const update of this.snapshot()) {
@@ -224,8 +317,10 @@ export class HarnessUpdates {
     if (profile === undefined) return null;
     const command = resolveCommand(profile);
     const managedDir = resolve(this.core.providers.installs.currentDir(providerId));
+    // A release on disk under `current` is what makes the route managed, whatever
+    // the install card is doing: an update under way or a failed one still leave it there.
     const runsManaged =
-      summary.install?.state === 'installed' &&
+      this.core.providers.installs.installedVersion(providerId) !== null &&
       command !== null &&
       inside(managedDir, resolve(command.executable));
     if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed' };
@@ -255,17 +350,18 @@ export class HarnessUpdates {
       });
     }
     this.emit();
-    await Promise.all(
-      targets.map(async (target) => {
+    const queue = [...targets];
+    const readNext = async (): Promise<void> => {
+      for (let target = queue.shift(); target !== undefined; target = queue.shift()) {
         const id = target.descriptor.id;
-        if (this.entries.get(id)?.state === 'updating') return;
+        if (this.entries.get(id)?.state === 'updating') continue;
         try {
           const read = await this.read(target);
-          if (this.entries.get(id)?.state === 'updating') return;
+          if (this.entries.get(id)?.state === 'updating') continue;
           this.entries.set(id, { route: target.route, ...read, state: 'idle', message: null, checkedAt: Date.now() });
         } catch (error) {
           const previous = this.entries.get(id);
-          if (previous?.state === 'updating') return;
+          if (previous?.state === 'updating') continue;
           this.entries.set(id, {
             route: target.route,
             current: previous?.current ?? null,
@@ -275,25 +371,24 @@ export class HarnessUpdates {
             checkedAt: Date.now(),
           });
         }
-      }),
-    );
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CHECK_PARALLEL, queue.length) }, readNext));
+    this.lastCheckAt = Date.now();
+    this.writeReadings();
     this.emit();
     return this.snapshot();
   }
 
   private async read(target: Target): Promise<{ current: string | null; latest: string | null }> {
-    const id = target.descriptor.id;
-    if (target.route === 'managed') {
-      const state = this.core.providers.installs.stateOf(id, target.profile.install);
-      return state?.state === 'installed' ? { current: state.version, latest: state.available } : { current: null, latest: null };
-    }
+    if (target.route === 'managed') return this.readManaged(target);
     const spec = target.profile.update as ProviderSelfUpdate;
-    const current = readVersion(await this.run(target, spec.versionArgs ?? ['--version'], VERSION_TIMEOUT_MS));
+    const current = readVersion(await this.run(target, spec.versionArgs ?? ['--version'], this.versionTimeoutMs));
     if (current === null) throw new Error(`${target.descriptor.name} printed no version`);
     let latest: string | null = null;
     if (spec.latestNpm !== undefined) latest = await this.npmLatest(spec.latestNpm);
     else if (spec.latestArgs !== undefined) {
-      const output = await this.run(target, spec.latestArgs, VERSION_TIMEOUT_MS);
+      const output = await this.run(target, spec.latestArgs, this.versionTimeoutMs);
       const start = output.indexOf('{');
       const end = output.lastIndexOf('}');
       try {
@@ -307,6 +402,11 @@ export class HarnessUpdates {
     return { current, latest };
   }
 
+  /** A managed release is read off disk and the descriptor's pin: nothing runs. */
+  private readManaged(target: Target): { current: string | null; latest: string | null } {
+    return { current: this.core.providers.installs.installedVersion(target.descriptor.id), latest: target.profile.install?.version ?? null };
+  }
+
   /** One short run of the agent's own program, traced like every process of an agent. */
   private async run(target: Target, args: string[], timeoutMs: number): Promise<string> {
     this.assertOpen();
@@ -317,18 +417,24 @@ export class HarnessUpdates {
       env: { ...process.env, ...command.updateEnv },
     });
     spawned.proc.stdin.end();
+    const readers = [spawned.proc.stdout.getReader(), spawned.proc.stderr.getReader()] as const;
     let timedOut = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    let giveUp = (): void => {};
+    const late = new Promise<'late'>((resolve) => {
+      giveUp = () => resolve('late');
+    });
     const timer = setTimeout(() => {
       timedOut = true;
-      spawned.proc.kill();
+      // The whole tree: a launcher's child that inherited the pipes would hold them open.
+      // A check and an update of one agent never overlap, so nothing else runs under this id.
+      this.core.procs.killTree(updateThreadId(target.descriptor.id));
+      grace = setTimeout(giveUp, PIPE_GRACE_MS);
     }, timeoutMs);
     try {
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(spawned.proc.stdout).text(),
-        new Response(spawned.proc.stderr).text(),
-        spawned.exited,
-      ]);
-      if (timedOut) throw new Error(`${target.descriptor.name} did not answer \`${args.join(' ')}\` within ${Math.round(timeoutMs / 1000)} s`);
+      const ran = await Promise.race([Promise.all([capture(readers[0]), capture(readers[1]), spawned.exited]), late]);
+      if (ran === 'late' || timedOut) throw new Error(`${target.descriptor.name} did not answer \`${args.join(' ')}\` within ${Math.round(timeoutMs / 1000)} s`);
+      const [stdout, stderr, code] = ran;
       if (code !== 0) {
         const last = `${stderr}\n${stdout}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0).at(-1);
         throw new Error(`\`${args.join(' ')}\` exited with ${code}${last === undefined ? '' : `: ${last.slice(0, 300)}`}`);
@@ -336,6 +442,9 @@ export class HarnessUpdates {
       return `${stdout}\n${stderr}`;
     } finally {
       clearTimeout(timer);
+      clearTimeout(grace);
+      // A descendant that outlived the kill keeps the pipe; stop reading it rather than wait on it.
+      if (timedOut) for (const reader of readers) void reader.cancel().catch(() => {});
     }
   }
 
@@ -344,6 +453,8 @@ export class HarnessUpdates {
     try {
       if (target.route === 'managed') await this.runManaged(target);
       else await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+      // An updater may have moved the program on PATH.
+      forgetWhich();
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
@@ -356,28 +467,57 @@ export class HarnessUpdates {
       });
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
+      forgetWhich();
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
       this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now() });
     }
+    this.writeReadings();
     this.emit();
   }
 
-  /** The install block's own download, waited on: its card shows the progress meanwhile. */
+  /**
+   * The install block's own download, waited on for as long as it takes: its
+   * card shows the progress meanwhile, and the download fails by itself once
+   * the connection stays dead. A download the install card already started is
+   * joined rather than refused as already running.
+   */
   private async runManaged(target: Target): Promise<void> {
     const id = target.descriptor.id;
-    const install = target.profile.install!;
     const installs = this.core.providers.installs;
-    installs.start(id, install);
-    const deadline = Date.now() + UPDATE_TIMEOUT_MS;
-    for (;;) {
-      await new Promise((done) => setTimeout(done, 250));
-      const state = installs.stateOf(id, install);
-      if (state === null || state.state === 'absent') throw new Error('the download was cancelled');
-      if (state.state === 'installed') return;
-      if (state.state === 'failed') throw new Error(state.message);
-      if (Date.now() > deadline) throw new Error('the download did not finish in time');
+    let done = installs.whenDone(id);
+    if (done === null) {
+      installs.start(id, target.profile.install!);
+      done = installs.whenDone(id);
     }
+    const result = await done;
+    if (result === null || result.outcome === 'cancelled') throw new Error('the download was cancelled');
+    if (result.state.state === 'failed') throw new Error(result.state.message);
+  }
+
+  /**
+   * An install that lands from the install card moves the managed release
+   * too: the row is read again at once rather than offering, until the next
+   * check, an update that is already on disk.
+   */
+  private installSettled(outcome: InstallOutcome): void {
+    const entry = this.entries.get(outcome.providerId);
+    if (this.closed || outcome.outcome !== 'installed' || entry?.route !== 'managed' || entry.state === 'updating') return;
+    const target = this.targetOf(outcome.providerId);
+    if (target?.route !== 'managed') return;
+    void this.read(target).then((read) => {
+      if (this.entries.get(outcome.providerId)?.state === 'updating') return;
+      this.put(outcome.providerId, { ...entry, ...read, state: 'idle', message: null, checkedAt: Date.now() });
+      this.writeReadings();
+    }).catch((error: unknown) => {
+      this.core.log('warn', `reading ${outcome.providerId} after its install: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  /** True while any turn of any agent is queued, running or waiting. */
+  private anyBusy(): boolean {
+    return this.core.journal.unfinishedTurns().length > 0 ||
+      this.core.journal.listThreads().some((thread) => ['queued', 'running', 'waiting'].includes(thread.status));
   }
 
   private busyThreads(providerId: ProviderId): number {
@@ -451,6 +591,47 @@ export class HarnessUpdates {
     } catch (error) {
       this.core.log('warn', `${file}: unreadable, expected {"skipped": {"<provider id>": "<version>"}}; no version is skipped (${error instanceof Error ? error.message : String(error)})`);
       return {};
+    }
+  }
+
+  /** Loads the last check's readings. A missing or broken file is no reading: the next check makes one. */
+  private readReadings(): void {
+    const file = join(this.core.dataDir, READINGS_FILE);
+    if (!existsSync(file)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { checkedAt?: unknown; readings?: unknown };
+      if (typeof parsed.checkedAt === 'number' && Number.isFinite(parsed.checkedAt)) this.lastCheckAt = Math.min(parsed.checkedAt, Date.now());
+      if (typeof parsed.readings !== 'object' || parsed.readings === null) return;
+      const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+      for (const [id, raw] of Object.entries(parsed.readings as Record<string, Record<string, unknown> | null>)) {
+        if (typeof raw !== 'object' || raw === null || (raw['route'] !== 'self' && raw['route'] !== 'managed')) continue;
+        const failed = raw['state'] === 'failed';
+        this.entries.set(id as ProviderId, {
+          route: raw['route'],
+          current: text(raw['current']),
+          latest: text(raw['latest']),
+          // A check or an update the last run left half done is only its last reading now.
+          state: failed ? 'failed' : 'idle',
+          message: failed ? text(raw['message']) : null,
+          checkedAt: typeof raw['checkedAt'] === 'number' ? raw['checkedAt'] : null,
+        });
+      }
+    } catch (error) {
+      this.core.log('warn', `${file}: unreadable, expected {"checkedAt": <ms>, "readings": {"<provider id>": {...}}}; the next check reads again (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+
+  private writeReadings(): void {
+    if (this.closed || this.core.stopping) return;
+    const readings: Record<string, Entry> = {};
+    for (const [id, entry] of this.entries) {
+      if (entry.state === 'checking' || entry.state === 'updating') continue;
+      readings[id] = entry;
+    }
+    try {
+      writeFileSync(join(this.core.dataDir, READINGS_FILE), `${JSON.stringify({ checkedAt: this.lastCheckAt, readings }, null, 2)}\n`);
+    } catch (error) {
+      this.core.log('warn', `writing ${READINGS_FILE}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

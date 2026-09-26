@@ -5,6 +5,7 @@
  * conversation by a later process, the warm process, the permission flags, the
  * `agy models` probe with its effort grouping, and the refusals.
  */
+import shippedAgy from '../src/providers/shipped/antigravity-cli.json';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
-import { modelsFromListing, parseModelLines } from '../src/drivers/agy.ts';
+import { modelsFromListing, parseModelLines } from '../src/drivers/agy/models.ts';
 import { browserNoopPath } from '../src/paths.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -66,7 +67,8 @@ function writeDescriptor(dataDir: string): void {
     executable: [{ kind: 'path', value: 'bun' }],
     launch: { args: [FAKE_AGENT] },
     isolation: {},
-    env: { BROWSER: '{browserNoop}', NO_COLOR: '1' },
+    // The shipped environment, so a variable it drops shows up here.
+    env: shippedAgy.profiles.windows.env,
     close: { processes: [] },
   };
   writeFileSync(
@@ -160,6 +162,8 @@ describe('agy driver', () => {
     expect(argvLines()).toEqual(['argv conversation=new model=configured mode=default skip=false stream=true']);
     // The browser the CLI would open for a sign-in is the no-op, never a window.
     expect(linesStarting('env BROWSER=')).toEqual([`env BROWSER=${browserNoopPath(harness?.dataDir ?? '')}`]);
+    // agy's own updater spawns a detached `agy --version` that opens a console window.
+    expect(linesStarting('env AGY_CLI_DISABLE_AUTO_UPDATE=')).toEqual(['env AGY_CLI_DISABLE_AUTO_UPDATE=true']);
   });
 
   test('a tool step is one part, running then done, between the two answers, and usage adds both', async () => {
@@ -332,6 +336,7 @@ describe('agy driver', () => {
     // Cached, and nothing is left running under the probe's thread.
     await client.call('providers.probe', { providerId: 'agy-fake', accountId });
     expect(linesStarting('models')).toHaveLength(1);
+    expect(linesStarting('probe env ')).toEqual(['probe env AGY_CLI_DISABLE_AUTO_UPDATE=true']);
     await waitFor(() => harness?.core.procs.liveCount(`probe:agy-fake:${accountId}`) === 0);
   });
 
@@ -369,6 +374,24 @@ describe('agy driver', () => {
     expect(argvLines().at(-1)).toContain('model=gemini-3.8-flash-medium');
   });
 
+  test('a stop while the models are listed before the launch ends the turn at once, and no process starts', async () => {
+    const client = await startCore();
+    const { threadId } = await agyThread(client, { model: 'gemini-3.8-flash', probe: true });
+    getDriver('agy').forgetProbes?.({});
+    process.env['AGY_FAKE_MODELS_DELAY_MS'] = '4000';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'never launched' });
+    await waitFor(() => linesStarting('models').length === 2);
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    expect((await finished).status).toBe('stopped');
+    expect(Date.now() - stoppedAt).toBeLessThan(1000);
+    // The listing ends on its own; the turn's process never starts.
+    await Bun.sleep(4500);
+    expect(argvLines()).toHaveLength(0);
+  });
+
   test('a signed-out agy fails the probe with what to do about it', async () => {
     const client = await startCore();
     const { accountId } = await agyAccount(client);
@@ -388,7 +411,10 @@ describe('agy driver', () => {
 
     const refused = client.call('providers.probe', { providerId: 'agy-fake', accountId, refresh: true });
     await waitFor(() => linesStarting('models').length === 2);
+    // A finished login announces its account whatever the status reads; a plain
+    // check that finds the same status is no change and leaves the probe alone.
     await client.call('accounts.check', { accountId });
+    harness!.core.accounts.check(accountId, true);
     await expect(refused).rejects.toThrow(/changed during discovery/);
   });
 

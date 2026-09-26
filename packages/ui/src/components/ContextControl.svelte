@@ -6,6 +6,7 @@
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { experimentOn } from '../lib/experiments.svelte';
   import { cacheSpan, promptCacheState, PROMPT_CACHE_TICK_MS } from '../lib/prompt-cache';
   let { store }: { store: Store } = $props();
@@ -52,6 +53,18 @@
   function show() { clearTimeout(leave); place(); popup.show(); }
   function hideLater() { clearTimeout(leave); leave = setTimeout(() => { if (!root?.contains(document.activeElement)) popup.hide(); }, 180); }
   onDestroy(() => clearTimeout(leave));
+  /**
+   * Captured on the window, ahead of App's own listener there and of the
+   * composer's: the Escape that shuts this popup is spent on it and never
+   * also stops the running turn.
+   */
+  function closeOnEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !popup.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    popup.hide();
+  }
+  $effect(() => { if (popup.open) return mobileOverlay(() => popup.hide()); });
   async function compact() {
     if (reason || submitting) return;
     submitting = true;
@@ -59,7 +72,7 @@
   }
 </script>
 
-<svelte:window onresize={() => { if (popup.open) place(); }} onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydown={event => { if (event.key === 'Escape' && popup.open) { popup.hide(); event.stopPropagation(); } }} />
+<svelte:window onresize={() => { if (popup.open) place(); }} onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydowncapture={closeOnEscape} />
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="context" bind:this={root} data-testid="context-meter" data-percent={percent ?? ''} data-level={contextLevel(percent)} onmouseenter={show} onmouseleave={hideLater} onfocusin={show} onfocusout={hideLater}>
   <button type="button" class="trigger ghost" data-testid="context-trigger" aria-label={cacheLabel ? `${strings.thread.contextDetails}, ${cacheLabel}` : strings.thread.contextDetails} aria-expanded={popup.open} aria-haspopup="dialog" onclick={show}>
@@ -106,6 +119,8 @@
 <style>
   .context { position: relative; flex: none; color: var(--color-muted-foreground); }
   .trigger { display: flex; align-items: center; gap: 5px; padding: 4px; }
+  /* On a phone the ring alone says how full the context is; the popup has the number. */
+  @media (max-width: 720px) { .trigger { min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; } .amount { display: none; } }
   svg { width: 24px; height: 24px; transform: rotate(-90deg); }
   circle { fill: none; stroke-width: 3; }
   .track { stroke: var(--color-border); }

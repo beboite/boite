@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn clean_shutdown_delivers_term_before_kill() {
-        let _process_guard = crate::PROCESS_TEST_LOCK.lock().unwrap();
+        let _process_guard = crate::process_test_guard();
         let mut child = Command::new("bun")
             .args(["-e", "process.on('SIGTERM', () => process.exit(0)); console.log('ready'); setInterval(() => {}, 1000)"])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();

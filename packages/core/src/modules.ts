@@ -11,7 +11,7 @@ import { registerUpdateMethods } from './providers/updates.ts';
 import { registerSchedulerMethods } from './scheduler.ts';
 import { registerSessionMethods } from './sessions.ts';
 import { registerSettingsMethods } from './settings.ts';
-import { registerThreadMethods } from './threads.ts';
+import { registerThreadMethods } from './threads/rpc.ts';
 import { registerTraceMethods } from './trace.ts';
 import { registerUsageMethods } from './usage.ts';
 import { registerPushMethods } from './push.ts';

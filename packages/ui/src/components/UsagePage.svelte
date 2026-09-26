@@ -4,6 +4,7 @@
   import type { UsageHistory } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
   import {
     dayEdges,
     formatMetric,
@@ -95,8 +96,9 @@
     return totals.priced === 0 ? strings.usage.noPrice : formatMetric('cost', totals.usage.costUsdEquivalent ?? 0);
   }
 
-  const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  const percent = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 0 });
+  // In the language the app speaks, not the system's.
+  const dayName = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'short', day: 'numeric', month: 'short' }));
+  const percent = $derived(new Intl.NumberFormat(formatLocale(), { style: 'percent', maximumFractionDigits: 0 }));
 </script>
 
 {#snippet numbers(totals: UsageTotals)}

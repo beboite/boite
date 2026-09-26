@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { existsSync, readFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { connect } from '../src/client.ts';
@@ -141,4 +141,119 @@ test.each(['{"groqKey":"private-fixture",', '{"engine":"invalid","groqKey":"priv
     expect(loaded.configure({ ...DEFAULT_SPEECH, engine: 'api', groqKey: 'repaired-fixture' }).ready).toBe(true);
     expect(loaded.status().error).toBeNull();
   } finally { await loaded.close(); }
+});
+
+describe('a local speech download on a bad connection', () => {
+  const body = new Uint8Array(256 * 1024).map((_, index) => (index * 7) % 253);
+  const half = body.byteLength / 2;
+  const spec = { url: '', bytes: body.byteLength, sha256: createHash('sha256').update(body).digest('hex') };
+  let server: ReturnType<typeof Bun.serve>;
+  let ranges: (string | null)[] = [];
+  let ifRanges: (string | null)[] = [];
+  let next: 'resume' | 'whole' = 'resume';
+  let first: 'drop' | 'stall' = 'drop';
+
+  beforeEach(() => {
+    ranges = [];
+    ifRanges = [];
+    next = 'resume';
+    first = 'drop';
+    server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        const range = request.headers.get('range');
+        ranges.push(range);
+        ifRanges.push(request.headers.get('if-range'));
+        if (ranges.length === 1) {
+          const end = first;
+          return new Response(new ReadableStream<Uint8Array>({
+            async start(controller) {
+              controller.enqueue(body.slice(0, half));
+              if (end === 'stall') return;
+              await Bun.sleep(50);
+              controller.error(new Error('the test server drops the connection'));
+            },
+          }), { headers: { 'content-length': String(body.byteLength), etag: '"model-1"' } });
+        }
+        const from = Number(/^bytes=(\d+)-$/.exec(range ?? '')?.[1] ?? Number.NaN);
+        if (next === 'whole' || Number.isNaN(from)) return new Response(body);
+        return new Response(body.slice(from), {
+          status: 206,
+          headers: { 'content-range': `bytes ${from}-${body.byteLength - 1}/${body.byteLength}` },
+        });
+      },
+    });
+    spec.url = `http://127.0.0.1:${server.port}/model.bin`;
+  });
+  afterEach(() => { server.stop(true); });
+
+  const download = (target: string) => harness.core.speech.local['download'](spec, target, new AbortController().signal);
+
+  test('a dropped connection keeps what it got, and the next download resumes from there', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    const failed = await download(target).then(() => null, (error: Error) => error);
+    expect(failed?.message).toContain('install again to resume');
+    expect(failed?.message).not.toContain('verbose');
+    expect(statSync(`${target}.part`).size).toBe(half);
+
+    await download(target);
+    expect(ranges).toEqual([null, `bytes=${half}-`]);
+    // The file the bytes came from is named, so a changed one would come whole.
+    expect(ifRanges).toEqual([null, '"model-1"']);
+    expect(existsSync(`${target}.part.json`)).toBe(false);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+    expect(existsSync(`${target}.part`)).toBe(false);
+  });
+
+  test('a server that ignores the range sends the whole file, and the download starts over cleanly', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    await download(target).catch(() => {});
+    next = 'whole';
+    await download(target);
+    expect(ranges[1]).toBe(`bytes=${half}-`);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+  });
+
+  test('a part kept for another file is never resumed: a build that pins another model downloads it whole', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    await download(target).catch(() => {});
+    expect(statSync(`${target}.part`).size).toBe(half);
+    const other = { ...spec, url: `${spec.url}?release=2` };
+    await harness.core.speech.local['download'](other, target, new AbortController().signal);
+    expect(ranges).toEqual([null, null]);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+  });
+
+  test('a part with no record of where it came from is not resumed either', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    await download(target).catch(() => {});
+    rmSync(`${target}.part.json`);
+    await download(target);
+    expect(ranges).toEqual([null, null]);
+    expect(new Uint8Array(readFileSync(target))).toEqual(body);
+  });
+
+  test('a stalled download fails after the idle wait instead of a total deadline, and keeps its bytes', async () => {
+    const target = join(harness.dataDir, 'model.bin');
+    first = 'stall';
+    harness.core.speech.local.stallMs = 300;
+    const started = Date.now();
+    const failed = await download(target).then(() => null, (error: Error) => error);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(failed?.message).toContain('no data');
+    expect(statSync(`${target}.part`).size).toBe(half);
+  });
+});
+
+test('installing again after a failed model download does not fetch the runtime it already has', async () => {
+  const local = harness.core.speech.local;
+  if (!local.canInstallRuntime) return;
+  mkdirSync(join(local.root, 'runtime'), { recursive: true });
+  writeFileSync(join(local.root, 'runtime', 'whisper-cli.exe'), 'fixture');
+  const urls: string[] = [];
+  fetchSpy = stubFetch(async (url) => { urls.push(String(url)); return new Response('gone', { status: 404 }); });
+  local.start();
+  await waitFor(() => !local.installing);
+  expect(urls).toHaveLength(1);
+  expect(urls[0]).toContain('ggml-small');
 });

@@ -1,7 +1,7 @@
 //! Signed desktop updates. These commands never update a connected remote core.
 use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Mutex}, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State, Webview};
+use tauri::{AppHandle, Emitter, Manager, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use sha2::{Digest, Sha256};
 
@@ -99,9 +99,36 @@ fn candidate(releases: &[Release], track: Track) -> Option<&Release> {
         .max_by(|a, b| a.0.cmp(&b.0)).map(|(_, r)| r)
 }
 
+/// How long a connection may take to open, and how long an open one may stay
+/// silent. Neither caps the whole transfer: a 35 MB installer on a slow link
+/// takes minutes and must be allowed to, while a link that stops sending must
+/// fail and give the updater back instead of holding it until a restart.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The plugin's requests (the manifest, the installer) with those timeouts.
+fn bounded(builder: tauri_plugin_updater::UpdaterBuilder, read: Duration) -> tauri_plugin_updater::UpdaterBuilder {
+    builder.configure_client(move |client| client.connect_timeout(CONNECT_TIMEOUT).read_timeout(read))
+}
+
+/// The client of the release listing. reqwest is built with rustls and no
+/// crypto provider, and the updater plugin installs one only inside its own
+/// `check()`: building a client before that panics, so this installs the same
+/// provider the plugin would.
+fn release_client(read: Duration) -> Result<reqwest::Client, String> {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        // Fails only when another thread installed one meanwhile.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+    reqwest::Client::builder().user_agent("boite-desktop-updater")
+        .connect_timeout(CONNECT_TIMEOUT).read_timeout(read).build().map_err(|e| e.to_string())
+}
+
 async fn find_release(track: Track) -> Result<Release, String> {
-    let client = reqwest::Client::builder().user_agent("boite-desktop-updater")
-        .timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    // The listing arrives gzipped, a quarter of its size, and pages of release
+    // notes grow with every nightly: a total deadline would fail every check
+    // on a slow link once they are large enough.
+    let client = release_client(READ_TIMEOUT)?;
     for page in 1..=10 {
         let releases: Vec<Release> = client.get(format!("{RELEASES}?per_page=100&page={page}"))
             .send().await.map_err(|e| format!("Release lookup failed: {e}"))?
@@ -147,8 +174,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
         std::fs::rename(temporary, &state.preference).map_err(|e| format!("Cannot save update channel: {e}"))?;
         let release = find_release(channel).await?;
         let endpoint = release_asset_url(&release)?.parse().map_err(|e| format!("Invalid manifest URL: {e}"))?;
-        let update = app.updater_builder().endpoints(vec![endpoint]).map_err(|e| e.to_string())?
-            .timeout(Duration::from_secs(120))
+        let update = bounded(app.updater_builder(), READ_TIMEOUT).endpoints(vec![endpoint]).map_err(|e| e.to_string())?
             .version_comparator(move |current, release| offer_version(&current, &release.version, channel))
             .build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
         if let Some(update) = update {
@@ -211,14 +237,30 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         state.fail(&app, error.clone()); return Err(error);
     }
     state.change(&app, |s| s.phase = "installing".into());
+    // The core outlives the shell (it is resident by default), so nothing
+    // stops it when this process exits: it is stopped here, through its own
+    // /shutdown, before the installer has to replace boite-core.exe. A core
+    // still running would keep that file locked and, once the new shell
+    // started, be adopted as the engine of a version it is not.
+    let core = app.clone();
+    let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::local_core::CoreState>() {
+        Some(core) => core.stop_for_install(),
+        None => Ok(()),
+    }).await;
+    if let Some(error) = match stopped { Ok(Ok(())) => None, Ok(Err(e)) => Some(e), Err(e) => Some(e.to_string()) } {
+        let error = format!("The engine could not be stopped for the update, so nothing was installed: {error}");
+        state.fail(&app, error.clone());
+        return Err(error);
+    }
     // The in-memory digest ties these exact bytes to the verified download.
-    // On Windows Tauri exits only after the installer launches. Windows then
-    // closes the shell's KILL_ON_JOB_CLOSE handle and stops its owned core.
-    // An installer launch failure leaves the core and its agents running.
+    // On Windows Tauri exits once the installer launches. If it cannot
+    // launch, the hold is released and the window's next reconnect starts the
+    // engine again.
     let result = tauri::async_runtime::spawn_blocking(move || pending.update.install(bytes)).await;
     match result {
         Ok(Ok(())) => { app.restart(); }
         outcome => {
+            if let Some(core) = app.try_state::<crate::local_core::CoreState>() { core.release_hold(); }
             let error = match outcome { Ok(Err(e)) => e.to_string(), Err(e) => e.to_string(), _ => unreachable!() };
             state.fail(&app, error.clone());
             Err(error)
@@ -270,7 +312,11 @@ mod tests {
 
     // Exercise the actual Tauri manifest/download/signature path against a tiny
     // local HTTP server. No installer is ever executed and no window is opened.
-    fn download_fixture(tamper: bool) -> Result<Vec<u8>, String> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Payload { Signed, Tampered, Stalled }
+
+    /// The download's outcome and how long the download alone took.
+    fn download_fixture(payload: Payload) -> (Result<Vec<u8>, String>, Duration) {
         use std::{io::{Read, Write}, net::TcpListener};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -281,7 +327,8 @@ mod tests {
             "url": format!("{base}/payload"), "signature": signature,
         } } }).to_string();
         let server = std::thread::spawn(move || {
-            for payload in [manifest.as_bytes(), if tamper { b"changed payload" } else { b"boite updater fixture\n" }] {
+            let body: &[u8] = if payload == Payload::Tampered { b"changed payload" } else { b"boite updater fixture\n" };
+            for (index, body) in [manifest.as_bytes(), body].into_iter().enumerate() {
                 let deadline = Instant::now() + Duration::from_secs(10);
                 let (mut stream, _) = loop {
                     match listener.accept() {
@@ -293,8 +340,15 @@ mod tests {
                 stream.set_nonblocking(false).unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut request = [0; 4096]; stream.read(&mut request).unwrap();
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n", payload.len()).unwrap();
-                stream.write_all(payload).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n", body.len()).unwrap();
+                if index == 1 && payload == Payload::Stalled {
+                    // Half the installer, then silence on a connection that stays open.
+                    stream.write_all(&body[..body.len() / 2]).unwrap();
+                    stream.flush().unwrap();
+                    std::thread::sleep(Duration::from_secs(4));
+                    continue;
+                }
+                stream.write_all(body).unwrap();
             }
         });
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
@@ -303,22 +357,33 @@ mod tests {
         }));
         let app = tauri::test::mock_builder().plugin(tauri_plugin_updater::Builder::new().build()).build(context).unwrap();
         let result = tauri::async_runtime::block_on(async {
-            let update = app.updater_builder().target("windows-x86_64").endpoints(vec![format!("{base}/latest.json").parse().unwrap()]).unwrap()
-                .timeout(Duration::from_secs(5)).build().unwrap().check().await.map_err(|e| e.to_string())?.unwrap();
+            let update = bounded(app.updater_builder(), Duration::from_millis(500)).target("windows-x86_64")
+                .endpoints(vec![format!("{base}/latest.json").parse().unwrap()]).unwrap()
+                .build().unwrap().check().await.map_err(|e| e.to_string())?.unwrap();
             assert_eq!(update.version, "2.0.0");
-            update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())
-        });
+            let started = Instant::now();
+            let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string());
+            Ok::<_, String>((bytes, started.elapsed()))
+        }).unwrap();
         server.join().unwrap();
         result
     }
 
     #[test]
     fn native_updater_downloads_and_verifies_the_signed_payload() {
-        assert_eq!(download_fixture(false).unwrap(), b"boite updater fixture\n");
+        assert_eq!(download_fixture(Payload::Signed).0.unwrap(), b"boite updater fixture\n");
     }
     #[test]
     fn native_updater_refuses_bytes_that_do_not_match_the_signature() {
-        let error = download_fixture(true).unwrap_err();
+        let error = download_fixture(Payload::Tampered).0.unwrap_err();
         assert!(error.to_lowercase().contains("signature"), "{error}");
+    }
+    #[test]
+    fn a_download_that_stops_sending_fails_after_the_read_timeout() {
+        let (result, took) = download_fixture(Payload::Stalled);
+        let error = result.unwrap_err();
+        // The server keeps the connection open for 4 s: an error well before
+        // then is the read timeout, not the server letting go.
+        assert!(took < Duration::from_secs(3), "the stalled download held on for {took:?}: {error}");
     }
 }

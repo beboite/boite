@@ -3,8 +3,25 @@
 The panel opens to the right of the chat, per thread, from the header's Panel
 button, the `panel` chord or one of the surface chords. It keeps its own tabs
 and width for each thread in the browser's storage, so a thread comes back the
-way it was left. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
-`RightPanel.svelte` the frame, one component per surface.
+way it was left. Under 720 px the panel is a sheet over the whole chat, so a
+reload there opens on the chat with the panel shut and its tabs kept for the
+next open, and Back shuts it. That reload-time shut is held in memory beside
+the stored layout, so a wider window of the same browser still finds its panels
+open after the phone has used its own. `packages/ui/src/lib/right-panel.svelte.ts` is the store,
+`RightPanel.svelte` the frame, one component per surface. The frame's launcher,
+resize handle and tab icon are `SurfaceLauncher.svelte`, `PanelResizeHandle.svelte`
+and `SurfaceIcon.svelte`; `lib/surface-labels.ts` names each surface and says where
+it is available.
+
+A thread that is archived, here or from another client, or removed with its
+project, takes its layout with it, and its browser views are destroyed rather
+than parked, since the UI has no way to show an archived thread again. The one
+exception is the thread on screen when another client archives it: it stays
+open with its tabs and unsaved file edits, reconnects included, and its layout
+goes when this client opens another thread or a draft. Each machine's
+`threads.list` also drops that machine's layouts for threads it no longer
+lists, which covers archives made while this client was away, except the open
+thread's. A machine that has not connected yet keeps its layouts.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
@@ -60,6 +77,14 @@ browser's file system: `git.status`, `git.diff`, `files.list`, `files.read`,
 Paths are relative to the thread's cwd, or absolute inside it, and a path that
 resolves outside (a symlink out, a `..`) is refused by name. `files.write` also
 refuses a link to nothing, since the write would create its target.
+
+The Changes tab reads the same checkout the agent writes in, so its git runs
+with `GIT_OPTIONAL_LOCKS=0` and counts lines with `git diff-index`, neither of
+which writes the index back: an agent's own `git add` or `git commit` never
+meets an `index.lock` the panel took. Each of those reads has 30 seconds. A git
+that has not answered by then is stopped by its own process id and the read
+fails with the command and the directory; the thread's other processes are
+left alone.
 
 `files.read` answers text inline, cut at `FILE_MAX_BYTES`. A picture, a video,
 a sound or another binary comes as a url on the core's HTTP server,

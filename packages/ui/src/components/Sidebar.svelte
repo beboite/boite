@@ -10,6 +10,7 @@
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
+  import { compareThreads } from '../lib/thread-order';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
@@ -32,10 +33,7 @@
           .filter((thread) => `${thread.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .map((thread) => ({ machine, project, thread }))
       )
-      .sort(
-        (a, b) =>
-          (b.thread.lastUserMessageAt ?? b.thread.createdAt) - (a.thread.lastUserMessageAt ?? a.thread.createdAt)
-      )
+      .sort((a, b) => compareThreads(a.thread, b.thread))
   );
   let target = $derived(store.openProject ?? store.projects[0]);
   let newLabel = $derived(
@@ -171,11 +169,7 @@
         {@const threads = owner
           .threadsOf(project.id)
           .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
-          .sort(
-            (a, b) =>
-              Number(b.pinned) - Number(a.pinned) ||
-              (b.lastUserMessageAt ?? b.createdAt) - (a.lastUserMessageAt ?? a.createdAt)
-          )}
+          .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const draftHere = store === owner && owner.draft?.projectId === project.id}
         <section class="project" data-testid="project" data-project-id={project.id} data-machine-id={machine.id}>
@@ -210,7 +204,7 @@
                   data-testid="draft-row"
                   onclick={() => owner.startDraft(project.id)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
                 >{/if}
-              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} />{/each}
+              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
                 </p>{/if}

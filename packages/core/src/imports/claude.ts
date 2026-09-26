@@ -96,6 +96,28 @@ function promptOf(record: Record): { text: string; images: TranscriptTurn['image
   return { text, images };
 }
 
+function parse(line: string): Record | null {
+  if (line.trim().length === 0) return null;
+  try {
+    const record = JSON.parse(line) as unknown;
+    return typeof record === 'object' && record !== null ? (record as Record) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A substring test that lets most lines by without a parse. */
+function mayBeTitle(line: string): boolean {
+  return line.includes('"ai-title"') || line.includes('"summary"');
+}
+
+/** The agent's title an `ai-title` or `summary` record carries, else null. */
+function titleOf(record: Record): string | null {
+  if (record.type === 'ai-title' && typeof record.aiTitle === 'string' && record.aiTitle.length > 0) return record.aiTitle;
+  if (record.type === 'summary' && typeof record.summary === 'string' && record.summary.length > 0) return record.summary;
+  return null;
+}
+
 /** Consumes records one at a time; `finish()` closes the tools no result reached. */
 export class TranscriptReader {
   private readonly turns: TranscriptTurn[] = [];
@@ -114,25 +136,16 @@ export class TranscriptReader {
    * is in hand, every other line is skipped on a substring test, no parse.
    */
   lineForListing(line: string): void {
-    if (this.hasPrompt && !line.includes('"ai-title"') && !line.includes('"summary"')) return;
+    if (this.hasPrompt && !mayBeTitle(line)) return;
     this.line(line);
   }
 
   line(line: string): void {
-    if (line.trim().length === 0) return;
-    let record: Record;
-    try {
-      record = JSON.parse(line) as Record;
-    } catch {
-      return;
-    }
-    if (typeof record !== 'object' || record === null) return;
-    if (record.type === 'ai-title' && typeof record.aiTitle === 'string' && record.aiTitle.length > 0) {
-      this.agentTitle = record.aiTitle;
-      return;
-    }
-    if (record.type === 'summary' && typeof record.summary === 'string' && record.summary.length > 0) {
-      this.agentTitle = record.summary;
+    const record = parse(line);
+    if (record === null) return;
+    const title = titleOf(record);
+    if (title !== null) {
+      this.agentTitle = title;
       return;
     }
     if (record.isSidechain === true) return;
@@ -211,8 +224,16 @@ export class TranscriptReader {
  */
 export async function readTranscript(file: string, listing = false): Promise<Transcript> {
   const reader = new TranscriptReader();
+  await readLines(file, listing ? (line) => reader.lineForListing(line) : (line) => reader.line(line));
+  return reader.finish();
+}
+
+/**
+ * Feeds `take` the file's lines in order until it returns false. True when
+ * every line was read.
+ */
+async function readLines(file: string, take: (line: string) => boolean | void): Promise<boolean> {
   const decoder = new TextDecoder();
-  const take = listing ? (line: string) => reader.lineForListing(line) : (line: string) => reader.line(line);
   let rest = '';
   const chunks = Bun.file(file).stream().getReader();
   try {
@@ -222,15 +243,65 @@ export async function readTranscript(file: string, listing = false): Promise<Tra
       rest += decoder.decode(value, { stream: true });
       let cut = rest.indexOf('\n');
       while (cut >= 0) {
-        take(rest.slice(0, cut));
+        if (take(rest.slice(0, cut)) === false) return false;
         rest = rest.slice(cut + 1);
         cut = rest.indexOf('\n');
       }
     }
     rest += decoder.decode();
     take(rest);
+    return true;
   } finally {
     await chunks.cancel().catch(() => undefined);
   }
-  return reader.finish();
+}
+
+/** How much of a transcript's end a listing reads to find its last title record. */
+export const LISTING_TAIL_BYTES = 256 * 1024;
+
+/** What a list of sessions shows of one transcript. */
+export interface TranscriptListing {
+  prompt: string;
+  promptAt: number;
+  /** The working directory the first prompt was sent from. */
+  cwd: string | null;
+  /** The last `ai-title` or `summary` record, as a full read would give it. */
+  agentTitle: string | null;
+}
+
+/**
+ * The first prompt, read from the head up to that prompt, and the last title,
+ * read from the last 256 KB: a long session is tens of megabytes, and the CLI
+ * writes its `ai-title` record again all along the file. A tail with no title
+ * falls back to reading the whole file, which old transcripts with a single
+ * `summary` near the head need. Null when the transcript has no prompt.
+ */
+export async function listTranscript(file: string): Promise<TranscriptListing | null> {
+  const reader = new TranscriptReader();
+  const whole = await readLines(file, (line) => {
+    reader.lineForListing(line);
+    return !reader.hasPrompt;
+  });
+  const head = reader.finish();
+  const first = head.turns[0];
+  if (first === undefined) return null;
+  const listing = { prompt: first.prompt, promptAt: first.promptAt, cwd: head.cwd };
+  // The head reached the end: it saw every title record already.
+  if (whole) return { ...listing, agentTitle: head.agentTitle };
+  const blob = Bun.file(file);
+  const size = blob.size;
+  const start = Math.max(0, size - LISTING_TAIL_BYTES);
+  // One byte before the window tells whether it starts on a line; the first
+  // piece is dropped either way, a cut line or a cut character with it.
+  const lines = (await blob.slice(start === 0 ? 0 : start - 1, size).text()).split('\n');
+  if (start > 0) lines.shift();
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]!;
+    if (!mayBeTitle(line)) continue;
+    const record = parse(line);
+    const title = record === null ? null : titleOf(record);
+    if (title !== null) return { ...listing, agentTitle: title };
+  }
+  if (start === 0) return { ...listing, agentTitle: null };
+  return { ...listing, agentTitle: (await readTranscript(file, true)).agentTitle };
 }

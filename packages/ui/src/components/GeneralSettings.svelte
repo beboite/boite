@@ -1,6 +1,5 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { untrack } from 'svelte';
   import type { PairedSession } from '@boite/contracts';
   import ShellSettings from './ShellSettings.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
@@ -8,6 +7,8 @@
   import AppUpdateCard from './AppUpdateCard.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
+  import ArchivedThreads from './ArchivedThreads.svelte';
+  import SchedulerSettings from './SchedulerSettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { ago, projectName, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
@@ -57,26 +58,6 @@
     });
     if (ok) await store.revokeSession(session.id);
   }
-
-
-  let maxConcurrentTurns = $state(untrack(() => store.settings?.maxConcurrentTurns ?? 6));
-  let perAccountConcurrency = $state(untrack(() => store.settings?.perAccountConcurrency ?? 2));
-  let warmProcessMinutes = $state(untrack(() => store.settings?.warmProcessMinutes ?? 5));
-  let listenOnLan = $state(untrack(() => store.settings?.listenOnLan ?? false));
-  let asyncQuestions = $state(untrack(() => store.settings?.asyncQuestions ?? true));
-  let savedAt = $state<number | null>(null);
-
-  async function save() {
-    await store.saveSettings({
-      maxConcurrentTurns,
-      perAccountConcurrency,
-      warmProcessMinutes,
-      listenOnLan,
-      asyncQuestions
-    });
-    savedAt = Date.now();
-  }
-
 </script>
 
 <div class="page" data-testid="settings-page">
@@ -111,6 +92,8 @@
     {/if}
   </section>
 
+  <ArchivedThreads {store} />
+
   <section class="card" id="settings-background">
     <h2>{strings.settings.background}</h2>
     <label for="{uid}-notifications" class="switch-row">
@@ -128,13 +111,6 @@
   </section>
 
   <ModelDefaultsSettings {store} />
-
-  <section class="card" id="settings-machines">
-    <h2>{strings.machines.heading}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h2>
-    <button data-testid="settings-machines" onclick={() => store.showSettings('machines')}>
-      {strings.machines.heading}
-    </button>
-  </section>
 
   <section class="card" id="settings-devices" data-testid="pairing-card">
     <h2>{strings.settings.pairing.heading}<InfoTip topic={strings.settings.pairing.heading} text={strings.settings.pairing.intro} /></h2>
@@ -206,47 +182,7 @@
     {/if}
   </section>
 
-  <!-- Every field here ends in one `settings.set` under the Save button, and
-       `listenOnLan` decides whether the phone can reach the core at all. The
-       whole card is the owner's machine, so the device does not see it. -->
-  {#if store.owner}
-    <section class="card" id="settings-scheduler">
-      <h2>{strings.settings.scheduler}</h2>
-      <div class="grid">
-        <label>
-          <span>{strings.settings.maxConcurrentTurns}</span>
-          <input type="number" min="1" max="64" bind:value={maxConcurrentTurns} />
-        </label>
-        <label>
-          <span>{strings.settings.perAccountConcurrency}</span>
-          <input type="number" min="1" max="32" bind:value={perAccountConcurrency} />
-        </label>
-        <label>
-          <span>{strings.settings.warmProcessMinutes}</span>
-          <input type="number" min="0" max="120" bind:value={warmProcessMinutes} />
-        </label>
-      </div>
-      <label for="{uid}-listen-on-lan" class="switch-row">
-        <span class="text">
-          <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
-        </span>
-        <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan" bind:checked={listenOnLan} />
-      </label>
-      <label class="switch-row">
-        <span class="text">
-          {strings.settings.asyncQuestions}
-          <span class="hint">{strings.settings.asyncQuestionsHint}</span>
-        </span>
-        <input type="checkbox" role="switch" data-testid="setting-async-questions" bind:checked={asyncQuestions} />
-      </label>
-      <div class="actions">
-        <button type="button" class="primary" onclick={() => void save()}>{strings.settings.save}</button>
-        {#if savedAt !== null}
-          <span class="muted">{strings.settings.saved} {time(savedAt)}</span>
-        {/if}
-      </div>
-    </section>
-  {/if}
+  <SchedulerSettings {store} />
 
   <section class="card" id="settings-tour">
     <h2>{strings.onboarding.label}<InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} /></h2>
@@ -286,12 +222,6 @@
 </div>
 
 <style>
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 10px;
-  }
-
   input {
     width: 100%;
   }

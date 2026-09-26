@@ -4,6 +4,9 @@ Boite can report usage counts through a Cloudflare Worker to PostHog EU.
 Basic counters start on for new hosts. Enhanced analytics start off and are
 offered explicitly in the onboarding tour. Skipping the tour does not enable
 enhanced mode. An existing saved choice, including Off, is never overwritten.
+The tour's privacy step has three answers: the "NO! Just the basic counters"
+row keeps the counters, the "DEAL" row turns on enhanced mode, and the "turn
+everything off" link under both rows saves Off. Each one closes the tour.
 Settings > General > Privacy and analytics has two
 switches. On a phone connected as the owner, they are under App & notifications.
 Paired guest devices and agents cannot read or change these settings.

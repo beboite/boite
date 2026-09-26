@@ -276,6 +276,48 @@ describe('the right panel', () => {
     expect(again.for('t-3').surfaces).toHaveLength(0);
   });
 
+  test('a phone comes back to the chat: the stored panel is shut, its tabs kept for the next open', () => {
+    const first = panel('t-1');
+    first.bound.open('trace');
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((media: string) => ({ media, matches: media === '(max-width: 720px)' })) as unknown as typeof window.matchMedia;
+    try {
+      const again = new RightPanelStore().for('t-1');
+      expect(again.isOpen).toBe(false);
+      expect(again.activeSurfaceId).toBe('trace');
+      expect(JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}').threads['t-1'].isOpen).toBe(true);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
+  test('a panel write after a phone load keeps every desktop panel stored open', () => {
+    const first = panel('t-1');
+    first.bound.open('trace');
+    first.root.for('t-2').open('changes');
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((media: string) => ({ media, matches: media === '(max-width: 720px)' })) as unknown as typeof window.matchMedia;
+    try {
+      const phone = new RightPanelStore();
+      const stored = () => JSON.parse(window.localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}').threads as Record<string, { isOpen: boolean }>;
+      // A write on another thread, and one on a shut panel that leaves it shut.
+      phone.for('t-3').open('files');
+      phone.for('t-2').update('changes', { path: 'src/app.ts' });
+      expect(phone.for('t-2').isOpen).toBe(false);
+      expect(stored()['t-1']?.isOpen).toBe(true);
+      expect(stored()['t-2']?.isOpen).toBe(true);
+      // Opened on the phone, then shut by hand: that is the phone user's choice, and it is saved.
+      phone.for('t-1').toggle();
+      expect(phone.for('t-1').isOpen).toBe(true);
+      phone.for('t-1').hide();
+      expect(phone.for('t-1').isOpen).toBe(false);
+      expect(stored()['t-1']?.isOpen).toBe(false);
+      expect(stored()['t-2']?.isOpen).toBe(true);
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
   test('a stored blob of another version is dropped whole', () => {
     window.localStorage.setItem(
       PANEL_STORAGE_KEY,
@@ -353,6 +395,24 @@ describe('the right panel', () => {
 
     expect(destroy.mock.calls.map(([id]) => id)).toEqual([first.id, second.id]);
     destroy.mockRestore();
+  });
+
+  test('a prune drops the layouts it names, with their browser views, and writes once', () => {
+    const root = new RightPanelStore();
+    const gone = root.for('t-gone').open('browser');
+    root.for('t-kept').open('trace');
+    root.for(null).open('trace');
+    const destroy = vi.spyOn(browserBridge, 'destroy');
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+
+    root.prune((key) => key !== 't-kept');
+
+    expect(Object.keys(root.threads).sort()).toEqual(['', 't-kept']);
+    expect(destroy.mock.calls.map(([id]) => id)).toEqual([gone.id]);
+    expect(write.mock.calls.filter(([key]) => key === PANEL_STORAGE_KEY)).toHaveLength(1);
+    expect(Object.keys(new RightPanelStore().threads).sort()).toEqual(['', 't-kept']);
+    destroy.mockRestore();
+    write.mockRestore();
   });
 
   test('a file tab keeps its unsaved text until it is closed, and each close names what it takes', () => {

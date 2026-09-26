@@ -91,6 +91,9 @@ in-memory fake.
   UI tests run on and the fastest way to look at a screen.
 - `?fake=1&long=1` adds a four-hundred-message thread, which is what the
   windowed message list is looked at on.
+- `?fake=1&stream=tokens` streams answers and reasoning sixteen characters per
+  delta, the echo driver's rate, instead of five deltas per answer, so a cost
+  paid per delta shows. Tests pass `chunkSize` to `FakeClient` for the same.
 - The app opens on a new thread's draft in the last used project, as if New
   thread had been pressed: the project last opened or drafted in on that
   device (kept per core in `localStorage`), else the project of the most recent
@@ -98,8 +101,10 @@ in-memory fake.
   thread instead, which is the page most captures and e2e tests look at.
 - `?grant=<grant>` is a pairing link: the page exchanges it once for a session
   key of its own and stores that. `?token=<token>` opens the page on a token
-  one already holds, and `?core=<url>` points it somewhere else. All three are
-  stripped from the address bar; the grant is never stored.
+  one already holds, and `?core=<url>` points it somewhere else, after asking
+  when that core is new to the device. All three are stripped from the address
+  bar; the grant is never stored, and the endpoint is stored only once it has
+  answered a hello.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
 a reload shows.
@@ -110,12 +115,19 @@ its directories through the owner-only `projects.browse` method. The native
 folder button is available only for the shell's local core. A folder dropped
 from the desktop switches to that local core before opening the path.
 
+Both sidebar views order threads the same way (`lib/thread-order.ts`): pinned
+threads first, then a thread waiting on the user, then running, queued and failed
+ones, then the rest by the user's last message. Under a project's header a row
+leaves out the project name; Recent shows it.
+
 The sidebar footer counts authenticated machine connections. Remembered cores
 use separate sockets without thread subscriptions; failed connections retry
 every thirty seconds. The menu names disconnected machines and opens connection
 settings. The title bar has no second connection indicator.
 
-Two menus open over the composer while typing. `/` on an empty box lists the
+Two menus open over the composer while typing, above the box, shortened to the
+room left under the title bar, or below the box when that side has more room
+(`lib/menu-fit.ts`). `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
 reported), then Boite's, the same list as the palette. `@` at the start of a
 word lists the project's files, ranked by `projects.files` on the word after
@@ -128,9 +140,14 @@ saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
 
 A draft on a git repository has one more chip, `Worktree`. `Project.repository`
-says whether the folder holds a `.git`, read by the core on every answer with
-the test the worktree refuses on; a core that does not send the field keeps the
-chip. On, the first send passes
+says whether the folder holds a `.git`, by the test the worktree refuses on. The
+answer is the last check's: each answer starts the next check off the event
+loop, one per folder at a time, so a folder that gains a `.git` says so on a
+later answer, and a project on a share whose host is gone never blocks the core
+(a synchronous check there froze it for 21 s). A check with no clear answer
+keeps the last one. The core checks every project at start and on
+`projects.add`; before any check has answered, the field is left out, and a
+client that gets no field keeps the chip. On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
 `-3` when the name is taken, or the `branch` the call names), the directory
@@ -143,13 +160,23 @@ they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
 person's call, `git worktree remove` from the project.
 
+Archiving stops the thread's running turn, its pending questions and its child
+agents, so the sidebar menu, the header and the palette ask first when the thread
+is working, waits on an answer or has a live child agent. An idle thread archives
+at once. Settings > General > Archived threads (on a phone, Settings > Archived
+threads) lists the archived conversations on demand and restores one to the
+sidebar; stopped work does not resume.
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments. The composer
 shows each pending message. Up in an empty composer takes the newest pending
 message out of the queue for editing; clicking a pending message does the same.
 Escape stops the current turn. Pending messages then run in their original
-order. A failed send preserves the queue for an explicit retry.
+order. An Escape that closes something first (a popover, a menu, a
+confirmation, the command palette, a rename field) only closes it, and the focus
+goes back to where it was, or to the composer when that is gone, so a second
+Escape is needed to stop. A failed send preserves the queue for an explicit retry.
 
 `/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
 consecutive iterations and stops. Counts range from 1 to 1000. A count written
@@ -208,11 +235,18 @@ reading to 300 ([context.md](context.md)).
 BOITE_ECHO=1 bun run dev:core
 ```
 
+`BOITE_HOST_AGENTS=0` keeps a core away from the agents installed on the
+machine: the shipped providers still load but resolve no program, so no
+version check, quota read or model probe runs the developer's own CLIs. The
+test harness, the end to end suite, `bun run bench` and `bench/idle-rss.ts` set
+it; an opt-in live test (`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back
+off.
+
 ## Checks and tests
 
 ```bash
-bun run check    # contracts, core, UI and end-to-end test types
-bun run test     # bun test in packages/core, vitest in packages/ui
+bun run check    # contracts, core, UI, end-to-end test, bench and telemetry Worker types
+bun run test     # bun test in packages/core (parallel workers), vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
@@ -236,6 +270,27 @@ the echo driver, the UI served by that core and driven in a throwaway browser,
 and the release shell executable driven over the WebView2 debugging port. The
 shell part runs with `BOITE_SHELL_HIDDEN=1`, which is the only way an agent may
 ever start that executable: a window on the user's screen is forbidden.
+
+### Contract scenarios
+
+`tests/contract/scenarios.ts` holds the contract as behaviour: each scenario
+drives methods through a small environment (`call`, `on`, a new folder, a
+missing one) and throws on the first code, data key or event that breaks the
+rule. It reads codes and data keys, never message text. Two runners share it:
+`packages/core/test/contract.test.ts` against one echo core over WebSocket, and
+`packages/ui/src/lib/fake-client.contract.test.ts` against the in-memory client.
+Both finish in under a second. `KNOWN_DIVERGENCES` lists a scenario allowed to
+fail on one side, with the reason; a listed scenario that passes fails its
+runner, so a fixed drift leaves the list. The rules the fake repeats live in
+`packages/ui/src/lib/fake-client/checks.ts`, and `settings.set` validation is
+one function in the contract (`checkSettingsPatch`). What only one side can
+show (a shell to close, a login to cancel, a device kept from owner events) is
+in `packages/ui/src/lib/fake-client.parity.test.ts`. In the fake, a folder
+under one named `missing` does not exist.
+
+Vitest gives each UI test 15 seconds (`packages/ui/vitest.config.ts`); the
+`waitFor` of `app.test.ts` stops at 8 seconds, so a slow wait fails with the
+page's text rather than as a bare timeout.
 
 ## Rebuilding the shell executable
 
@@ -275,6 +330,9 @@ That script puts the compiled core in `src-tauri/binaries` for the bundler and
 beside the release shell executable for the end to end run, with `jobs-worker.js`
 and `guard-worker.js` next to each copy. Without the first the trace degrades
 from exact events to polling; without the second the focus guard never starts.
+On Windows the first staging downloads Bun's baseline runtime (a 40 MB archive)
+for the Bun version running it and keeps it under `node_modules/.cache`
+([releasing](releasing.md)).
 
 ## Captures
 
@@ -289,10 +347,28 @@ and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
-The fake client is excluded from production bundles. Tests that need it must
+In forced colors (Windows high contrast) the browser drops the shadows and
+border tints the UI uses to mark focus. `app.css` then gives every
+`:focus-visible` control a 2 px `Highlight` outline, and
+`tests/e2e/readability.test.ts` checks it on the composer and the thread
+search.
+
+The fake client is excluded from production bundles. Its imports sit behind
+`import.meta.env.DEV`, and because Rolldown still writes a chunk for a dynamic
+import in a dead branch, `vite.config.ts` deletes that orphan chunk and fails
+the build if a shipped chunk still names it. Tests that need it must
 use the Vite development server. `tests/e2e/settings.test.ts` starts and closes
 one within the test process; the other end-to-end paths use a real temporary
 core with the echo driver.
+
+A real core serves `packages/ui/dist`. `tests/e2e/ui.test.ts` and
+`tests/e2e/cli.test.ts` call `ensureProductionUi` (`tests/e2e/lib/prod-ui.ts`),
+which builds it again with `NODE_ENV=production` only when it is missing, older
+than the UI sources, `packages/contracts` or `bun.lock`, or a development
+build. A child of `bun test` inherits `NODE_ENV=test`, and Vite then builds a
+development bundle that loads the fake client on `?fake=1`. `ui.test.ts` fails
+if the bundle the core serves imports the fake client or carries Svelte's
+development runtime.
 
 `tests/e2e/model-switch.test.ts` changes an existing conversation from Echo to
 an ACP fixture over real RPC and stdio. It checks history continuity and writes
@@ -309,6 +385,14 @@ through ANGLE, muted, in a throwaway profile, and drives it over CDP.
 `tests/e2e/.artifacts/`, which is git-ignored. That is the proof for anything
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
+
+`page.close()` kills the browser's process tree without blocking the other
+closes, waits up to 30 s for the browser to exit, then removes its profile,
+retrying for 15 s while Windows still holds a file. A directory it cannot
+remove is printed as `e2e: left <path>`. The test preload removes `boite-e2e-*`
+directories older than an hour, which an interrupted run left in the temp
+folder, and closes any page a file left open when the run ends.
+`tests/e2e/cleanup.test.ts` checks all three.
 
 An end-to-end file serves the UI through `tests/e2e/lib/ui.ts`. `startUi` uses
 the fake-client bundle in `BOITE_E2E_FAKE_UI` when set. With
@@ -342,6 +426,7 @@ each one is skipped unless its variable is set. Run them from
 | `BOITE_E2E_ANTIGRAVITY_INSTALL=1` | `test/antigravity.install.live.test.ts` | the managed install for real: 468 MB from Google, the sha256 and every file size checked, `initialize` answered. No sign-in |
 | `BOITE_E2E_ANTIGRAVITY=1` | `test/antigravity.live.test.ts` | the whole Google sign-in, in your browser, then one turn. Only a person runs this one |
 | `BOITE_BENCH_CLAUDE=1` | `bun run bench` | the Claude turn row of the bench |
+| `BOITE_BENCH_HOST_AGENTS=1` | `bun run bench/idle-rss.ts` | the steady idle point with the update check reading the agents installed on the machine, as a user's core would |
 
 One more is opt-in for a different reason. `BOITE_E2E_GUARD=1` runs
 `test/guard.e2e.test.ts`, which opens a real window and steals the keyboard focus
@@ -376,7 +461,7 @@ external access needs the trusted HTTPS origin described in [phone.md](phone.md)
 
 ```bash
 bun run bench               # against Boite Legacy, writes bench/results/<date>.md
-bun run bench/idle-rss.ts   # the core's idle working set against bare bun
+bun run bench/idle-rss.ts   # the core's idle memory against bare bun, at 4.5 s and 75 s (--fresh-only: 4.5 s)
 ```
 
 Both set their own fresh data directory. Quote a figure with the date of the run
@@ -393,7 +478,26 @@ does not retry or skip tests.
 `bun run check` includes `bun run check:architecture`. The architecture check
 uses Bun's parser and needs no installed workspace dependencies. CI runs it in
 the changes job on every pull request. `bun test scripts/architecture` verifies
-cycle detection, import resolution and the package boundaries.
+cycle detection, import resolution, the package boundaries and the size budget.
+
+The same check fails when a production `.ts`, `.js` or `.svelte` file passes
+900 lines. The files already above it are listed in
+`scripts/architecture/size-budget.json` with the most lines each may have. A
+file that grows past its entry fails; split it instead of raising the number.
+When a file shrinks, the check prints a note, and
+`bun run check:architecture --write-size-budget` lowers its entry to match, or
+removes it once the file is back under 900. That flag never raises an entry.
+
+The `exempt` entries of the same file have no ceiling, each with its reason:
+`packages/contracts/src/index.ts`, which every RPC method changes first,
+`lib/fake-client.ts`, which implements that contract, and the
+`lib/strings.*.ts` tables, which gain an entry with every UI sentence.
+
+`bun run check:architecture --rebaseline-size-budget` pins every file above 900
+at its size today, raising or adding entries, and prints each raise. It exists
+for one case: merging branches written before their files were pinned, on the
+tree that combines them, so the raises are reviewed in that diff. Everywhere
+else a file that outgrows its entry is split.
 
 `bun run audit:complexity` ranks production functions by cyclomatic complexity.
 Use `bun run audit:complexity --json` to save a comparison. It is advisory;
@@ -455,7 +559,11 @@ compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
 ### File attachments
 
 Desktop and paired phones can pick, paste or drop files into the composer.
-A turn accepts eight attachments, each at most 5 MB. PNG, JPEG, GIF and WebP
+A turn accepts eight attachments, each at most 5 MB and 10 MB together. The
+total keeps the `turns.start` frame, where they travel as base64, under the
+16 MB the core reads in one frame (`RPC_MAX_FRAME_BYTES`, the websocket's
+`maxPayloadLength`); a larger frame would close the socket before any handler
+ran, so the UI client refuses one before sending it. PNG, JPEG, GIF and WebP
 use the provider's native image input. Other formats, including PDF, text,
 source files and archives, use `kind: 'file'` and do not require image support.
 The core validates and journals their base64 bytes, then writes a sanitized,

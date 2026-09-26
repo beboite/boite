@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { agentEnv, profileFor } from '../../providers/loader.ts';
+import { agentEnv, profileFor } from '../../providers/resolve.ts';
 import { writeLandsInside } from '../../workdir.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
 import {
@@ -39,6 +39,7 @@ import {
   META_PROVIDER,
   MODE_POSTURE,
   STDERR_MAX,
+  STARTUP_DEADLINE_MS,
   SUBAGENT_TOOL_NAME,
 } from './protocol.ts';
 import { handshake, mintUuidV7, MuseRpc } from './rpc.ts';
@@ -48,6 +49,13 @@ import { MuseTurn } from './turn.ts';
 interface OpenQuestion {
   settle: () => void;
   settled: Promise<null>;
+}
+
+let startupDeadlineMs = STARTUP_DEADLINE_MS;
+
+/** Shortens the startup deadline so a test does not wait 90 s; null restores it. */
+export function setMuseStartupDeadlineForTests(ms: number | null): void {
+  startupDeadlineMs = ms ?? STARTUP_DEADLINE_MS;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +83,10 @@ export class MuseSession {
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
   private idle: Timer | null = null;
+  /** The turn waiting on the host's startup, which a stop ends by closing the host. */
+  private opening: MuseTurn | null = null;
   private current: MuseTurn | null = null;
+  private killTree: (() => void) | null = null;
   private contextSink: TurnContext['context'] | null = null;
   private readonly items = new Map<string, { kind: string; revision: number }>();
   private readonly approvals = new Map<string, OpenApproval>();
@@ -120,6 +131,13 @@ export class MuseSession {
   stopTurn(turn: MuseTurn): void {
     if (turn.settled) return;
     turn.markStopped();
+    if (this.opening === turn) {
+      // Nothing reached the model yet, and a host stuck in its startup answers
+      // nothing else: closing it is the only stop there is.
+      this.closing = true;
+      this.drop();
+      return;
+    }
     if (this.current !== turn) return;
     if (turn.compacting) {
       // A compaction has no turn to interrupt; the stop is the user's to take.
@@ -158,11 +176,25 @@ export class MuseSession {
   // -- the turn -------------------------------------------------------------
 
   private async runTurn(turn: MuseTurn): Promise<void> {
+    // A turn stopped while it was queued, or during the host's startup, sends
+    // nothing to the model.
+    if (turn.isStopped) {
+      this.endStopped(turn);
+      return;
+    }
+    this.opening = turn;
     try {
       await this.start(turn.ctx);
     } catch (error) {
-      turn.fail(messageOf(error));
+      if (turn.isStopped) turn.finish('cancelled', null);
+      else turn.fail(messageOf(error));
       this.endTurn(turn, true);
+      return;
+    } finally {
+      this.opening = null;
+    }
+    if (turn.isStopped) {
+      this.endStopped(turn);
       return;
     }
 
@@ -180,6 +212,13 @@ export class MuseSession {
     const ctx = turn.ctx;
     try {
       await this.align(rpc, sessionId, ctx);
+      if (turn.isStopped) {
+        // Stopped while the model or the mode was being set: no turn and no
+        // compaction goes out, and the host stays warm.
+        this.current = null;
+        this.endStopped(turn);
+        return;
+      }
       if (turn.compacting) {
         const result = await rpc.command<{ status?: string; reason?: string }>('session/compact', { sessionId });
         if (result.status === 'noop') {
@@ -232,6 +271,11 @@ export class MuseSession {
     }
   }
 
+  private endStopped(turn: MuseTurn): void {
+    turn.finish('cancelled', null);
+    this.endTurn(turn, false);
+  }
+
   private endTurn(turn: MuseTurn, drop: boolean): void {
     turn.settle();
     this.running = Math.max(0, this.running - 1);
@@ -257,6 +301,7 @@ export class MuseSession {
       env: agentEnv(ctx.provider, ctx.accountEnv),
     });
     this.child = child;
+    this.killTree = ctx.killTree ?? null;
     const rpc = new MuseRpc(child, {
       notification: (method, params) => {
         this.onNotification(method, params);
@@ -268,25 +313,53 @@ export class MuseSession {
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
 
-    await handshake(rpc);
+    await this.within('initialize', handshake(rpc));
 
     if (ctx.sessionId !== null) {
-      const resumed = await rpc.command<{ session: MuseSessionRecord }>('session/resume', {
-        sessionId: ctx.sessionId,
-        excludeItems: true,
-      });
+      const resumed = await this.within(
+        'session/resume',
+        rpc.command<{ session: MuseSessionRecord }>('session/resume', {
+          sessionId: ctx.sessionId,
+          excludeItems: true,
+        }),
+      );
       this.adopt(resumed.session);
       return;
     }
 
     const model = modelOf(ctx);
-    const created = await rpc.command<{ session: MuseSessionRecord }>('session/start', {
-      sessionId: mintUuidV7(),
-      workspaceRoot: ctx.thread.cwd,
-      approvalMode: posture.approvalMode,
-      ...(model === null ? {} : { modelId: model, providerId: META_PROVIDER }),
-    });
+    const created = await this.within(
+      'session/start',
+      rpc.command<{ session: MuseSessionRecord }>('session/start', {
+        sessionId: mintUuidV7(),
+        workspaceRoot: ctx.thread.cwd,
+        approvalMode: posture.approvalMode,
+        ...(model === null ? {} : { modelId: model, providerId: META_PROVIDER }),
+      }),
+    );
     this.adopt(created.session);
+  }
+
+  /** One startup step, or the host closed and a sentence naming the step it hung on. */
+  private within<T>(step: string, pending: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`the muse host did not answer ${step} within ${Math.round(startupDeadlineMs / 1000)} s`));
+        this.closing = true;
+        this.drop();
+      }, startupDeadlineMs);
+      timer.unref?.();
+      pending.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
   }
 
   private adopt(session: MuseSessionRecord): void {
@@ -351,6 +424,14 @@ export class MuseSession {
     this.ended = true;
     this.closing = true;
     this.clearIdle();
+    // The running turn ends now, while the journal is still open, not from the
+    // child's close event, which can fire after core shutdown closed it.
+    const turn = this.current;
+    this.current = null;
+    if (turn !== null) {
+      if (turn.isStopped) turn.finish('cancelled', null);
+      else turn.fail('the muse session was closed');
+    }
     for (const question of this.questions.values()) question.settle();
     this.questions.clear();
     this.approvals.clear();
@@ -365,7 +446,9 @@ export class MuseSession {
         // the pipe is already gone
       }
       try {
-        child.kill();
+        // The whole tree on Windows, so a shell a tool left running goes too.
+        if (this.killTree !== null) this.killTree();
+        else child.kill();
       } catch {
         // already exited
       }
@@ -404,6 +487,16 @@ export class MuseSession {
         if (typeof used !== 'number') return;
         const window = params['windowTokens'];
         this.contextSink?.({ tokens: used, window: typeof window === 'number' ? window : null });
+        return;
+      }
+      case 'session/closed': {
+        // The host unloaded the session (its idle policy, a restart of it): this
+        // host takes no more turns, and the next one resumes on a fresh host.
+        if (this.closing) return;
+        this.closing = true;
+        const turn = this.current;
+        if (turn !== null) turn.fail(`Muse closed the session: ${textOf(params['reason']) || 'no reason given'}`);
+        else if (this.running === 0) this.drop();
         return;
       }
       default:
@@ -469,9 +562,6 @@ export class MuseSession {
         open.settle();
         break;
       }
-      case 'session/closed':
-        if (!this.closing) turn.fail(`Muse closed the session: ${textOf(params['reason']) || 'no reason given'}`);
-        break;
       case 'view/gap':
         turn.ctx.log('warn', 'muse: the host skipped some updates of this turn; the saved session is complete');
         break;

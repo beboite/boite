@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
+  import { quotaWindowName, tenth, weekdayTime } from '../lib/format';
   import ProviderLogo from './ProviderLogo.svelte';
 
   let { rows }: { rows: AccountQuota[] } = $props();
 
-  const when = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  // The app's language, not the system's: a French app on an English machine still reads `ven. 03:30`.
+  const when = { format: weekdayTime };
   const remaining = (used: number) => Math.max(0, Math.round((100 - used) * 10) / 10);
 
   /** An account the provider reports on, and was asked about. The rest are named once, below. */
@@ -30,11 +32,11 @@
       </header>
       {#each row.windows as limit (limit.id)}
         <div class="window" class:low={limit.usedPercent >= 80} class:out={limit.usedPercent >= 100}>
-          <span class="name">{limit.label}</span>
-          <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-label="{row.providerName} {limit.label}">
+          <span class="name">{quotaWindowName(limit.label)}</span>
+          <div class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={remaining(limit.usedPercent)} aria-label="{row.providerName} {quotaWindowName(limit.label)}">
             <div class="fill" style:width="{remaining(limit.usedPercent)}%"></div>
           </div>
-          <span class="left">{fill(strings.quotas.remaining, { percent: String(remaining(limit.usedPercent)) })}</span>
+          <span class="left">{fill(strings.quotas.remaining, { percent: tenth(remaining(limit.usedPercent)) })}</span>
           <small class="reset">{limit.resetsAt ? fill(strings.quotas.resets, { time: when.format(limit.resetsAt) }) : strings.quotas.noReset}</small>
         </div>
       {/each}
@@ -54,7 +56,7 @@
   header strong { font-weight: 600; }
   .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   header small, .reset, .muted { color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .window { display: grid; grid-template-columns: 96px minmax(80px, 1fr) 72px 128px; align-items: center; gap: 12px; font-size: var(--text-sm); }
+  .window { display: grid; grid-template-columns: 96px minmax(80px, 1fr) max-content 128px; align-items: center; gap: 12px; font-size: var(--text-sm); }
   .name { color: var(--color-foreground); }
   .track { height: 6px; border-radius: 3px; background: var(--color-surface-3); overflow: hidden; }
   .fill { height: 100%; border-radius: 3px; background: var(--color-success); transition: width var(--dur-3) var(--ease-out-quint); }

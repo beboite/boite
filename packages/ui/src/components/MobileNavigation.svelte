@@ -1,9 +1,13 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Bot, ChevronDown, MessageSquare, Plus, Settings } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, Pin, Plus, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
+  import { mobileOverlay } from '../lib/mobile-history';
+  import { archiveThread } from '../lib/archive';
+  import { separator, type MenuItem } from '../lib/menu';
+  import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import StatusMark from './StatusMark.svelte';
 
@@ -12,24 +16,50 @@
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
   let project = $derived(store.openProject ?? store.projects[0]);
-  let entries = $derived(machines.flatMap(machine => machine.store.threads.filter(t => !t.archived).map(thread => ({
-    machine, thread, project: machine.store.projects.find(p => p.id === thread.projectId)
-  }))));
+  let entries = $derived(machines.flatMap(machine => {
+    const byId = new Map(machine.store.projects.map(p => [p.id, p]));
+    return machine.store.threads.filter(t => !t.archived).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
+  }));
   let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
-    .toSorted((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
+    .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
   let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: m.label,
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
+  /** The list a conversation was opened from: Back returns to it. The landing conversation has none, so Back leaves. */
+  let from = $state<'threads' | 'activity' | null>(null);
+  $effect(() => {
+    if (store.page !== 'chat' || screen !== 'chat' || !from) return;
+    const list = from;
+    return mobileOverlay(() => { from = null; screen = list; });
+  });
+
   function show(next: typeof screen) {
     store.showChat();
     store.sidebarOpen = false;
     search = '';
+    from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
+  }
+  /** What the sidebar's thread menu offers, minus what needs the desktop. */
+  function rowItems(owner: Store, thread: ThreadSummary): MenuItem[] {
+    const retitling = owner.retitling.includes(thread.id);
+    return [
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
+  }
+  /** Thread ids can collide between machines: the row's own store acts. */
+  function rowAction(owner: Store, thread: ThreadSummary, action: string) {
+    if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
+    else if (action === 'retitle') void owner.retitle(thread.id);
+    else if (action === 'archive') void archiveThread(owner, thread.id);
   }
   async function pickProject(key: string) {
     if (key === 'add-project') { store.projectPickerOpen = true; return; }
@@ -62,11 +92,14 @@
       <input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} />
     </div>
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
-      <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
-        <StatusMark status={row.thread.status} />
-        <span class="summary"><span class="title">{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
-        {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
-      </button>
+      <div class="row">
+        <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
+          <StatusMark status={row.thread.status} />
+          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
+          {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
+        </button>
+        <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
+      </div>
     {:else}
       <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>
     {/each}
@@ -88,14 +121,19 @@
     .identity { min-width: 0; flex: 1; }
     .machine { display: block; font-size: var(--text-xs); color: var(--color-muted-foreground); padding-left: 4px; }
     .identity :global(.trigger) { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+    /* A finger-sized target without growing the header: the padding reaches over the machine line and the header's own padding. */
+    .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(12px, env(safe-area-inset-right)) 20px max(12px, env(safe-area-inset-left)); }
     .list-heading { padding: 14px 4px; }
     h1 { font-size: var(--text-lg); margin: 0; }
     p { font-size: var(--text-sm); }
     input { width: 100%; }
-    .thread { display: flex; width: 100%; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-bottom: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 14px 12px; }
+    .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); }
+    .row :global(.menu) { flex: none; }
+    .thread { display: flex; flex: 1; min-width: 0; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 14px 12px; }
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+    .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); }
     .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }

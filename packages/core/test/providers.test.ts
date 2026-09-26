@@ -1,9 +1,12 @@
 import { currentOs } from '../src/paths.ts';
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
-import { resolveCommand } from '../src/providers/loader.ts';
-import { join, sep } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { startTestCore } from './harness.ts';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import type { Account } from '@boite/contracts';
+import { assertDriverRunnable } from '../src/drivers/index.ts';
+import { resolveCommand } from '../src/providers/resolve.ts';
+import { globalRoots } from '../src/providers/npm.ts';
+import { delimiter, join, sep } from 'node:path';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 let harness: TestCore;
@@ -65,6 +68,157 @@ describe('providers', () => {
     ], isolation: {} })?.executable).toBe(process.execPath);
   });
 
+  test.skipIf(process.platform !== 'win32')('an npm launcher script on PATH is not an agent to start, but a program behind it is', () => {
+    const shims = join(harness.dataDir, 'npm-prefix');
+    const programs = join(harness.dataDir, 'programs');
+    mkdirSync(shims);
+    mkdirSync(programs);
+    writeFileSync(join(shims, 'fakeagent.cmd'), '@echo off\r\n');
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = shims;
+      const profile = { detect: {}, executable: [{ kind: 'path' as const, value: 'fakeagent' }], isolation: {} };
+      // node's spawn refuses a .cmd with EINVAL: the agent is missing, and its install is offered.
+      expect(resolveCommand(profile)).toBeNull();
+
+      writeFileSync(join(programs, 'fakeagent.exe'), 'MZ');
+      process.env['PATH'] = [shims, programs].join(delimiter);
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(join(programs, 'fakeagent.exe').toLowerCase());
+
+      // A profile that names a launcher script itself maps one to its program, as Muse does.
+      process.env['PATH'] = shims;
+      const scripted = { ...profile, executable: [{ kind: 'file' as const, value: join(programs, 'missing.cmd') }, ...profile.executable] };
+      expect(resolveCommand(scripted)?.executable.toLowerCase()).toBe(join(shims, 'fakeagent.cmd').toLowerCase());
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test.skipIf(process.platform !== 'win32')('a detect.command that finds only a launcher script reads unavailable, and a program later on PATH makes it available', async () => {
+    const shims = join(harness.dataDir, 'detect-shims');
+    const programs = join(harness.dataDir, 'detect-programs');
+    mkdirSync(shims);
+    mkdirSync(programs);
+    writeFileSync(join(shims, 'fakedetect.cmd'), '@echo off\r\n');
+    const descriptor = validDescriptor();
+    descriptor['id'] = 'detected';
+    (descriptor['profiles'] as Record<string, unknown>)['windows'] = { detect: { command: 'fakedetect' }, executable: [], isolation: {} };
+    writeUserDescriptor('detected.json', descriptor);
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = shims;
+      const client = await harness.connect();
+      const { loaded, rejected } = await client.call('providers.reload', {});
+      expect(rejected).toEqual([]);
+      expect(loaded.find((provider) => provider.id === 'detected')?.available).toBe(false);
+
+      writeFileSync(join(programs, 'fakedetect.exe'), 'MZ');
+      process.env['PATH'] = [shims, programs].join(delimiter);
+      expect(harness.core.providers.summary('detected')?.available).toBe(true);
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test.skipIf(process.platform !== 'win32')('an {npmRoot} candidate finds the program an npm package vendors under the prefix whose shim is on PATH', async () => {
+    // A custom prefix, as nvm-windows, fnm or scoop make one: the shim in it, the package under its node_modules.
+    const prefix = join(harness.dataDir, 'custom-prefix');
+    const vendored = join(prefix, 'node_modules', 'fake-npm-agent', 'bin');
+    mkdirSync(vendored, { recursive: true });
+    writeFileSync(join(prefix, 'npmagent.cmd'), '@echo off\r\n');
+    const exe = join(vendored, 'npmagent.exe');
+    writeFileSync(exe, 'MZ');
+    const descriptor = validDescriptor();
+    descriptor['id'] = 'npm-rooted';
+    (descriptor['profiles'] as Record<string, unknown>)['windows'] = {
+      detect: {},
+      executable: [
+        { kind: 'file', value: '{npmRoot}/fake-npm-agent/bin/npmagent.exe' },
+        { kind: 'path', value: 'npmagent' },
+      ],
+      isolation: {},
+    };
+    writeUserDescriptor('npm-rooted.json', descriptor);
+    const saved = process.env['PATH'];
+    try {
+      process.env['PATH'] = prefix;
+      const client = await harness.connect();
+      const { loaded, rejected } = await client.call('providers.reload', {});
+      expect(rejected).toEqual([]);
+      const found = loaded.find((provider) => provider.id === 'npm-rooted');
+      expect(found?.available).toBe(true);
+      expect(found?.executable?.toLowerCase()).toBe(exe.toLowerCase());
+      expect(harness.core.providers.launcherScriptOnly('npm-rooted')).toBeNull();
+
+      // Without the vendored program only the shim is left: missing, and a turn says why.
+      rmSync(exe);
+      const summary = harness.core.providers.summary('npm-rooted');
+      expect(summary?.available).toBe(false);
+      const script = harness.core.providers.launcherScriptOnly('npm-rooted');
+      expect(script?.toLowerCase()).toBe(join(prefix, 'npmagent.cmd').toLowerCase());
+      const account: Account = { id: 'acc_x', providerId: 'npm-rooted', label: 'Default', isolationDir: null, status: 'ok', identity: null, createdAt: 0 };
+      expect(() => assertDriverRunnable('acp', summary, account, () => harness.core.providers.launcherScriptOnly('npm-rooted')))
+        .toThrow(`PATH has only the launcher script ${script}, which Boite cannot start`);
+    } finally {
+      process.env['PATH'] = saved;
+    }
+  });
+
+  test('{npmRoot} is refused anywhere but the start of a file candidate', async () => {
+    const client = await harness.connect();
+    const placements = [
+      { kind: 'path', value: '{npmRoot}/agent' },
+      { kind: 'file', value: '{home}/{npmRoot}/agent.exe' },
+      { kind: 'file', value: '{npmRoot}agent.exe' },
+    ];
+    for (const [index, candidate] of placements.entries()) {
+      const descriptor = validDescriptor();
+      descriptor['id'] = `npm-misplaced-${index}`;
+      (descriptor['profiles'] as Record<string, unknown>)['linux'] = { detect: {}, executable: [candidate], isolation: {} };
+      writeUserDescriptor(`npm-misplaced-${index}.json`, descriptor);
+    }
+    const { rejected } = await client.call('providers.reload', {});
+    const refused = rejected.filter((entry) => entry.file.includes('npm-misplaced-'));
+    expect(refused.length).toBe(3);
+    for (const entry of refused) {
+      expect(entry.field).toBe('profiles.linux.executable[0].value');
+      expect(entry.expected).toContain('{npmRoot} only at the start of a file candidate');
+    }
+  });
+
+  test('a PATH lookup is remembered: a burst of resolutions walks PATH once, a reload or a vanished program reads again', () => {
+    const programs = join(harness.dataDir, 'cached-programs');
+    mkdirSync(programs);
+    const exe = join(programs, process.platform === 'win32' ? 'cachedagent.exe' : 'cachedagent');
+    const write = (): void => {
+      writeFileSync(exe, process.platform === 'win32' ? 'MZ' : '#!/bin/sh\n');
+      if (process.platform !== 'win32') chmodSync(exe, 0o755);
+    };
+    write();
+    const saved = process.env['PATH'];
+    const which = spyOn(Bun, 'which');
+    try {
+      process.env['PATH'] = programs;
+      const profile = { detect: { command: 'cachedagent' }, executable: [{ kind: 'path' as const, value: 'cachedagent' }], isolation: {} };
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(exe.toLowerCase());
+      const walks = which.mock.calls.length;
+      for (let index = 0; index < 20; index += 1) resolveCommand(profile);
+      expect(which.mock.calls.length).toBe(walks);
+
+      // A remembered program that is gone is looked up again, never handed to a spawn.
+      rmSync(exe);
+      expect(resolveCommand(profile)).toBeNull();
+      // A miss stays a miss for a while; a reload forgets it.
+      write();
+      expect(resolveCommand(profile)).toBeNull();
+      harness.core.providers.load();
+      expect(resolveCommand(profile)?.executable.toLowerCase()).toBe(exe.toLowerCase());
+    } finally {
+      which.mockRestore();
+      process.env['PATH'] = saved;
+    }
+  });
+
   test.skipIf(process.platform === 'win32')('a non-executable file cannot mask a runnable fallback on POSIX', () => {
     const file = join(harness.dataDir, 'not-executable');
     writeFileSync(file, '#!/bin/sh\nexit 0\n');
@@ -89,6 +243,28 @@ describe('providers', () => {
     const accounts = await client.call('accounts.list', {});
     expect(accounts.filter((account) => account.providerId === 'mine')).toHaveLength(1);
     expect(updates).toContain('mine');
+  });
+
+  test('a reload that changes nothing broadcasts nothing, and a changed descriptor still does', async () => {
+    const client = await harness.connect();
+    const broadcasts: number[] = [];
+    client.on('providers.updated', (result) => { broadcasts.push(result.loaded.length); });
+    await client.call('providers.reload', {});
+    const settled = broadcasts.length;
+    for (let index = 0; index < 3; index += 1) {
+      expect((await client.call('providers.reload', {})).loaded.length).toBeGreaterThan(0);
+    }
+    // A later event proves the unchanged reloads had their chance to arrive.
+    await client.call('settings.set', { asyncQuestions: false });
+    expect(broadcasts.length).toBe(settled);
+
+    const body = validDescriptor();
+    body.profiles = Object.fromEntries(['windows', 'linux', 'macos'].map((os) => [os, {
+      detect: {}, executable: [{ kind: 'file', value: process.execPath }], isolation: {},
+    }]));
+    writeUserDescriptor('changed.json', body);
+    await client.call('providers.reload', {});
+    await waitFor(() => broadcasts.length === settled + 1);
   });
 
   test('an unsupported executable resolver is rejected at its field', () => {
@@ -118,6 +294,16 @@ describe('providers', () => {
     expect(claude?.models.find((model) => model.default)?.id).toBe('claude-sonnet-5');
     expect(claude?.models.some((model) => model.legacy)).toBe(true);
     expect(claude?.capabilities.planMode).toBe(true);
+  });
+
+  test('a test core resolves none of the agents installed on the machine', async () => {
+    expect(process.env.BOITE_HOST_AGENTS).toBe('0');
+    const client = await harness.connect();
+    const { loaded } = await client.call('providers.list', {});
+    for (const provider of loaded.filter((entry) => entry.id !== 'echo')) {
+      expect({ id: provider.id, available: provider.available, executable: provider.executable }).toEqual({ id: provider.id, available: false, executable: null });
+    }
+    expect(await client.call('providers.updates', { refresh: true })).toEqual([]);
   });
 
   test('the shipped opencode descriptor loads, resolves its executable and offers one model', async () => {
@@ -157,14 +343,14 @@ describe('providers', () => {
     expect(descriptor.login?.command).toEqual(['opencode', 'auth', 'login']);
   });
 
-  test('{appdata} expands at load, so the windows candidate is a real absolute path', () => {
+  test('the windows npm copy is looked for under every global npm root, the default %APPDATA% one included', () => {
     const windows = harness.core.providers.require('opencode').profiles.windows;
     // Boite's own release is named first, the npm copy right behind it.
     const candidate = windows?.executable[1];
     expect(candidate?.kind).toBe('file');
-    expect(candidate?.value).not.toContain('{appdata}');
+    expect(candidate?.value).toStartWith('{npmRoot}');
     if (process.platform === 'win32') {
-      expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+      expect(globalRoots(null)).toContain(join(process.env['APPDATA'] ?? '', 'npm', 'node_modules'));
     }
     expect(candidate?.value).toContain(`opencode-ai${sep}bin`);
     expect(candidate?.value.toLowerCase()).toEndWith('opencode.exe');
@@ -314,12 +500,11 @@ describe('providers', () => {
       return;
     }
     // Boite's own release is named first. npm installs a `.cmd` shim Bun cannot
-    // spawn, so the real vendored exe is named next, and `{appdata}` has to be a
-    // real path by the time it runs.
+    // spawn, so the real vendored exe is named next, under whichever global npm
+    // root holds the package.
     const candidate = profile?.executable[1];
     expect(candidate?.kind).toBe('file');
-    expect(candidate?.value).not.toContain('{appdata}');
-    expect(candidate?.value.startsWith(process.env['APPDATA'] ?? '')).toBe(true);
+    expect(candidate?.value).toStartWith('{npmRoot}');
     expect(candidate?.value.toLowerCase()).toEndWith('codex.exe');
     expect(profile?.executable.at(-1)).toEqual({ kind: 'path', value: 'codex' });
     expect(profile?.close?.processes).toEqual(['codex.exe', 'codex-x86_64-pc-windows-msvc.exe']);
