@@ -111,8 +111,8 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
   await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('progress')`);
-  // The popup window is opaque and square: the page paints to every corner and rounds nothing.
-  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).not.toBe('rgba(0, 0, 0, 0)');
+  // The popup window is opaque and square: the page paints the canvas to every corner and rounds nothing.
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).backgroundColor`)).not.toBe('rgba(0, 0, 0, 0)');
   expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('none');
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderRadius`)).toBe('0px');
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('1px');

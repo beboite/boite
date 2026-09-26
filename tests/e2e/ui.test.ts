@@ -717,6 +717,7 @@ test(
 
       // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
       await page.click(testid('nav-settings'));
+      await page.click(testid('settings-tab-machines'));
       await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
       const client = await connect(core.url, core.token);
       try {

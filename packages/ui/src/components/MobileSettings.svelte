@@ -14,6 +14,7 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import BrainPage from './BrainPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
@@ -26,6 +27,8 @@
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits : strings.machines.heading);
+  /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
+  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}` : page === 'limits' ? strings.usage.limitsIntro : '');
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
 
@@ -80,7 +83,7 @@
   {:else}
     <header>
       <button class="ghost icon" data-testid="mobile-settings-back" aria-label={strings.mobile.settingsBack} onclick={back}><ArrowLeft size={20} /></button>
-      <h1>{title}</h1>
+      <h1>{title}{#if info}<InfoTip topic={title} text={info} testid="mobile-settings-info" />{/if}</h1>
     </header>
     <div class="detail" data-testid="mobile-settings-detail">
       {#if page === 'brain' && store.owner}
@@ -136,9 +139,8 @@
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
-  .detail :global(.page:not(.machines-page):not(.usage):not(.limits-page) > header),
+  .detail :global(.page:not(.machines-page):not(.limits-page) > header),
   .detail :global(.machines-page > .head h1),
-  .detail :global(.usage > header h1),
   .detail :global(.limits-page > header h1) { display: none; }
   .detail :global(.limits-page > header) { margin-bottom: 4px; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
