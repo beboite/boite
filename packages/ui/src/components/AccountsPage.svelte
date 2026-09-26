@@ -5,6 +5,7 @@
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
   import type { Account, AccountQuota, HarnessUpdate, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
+  import ProviderVersion, { updatable } from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EffortSlider from './EffortSlider.svelte';
@@ -133,32 +134,8 @@
     return Math.min(100, (install.receivedBytes / install.totalBytes) * 100);
   }
 
-  function updatable(provider: ProviderSummary): boolean {
-    const install = store.installOf(provider.id);
-    // When the agent that runs is not Boite's copy, its own updater owns the
-    // version; an Update here would refresh a copy nothing uses.
-    if (store.harnessUpdates.some((update) => update.providerId === provider.id && update.route === 'self')) return false;
-    return install?.state === 'installed' && install.available !== install.version;
-  }
-
   const updateOf = (providerId: string): HarnessUpdate | undefined =>
     store.harnessUpdates.find((update) => update.providerId === providerId);
-
-  function newer(update: HarnessUpdate): boolean {
-    return update.latest !== null && update.current !== null && update.latest !== update.current && (update.pending || update.skipped === update.latest || update.state === 'failed');
-  }
-
-  const skippedNow = (update: HarnessUpdate): boolean => update.skipped !== null && update.skipped === update.latest;
-  /** The release a row offers: the arrow and the Update button go together. */
-  const offered = (update: HarnessUpdate): boolean => !skippedNow(update) && (update.pending || (update.state === 'failed' && newer(update)));
-
-  /** What the version says on hover: whose install it is and where it stands. */
-  function versionTitle(update: HarnessUpdate): string {
-    const where = strings.harnessUpdates.route[update.route];
-    if (update.latest === null) return `${where} · ${strings.harnessUpdates.unknown}`;
-    if (offered(update)) return `${where} · ${strings.harnessUpdates.availableShort}`;
-    return `${where} · ${strings.harnessUpdates.upToDate}`;
-  }
 
   async function checkUpdates() {
     checkingUpdates = true;
@@ -323,41 +300,6 @@
     return () => { offQuotas?.(); offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
   });
 </script>
-
-<!-- The installed version and, when a release is out, the one thing to do about it. -->
-{#snippet updateSegment(provider: ProviderSummary, main: boolean)}
-  {@const update = updateOf(provider.id)}
-  {@const install = store.installOf(provider.id)}
-  <!-- An agent that is not on this machine has nothing to update, whatever the last reading said. -->
-  {#if update && ((provider.available && update.current !== null) || update.state !== 'idle')}
-    <span class="update" data-testid="provider-update" data-update-provider={provider.id} data-state={update.state}>
-      {#if update.current !== null}
-        <span class="version" title={versionTitle(update)}>{offered(update) ? `${update.current} → ${update.latest}` : update.current}</span>
-      {/if}
-      {#if update.state === 'updating' || update.state === 'checking'}
-        <span class="note-inline live" role="status">{update.state === 'updating' ? strings.providerSettings.updating : strings.harnessUpdates.checking}</span>
-      {:else if skippedNow(update) && update.latest !== null}
-        <span class="note-inline">{strings.harnessUpdates.skipped(update.latest)}</span>
-      {/if}
-      {#if skippedNow(update)}
-        <button type="button" class="quiet small" data-testid="harness-update-unskip" onclick={() => void store.skipHarnessUpdate(update.providerId, null)}>{strings.harnessUpdates.unskip}</button>
-      {:else if offered(update) && update.state !== 'updating'}
-        <button type="button" class="small" class:primary={main} data-testid="harness-update-row-run" onclick={() => void store.updateHarness(update.providerId)}>
-          {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
-        </button>
-      {:else if update.route === 'self' && update.latest === null && update.current !== null && update.state !== 'updating'}
-        <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => void store.updateHarness(update.providerId)}>{strings.harnessUpdates.runUpdater}</button>
-      {/if}
-    </span>
-  {:else if provider.available && install?.state === 'installed' && stepOf(provider) !== 'installing'}
-    <span class="update" data-testid="install-version">
-      <span class="version" title={strings.harnessUpdates.route.managed}>{updatable(provider) ? `${install.version} → ${install.available}` : install.version}</span>
-      {#if updatable(provider)}
-        <button type="button" class="small" class:primary={main} data-testid="install-update" onclick={() => void startInstall(provider, false)}>{strings.install.update}</button>
-      {/if}
-    </span>
-  {/if}
-{/snippet}
 
 <!-- An update that failed says why, under the line it belongs to. -->
 {#snippet updateNote(provider: ProviderSummary)}
@@ -582,7 +524,7 @@
         <div class="fact">
           <dt>{strings.providerSettings.version}</dt>
           <dd class="managed">
-            <span data-testid="install-status">{updatable(provider)
+            <span data-testid="install-status">{updatable(store, provider)
               ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
               : strings.install.upToDate.replace('{version}', install.version)}</span>
             <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
@@ -650,7 +592,7 @@
       {/if}
       <div class="act">
         <!-- A provider still to add shows its one way in; its version waits until it is connected. -->
-        {#if !secondary}{@render updateSegment(lead, main && step === 'ready')}{/if}
+        {#if !secondary}<ProviderVersion {store} provider={lead} main={main && step === 'ready'} installing={step === 'installing'} oninstall={() => void startInstall(lead, false)} />{/if}
         {@render stepAction(lead, step, main)}
       </div>
     </div>
@@ -676,7 +618,7 @@
                 </span>
                 {#if member.id !== lead.id}
                   <div class="act">
-                    {@render updateSegment(member, false)}
+                    <ProviderVersion {store} provider={member} installing={memberStep === 'installing'} oninstall={() => void startInstall(member, false)} />
                     {@render stepAction(member, memberStep, false)}
                   </div>
                 {/if}
@@ -806,11 +748,6 @@
 
   .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 
-  /* The version reads as a fact beside the actions, the arrow only when there is somewhere to go. */
-  .update { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-  .version { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-muted-foreground); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .note-inline { font-size: var(--text-sm); color: var(--color-muted-foreground); white-space: nowrap; }
-  .note-inline.live { color: var(--color-live); }
 
   /* A link that does a button's job: leaving for a sign-in page or an installer. */
   a.button {
