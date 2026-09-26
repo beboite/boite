@@ -116,7 +116,7 @@
   const fetching = $derived(status?.models.find((model) => model.id === status?.downloading));
   const modelName = $derived(config?.modelPath ? config.modelPath.split(/[\\/]/).at(-1) ?? '' : current?.name ?? config?.model ?? '');
   const meta = (model: SpeechModel): string => [
-    model.bytes ? `${megabytes(model.bytes)} MB` : '',
+    model.bytes ? `${megabytes(model.bytes)} ${strings.units.megabytes}` : '',
     model.tier ? strings.speech.tiers[model.tier] : model.host ?? '',
   ].filter(Boolean).join(' · ');
   /** What the top line says: one state, at most one action. */
@@ -161,7 +161,7 @@
             {#if status.engine === 'local' && status.runtimeOutdated}<span class="hint">{strings.speech.updateHint}</span>{/if}
           {:else if stage === 'downloading'}
             {fill(strings.speech.downloadingModel, { model: fetching?.name ?? '' })}
-            <span class="hint bytes">{megabytes(status.downloadedBytes)}{status.totalBytes ? ` / ${megabytes(status.totalBytes)}` : ''} MB</span>
+            <span class="hint bytes">{megabytes(status.downloadedBytes)}{status.totalBytes ? ` / ${megabytes(status.totalBytes)}` : ''} {strings.units.megabytes}</span>
           {:else if stage === 'failed' || stage === 'broken'}
             {stage === 'failed' ? strings.speech.statusFailed : strings.speech.statusBroken}
             <span class="hint reason">{status.error}</span>
