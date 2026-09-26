@@ -15,16 +15,12 @@
     url = $state(''),
     token = $state('');
   let busy = $state(false);
-  let origins = $state('');
   /** The add form stays folded behind its button, unless there is nothing else to show. */
   let adding = $state(false);
   let open = $derived(adding || workspace.machines.length === 0);
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
   let linkInput = $state<HTMLInputElement | null>(null);
-  $effect(() => {
-    origins = (workspace.active.settings?.browserOrigins ?? []).join('\n');
-  });
   /** Forgetting a machine drops its saved address and key: getting it back takes a new pairing link made there. */
   async function removeMachine(machine: { id: string; label: string }) {
     const ok = await confirm.ask({
@@ -175,23 +171,6 @@
     <PairingCard store={workspace.active} />
     <PhoneSettings store={workspace.active} />
   {/if}
-
-  {#if workspace.active.owner && !mobile}
-    <details class="card origins disclosure">
-      <summary>{strings.machines.browserOrigins}</summary>
-      <p class="hint">{strings.machines.browserOriginsHint}</p>
-      <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
-      <button
-        onclick={() =>
-          void workspace.active.saveSettings({
-            browserOrigins: origins
-              .split('\n')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          })}>{strings.settings.save}</button
-      >
-    </details>
-  {/if}
 </div>
 
 <style>
@@ -215,11 +194,6 @@
   h2 {
     font-size: var(--text-base);
     margin: 0;
-  }
-  .hint {
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    line-height: 1.6;
   }
   .add-open {
     flex: none;
@@ -372,23 +346,6 @@
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
-  .origins {
-    padding: 14px 20px;
-  }
-  .origins summary {
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-  .origins[open] summary {
-    margin-bottom: 10px;
-    color: var(--color-foreground);
-  }
-  textarea {
-    display: block;
-    width: 100%;
-    margin: 12px 0;
-  }
   label {
     display: flex;
     flex-direction: column;
@@ -400,7 +357,7 @@
   input {
     width: 100%;
   }
-  details:not(.origins) {
+  details {
     margin-top: 8px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);

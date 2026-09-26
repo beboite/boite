@@ -1,10 +1,24 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
-  /** The numbers most people never touch: how many turns run at once, and the core this window talks to. */
+  /**
+   * What most people never touch: how many turns run at once, which browser
+   * origins may reach this core, and the core this window talks to.
+   */
   let { store }: { store: Store } = $props();
+
+  let origins = $state('');
+  let saved = $derived((store.settings?.browserOrigins ?? []).join('\n'));
+  $effect(() => {
+    origins = saved;
+  });
+
+  function saveOrigins() {
+    void store.saveSettings({ browserOrigins: origins.split('\n').map((line) => line.trim()).filter(Boolean) });
+  }
 </script>
 
 <div class="page" data-testid="advanced-page">
@@ -13,6 +27,14 @@
   </header>
 
   <SchedulerSettings {store} />
+
+  {#if store.owner}
+    <section class="card" id="settings-origins" data-testid="browser-origins">
+      <h2>{strings.machines.browserOrigins}<InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /></h2>
+      <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
+      <button type="button" disabled={!store.settings || origins.trim() === saved} onclick={saveOrigins}>{strings.settings.save}</button>
+    </section>
+  {/if}
 
   <section class="card" id="settings-core">
     <h2>{strings.settings.core}</h2>
@@ -38,6 +60,7 @@
 </div>
 
 <style>
+  textarea { display: block; width: 100%; height: auto; min-height: 72px; padding: 8px 10px; margin-bottom: 12px; font-family: var(--font-mono); font-size: var(--text-sm); resize: vertical; }
   dl { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0; }
   dt { color: var(--color-muted-foreground); font-size: var(--text-sm); padding-top: 2px; }
   dd { margin: 0; overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }

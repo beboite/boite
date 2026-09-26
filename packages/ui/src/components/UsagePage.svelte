@@ -20,6 +20,7 @@
     type UsageRange,
     type UsageTotals
   } from '../lib/usage';
+  import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageChart from './UsageChart.svelte';
 
@@ -124,8 +125,7 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1>{strings.usage.heading}</h1>
-      <p>{strings.usage.intro} {strings.usage.note}</p></div>
+    <div><h1>{strings.usage.heading}<InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
   </header>
 
   <div class="filters">

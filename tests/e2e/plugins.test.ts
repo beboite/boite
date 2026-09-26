@@ -87,7 +87,8 @@ test('the recommended plugin installs, switches an account and uninstalls back t
   const account = `${row('kebacc-switcher')} ${id('plugin-pool')}[data-provider="claude"] ${id('plugin-account')}[data-email="personal@example.com"]`;
   await page.click(`${account} ${id('plugin-switch')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${account} ${id('plugin-switch')}').disabled`);
+  // The active login says so and has nothing to switch to.
+  await page.waitFor(`document.querySelector('${account} ${id('plugin-account-active')}') !== null && document.querySelector('${account} ${id('plugin-switch')}') === null`);
   await scrollTo(row('kebacc-switcher'));
   await capture('plugins-installed-desktop.png');
   await page.click(`${row('kebacc-switcher')} ${id('plugin-uninstall')}`);

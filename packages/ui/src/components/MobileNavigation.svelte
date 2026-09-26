@@ -88,7 +88,6 @@
   <section class="mobile-list" data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     <div class="list-heading">
       <h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>
-      <p class="muted">{screen === 'activity' ? strings.mobile.activityHint : strings.mobile.threadsHint}</p>
       <input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} />
     </div>
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}

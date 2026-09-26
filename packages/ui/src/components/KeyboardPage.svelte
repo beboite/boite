@@ -1,9 +1,11 @@
 <script lang="ts">
   import { parseChord, type KeybindingCommand } from '@boite/contracts';
   import { RotateCcw, Search, X } from '@lucide/svelte';
+  import InfoTip from './InfoTip.svelte';
   import { commandLabel } from '../lib/commands.svelte';
+  import { openOwnFile } from '../lib/links';
   import { COMMAND_GROUPS, chordFromEvent, chordParts, isMac } from '../lib/keybindings';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   let { store }: { store: Store } = $props();
@@ -140,7 +142,16 @@
     stop();
   }
 
-  const example = '{\n  "new-thread": "mod+shift+n",\n  "palette": "mod+p",\n  "sidebar": null\n}';
+  /** The shell on its own core opens the file; anywhere else the path is all this window can hand over. */
+  async function openFile() {
+    const path = store.keybindings?.path;
+    if (!path) return;
+    try {
+      await openOwnFile(path);
+    } catch (error) {
+      store.error = fill(strings.keyboard.openFailed, { reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
 </script>
 
 <svelte:window onkeydowncapture={onkeydown} onkeyupcapture={onkeyup} onpointerdowncapture={onoutside} onfocusincapture={onoutside} onblur={stop} />
@@ -148,8 +159,7 @@
 <div class="page" data-testid="keyboard-page">
   <header class="top">
     <div>
-      <h1>{strings.settings.tabs.keyboard}</h1>
-      <p class="intro" id="settings-shortcuts">{strings.keyboard.intro}</p>
+      <h1>{strings.settings.tabs.keyboard}<InfoTip topic={strings.settings.tabs.keyboard} text={strings.keyboard.intro} /></h1>
     </div>
     {#if anyCustom}
       <button class="quiet small" data-testid="keybindings-reset-all" disabled={busy} onclick={() => void resetAll()}><RotateCcw size={14} />{strings.keyboard.resetAll}</button>
@@ -232,13 +242,17 @@
     <p class="intro">{strings.keyboard.noMatch}</p>
   {/each}
 
-  <details class="card file">
-    <summary id="settings-keybinding-file">{strings.keyboard.file}</summary>
-    <p class="mono path" data-testid="keybindings-path">{store.keybindings?.path ?? ''}</p>
-    <p class="intro">{strings.keyboard.fileHint}</p>
-    <p class="subtle example-label">{strings.keyboard.example}</p>
-    <pre class="mono">{example}</pre>
-  </details>
+  <section class="card file" id="settings-keybinding-file">
+    <div class="file-text">
+      <span class="file-name">{strings.keyboard.file}<InfoTip topic={strings.keyboard.file} text={strings.keyboard.fileHint} /></span>
+      <span class="mono path" data-testid="keybindings-path">{store.keybindings?.path ?? ''}</span>
+    </div>
+    {#if store.pickerAvailable}
+      <button type="button" data-testid="keybindings-open" disabled={!store.keybindings} onclick={() => void openFile()}>{strings.keyboard.openFile}</button>
+    {:else}
+      <button type="button" data-testid="keybindings-copy" disabled={!store.keybindings} onclick={() => void store.copy(store.keybindings?.path ?? '')}>{strings.keyboard.copyPath}</button>
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -457,39 +471,29 @@
   }
 
   .file {
+    display: flex;
+    align-items: center;
+    gap: 16px;
     padding: 14px 20px;
   }
-  .file summary {
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
+  .file-text {
+    display: grid;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
   }
-  .file[open] summary {
-    margin-bottom: 12px;
-    color: var(--color-foreground);
+  .file-name {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 500;
   }
   .path {
-    margin: 0 0 8px;
     word-break: break-all;
-    color: var(--color-foreground);
-    font-size: var(--text-sm);
-  }
-  .subtle {
     color: var(--color-muted-foreground);
-  }
-  .example-label {
-    margin: 12px 0 4px;
-    font-size: var(--text-xs);
-  }
-  pre {
-    margin: 0;
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-2);
     font-size: var(--text-sm);
-    white-space: pre;
-    overflow-x: auto;
+  }
+  .file button {
+    flex: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .capture { animation: none; }

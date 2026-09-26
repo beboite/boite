@@ -84,7 +84,7 @@
       { id: 'phone', label: strings.phone.heading }
     ],
     advanced: [
-      ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }] : []),
+      ...(store.owner ? [{ id: 'execution', label: strings.settings.execution }, { id: 'origins', label: strings.machines.browserOrigins }] : []),
       { id: 'core', label: strings.settings.core }
     ],
     experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title }))
