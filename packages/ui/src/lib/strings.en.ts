@@ -1186,7 +1186,6 @@ export const strings = {
     coreUrl: 'Core URL',
     token: 'Token',
     connect: 'Connect',
-    scheduler: 'Scheduler',
     maxConcurrentTurns: 'Max concurrent turns',
     perAccountConcurrency: 'Per account concurrency',
     warmProcessMinutes: 'Warm process minutes',

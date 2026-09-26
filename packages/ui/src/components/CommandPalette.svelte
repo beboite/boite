@@ -50,7 +50,8 @@
         id: `thread:${machine.store.threadKey(t.id)}`,
         kind: 'thread' as const,
         label: t.title,
-        hint: `${machine.store.projects.find(p => p.id === t.projectId)?.name ?? ''} · ${machine.label}`,
+        // One machine names no machine.
+        hint: [machine.store.projects.find(p => p.id === t.projectId)?.name, workspace.machines.length > 1 ? machine.label : ''].filter(Boolean).join(' · '),
         keywords: t.status,
         at: t.lastUserMessageAt ?? t.createdAt
       }))).sort((a,b) => b.at - a.at)

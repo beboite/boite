@@ -44,17 +44,19 @@
     ...(workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => {
       const here = machine.store === store;
       const drafts = machine.store.draftsProject;
+      // One machine names no machine: the path alone tells the projects apart.
+      const place = workspace.machines.length > 1 ? machine.label : '';
       return [
         {
           id: JSON.stringify([machine.id, null]),
           label: strings.drafts.name,
-          hint: machine.label ? `${machine.label} · ${strings.drafts.hint}` : strings.drafts.hint,
+          hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
           active: here && store.draftInDrafts
         },
         ...machine.store.projects.filter((entry) => entry.id !== drafts?.id).map((entry) => ({
           id: JSON.stringify([machine.id, entry.id]),
           label: projectName(entry),
-          hint: machine.label ? `${machine.label} · ${entry.path}` : entry.path,
+          hint: place ? `${place} · ${entry.path}` : entry.path,
           active: here && entry.id === store.draft?.projectId
         }))
       ];

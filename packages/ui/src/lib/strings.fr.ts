@@ -1164,7 +1164,6 @@ export const fr: Translation = {
     coreUrl: 'URL du cœur',
     token: 'Jeton',
     connect: 'Connecter',
-    scheduler: 'Ordonnanceur',
     maxConcurrentTurns: 'Tours simultanés maximum',
     perAccountConcurrency: 'Simultanéité par compte',
     warmProcessMinutes: 'Minutes de processus gardé chaud',
