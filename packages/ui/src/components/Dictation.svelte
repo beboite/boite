@@ -23,6 +23,8 @@
   let client: Client | null = null;
   let preview: SpeechPreview | null = null;
   let previewText = '';
+  /** The language a preview heard, sent with the final request so the engine skips its detection. */
+  let heard: string | undefined;
   let previewTimer: ReturnType<typeof setInterval> | null = null;
   function stopPreview() {
     if (previewTimer) clearInterval(previewTimer);
@@ -43,7 +45,7 @@
     client = store.client;
     if (!client) return;
     const run = ++generation;
-    error = ''; needsSetup = false; audio = null; seconds = 0; level = 0; previewText = '';
+    error = ''; needsSetup = false; audio = null; seconds = 0; level = 0; previewText = ''; heard = undefined;
     phase = 'opening'; onbusy(true);
     onpreview('', strings.speech.opening, false);
     // Permission is requested inside the click, before an RPC can consume activation.
@@ -51,6 +53,8 @@
     try {
       let captureEnded = false;
       const captureStarted = capture.start((value, elapsed) => { level = value; seconds = elapsed; }, () => { captureEnded = true; if (phase === 'recording') void stop(); });
+      // A local engine starts loading its model while the user speaks. A core without it just answers later.
+      void client.call('speech.warm', {}).catch(() => {});
       // A core from before dictation has no voice engine: name the machine to update instead of the raw RPC error.
       const statusPromise = client.call('speech.status', {}).catch((cause: unknown) => {
         if (cause instanceof RpcFailure && cause.code === RpcErrorCode.MethodNotFound) {
@@ -79,6 +83,7 @@
     const run = generation;
     phase = 'transcribing';
     onpreview(previewText, strings.speech.transcribing, false);
+    heard = preview?.language;
     const drained = stopPreview();
     try { const recording = await recorder.stop(); await drained; if (run === generation && !disposed) { audio = recording; await transcribe(); } }
     catch (cause) { if (run === generation && !disposed) fail(cause); }
@@ -90,7 +95,7 @@
     onpreview(previewText, strings.speech.transcribing, false);
     requestId = crypto.randomUUID();
     try {
-      const result = await client.call('speech.transcribe', { requestId, revision, audio: audioBase64(audio) });
+      const result = await client.call('speech.transcribe', { requestId, revision, audio: audioBase64(audio), ...(heard ? { language: heard } : {}) });
       if (run !== generation || disposed) return;
       if (!result.text.trim()) throw new Error(strings.speech.silence);
       ontext(result.text); audio = null; phase = 'idle'; onbusy(false); onpreview('', '', false);

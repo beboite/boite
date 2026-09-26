@@ -26,6 +26,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'speech.status',
   'speech.transcribe',
   'speech.cancel',
+  // Loads the owner's configured model a dictation is about to use: nothing a device could transcribe anyway.
+  'speech.warm',
   // Its own pairing, so a phone can show itself in the device list.
   'sessions.list',
   // Each authenticated pairing manages only its own push destination.
