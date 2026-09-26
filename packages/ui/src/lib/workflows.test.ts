@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { RpcErrorCode, type WorkflowPlan, type WorkflowRun } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
-import { COLUMN_GAP, COLUMN_MIN, columnsOf, edgesOf, fitsColumns, nodeProgress, retryable, routeOf, runProgress, shown } from './workflow-view';
+import { STEP_GAP, STEP_MIN, edgesOf, fitsPhase, nodeProgress, phasesOf, retryable, routeOf, runProgress, shown } from './workflow-view';
 
 const plan: WorkflowPlan = {
   name: 'Check the lexer',
@@ -22,26 +22,32 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Pr
   throw new Error('the workflow never reached the expected state');
 }
 
-test('the seeded run lays out as four columns with an arrow per dependency', async () => {
+test('the seeded run lays out as four phases with an arrow per dependency', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   await client.connect();
   try {
     const [run] = await client.call('workflows.list', { threadId: 't-trace' });
     expect(run!.name).toBe('Review the parser');
-    expect(columnsOf(run!).map(column => column.map(node => node.id))).toEqual([['scan'], ['review'], ['fix'], ['report']]);
-    expect(edgesOf(run!)).toEqual([{ from: 'scan', to: 'review' }, { from: 'review', to: 'fix' }, { from: 'fix', to: 'report' }]);
+    expect(phasesOf(run!).map(phase => phase.map(node => node.id))).toEqual([['scan'], ['review'], ['fix', 'tests'], ['report']]);
+    expect(edgesOf(run!)).toEqual([
+      { from: 'scan', to: 'review' },
+      { from: 'review', to: 'fix' },
+      { from: 'review', to: 'tests' },
+      { from: 'fix', to: 'report' },
+      { from: 'tests', to: 'report' }
+    ]);
     const review = run!.nodes.find(node => node.id === 'review')!;
     expect(nodeProgress(review)).toMatchObject({ done: 1, total: 3, running: 2 });
-    expect(runProgress(run!)).toEqual({ done: 1, total: 4 });
+    expect(runProgress(run!)).toEqual({ done: 1, total: 5 });
     expect(routeOf(review, [])).toMatchObject({ providerId: review.instances[0]!.providerId });
     expect(shown(review.instances[0]!.output)).toContain('"bugs"');
   } finally { client.close(); }
 });
 
-test('columns fit side by side only with room for each and the arrows between', () => {
-  expect(fitsColumns(0, 1)).toBe(true);
-  expect(fitsColumns(3 * COLUMN_MIN + 2 * COLUMN_GAP, 3)).toBe(true);
-  expect(fitsColumns(3 * COLUMN_MIN + 2 * COLUMN_GAP - 1, 3)).toBe(false);
+test('the steps of a phase sit side by side only with room for each and the gaps between', () => {
+  expect(fitsPhase(0, 1)).toBe(true);
+  expect(fitsPhase(3 * STEP_MIN + 2 * STEP_GAP, 3)).toBe(true);
+  expect(fitsPhase(3 * STEP_MIN + 2 * STEP_GAP - 1, 3)).toBe(false);
 });
 
 test('a started plan fans out over the first step output, ends and delivers', async () => {

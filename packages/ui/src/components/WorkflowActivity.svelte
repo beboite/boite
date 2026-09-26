@@ -3,17 +3,17 @@
   import type { WorkflowRun } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
-  import { columnsOf, runProgress } from '../lib/workflow-view';
+  import { phasesOf, runProgress } from '../lib/workflow-view';
   import AgentElapsed from './AgentElapsed.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
 
   /** A run in the chat where it started: its name, one mark per phase, and the way to its graph. */
   let { store, run }: { store: Store; run: WorkflowRun } = $props();
   let progress = $derived(runProgress(run));
-  let columns = $derived(columnsOf(run));
+  let phases = $derived(phasesOf(run));
 
   function phaseStatus(index: number) {
-    const nodes = columns[index] ?? [];
+    const nodes = phases[index] ?? [];
     if (nodes.some(node => node.status === 'failed')) return 'failed';
     if (nodes.some(node => node.status === 'running')) return 'running';
     if (nodes.some(node => node.status === 'stopped')) return 'stopped';
@@ -37,7 +37,7 @@
       <span>· {fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })}</span>
     </span>
     <span class="phases" aria-hidden="true">
-      {#each columns as _, index (index)}<i class={phaseStatus(index)}></i>{/each}
+      {#each phases as _, index (index)}<i class={phaseStatus(index)}></i>{/each}
     </span>
   </span>
   <span class="timing"><AgentElapsed startedAt={run.createdAt} finishedAt={run.finishedAt} active={run.status === 'running'} /></span>

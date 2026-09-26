@@ -140,7 +140,8 @@ function seedWorkflowDemo(ctx: FakeContext, rootId: ThreadId): void {
         { id: 'scan', title: 'List changed files', profile: 'implementer', task: 'List the source files of src/parser that changed this week.', output: { files: ['string'] } },
         { id: 'review', title: 'Review each file', profile: 'reviewer', forEach: 'scan.files', task: 'Review {{item}} for malformed-input bugs. Do not edit files.', output: { bugs: [{ line: 'number', text: 'string' }] } },
         { id: 'fix', title: 'Fix the bugs', profile: 'implementer', when: { path: 'review.bugs', notEmpty: true }, task: 'Fix these bugs, one commit each: {{review.bugs}}' },
-        { id: 'report', title: 'Write the report', profile: 'reviewer', after: ['fix'], task: 'Summarize what was reviewed and fixed: {{review}}' }
+        { id: 'tests', title: 'Add regression tests', profile: 'implementer', when: { path: 'review.bugs', notEmpty: true }, task: 'Add one failing test per bug, in test/parser only: {{review.bugs}}' },
+        { id: 'report', title: 'Write the report', profile: 'reviewer', after: ['fix', 'tests'], task: 'Summarize what was reviewed and fixed: {{review}}' }
       ]
     }, 'demo-workflow', undefined, 'agent');
     ctx.workflowLag = -110_000;

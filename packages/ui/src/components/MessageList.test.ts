@@ -140,7 +140,7 @@ test('a workflow the thread started is one card that opens its graph, and a step
     expect(cards).toHaveLength(1);
     const run = owner.workflowsOf('t-trace')[0]!;
     expect(cards[0]!.textContent).toContain('Review the parser');
-    expect(cards[0]!.textContent).toContain('1/4 steps');
+    expect(cards[0]!.textContent).toContain('1/5 steps');
     expect(cards[0]!.querySelectorAll('.phases i')).toHaveLength(4);
     cards[0]!.click();
     flushSync();

@@ -120,7 +120,7 @@
   .title { flex: 1; min-width: 0; }
   .title strong { display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-sm); font-weight: 600; }
   .title small { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .body { min-height: 0; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .body { flex: 1; min-height: 0; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
   .facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .facts li { overflow-wrap: anywhere; }
   .section-label { margin: 6px 0 0; }
@@ -133,7 +133,8 @@
   .well { margin: 0; max-height: 220px; padding: 8px 10px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--text-sm); }
   .well.mono { font-family: var(--font-mono); font-size: 13px; }
   .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .transcript { display: flex; min-height: 120px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+  /* The conversation takes the height left under the step; a long one scrolls with the body. */
+  .transcript { flex: 1 0 auto; display: flex; min-height: 160px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
   .transcript :global(.transcript-list) { max-height: none; overflow: visible; }
   .muted { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }

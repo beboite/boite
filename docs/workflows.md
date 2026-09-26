@@ -108,20 +108,21 @@ The chat shows one card per run where it started, with the run's status, steps
 done out of the total, one bar per phase and the elapsed time. Clicking it
 opens the run.
 
-The tab draws the plan as columns, one per dependency level, with an arrow from
-each step to the steps waiting for it. An arrow already implied by another path
-is left out. When the columns do not fit (the panel at its default width, a
-phone), the same run reads as a list of phases from top to bottom. A card shows
-the step's status, its model, `done/total` and a segmented bar for a fan-out,
-and its elapsed time.
+The tab draws the plan top to bottom, the way the panel is shaped: one row per
+dependency level, the steps of a row side by side, and an arrow down from each
+step to the steps waiting for it. An arrow already implied by another path is
+left out. The default panel width and a phone fit two steps in a row. A row
+with more steps than fit turns the run into a plain list of phases. A card
+shows the step's status, its model, `done/total` and a segmented bar for a
+fan-out, and its elapsed time.
 
 Clicking a step opens its detail: dependencies, condition, each execution, its
-structured output and its conversation streaming live. "Open conversation"
-jumps to the step's own thread. Saved workflows sit at the bottom of the tab,
+structured output and its conversation streaming live in the height left
+below. "Open conversation" jumps to the step's own thread. Saved workflows sit at the bottom of the tab,
 where the owner saves the shown run as a template, starts one or deletes one.
 The palette's "Show the workflows" toggles the tab.
 
-Captures: [columns on the desktop](images/workflow-desktop.png) · [a step's detail](images/workflow-step.png) · [phases on a phone](images/workflow-phone.png)
+Captures: [the graph on the desktop](images/workflow-desktop.png) · [a step's detail](images/workflow-step.png) · [the graph on a phone](images/workflow-phone.png)
 
 ## Commands
 

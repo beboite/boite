@@ -12,7 +12,7 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
-test('the surface reads a narrow run as phases, opens a step and comes back to the graph', async () => {
+test('the surface reads a narrow run as a list, opens a step and comes back to the graph', async () => {
   const client = new FakeClient({ delayMs: 0, delegationDemo: true });
   const store = new Store();
   store.attach(client);
@@ -25,13 +25,13 @@ test('the surface reads a narrow run as phases, opens a step and comes back to t
     component = mount(WorkflowSurface, { target: document.body, props: { store, surface, panel: store.panel } });
     await settle();
 
-    // jsdom lays nothing out: zero width, so the graph is the phone's list.
+    // jsdom lays nothing out: at zero width the two steps of phase 3 do not fit side by side, so the graph is a list.
     const graph = document.querySelector('[data-testid=workflow-graph]')!;
-    expect(graph.getAttribute('data-layout')).toBe('phases');
-    expect(document.querySelectorAll('[data-testid=workflow-column]')).toHaveLength(4);
-    expect(document.querySelector('[data-testid=workflow-meta]')?.textContent).toContain('1/4 steps');
+    expect(graph.getAttribute('data-layout')).toBe('list');
+    expect(document.querySelectorAll('[data-testid=workflow-phase]')).toHaveLength(4);
+    expect(document.querySelector('[data-testid=workflow-meta]')?.textContent).toContain('1/5 steps');
     const nodes = [...document.querySelectorAll<HTMLButtonElement>('[data-testid=workflow-node]')];
-    expect(nodes.map(node => node.dataset.status)).toEqual(['done', 'running', 'waiting', 'waiting']);
+    expect(nodes.map(node => node.dataset.status)).toEqual(['done', 'running', 'waiting', 'waiting', 'waiting']);
     expect(nodes[1]!.querySelector('[data-testid=workflow-node-count]')?.textContent).toBe('1/3');
 
     nodes[1]!.click();

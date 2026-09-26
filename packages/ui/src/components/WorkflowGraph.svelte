@@ -3,15 +3,17 @@
   import { tick } from 'svelte';
   import type { DelegationProfile, WorkflowNode, WorkflowRun } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { columnsOf, edgesOf, fitsColumns, nodeProgress, nodeTiming, routeOf } from '../lib/workflow-view';
+  import { edgesOf, fitsPhase, nodeProgress, nodeTiming, phasesOf, routeOf } from '../lib/workflow-view';
   import AgentElapsed from './AgentElapsed.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import WorkflowMark from './WorkflowMark.svelte';
 
   /**
-   * The run as columns, one per dependency level, arrows from each step to
-   * the ones waiting for it. Too narrow for its columns (the panel at its
-   * default width, a phone), it reads as a list of phases top to bottom.
+   * The run top to bottom, one row per dependency level, the steps of a row
+   * side by side and an arrow down from each step to the ones waiting for it.
+   * The panel is taller than wide, so the plan grows down the way it runs.
+   * A row too wide for the graph (many steps at once on a phone) turns the
+   * whole run into a list of phases, one step under the other.
    */
   let {
     run,
@@ -21,19 +23,24 @@
   }: { run: WorkflowRun; profiles: DelegationProfile[]; selectedId: string | null; onselect: (nodeId: string) => void } = $props();
 
   const uid = $props.id();
-  let graph = $state<HTMLDivElement | undefined>(undefined);
+  let rows = $state<HTMLDivElement | undefined>(undefined);
   let width = $state(0);
   let paths = $state<{ key: string; d: string; live: boolean }[]>([]);
-  let size = $state({ width: 0, height: 0 });
 
-  let columns = $derived(columnsOf(run));
+  let phases = $derived(phasesOf(run));
   let edges = $derived(edgesOf(run));
-  let wide = $derived(fitsColumns(width, columns.length));
+  // The widest row decides, less the graph's 16px side padding.
+  let wide = $derived(fitsPhase(width - 32, Math.max(0, ...phases.map(phase => phase.length))));
   let byId = $derived(new Map(run.nodes.map(node => [node.id, node])));
 
-  /** Arrows are drawn from the laid-out cards, so a card that grows moves its arrows with it. */
+  /**
+   * Arrows are drawn from the laid-out cards, so a card that grows moves its
+   * arrows with it. The SVG fills the rows it sits in and takes no size of
+   * its own: sized from a scroll width, it would hold the width of a wider
+   * panel after a resize.
+   */
   function measure(): void {
-    const node = graph;
+    const node = rows;
     if (!node || !wide) {
       paths = [];
       return;
@@ -44,19 +51,18 @@
     for (const edge of edges) {
       const from = rect(edge.from), to = rect(edge.to);
       if (!from || !to) continue;
-      const x1 = from.right - origin.left + node.scrollLeft;
-      const y1 = from.top + from.height / 2 - origin.top + node.scrollTop;
-      const x2 = to.left - origin.left + node.scrollLeft - 3;
-      const y2 = to.top + to.height / 2 - origin.top + node.scrollTop;
-      const bend = Math.max(12, (x2 - x1) / 2);
+      const x1 = from.left + from.width / 2 - origin.left;
+      const y1 = from.bottom - origin.top;
+      const x2 = to.left + to.width / 2 - origin.left;
+      const y2 = to.top - origin.top - 3;
+      const bend = Math.max(10, (y2 - y1) / 2);
       next.push({
         key: `${edge.from}>${edge.to}`,
-        d: `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`,
+        d: `M${x1},${y1} C${x1},${y1 + bend} ${x2},${y2 - bend} ${x2},${y2}`,
         live: byId.get(edge.to)?.status === 'running'
       });
     }
     paths = next;
-    size = { width: node.scrollWidth, height: node.scrollHeight };
   }
 
   $effect(() => {
@@ -67,7 +73,7 @@
   });
 
   $effect(() => {
-    const node = graph;
+    const node = rows;
     if (!node || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => measure());
     observer.observe(node);
@@ -118,32 +124,32 @@
   </button>
 {/snippet}
 
-<div class="graph" class:wide bind:this={graph} bind:clientWidth={width} data-testid="workflow-graph" data-layout={wide ? 'columns' : 'phases'}>
+<div class="graph" bind:clientWidth={width} data-testid="workflow-graph" data-layout={wide ? 'rows' : 'list'}>
   {#if wide}
-    <svg class="edges" width={size.width} height={size.height} aria-hidden="true">
-      <defs>
-        <marker id="{uid}-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="tip" /></marker>
-        <marker id="{uid}-arrow-live" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="tip live" /></marker>
-      </defs>
-      {#each paths as path (path.key)}
-        <path d={path.d} class="edge" class:live={path.live} marker-end="url(#{uid}-arrow{path.live ? '-live' : ''})" data-testid="workflow-edge" />
-      {/each}
-    </svg>
-    <div class="columns">
-      {#each columns as column, index (index)}
-        <div class="column" data-testid="workflow-column">
+    <div class="rows" bind:this={rows}>
+      <svg class="edges" aria-hidden="true">
+        <defs>
+          <marker id="{uid}-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="tip" /></marker>
+          <marker id="{uid}-arrow-live" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L6,3 L0,6 z" class="tip live" /></marker>
+        </defs>
+        {#each paths as path (path.key)}
+          <path d={path.d} class="edge" class:live={path.live} marker-end="url(#{uid}-arrow{path.live ? '-live' : ''})" data-testid="workflow-edge" />
+        {/each}
+      </svg>
+      {#each phases as phase, index (index)}
+        <section class="phase" data-testid="workflow-phase">
           <p class="section-label">{fill(strings.workflow.phase, { n: String(index + 1) })}</p>
-          {#each column as node (node.id)}{@render card(node)}{/each}
-        </div>
+          <div class="steps">{#each phase as node (node.id)}{@render card(node)}{/each}</div>
+        </section>
       {/each}
     </div>
   {:else}
-    <div class="phases">
-      {#each columns as column, index (index)}
+    <div class="list">
+      {#each phases as phase, index (index)}
         {#if index > 0}<span class="down" aria-hidden="true"><ArrowDown size={13} strokeWidth={1.75} /></span>{/if}
-        <section class="phase" data-testid="workflow-column">
+        <section class="phase" data-testid="workflow-phase">
           <p class="section-label">{fill(strings.workflow.phase, { n: String(index + 1) })}</p>
-          {#each column as node (node.id)}{@render card(node)}{/each}
+          <div class="steps">{#each phase as node (node.id)}{@render card(node)}{/each}</div>
         </section>
       {/each}
     </div>
@@ -152,15 +158,19 @@
 
 <style>
   .graph { position: relative; min-width: 0; padding: 14px 16px 18px; overflow: auto; }
-  .edges { position: absolute; inset: 0 auto auto 0; pointer-events: none; overflow: visible; }
+  .edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
   .edge { fill: none; stroke: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent); stroke-width: 1.5; }
   .edge.live { stroke: color-mix(in srgb, var(--color-live) 70%, transparent); }
   .tip { fill: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent); }
   .tip.live { fill: color-mix(in srgb, var(--color-live) 70%, transparent); }
-  .columns { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(var(--column-min, 168px), 1fr); gap: 36px; align-items: start; }
-  .column, .phase { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-  .column .section-label, .phase .section-label { margin: 0 0 2px; }
-  .phases { display: flex; flex-direction: column; }
+  /* The label sits at the left of the gap an arrow crosses; an arrow leaves a card's center, at least half a card from that edge. */
+  .rows { position: relative; display: flex; flex-direction: column; gap: 10px; }
+  .phase { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .phase .section-label { margin: 0; }
+  .rows .steps { display: flex; justify-content: center; gap: 12px; }
+  .rows .node { flex: 1 1 0; min-width: 0; max-width: 320px; }
+  .list { display: flex; flex-direction: column; }
+  .list .steps { display: flex; flex-direction: column; gap: 8px; }
   .down { align-self: center; display: grid; place-items: center; height: 26px; color: var(--color-subtle); }
   .node { position: relative; width: 100%; height: auto; min-height: 0; padding: 9px 10px; display: flex; flex-direction: column; align-items: stretch; gap: 5px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); box-shadow: var(--shadow-e1); color: var(--color-foreground); text-align: left; font-weight: 400; transition: background var(--dur-2) var(--ease-out-quint), border-color var(--dur-2) var(--ease-out-quint); }
   .node:hover { background: color-mix(in srgb, var(--color-surface-2) 100%, var(--color-foreground) 4%); border-color: var(--color-edge); }

@@ -1,17 +1,17 @@
 /**
- * What the workflow surface and the chat card read off a run: its columns,
+ * What the workflow surface and the chat card read off a run: its phases,
  * its edges, each step's route and progress. Pure, so the layout rules are
  * tested without a DOM.
  */
 import { workflowLevels, type DelegationProfile, type WorkflowNode, type WorkflowRun, type WorkflowStepStatus } from '@boite/contracts';
 
-/** Under this width per column the graph reads as a list of phases instead. */
-export const COLUMN_MIN = 168;
-/** The horizontal room the arrows take between two columns. */
-export const COLUMN_GAP = 36;
+/** Under this width per step a phase no longer fits in a row, and the graph reads as a plain list. */
+export const STEP_MIN = 150;
+/** The room between two steps of one phase. */
+export const STEP_GAP = 12;
 
-/** One column per dependency level, in plan order inside a column. */
-export function columnsOf(run: WorkflowRun): WorkflowNode[][] {
+/** One phase per dependency level, in plan order inside a phase. */
+export function phasesOf(run: WorkflowRun): WorkflowNode[][] {
   const byId = new Map(run.nodes.map(node => [node.id, node]));
   return workflowLevels(run.nodes).map(ids => ids.map(id => byId.get(id)!));
 }
@@ -43,9 +43,9 @@ export function edgesOf(run: WorkflowRun): { from: string; to: string }[] {
   });
 }
 
-/** Whether `columns` columns fit side by side in `width` pixels. */
-export function fitsColumns(width: number, columns: number): boolean {
-  return columns <= 1 || width >= columns * COLUMN_MIN + (columns - 1) * COLUMN_GAP;
+/** Whether a phase of `steps` steps fits side by side in `width` pixels. */
+export function fitsPhase(width: number, steps: number): boolean {
+  return steps <= 1 || width >= steps * STEP_MIN + (steps - 1) * STEP_GAP;
 }
 
 export function ended(status: WorkflowStepStatus): boolean {
