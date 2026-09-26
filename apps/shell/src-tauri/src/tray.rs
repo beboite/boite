@@ -61,7 +61,11 @@ pub(crate) fn build_tray<R: Runtime>(app: &AppHandle<R>, channel: Channel) -> ta
         .on_tray_icon_event(|tray, event| {
             use tauri::tray::{MouseButton, TrayIconEvent};
             match event {
-                TrayIconEvent::Enter { .. } => quota_window::enter(tray.app_handle()),
+                // tray-icon 0.24 sends Enter again only after its own Leave, which
+                // never comes when the pointer rests on the icon and then jumps
+                // away. Every later hover is Moves alone, so a Move counts as the
+                // Enter that did not come; `enter` ignores the repeats.
+                TrayIconEvent::Enter { .. } | TrayIconEvent::Move { .. } => quota_window::enter(tray.app_handle()),
                 TrayIconEvent::Leave { .. } => quota_window::leave(tray.app_handle()),
                 TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(tray.app_handle()),
                 _ => {}

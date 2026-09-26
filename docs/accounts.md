@@ -237,7 +237,9 @@ closing. Hovering the icon of an open popup leaves it as it is. While it is open
 the shell reads the pointer every 150 ms and closes it after two readings in a
 row outside the icon, the popup and the gap between them. It does not wait for
 the tray's leave event, which Windows often never sends: the popup then stayed
-up and the next hover could not open it again. The popup is an
+up and the next hover could not open it again. For the same reason a move over
+the icon starts a hover as an entry does: without that leave event the tray
+reports no entry again, only moves. The popup is an
 opaque window: Windows 11 rounds its corners and draws its border, Windows 10
 keeps it square.
 

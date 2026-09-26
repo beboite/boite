@@ -57,8 +57,11 @@ impl HoverState {
         true
     }
 
+    /// However the popup closed, the next hover opens it again: the pointer
+    /// may still count over the icon when tray-icon never reported it leaving.
     fn closed(&self) {
         self.open.store(false, Ordering::Release);
+        self.over_icon.store(false, Ordering::Release);
     }
 
     /// Whether the popup hidden when `opened` was the count stayed hidden.
@@ -237,8 +240,11 @@ fn pointer_keeps_open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>)
 }
 
 /// A popup closed without `hide` (Alt+F4 destroys it) is not open any more.
+/// Only once: every Move over the icon comes through here, and a released
+/// popup has no window either.
 fn forget_a_closed_window<R: Runtime>(app: &AppHandle<R>) {
-    if app.get_webview_window(LABEL).is_none() { app.state::<HoverState>().closed(); }
+    let state = app.state::<HoverState>();
+    if state.open.load(Ordering::Acquire) && app.get_webview_window(LABEL).is_none() { state.closed(); }
 }
 
 fn present<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tauri::Result<()> {
@@ -404,6 +410,19 @@ mod tests {
         assert!(state.ready(next, HOVER_DELAY));
         assert!(state.opening());
         assert_eq!(state.opened.load(Ordering::Acquire), 2);
+    }
+    #[test]
+    fn a_popup_closed_before_any_leave_still_opens_on_the_next_hover() {
+        let state = HoverState::default();
+        let first = state.entered().expect("a closed popup is shown after the delay");
+        assert!(state.ready(first, HOVER_DELAY));
+        assert!(state.opening());
+        // tray-icon never reports the pointer leaving; the popup's own button closes it.
+        state.closed();
+        let next = state.entered().expect("the pointer still counted over the icon must not block the next hover");
+        assert!(state.ready(next, HOVER_DELAY));
+        // Further Moves over the icon while that show waits schedule nothing more.
+        assert_eq!(state.entered(), None);
     }
     #[test]
     fn the_pointer_keeps_the_popup_open_on_its_way_between_icon_and_popup() {
