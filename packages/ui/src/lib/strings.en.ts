@@ -144,7 +144,6 @@ export const strings = {
     statusFailed: 'The download did not finish', statusBroken: 'Voice settings could not be read', repair: 'Save to repair',
     setUp: 'Set up dictation', tryAgain: 'Try again',
     update: 'Update engine', updateHint: 'A faster engine is available, 8 MB.',
-    phoneHint: 'Dictation uses the voice engine on the connected machine.',
     https: 'Microphone access needs HTTPS or localhost. Open the secure pairing link for this core.',
     denied: 'Microphone permission was denied. Allow it in your browser or system settings, then try again.',
     noMicrophone: 'No microphone was found. Connect one and try again.', microphoneBusy: 'The microphone is unavailable. Check whether another app is using it.',
@@ -183,15 +182,10 @@ export const strings = {
     subscriptionFailed: 'The browser did not return a complete push subscription.'
   },
   mobile: {
-    settingsDevice: 'This phone', settingsDeviceHint: 'Preferences saved on this device.',
-    settingsPhone: 'App & notifications', settingsPhoneHint: 'Installation and alerts from your connected machine.',
-    settingsMachinesHint: 'Connect, switch or disconnect a remote machine.',
-    settingsAppearanceHint: 'Theme and accent for this phone.',
-    settingsArchivedHint: 'Bring back a conversation archived on the connected machine.',
-    settingsRemoteHint: 'Providers, projects and server administration are managed from the desktop app.',
+    settingsDevice: 'This phone',
+    settingsPhone: 'App & notifications',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
-    activityHint: 'Running agents and requests waiting for you.', threadsHint: 'Your conversations across machines.',
     search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
   },
   machines: {
@@ -284,7 +278,6 @@ export const strings = {
     local: 'This PC',
     current: 'Current machine',
     machines: 'machines connected',
-    oneMachine: 'machine connected',
     issues: 'need attention',
     manage: 'Manage machines',
     folder: 'Folder',
@@ -1100,12 +1093,9 @@ export const strings = {
     limits: 'Limits',
     limitsIntro: 'Subscription windows as each provider last reported them.',
     limitsOwner: 'Subscription limits are read on the computer that runs Boite. Open this page there to see them.',
-    limitsEmpty: 'No provider reports a limit yet. Connect one in Providers.',
-    notMonitored: 'Not monitored: {accounts}',
     refresh: 'Refresh usage',
     loading: 'Reading usage',
     failed: 'Could not read usage: {error}',
-    phoneHint: 'Tokens and API cost per day, provider and model on the connected machine.'
   },
 
   settings: {
@@ -1131,7 +1121,6 @@ export const strings = {
     searchEmpty: 'No setting matches',
     providersReady: '{count} connected',
     providersOne: '1 connected',
-    providersNone: 'None connected',
     machinesCount: '{count} machines',
     devicesCount: '{count} paired devices',
     devicesOne: '1 paired device',
@@ -1146,8 +1135,6 @@ export const strings = {
     perAccountConcurrencyHint: 'How many turns one account runs at once.',
     warmProcessMinutesHint: 'How long an agent stays loaded after a turn, so the next message starts faster. 0 stops it right away.',
     projects: 'Projects',
-    projectsHint: 'Right-click a project in the sidebar to remove it from Boite.',
-    projectsDevice: 'Folders are added and removed from the app the core runs in.',
     /** The language the UI speaks, on this device. `system` follows the machine. */
     language: 'Language',
     languageHint: 'Saved on this device. System follows the language your machine is set to.',
@@ -1324,18 +1311,14 @@ export const strings = {
 
   quotas: {
     trayHeading: 'Usage',
-    trayIntro: 'Subscription limits',
     /** The tray icon's right-click menu. */
     trayShow: 'Show',
     trayQuit: 'Quit',
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Off',
     noReading: 'Unavailable',
-    notConnected: 'Not connected',
-    autoConnect: 'Uses your connected account',
     cliSource: 'Antigravity CLI account',
     cliHint: 'Uses the account signed in through agy on this computer. Install Antigravity CLI 1.1.11 or later and sign in once, then enable monitoring below. Separate from Boite’s isolated Antigravity accounts.',
-    connectHint: 'Connect {provider} once in Providers. Usage appears here automatically.',
     connect: 'Connect account',
     noReset: 'Reset time not reported',
     heading: 'Provider quotas',
@@ -1624,7 +1607,6 @@ export const strings = {
       title: 'See what you have left',
       body: 'See which subscription is filling up and when it resets, even with Boite in the background.',
       monitor: 'Read subscription limits for {account}',
-      noAccounts: 'No provider connected yet.',
       connect: 'Connect a provider',
       deviceHint: 'Limits are read on the machine hosting the core.'
     },
