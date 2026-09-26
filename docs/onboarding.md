@@ -27,8 +27,12 @@ same conversation as bars on a monitor and a phone rather than text to read.
 Each scene plays in under four seconds, the two conversation demos in under five.
 Three bordered icon buttons select the conversation demonstrations. Dictation
 shows microphone activation, speech, then a draft to review; agent switching
-shows the picker, a follow-up and the next agent's answer. Animations stop after their demonstration, can be paused and replayed,
-and show the completed state under reduced motion. The dots are the only progress
+shows the picker, a follow-up and the next agent's answer. While a scene plays,
+an accent glow outlines it from the inside. Hovering or focusing it shows a strip
+across its top with pause and replay icons, which stays while paused and is always
+shown without a hovering pointer. Animations stop after their demonstration, the
+glow and the pause go with them, and replay stays. Under reduced motion the
+scenes show their completed state without glow or controls. The dots are the only progress
 indicator.
 
 The privacy screen is Boite Legacy's: a title that turns red over ten seconds,

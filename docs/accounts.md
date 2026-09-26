@@ -218,17 +218,24 @@ Claude subscription quotas come from its OAuth usage endpoint using the account'
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
 come from `account/rateLimits/read`, without starting a conversation.
 
-The tray Usage window always lists Claude, Codex, Antigravity, Grok and OpenCode
-Go. Each row shows the lowest remaining limit across its monitored accounts and
-the next reported reset. Open a row for individual windows, account names and
-monitoring switches. Missing accounts lead to Providers.
+The tray Usage window and Settings, Limits list only the providers with a
+signed-in account whose limits are monitored. Each tray row shows the lowest
+remaining limit across those accounts and the next reported reset; opening it
+shows each window's own bar and reset time, by account when there are several.
+Monitoring switches live on the Limits page, not in the tray. With nothing
+signed in, both offer to connect a provider. The last reading stays on screen
+while the next one loads, from this browser's storage after a restart.
 
 The tray popup opens after 100 ms of continuous hover. Leaving the icon cancels
 that opening; a click does not bypass the delay. On Windows it stays inside the
 monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
 full height even while sliding offscreen. The popup keeps its position when the
 taskbar retracts and allows moving from the icon into the popup and back before
-closing. Hovering the icon of an open popup leaves it as it is. The popup is an
+closing. Hovering the icon of an open popup leaves it as it is. While it is open
+the shell reads the pointer every 150 ms and closes it after two readings in a
+row outside the icon, the popup and the gap between them. It does not wait for
+the tray's leave event, which Windows often never sends: the popup then stayed
+up and the next hover could not open it again. The popup is an
 opaque window: Windows 11 rounds its corners and draws its border, Windows 10
 keeps it square.
 
