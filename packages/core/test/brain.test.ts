@@ -213,6 +213,43 @@ test('normal turns receive current instructions and skill paths without changing
   expect(h.core.brain.instructions()).toContain('Shared convention two');
 });
 
+test('Boite guide follows AGENTS.md on the first turn of a session only', async () => {
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  file(join(root, 'AGENTS.md'), 'Shared convention');
+  await owner.call('brain.configure', { path: root, enabled: true });
+  const run = async (prompt: string) => {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return JSON.stringify(h.core.journal.listMessages(threadId).filter(m => m.turnId === turn.id && m.role === 'assistant'));
+  };
+  const first = await run('Hello');
+  expect(first).toContain('boite where');
+  expect(first.indexOf('Shared convention')).toBeLessThan(first.indexOf('boite where'));
+  const second = await run('Again');
+  expect(second).toContain('Shared convention');
+  expect(second).not.toContain('boite where');
+});
+
+test('the Boite guide switch persists, and the ask line follows asynchronous questions', async () => {
+  const owner = await h.connect();
+  file(join(root, 'AGENTS.md'), 'Shared convention');
+  await owner.call('brain.configure', { path: root, enabled: true });
+  const brain = h.core.brain;
+  expect(brain.guides()).toBe(true);
+  expect(brain.instructions(undefined, false)).not.toContain('boite where');
+  expect(brain.instructions(undefined, true)).not.toContain('boite ask');
+  h.core.settings.set({ asyncQuestions: true });
+  expect(brain.instructions(undefined, true)).toContain('boite ask');
+  const off = await owner.call('brain.configure', { path: root, enabled: true, boiteGuide: false });
+  expect(off.config.boiteGuide).toBe(false);
+  expect(brain.guides()).toBe(false);
+  expect(brain.instructions(undefined, true)).not.toContain('boite where');
+  // Leaving the field out keeps the switch where it was.
+  expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
+  await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+});
+
 /** Moves every time under `dir` an hour back, as a brain nobody edited today looks. */
 function age(dir: string, offsetMs = 3_600_000) {
   const then = new Date(Date.now() - offsetMs);

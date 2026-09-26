@@ -1,9 +1,11 @@
+/// <reference path="./text.d.ts" />
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BrainConfig, BrainEntry, BrainStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
+import BOITE_GUIDE from './boite.md' with { type: 'text' };
 
 const FILE_LIMIT = 64 * 1024;
 const ENTRY_LIMIT = 500;
@@ -216,6 +218,8 @@ export class BrainStore {
     if (config.enabled && config.path === null) throw invalidParams('brain.path is required when enabled');
     const globalInstructions = config.globalInstructions === undefined ? this.config().globalInstructions : config.globalInstructions;
     if (globalInstructions !== undefined && typeof globalInstructions !== 'boolean') throw invalidParams('brain.globalInstructions must be a boolean');
+    const boiteGuide = config.boiteGuide === undefined ? this.config().boiteGuide : config.boiteGuide;
+    if (boiteGuide !== undefined && typeof boiteGuide !== 'boolean') throw invalidParams('brain.boiteGuide must be a boolean');
     const autoPull = config.autoPull === undefined ? this.config().autoPull : config.autoPull;
     if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) {
       throw invalidParams('brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440 (0 disables periodic pulls)');
@@ -232,7 +236,7 @@ export class BrainStore {
       this.core.journal.setSetting('brain.pullError', null);
     }
     this.inventory = null;
-    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) });
+    this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}), ...(boiteGuide !== undefined ? { boiteGuide } : {}) });
     this.links.apply(this.globalRoot());
     this.schedulePull();
     return this.status();
@@ -256,8 +260,18 @@ export class BrainStore {
     return status;
   }
 
-  /** Included in normal turns across all drivers, including already warm sessions. */
-  instructions(providerId?: string): string {
+  /** Whether a new agent session gets Boite's guide, which then also teaches `boite ask`. */
+  guides(): boolean {
+    const { path, enabled, boiteGuide } = this.config();
+    return enabled && !!path && boiteGuide !== false;
+  }
+
+  /**
+   * Included in normal turns across all drivers, including already warm sessions.
+   * Boite's guide follows the brain's instructions only when `fresh`, the first
+   * turn of an agent session: the session keeps it after that.
+   */
+  instructions(providerId?: string, fresh = false): string {
     const { path, enabled } = this.config();
     if (!enabled || !path) return '';
     const { entries, texts } = this.current(path);
@@ -265,6 +279,10 @@ export class BrainStore {
     for (const entry of entries.filter(entry => entry.kind === 'instructions' && (entry.path.endsWith('AGENTS.md') || (entry.path === 'CLAUDE.md' && providerId === 'claude') || (entry.path === 'GEMINI.md' && providerId === 'antigravity')))) {
       if (entry.error) throw refused(entry.error);
       blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
+    }
+    if (fresh && this.guides()) {
+      const asks = this.core.settings.get().asyncQuestions !== false;
+      blocks.push(BOITE_GUIDE.trim().split('\n').filter(line => asks || !line.includes('`boite ask')).join('\n'));
     }
     const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error);
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));

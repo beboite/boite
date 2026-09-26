@@ -304,6 +304,8 @@ export class ThreadCards {
     if (thread.sessionId !== null || turn.execution?.operation || prompt.trimStart().startsWith('/')) return '';
     if (provider.protocol === 'codex-appserver' || provider.protocol === 'echo') return '';
     if (this.core.settings.get().asyncQuestions === false) return '';
+    // Boite's guide already teaches the command in the same prompt.
+    if (this.core.brain.guides()) return '';
     return ASK_INSTRUCTIONS;
   }
 }

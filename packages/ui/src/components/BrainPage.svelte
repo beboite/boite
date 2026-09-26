@@ -36,19 +36,20 @@
     return () => { ++revision; };
   });
 
-  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global', policy?: BrainConfig['autoPull']) {
+  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global' | 'guide', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
     const current = revision;
     busy = true; error = '';
     try {
-      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global'
+      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global' || action === 'guide'
         ? await client.call('brain.configure', {
           ...status?.config,
           path: action === 'disconnect' ? null : action === 'save' ? path.trim() : status!.config.path,
           enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : status?.config.path ? status.config.enabled : true,
           ...(policy ? { autoPull: policy } : {}),
           ...(action === 'global' ? { globalInstructions: !status!.config.globalInstructions } : {}),
+          ...(action === 'guide' ? { boiteGuide: status!.config.boiteGuide === false } : {}),
         })
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
@@ -110,6 +111,10 @@
             {/each}
           </details>
         {/if}
+      </div>
+      <div class="boite-guide">
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span>{t.boiteGuide}</span></label>
+        <p>{t.boiteGuideHint}</p>
       </div>
       {#if status.git?.upstream || status.config.autoPull}
         <div class="automation">
@@ -186,7 +191,8 @@
   .sync-state :global(svg) { flex: none; }
   .connection-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--color-border); }
   .sharing { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
-  .global-instructions { padding: 16px 24px; border-top: 1px solid var(--color-border); }
+  .global-instructions, .boite-guide { padding: 16px 24px; border-top: 1px solid var(--color-border); }
+  .boite-guide p { margin: 8px 0 0; }
   .global-links { margin-top: 12px; font-size: var(--text-sm); }
   .global-links summary { display: flex; gap: 10px; align-items: center; cursor: pointer; color: var(--color-muted-foreground); }
   .global-links summary span { font-variant-numeric: tabular-nums; }
@@ -237,7 +243,7 @@
     .sync-state { padding: 12px 16px 20px; }
     .connection-bottom { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
     .automation { padding: 16px; }
-    .global-instructions { padding: 16px; }
+    .global-instructions, .boite-guide { padding: 16px; }
     .folder-form { padding: 20px 16px; }
     .path-row { flex-wrap: wrap; }
     .path-row input { flex-basis: 100%; }

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import { waitFor } from './harness.ts';
 import {
@@ -358,4 +360,22 @@ test('a new Claude session learns `boite ask` once, and the setting turns it off
   await client.call('threads.update', { threadId: other.id, title: 'untaught' });
   expect(await runTurn(client, other.id, 'third')).toBe('done');
   expect(calls.at(-1)!.prompts[0]).toBe('third');
+});
+
+test('with a brain, a new Claude session reads the Boite guide once and learns `boite ask` from it alone', async () => {
+  harness.core.settings.set({ asyncQuestions: true, warmProcessMinutes: 5 });
+  const brain = join(harness.dataDir, 'brain');
+  mkdirSync(brain);
+  writeFileSync(join(brain, 'AGENTS.md'), 'Shared convention');
+  await harness.core.brain.configure({ path: brain, enabled: true });
+  scripted(() => undefined, answerEach('sess-guide'));
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  expect(await runTurn(client, threadId, 'first')).toBe('done');
+  expect(await runTurn(client, threadId, 'second')).toBe('done');
+  const [first, second] = calls[0]!.prompts;
+  expect(first).toContain('boite where');
+  expect(first!.split('boite ask').length).toBe(2);
+  expect(second).toContain('Shared convention');
+  expect(second).not.toContain('boite where');
 });

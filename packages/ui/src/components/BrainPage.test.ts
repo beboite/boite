@@ -17,7 +17,7 @@ test('restoration problems remain visible after disconnecting the folder', async
   await vi.waitFor(() => { flushSync(); expect(document.querySelector('[role="alert"]')?.textContent).toContain('original backup preserved'); });
 });
 
-test.each(['enabled', 'global'])('a refused %s change keeps the saved switch state and shows the error', async name => {
+test.each(['enabled', 'global', 'guide'])('a refused %s change keeps the saved switch state and shows the error', async name => {
   const call = vi.fn(async (method: string) => {
     if (method === 'brain.configure') throw new Error('Could not save brain settings');
     return { config: { path: '/work/brain', enabled: true }, entries: [], problems: [], git: null, lastSync: null };
@@ -35,10 +35,13 @@ test.each(['enabled', 'global'])('a refused %s change keeps the saved switch sta
     flushSync();
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Could not save brain settings');
   });
-  expect(control.checked).toBe(name === 'enabled');
-  expect(call).toHaveBeenCalledWith('brain.configure', name === 'enabled'
-    ? { path: '/work/brain', enabled: false }
-    : { path: '/work/brain', enabled: true, globalInstructions: true });
+  // The guide is on until turned off, so its saved state is checked too.
+  expect(control.checked).toBe(name !== 'global');
+  expect(call).toHaveBeenCalledWith('brain.configure', {
+    enabled: { path: '/work/brain', enabled: false },
+    global: { path: '/work/brain', enabled: true, globalInstructions: true },
+    guide: { path: '/work/brain', enabled: true, boiteGuide: false },
+  }[name]);
 });
 
 test('automatic pull controls save their policy and preserve it when sharing changes', async () => {

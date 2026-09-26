@@ -105,6 +105,7 @@ export const strings = {
     autoPull: 'Pull automatically', onStartup: 'At startup', periodic: 'Periodically', minutes: 'min',
     globalInstructions: 'Global AGENTS.md', globalDetails: 'Connected harnesses',
     globalHint: 'Uses this brain in every project, including outside Boite. Existing files are backed up and restored when disabled.',
+    boiteGuide: 'Boite guide', boiteGuideHint: 'Adds a short note after AGENTS.md when an agent session starts: the boite command and how to use the panel. About 250 tokens, once per session.',
     linked: 'Linked', existing: 'Already linked', blocked: 'Needs attention',
     interval: 'Pull interval in minutes', intervalHint: 'Choose a whole number from 1 to 1440 minutes.',
     detected: 'Contents', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',
