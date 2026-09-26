@@ -1382,9 +1382,13 @@ export const fr: Translation = {
     useCli: 'Utiliser mon login en ligne de commande',
     executable: 'Lancé depuis',
     accounts: 'Comptes',
-    noAccounts: 'Aucun compte pour le moment.',
     installation: 'Installation',
-    version: 'Version'
+    version: 'Version',
+    addHeading: 'Ajouter un fournisseur',
+    defaultModel: 'Modèle par défaut',
+    autoUpdate: 'Mises à jour automatiques',
+    checkUpdates: 'Rechercher les mises à jour',
+    updating: 'Mise à jour en cours'
   },
   plugins: {
     heading: 'Extensions',

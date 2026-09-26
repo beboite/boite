@@ -96,10 +96,16 @@ test('the draft sentence follows worktree, permissions, model and effort on desk
   await size(false);
 }, 30_000);
 
-test('default models can be changed in General on desktop and phone', async () => {
+test('default models can be changed on each provider row in Providers', async () => {
   await page.click(id('nav-settings'));
-  await page.click(id('settings-tab-general'));
-  await page.waitFor(`document.querySelector('${id('model-defaults-settings')}')`);
+  await page.click(id('settings-tab-accounts'));
+  // Each connected provider keeps its default model behind its row's chevron.
+  for (const provider of ['claude', 'codex', 'grok']) {
+    const toggle = `${id('provider-settings')}[data-provider-id="${provider}"] ${id('provider-details-toggle')}`;
+    await page.click(toggle);
+    await page.waitFor(`document.querySelector('[data-default-provider="${provider}"]')`);
+  }
+  expect(await page.evaluate(`document.querySelector('${id('model-defaults-settings')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('GPT 5.6 Sol');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('medium');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('Grok 4.6');
@@ -113,9 +119,8 @@ test('default models can be changed in General on desktop and phone', async () =
   await page.click(`${row} ${id('composer-picker')}`);
   await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
   await capture('model-defaults-desktop');
-  await size(true);
-  await capture('model-defaults-phone');
-  await size(false);
+  // Put the rows back the way the page opens, for the tests that follow.
+  for (const provider of ['claude', 'codex', 'grok']) await page.click(`${id('provider-settings')}[data-provider-id="${provider}"] ${id('provider-details-toggle')}`);
   await page.click(id('settings-back'));
 }, 30_000);
 
