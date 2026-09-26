@@ -216,6 +216,9 @@ provider's default account before it emits `providers.updated`, so an existing
 command-line login reads as ready and no sign-in starts. Cancelling the download
 or leaving the page drops that continuation. Returning to the window looks for
 missing agents again, so installing one outside Boite needs no button.
+Rows with a signed-in agent come first; the others follow under `Add a
+provider`. Antigravity and the Antigravity CLI share one row
+(`packages/ui/src/lib/provider-family.ts`), and opening it shows both.
 
 `providers.install` streams the archive to
 `<dataDir>/agents/<id>/downloads/<version>.zip.part`, hashing as it writes, and
@@ -361,7 +364,8 @@ pass that size is drawn as a sentence giving its size.
 
 ## The Antigravity CLI
 
-Two rows carry Antigravity, and they are two different programs.
+Two descriptors carry Antigravity, and they are two different programs, drawn
+as one row on the Providers page.
 `antigravity` is Google's ACP server, `agy_acp_server.exe`, which Boite
 downloads (468 MB) and runs on accounts of its own, each signed in through
 the protocol. `antigravity-cli` is the `agy` command the user installed and
@@ -383,7 +387,7 @@ Every agy Boite starts (turns, `agy models`, the usage read) runs with
 not. Left on, agy spawns `agy --bg-updater` at most every 15 minutes, and that
 detached process runs `agy --version` in a console of its own. No hidden-window
 flag on Boite's side reaches it, so on Windows the user got a terminal window
-over whatever they were doing. agy is updated from the agent updates card
+over whatever they were doing. agy is updated from its row on the Providers page
 instead ([agent-updates.md](agent-updates.md)), whose `agy update` run keeps
 the variable unset.
 

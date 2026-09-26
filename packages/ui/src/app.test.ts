@@ -380,7 +380,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // One tile per provider an account answers for, in the core's order: the
   // one still to download or sign into is Settings' business, one tile away.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'more']);
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -1585,16 +1585,24 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  const absent = '[data-testid=provider-settings][data-provider-id=antigravity]';
-  await waitFor(() => document.querySelector(absent) !== null);
+  // One Antigravity row: its CLI is signed in, so the row reads ready and the
+  // download Boite manages waits inside it.
+  const family = '[data-testid=provider-settings][data-provider-id=antigravity]';
+  await waitFor(() => document.querySelector(family) !== null);
+  expect(document.querySelectorAll(family)).toHaveLength(1);
+  expect(document.querySelector('[data-testid=provider-settings][data-provider-id=antigravity-cli]')).toBeNull();
+  expect(query(family).getAttribute('data-step')).toBe('ready');
+  await openProviderDetails('antigravity');
+  const absent = `${family} [data-testid=provider-member][data-provider-id=antigravity]`;
+  expect(document.querySelector(`${family} [data-testid=provider-member][data-provider-id=antigravity-cli]`)).not.toBeNull();
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
   expect(query(absent).getAttribute('data-step')).toBe('install');
   expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
   expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // The fake's OpenCode runs from the user's own install, so the updates card
-  // owns its version and the row offers no Update beside that card's "Up to date".
+  // The fake's OpenCode runs from the user's own install, so its own updater
+  // owns the version and the row offers no Update beside it.
   const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
   await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
   expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
@@ -1936,7 +1944,8 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   store.showSettings('accounts');
   await store.installProvider('antigravity');
   await waitFor(() => store.providerOf('antigravity')?.available === true);
-  // Installed and nobody signed in: the row's one button is the sign-in.
+  // Installed and nobody signed in: its block in the Antigravity row offers the sign-in.
+  await openProviderDetails('antigravity');
   const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);
   query<HTMLButtonElement>(loginButton).click();

@@ -23,7 +23,7 @@
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
-  import { providerRows } from '../lib/provider-family';
+  import { providerGroups } from '../lib/provider-family';
 
   let { store }: { store: Store } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -54,6 +54,8 @@
     { id: 'experiments', label: strings.settings.tabs.experiments, icon: FlaskConical, group: 3 }
   ]);
 
+  let providerList = $derived(providerGroups(store.providers, store.accounts));
+
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     general: [
       ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
@@ -67,7 +69,8 @@
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
     ],
-    accounts: providerRows(store.providers).map((row) => ({ id: `provider-${row.id}`, label: row.name })),
+    // The page's order: connected providers first, then the ones still to add.
+    accounts: [...providerList.connected, ...providerList.rest].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
       { id: 'usage-breakdown', label: strings.usage.breakdown },

@@ -1,4 +1,5 @@
-import type { ProviderSummary } from '@boite/contracts';
+import type { Account, ProviderSummary } from '@boite/contracts';
+import { connected } from './provider-setup';
 
 /**
  * Descriptors that are one agent to the person using them. Antigravity ships
@@ -38,4 +39,18 @@ export function providerRows(providers: readonly ProviderSummary[]): ProviderRow
     } else row.members.push(provider);
   }
   return rows;
+}
+
+/**
+ * The Providers page's two lists: rows something can run on now, then the
+ * ones still to install or sign into, each in the core's order. One signed-in
+ * member is enough for its family to count as connected.
+ */
+export function providerGroups(
+  providers: readonly ProviderSummary[],
+  accounts: Account[]
+): { connected: ProviderRow[]; rest: ProviderRow[] } {
+  const rows = providerRows(providers);
+  const on = (row: ProviderRow) => row.members.some((member) => connected(member, accounts));
+  return { connected: rows.filter(on), rest: rows.filter((row) => !on(row)) };
 }

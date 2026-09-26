@@ -211,8 +211,9 @@ that runs under `node` names nothing there, because the process in the job is
 Providers shows one row per provider and its next step. A row's chevron opens
 its accounts: sign in again for an isolated one, Check (the session file, then a
 model probe), Remove, quotas, `Add another account`, which names the account
-after the provider and starts its sign-in, and `Use my command-line login` when
-no account uses the default location. Default-location accounts keep their
+after the provider and starts its sign-in, `Use my command-line login` when
+no account uses the default location, and the provider's default model and
+effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
@@ -237,8 +238,8 @@ OpenCode Go reads the `opencode-go` API login in the account's
 usage API. It never substitutes another provider's login or local token totals.
 
 Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
-or later and sign in once, then expand Antigravity in the tray and enable the
-switch. Boite reads `agy -p /usage --output-format json` in a temporary directory,
+or later and sign in once, then expand Antigravity in the tray or on the
+Providers page and enable the switch. Boite reads `agy -p /usage --output-format json` in a temporary directory,
 with a version check, output limit and timeout. It does not send a model prompt.
 The report belongs to the CLI login on the core's computer, not an isolated ACP
 account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring

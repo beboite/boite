@@ -216,6 +216,23 @@ export function seedAccounts() {
     install: null,
     alwaysIsolated: false
   })));
+  // The `agy` command the user installed themselves: the same Antigravity to
+  // them, drawn in its row. It has no sign-in of its own, so the core made its
+  // default account and it reads as ready.
+  providers.push({
+    id: 'antigravity-cli',
+    name: 'Antigravity CLI',
+    shortName: 'agy',
+    protocol: 'agy',
+    login: false,
+    alwaysIsolated: false,
+    source: 'shipped',
+    available: true,
+    executable: `${DATA_DIR}\\demo\\agy.exe`,
+    models: [{ id: 'default', name: 'Antigravity CLI default', default: true }],
+    install: null,
+    capabilities: { approvals: false, hooks: false, checkpoint: false, images: false, planMode: true, resume: true }
+  });
   const accounts: Account[] = [
     {
       id: 'a-echo',
@@ -274,5 +291,14 @@ export function seedAccounts() {
     identity: 'you@example.com',
     createdAt: T0
   })));
+  accounts.push({
+    id: 'a-antigravity-cli',
+    providerId: 'antigravity-cli',
+    label: 'Default',
+    isolationDir: null,
+    status: 'ok',
+    identity: 'you@example.com',
+    createdAt: T0
+  });
   return { providers, accounts };
 }

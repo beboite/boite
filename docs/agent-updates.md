@@ -8,8 +8,9 @@ work: it reads each agent's version, reads the newest one, and runs the update.
 A client only shows what the core found and sends Update or Skip back.
 
 An agent with an updater and no way to name its newest release, the Antigravity
-CLI being one, announces nothing: its row reads `Checks by itself` and carries
-`Run its updater`, which runs the updater on request and reads the version again.
+CLI being one, announces nothing: its version on the Providers row reads
+`Checks by itself` on hover and the row carries `Run its updater`, which runs
+the updater on request and reads the version again.
 The automatic switch leaves it alone, such an agent updates itself.
 
 ## What the user sees
@@ -25,16 +26,17 @@ buttons stay in reach.
   background: the notice leaves at once. The threads stay; the next turn starts
   the new version. Settings, Providers shows the agent as updating meanwhile.
 - Skip stops offering that version. A later version is offered again.
-  Settings, Providers, Agent updates lists every agent with its versions and
-  offers a skipped version again.
+  In Settings, Providers, each provider's row shows its agent's version, the
+  newer one when there is one, and offers a skipped version again.
 - A failed update brings its notice back with the updater's last line and Try
   again.
 - When the agent that runs is the user's own install (the `self` route), its
   provider row offers no Update for a copy Boite downloaded earlier: that copy
-  is not what runs, and the Agent updates card owns the version shown.
+  is not what runs, and the version shown is the one the update reads.
 
-`Update agents automatically` in the same card makes the core update by
-itself. It is off by default.
+`Automatic updates` at the top of Settings, Providers makes the core update by
+itself. It is off by default. `Check for updates` beside it reads every
+version again.
 
 ## Two routes
 

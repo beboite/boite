@@ -1409,9 +1409,13 @@ export const strings = {
     useCli: 'Use my command-line login',
     executable: 'Runs from',
     accounts: 'Accounts',
-    noAccounts: 'No account yet.',
     installation: 'Installation',
-    version: 'Version'
+    version: 'Version',
+    addHeading: 'Add a provider',
+    defaultModel: 'Default model',
+    autoUpdate: 'Automatic updates',
+    checkUpdates: 'Check for updates',
+    updating: 'Updating'
   },
   plugins: {
     heading: 'Plugins',
