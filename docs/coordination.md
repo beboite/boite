@@ -29,7 +29,8 @@ the panel; only an owner connection can change permissions.
 ## Reaching another computer
 
 Connect both machines in Machines using owner connections. Give each core an
-HTTPS public address in General settings, reachable from the other core. Then
+HTTPS public address in Settings, Machines and devices, Phone app, reachable
+from the other core. Then
 use the agent coordination section in Machines to link them. Boite exchanges
 their public identities and checks the connection in both directions. HTTP is
 accepted only on numeric loopback for two cores on the same computer.

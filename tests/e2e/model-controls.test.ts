@@ -23,7 +23,8 @@ test.each([1440, 390])('provider switching keeps the picker frame still at %ipx'
   await page.navigate(url);
   await page.click('[data-testid=composer-picker]');
   const frames: { x: number; y: number; width: number; height: number }[] = [];
-  for (const provider of ['claude', 'echo', 'opencode', 'antigravity', 'favorites']) {
+  // Only providers with a signed-in account have a tile; the fake's Antigravity is signed out.
+  for (const provider of ['claude', 'echo', 'opencode', 'codex', 'favorites']) {
     await page.click(`[data-provider="${provider}"]`);
     await capture(`picker-stable-${width}-${provider}.png`);
     frames.push(await page.evaluate<{ x: number; y: number; width: number; height: number }>(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().toJSON()`));
@@ -171,7 +172,8 @@ test('the accent persists and colours the effort track continuously to the thumb
   const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
   expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
   expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading').textContent.trim()`)).toBe('Max');
-  expect(await page.evaluate(`!!document.querySelector('[data-testid=composer-effort-menu] svg')`)).toBe(false);
+  // The chip's pin is the menu's one icon.
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=composer-pin-effort]'))`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
   const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });

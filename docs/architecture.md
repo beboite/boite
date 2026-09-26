@@ -145,7 +145,7 @@ their `TraceCapability` reports the limited fallback. They do not discover
 grandchildren or promise whole-tree termination.
 
 Two Windows-only rules ride the same pid set, both in a second Worker and both
-switchable from General settings. The focus guard sends a window of a traced pid
+switchable from Settings, Protection. The focus guard sends a window of a traced pid
 to `HWND_BOTTOM` without activation the moment it takes the foreground, then
 gives the focus back to the window the user was on. The audio mute walks the
 default render endpoint's sessions every second and mutes the ones belonging to
