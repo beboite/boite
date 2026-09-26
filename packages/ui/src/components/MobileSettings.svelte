@@ -118,7 +118,7 @@
 </div>
 
 <style>
-  .mobile-settings { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .mobile-settings { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .home, .detail { animation: fade var(--dur-2) var(--ease-out-quint); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .home { padding: 20px 16px; }
   h1 { font-size: var(--text-lg); margin: 0; }
@@ -142,7 +142,9 @@
   .detail :global(.page:not(.machines-page):not(.limits-page) > header),
   .detail :global(.machines-page > .head h1),
   .detail :global(.limits-page > header h1) { display: none; }
-  .detail :global(.limits-page > header) { margin-bottom: 4px; }
+  /* Its refresh joins the bar, at the right end: alone on a row it pushed the cards down. */
+  .detail :global(.limits-page > header) { position: absolute; top: 8px; right: 12px; margin: 0; }
+  .detail :global(.limits-page > header .refresh) { width: 44px; height: 44px; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
   /* The bar names the page and the line above says what it holds: the card's own heading and tip step aside. */
   .archived-page :global(#settings-archived > h2) { display: none; }
