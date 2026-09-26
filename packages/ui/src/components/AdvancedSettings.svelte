@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import InfoTip from './InfoTip.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import { strings } from '../lib/strings';
@@ -11,13 +12,17 @@
   let { store }: { store: Store } = $props();
 
   let origins = $state('');
+  /** A draft being typed survives a settings update from elsewhere; a save lets the saved list back in. */
+  let dirty = $state(false);
   let saved = $derived((store.settings?.browserOrigins ?? []).join('\n'));
   $effect(() => {
-    origins = saved;
+    const next = saved;
+    untrack(() => { if (!dirty) origins = next; });
   });
 
-  function saveOrigins() {
-    void store.saveSettings({ browserOrigins: origins.split('\n').map((line) => line.trim()).filter(Boolean) });
+  async function saveOrigins() {
+    const ok = await store.saveSettings({ browserOrigins: origins.split('\n').map((line) => line.trim()).filter(Boolean) });
+    if (ok) dirty = false;
   }
 </script>
 
@@ -31,7 +36,7 @@
   {#if store.owner}
     <section class="card" id="settings-origins" data-testid="browser-origins">
       <h2>{strings.machines.browserOrigins}<InfoTip topic={strings.machines.browserOrigins} text={strings.machines.browserOriginsHint} /></h2>
-      <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
+      <textarea bind:value={origins} oninput={() => (dirty = true)} aria-label={strings.machines.browserOrigins} rows="3" spellcheck="false" placeholder="https://boite.example.com"></textarea>
       <button type="button" disabled={!store.settings || origins.trim() === saved} onclick={saveOrigins}>{strings.settings.save}</button>
     </section>
   {/if}

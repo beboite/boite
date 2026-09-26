@@ -24,7 +24,9 @@
   );
   /** One machine says nothing about where a thread runs: its icon only shows once there are two. */
   let multi = $derived(machines.length > 1);
-  let visible = $derived(machines.filter((m) => filter === null || m.id === filter));
+  /** A filter on a machine that has since gone filters nothing, so the list never empties itself. */
+  let shownFilter = $derived(machines.some((m) => m.id === filter) ? filter : null);
+  let visible = $derived(machines.filter((m) => shownFilter === null || m.id === shownFilter));
   let needle = $derived(store.search.trim().toLowerCase());
   let groups = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   let recent = $derived(
@@ -221,7 +223,7 @@
     >
   {/if}
   <div class="foot">
-    <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
+    <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
     <button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>
     <button
       class="ghost icon"

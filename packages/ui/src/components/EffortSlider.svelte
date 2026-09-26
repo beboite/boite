@@ -174,7 +174,8 @@
       <div class="heading">
         <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
         {#if onpin}
-          <button type="button" class="ghost icon pin" class:on={pinned} aria-pressed={pinned} aria-label={fill(strings.composer.pin, { option: strings.composer.effortTitle })} title={fill(strings.composer.pin, { option: strings.composer.effortTitle })} data-testid="composer-pin-effort" onclick={() => onpin(!pinned)}><Pin size={13} strokeWidth={1.75} /></button>
+          {@const pinLabel = fill(pinned ? strings.composer.unpinOption : strings.composer.pin, { option: strings.composer.effortTitle })}
+          <button type="button" class="ghost icon pin" class:on={pinned} aria-pressed={pinned} aria-label={pinLabel} title={pinLabel} data-testid="composer-pin-effort" onclick={() => onpin(!pinned)}><Pin size={13} strokeWidth={1.75} /></button>
         {/if}
       </div>
 

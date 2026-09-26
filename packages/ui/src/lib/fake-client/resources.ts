@@ -16,7 +16,8 @@ function resources(ctx: FakeContext): ThreadResources[] {
       title: thread.title,
       status: thread.status,
       live,
-      load: thread.load ?? { processes: live.length, cpuPercent: 0, memoryBytes: 0 }
+      // As in the core, the count is the live list's, whenever the load was sampled.
+      load: { ...(thread.load ?? { cpuPercent: 0, memoryBytes: 0 }), processes: live.length }
     });
   }
   return out.sort((a, b) => b.load.cpuPercent - a.load.cpuPercent);

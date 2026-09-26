@@ -911,6 +911,18 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.querySelector('.command')?.textContent).toContain('claude');
 });
 
+test('turning the developer switch off closes an open trace tab', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.open('trace');
+  await waitFor(() => document.querySelector('[data-testid=trace-panel]') !== null);
+  work.setDeveloper(false);
+  await waitFor(() => document.querySelector('[data-testid=trace-panel]') === null);
+  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
+});
+
 test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
@@ -2109,6 +2121,24 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);
+});
+
+test('a machine filter whose machine goes away lists the remaining machine again', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const threads = () => document.querySelectorAll('[data-thread-id]').length;
+  await waitFor(() => threads() > 0 && document.querySelector('[data-testid=machine-status]') !== null);
+  const everything = threads();
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  query<HTMLButtonElement>('[data-testid=machine-status]').click();
+  await waitFor(() => document.querySelector(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`) !== null);
+  query<HTMLButtonElement>(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => threads() < everything);
+  workspace.machines = workspace.machines.filter((machine) => machine !== remote);
+  flushSync();
+  // One machine draws no machine button, so a filter left on the gone one could never be cleared.
+  expect(document.querySelector('[data-testid=machine-status]')).toBeNull();
+  expect(threads()).toBeGreaterThan(0);
 });
 
 test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {

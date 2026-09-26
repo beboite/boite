@@ -15,8 +15,10 @@
     if (!stage?.getAnimations) return true;
     return stage.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running' || animation.playState === 'paused');
   }
+  // Another scene, or a restart, plays from the top: a pause does not carry over.
   $effect(() => {
     void scene; void replay;
+    paused = false;
     playing = true;
     const frame = requestAnimationFrame(() => { playing = running(); });
     return () => cancelAnimationFrame(frame);

@@ -27,11 +27,20 @@
     const at = newest?.createdAt;
     if (at) untrack(() => view.markRead(chatKey(scope.kind === 'agent' ? 'profile' : 'group', scope.id), at));
   });
-  /** A new message, or the first render, scrolls to the bottom; a page of older messages does not. */
-  $effect(() => {
+  /**
+   * The first render and the user's own message scroll to the bottom. An agent's
+   * message does only for a reader already there, measured before it is drawn;
+   * someone reading older messages stays where they are.
+   */
+  const NEAR_BOTTOM = 80;
+  let followed = '';
+  $effect.pre(() => {
     if (!newest?.id || !section) return;
     const box = section.parentElement;
-    void tick().then(() => { if (box) box.scrollTop = box.scrollHeight; });
+    if (!box) return;
+    const follow = followed !== key || newest.senderId === null || box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM;
+    followed = key;
+    if (follow) void tick().then(() => { box.scrollTop = box.scrollHeight; });
   });
   const nameOf = (id: string) => view.snapshot?.profiles.find(a => a.id === id)?.name ?? id;
   const time = (at: number) => new Date(at).toLocaleTimeString(formatLocale(), { hour: '2-digit', minute: '2-digit' });

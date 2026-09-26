@@ -10,7 +10,7 @@
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
+  import { offeredCards, available as availableTo, hiddenKind, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
@@ -49,6 +49,12 @@
   let surfaces = $derived(panel.surfaces);
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
+
+  // Turning the developer switch off closes the trace tabs it no longer offers.
+  $effect(() => {
+    const hidden = surfaces.filter((surface) => hiddenKind(surface.kind));
+    if (hidden.length) untrack(() => { for (const surface of hidden) panel.close(surface.id); });
+  });
 
   /** A page needs a webview; everything else reads what only the owner may ask for. */
   function available(kind: SurfaceKind): boolean {
