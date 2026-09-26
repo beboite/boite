@@ -372,7 +372,8 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
     popup = await BrowserPage.attach(secondPort, 'view=quotas');
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
-    await popup.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    // Every account is off, so the popup says there is nothing to read and offers the way to a provider.
+    await popup.waitFor(`document.querySelector('[data-testid="quota-empty"]') && document.querySelectorAll('[data-testid="quota-provider"]').length === 0`);
     expect(await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint').then(e => Boolean(e.url && e.token))`)).toBe(true);
     // The webview can be ready before Windows applies the native placement.
     // Poll the geometry itself; a timeout still reports all offending bounds.

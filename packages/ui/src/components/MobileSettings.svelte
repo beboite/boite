@@ -133,9 +133,11 @@
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */
-  .detail :global(.page:not(.machines-page):not(.usage) > header),
+  .detail :global(.page:not(.machines-page):not(.usage):not(.limits-page) > header),
   .detail :global(.machines-page > .head h1),
-  .detail :global(.usage > header h1) { display: none; }
+  .detail :global(.usage > header h1),
+  .detail :global(.limits-page > header h1) { display: none; }
+  .detail :global(.limits-page > header) { margin-bottom: 4px; }
   .detail :global(.switch-row) { flex-wrap: wrap; gap: 12px; }
   /* The bar names the page and the line above says what it holds: the card's own heading and tip step aside. */
   .archived-page :global(#settings-archived > h2) { display: none; }

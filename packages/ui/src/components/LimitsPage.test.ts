@@ -37,6 +37,37 @@ test('a refresh asked while the first read is in flight keeps the refreshed rows
   expect(document.body.textContent).not.toContain('Stale');
 });
 
+test('the last reading stays up while the next one loads, and only signed-in accounts the user reads are listed', async () => {
+  let answer: ((rows: AccountQuota[]) => void) | undefined;
+  const call = vi.fn(async () => new Promise<AccountQuota[]>((resolve) => { answer = resolve; }));
+  const rows: AccountQuota[] = [
+    { ...quota('Claude'), accountId: 'signed-in' },
+    { ...quota('Claude'), accountId: 'signed-out' },
+    { ...quota('Antigravity'), accountId: 'quota:antigravity-cli', providerId: 'antigravity', enabled: false, status: 'disabled', windows: [] },
+    { ...quota('Pi'), accountId: 'pi', providerId: 'pi', status: 'unsupported', windows: [] },
+  ];
+  const accounts = [{ id: 'signed-in', status: 'ok' }, { id: 'signed-out', status: 'unauthenticated' }];
+  const store = { client: { call, on: () => () => {} }, connection: 'ready', owner: true, endpointUrl: 'cached-core', accounts } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  answer!(rows);
+  await settle();
+  expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('Antigravity');
+  await unmount(mounted);
+
+  // Opened again, the page draws the reading it had while a new one is on its way.
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  expect(call).toHaveBeenCalledTimes(2);
+  expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
+  expect(document.querySelector('[data-testid="usage-limits"]')!.classList.contains('loading')).toBe(true);
+  expect(document.querySelector('[data-testid="limits-refresh"]')!.getAttribute('aria-busy')).toBe('true');
+  answer!(rows);
+  await settle();
+  expect(document.querySelector('[data-testid="usage-limits"]')!.classList.contains('loading')).toBe(false);
+});
+
 test('a device is told where the limits are read, and asks for none', async () => {
   const call = vi.fn(async () => []);
   mounted = mount(LimitsPage, { target: document.body, props: {

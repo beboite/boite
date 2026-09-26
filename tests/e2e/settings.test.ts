@@ -110,21 +110,23 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
-  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length === 5 && document.querySelector('progress')`);
+  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('progress')`);
   expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
   expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('inset(0px round 12px)');
   await capture('quota-popup.png');
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`)).toEqual(['claude', 'codex', 'antigravity', 'grok', 'opencode']);
+  // Only signed-in providers the user reads: Antigravity's CLI source is off, echo and pi report nothing.
+  const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
+  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode']));
+  for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  await page.click('[data-provider="antigravity"] .summary');
-  await page.click('[data-provider="antigravity"] input');
-  await page.waitFor(`document.querySelector('[data-provider="antigravity"] progress')`);
-  await page.click('[data-provider="antigravity"] input');
-  await page.waitFor(`!document.querySelector('[data-provider="antigravity"] progress')`);
-  await page.evaluate(`document.querySelector('[data-provider="antigravity"] input').scrollIntoView({ block: 'nearest' })`);
-  await capture('quota-popup-setup.png');
-  await page.click('[data-provider="antigravity"] .summary');
+  // Unfolded, a provider lists each window with its own bar; there is nothing to set here.
+  await page.click('[data-provider="claude"] .summary');
+  await page.waitFor(`document.querySelectorAll('#usage-claude progress').length === 3`);
+  expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').querySelector('input') === null`)).toBe(true);
+  await capture('quota-popup-open.png');
+  await page.click('[data-provider="claude"] .summary');
+  await page.waitFor(`!document.querySelector('#usage-claude')`);
   expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);

@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
-  import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
+  import type { Account, ProviderSummary } from '@boite/contracts';
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
@@ -12,6 +12,7 @@
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { strings } from '../lib/strings';
+  import { quotaReader } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
 
   /**
@@ -23,8 +24,10 @@
 
   /** One pending code per account, so two logins never share a field. */
   let codes = $state<Record<string, string>>({});
-  let quotas = $state<AccountQuota[]>([]);
-  let quotaBusy = $state(false);
+  // The limits under each account come from the reading the Limits page and the tray share, so they never blank while a new one loads.
+  let quotaState = $derived(quotaReader(store.endpointUrl ?? 'here'));
+  let quotas = $derived(quotaState.rows ?? []);
+  let quotaBusy = $derived(quotaState.loading);
   let open = $state<Record<string, boolean>>({});
   /** Providers whose install was asked for from a row: sign-in follows the download. */
   let chained = $state<Record<string, boolean>>({});
@@ -172,15 +175,13 @@
 
   async function readQuotas(refresh = false) {
     if (!store.client || quotaBusy) return;
-    quotaBusy = true;
-    try { quotas = await store.client.call('quotas.list', { refresh }); }
+    try { await quotaState.read(store.client, refresh); }
     catch (error) { store.error = String(error); }
-    finally { quotaBusy = false; }
   }
 
   async function monitor(accountId: string, enabled: boolean) {
     if (!store.client) return;
-    try { quotas = await store.client.call('quotas.configure', { accountId, enabled }); if (enabled) await readQuotas(); }
+    try { await quotaState.configure(store.client, accountId, enabled); }
     catch (error) { store.error = String(error); }
   }
 
@@ -219,7 +220,7 @@
 
   onMount(() => {
     void readQuotas();
-    const offQuotas = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
+    const offQuotas = store.client?.on('quotas.updated', (rows) => quotaState.accept(rows));
     // The download the row asked for is on disk. The core made the default
     // account before it said so, which means an existing command-line login already
     // reads as ready here and only a provider nobody is signed into goes on.
