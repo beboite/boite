@@ -9,7 +9,8 @@ import { DEFAULT_WORKFLOW_LIMITS, WORKFLOW_LIMITS } from './workflows';
 const STEP_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
 const RESERVED = new Set(['item', 'index', 'steps']);
-const TEMPLATE = /\{\{\s*([^{}]*?)\s*\}\}/g;
+// One greedy class and the spaces trimmed after: `\s*` around a lazy group backtracks quadratically on a long run of spaces.
+const TEMPLATE = /\{\{([^{}]*)\}\}/g;
 
 export class WorkflowPlanError extends Error {}
 
@@ -68,7 +69,10 @@ function checkCondition(value: unknown, field: string): WorkflowCondition {
 /** The `{{...}}` references of a brief, as segment lists. */
 export function templateRefs(task: string, field: string): string[][] {
   const refs: string[][] = [];
-  for (const match of task.matchAll(TEMPLATE)) refs.push(pathSegments(match[1], `${field} {{${match[1]}}}`));
+  for (const match of task.matchAll(TEMPLATE)) {
+    const path = match[1]!.trim();
+    refs.push(pathSegments(path, `${field} {{${path}}}`));
+  }
   return refs;
 }
 
