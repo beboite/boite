@@ -48,11 +48,11 @@
   /** The state line under a tile, null when the page has none worth a glance. */
   function status(tab: SettingsTab): { text: string; tone?: 'call' } | null {
     if (tab === 'accounts' && store.providers.length > 0) {
-      return ready === 0 ? { text: strings.settings.connectProvider, tone: 'call' } : { text: fill(strings.settings.providersReady, { count: String(ready) }) };
+      return ready === 0 ? { text: strings.settings.connectProvider, tone: 'call' } : { text: ready === 1 ? strings.settings.providersOne : fill(strings.settings.providersReady, { count: String(ready) }) };
     }
     if (tab === 'machines') {
       const parts = machines > 1 ? [fill(strings.settings.machinesCount, { count: String(machines) })] : [];
-      if (store.sessions.length > 0) parts.push(fill(strings.settings.devicesCount, { count: String(store.sessions.length) }));
+      if (store.sessions.length > 0) parts.push(store.sessions.length === 1 ? strings.settings.devicesOne : fill(strings.settings.devicesCount, { count: String(store.sessions.length) }));
       return parts.length > 0 ? { text: parts.join(' · ') } : null;
     }
     return null;

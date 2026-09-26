@@ -297,9 +297,10 @@
   .subcategories { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-2); }
   .subcategories.open { grid-template-rows: 1fr; opacity: 1; }
   .subcategories > div { overflow: hidden; min-height: 0; }
-  /* Block rather than flex, so a label longer than the rail ends in an ellipsis
-     instead of being cut mid-word: French says most of these in more letters. */
-  .subsection { display: block; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); transition: color var(--dur-2), border-color var(--dur-2), background var(--dur-2); }
+  /* Block rather than flex, and a label longer than the rail wraps onto a second
+     line: French says most of these in more letters, and a cut label hides the word
+     that tells two sections apart. */
+  .subsection { display: block; text-align: left; white-space: normal; text-wrap: pretty; height: auto; min-height: var(--control); padding-block: 5px; line-height: 1.3; width: calc(100% - 24px); margin-left: 24px; padding-left: 15px; border-left: 1px solid var(--color-edge); border-radius: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); transition: color var(--dur-2), border-color var(--dur-2), background var(--dur-2); }
   .subsection.chosen { color: var(--color-foreground); border-left-color: var(--color-foreground); background: var(--color-hover); }
   @media (prefers-reduced-motion: reduce) { .subcategories, .tab :global(svg:last-child) { transition: none; } }
 
