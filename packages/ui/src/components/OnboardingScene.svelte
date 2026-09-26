@@ -63,7 +63,7 @@
             <p class="agent-draft"><span>{t.followup}</span><span>{t.nextMessage}</span></p>
             <div class="composer-tools">
               <div class="agent-chip"><span class="agent-old">{@render author('claude')}</span><span class="agent-new">{@render author('codex')}</span><ChevronDown size={14} />
-                <div class="agent-menu"><span>{@render author('claude')}<Check size={14} /></span><span class="chosen">{@render author('codex')}<Check size={14} /></span></div>
+                <div class="agent-menu"><span>{@render author('claude')}<Check size={14} /></span><span class="chosen">{@render author('codex')}</span></div>
                 {@render pointer('agent-pointer')}
               </div>
               <span class="send"><ArrowUp size={17} /></span>
@@ -173,7 +173,6 @@
   .agent-menu { position: absolute; bottom: calc(100% + 8px); left: 0; width: 158px; padding: 5px; border-radius: var(--radius-md); border: 1px solid var(--color-edge); background: var(--color-surface); box-shadow: var(--shadow-e2); animation: menu var(--demo-duration) both; }
   .agent-menu > span { display: flex; justify-content: space-between; align-items: center; padding: 8px; }
   .agent-menu .chosen { background: var(--color-accent-soft); border-radius: var(--radius-sm); }
-  .agent-menu .chosen > :global(svg) { color: var(--color-accent); }
   .send { display: flex; align-items: center; justify-content: center; width: 27px; height: 27px; border-radius: var(--radius-md); background: var(--color-foreground); color: var(--color-surface); }
   .pointer { position: absolute; width: 23px; height: 27px; z-index: 2; overflow: visible; pointer-events: none; }
   .pointer path { fill: var(--color-foreground); stroke: var(--color-background); stroke-width: 1.5; }
