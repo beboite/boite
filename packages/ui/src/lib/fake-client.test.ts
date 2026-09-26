@@ -336,6 +336,25 @@ test('fake speech refuses overlapping request IDs and accepts a retry after comp
   } finally { await first.catch(() => {}); client.close(); }
 });
 
+test('fake speech downloads a model from a link, uses it, and removing it hands back the default', async () => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call('speech.install', { url: 'http://models.example/ggml-tiny.bin' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    const started = await client.call('speech.install', { url: 'https://models.example/ggml-tiny.bin' });
+    expect(started.downloading).toMatch(/^custom-[a-f0-9]{12}$/);
+    expect(started.models.at(-1)).toMatchObject({ kind: 'custom', name: 'ggml-tiny.bin', host: 'models.example', installed: false });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const done = await client.call('speech.status', {});
+    expect(done.installing).toBe(false);
+    expect((await client.call('speech.config', {})).model).toBe(started.downloading);
+    await client.call('speech.uninstall', { model: started.downloading! });
+    expect((await client.call('speech.config', {})).model).toBe('small-q5_1');
+    expect((await client.call('speech.status', {})).models.some(model => model.kind === 'custom')).toBe(false);
+  } finally { client.close(); vi.useRealTimers(); }
+});
+
 test('fake speech refuses a recording made before configuration changed', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

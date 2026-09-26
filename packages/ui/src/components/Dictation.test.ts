@@ -36,6 +36,9 @@ test('a microphone ending before speech status resolves finishes instead of stic
   for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); }
   expect(recorder.stop).toHaveBeenCalledOnce();
   expect(ontext).toHaveBeenCalledWith('Captured before unplugging.');
+  // The model started loading when the recording did; no preview ran, so the final request detects the language.
+  expect(call).toHaveBeenCalledWith('speech.warm', {});
+  expect(call).toHaveBeenLastCalledWith('speech.transcribe', { requestId: expect.any(String), revision: 'revision', audio: 'AQ==' });
   expect(document.querySelector('[data-testid="dictation"]')?.getAttribute('data-phase')).toBe('idle');
 });
 
