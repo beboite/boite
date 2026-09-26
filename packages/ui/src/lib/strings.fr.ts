@@ -117,6 +117,7 @@ export const fr: Translation = {
     autoPull: 'Pull automatique', onStartup: 'Au démarrage', periodic: 'À intervalle régulier', minutes: 'min',
     globalInstructions: 'AGENTS.md global', globalDetails: 'Harness reliés',
     globalHint: 'Ce brain s\'applique à tous les projets, même hors de Boite. Les fichiers existants sont sauvegardés puis restaurés à la désactivation.',
+    boiteGuide: 'Guide Boite', boiteGuideHint: 'Ajoute une courte note après AGENTS.md au début d\'une session d\'agent : la commande boite et l\'usage du panneau. Environ 250 tokens, une fois par session.',
     linked: 'Relié', existing: 'Déjà relié', blocked: 'À vérifier',
     interval: 'Intervalle du pull en minutes', intervalHint: 'Choisis un nombre entier entre 1 et 1440 minutes.',
     detected: 'Contenu', instructions: 'Instructions', skill: 'Skills', plugin: 'Plugins',

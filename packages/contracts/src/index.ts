@@ -1548,6 +1548,8 @@ export interface BrainConfig {
   autoPull?: { onStartup: boolean; intervalMinutes: number };
   /** Link the root AGENTS.md into user-level harness profiles on this machine. */
   globalInstructions?: boolean;
+  /** Append Boite's own guide after the brain's instructions, once per agent session. Defaults to on. */
+  boiteGuide?: boolean;
 }
 
 export interface BrainLink {

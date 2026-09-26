@@ -11,9 +11,11 @@ export function brainMethods(ctx: FakeContext) {
         const autoPull = config.autoPull === undefined ? ctx.brain.config.autoPull : config.autoPull;
         const globalInstructions = config.globalInstructions === undefined ? ctx.brain.config.globalInstructions : config.globalInstructions;
         if (globalInstructions !== undefined && typeof globalInstructions !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.globalInstructions must be a boolean' });
+        const boiteGuide = config.boiteGuide === undefined ? ctx.brain.config.boiteGuide : config.boiteGuide;
+        if (boiteGuide !== undefined && typeof boiteGuide !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.boiteGuide must be a boolean' });
         if (autoPull !== undefined && (!autoPull || typeof autoPull.onStartup !== 'boolean' || !Number.isInteger(autoPull.intervalMinutes) || autoPull.intervalMinutes < 0 || autoPull.intervalMinutes > 1440)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'brain.autoPull.onStartup must be a boolean; intervalMinutes must be an integer from 0 to 1440' });
         if (ctx.brain.config.path !== config.path) ctx.brain.lastSync = null;
-        ctx.brain.config = { ...config, ...(autoPull ? { autoPull: { ...autoPull } } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}) };
+        ctx.brain.config = { ...config, ...(autoPull ? { autoPull: { ...autoPull } } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}), ...(boiteGuide !== undefined ? { boiteGuide } : {}) };
         ctx.brain.links = config.path && config.enabled && globalInstructions ? [
           ['Claude Code', '.claude/CLAUDE.md'], ['Codex', '.codex/AGENTS.md'], ['OpenCode', '.config/opencode/AGENTS.md'],
           ['pi', '.pi/agent/AGENTS.md'], ['Grok', '.grok/AGENTS.md'], ['Gemini / Antigravity', '.gemini/GEMINI.md'], ['Muse', '.config/muse/AGENTS.md'],

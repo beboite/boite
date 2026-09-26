@@ -121,7 +121,7 @@ export class TurnContexts {
     const deferred = carried.deferred;
     const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters;
     const compose = (body: string, sessionId: string | null): string =>
-      ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id)) + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+      ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id, sessionId === null)) + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     return {
       thread,
       account,

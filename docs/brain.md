@@ -54,6 +54,19 @@ turn from 32 ms of scanning to about 6 ms of stats (2026-09-25).
 Missing folders or unreadable instruction files fail the turn instead of silently
 dropping their content. The combined prefix is limited to 128 KiB.
 
+### Boite guide
+
+The Boite guide switch, on by default, appends Boite's own guide after the
+brain's `AGENTS.md` blocks: the `boite` command, the panel, the task and todo
+lists. The text is `packages/core/src/boite.md`, bundled into the core, about
+900 bytes. It goes only into a turn that starts a native agent session (the
+thread has no `sessionId` yet), since the session keeps it afterwards; the brain's own instructions still go every turn.
+With the guide on, the separate `boite ask` note is not added, and with
+"Asynchronous questions" off, the guide leaves its `boite ask` line out. The
+guide exists only in the turn prefix: it is never written into the brain
+folder, so the brain's Git status and the global links stay untouched, and a
+harness started outside Boite never reads it.
+
 Native slash commands, compaction and agent coordination turns do not receive
 the prefix. Disconnecting a brain stops future injection but cannot remove
 instructions already present in an agent's conversation history. Start a new
