@@ -15,11 +15,6 @@
   }
 </script>
 
-<header class="agents-page-head">
-  <h2>{labels.engineSettings}</h2>
-  <p>{labels.engineSettingsHint}</p>
-</header>
-
 <section class="card" data-testid="agents-engine-settings">
   <h2>{labels.engine}</h2>
   <p class="hint">{labels.engineHint}</p>
