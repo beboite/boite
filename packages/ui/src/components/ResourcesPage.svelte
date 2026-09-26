@@ -62,8 +62,8 @@
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, threadMemoryCapMb: memoryCap}); }}>
-      <label><span>{strings.settings.agentCpuCapPercent}</span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
-      <label><span>{strings.settings.threadMemoryCapMb}</span><input type="number" min="0" max="65536" required bind:value={memoryCap} /></label>
+      <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
+      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input type="number" min="0" max="65536" required bind:value={memoryCap} /></label>
       <button type="submit" class="primary">{strings.settings.save}</button>
     </form>
   </section>
@@ -118,6 +118,8 @@
 <style>
   form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: end; }
   form button { justify-self: start; }
+  form label { display: grid; gap: 6px; justify-items: start; }
+  form .name { display: inline-flex; align-items: center; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
   .process-table { overflow-x: auto; }
   @media (max-width: 720px) { form { grid-template-columns: 1fr; } .head { flex-wrap: wrap; } .load { margin-left: 0; flex-basis: 100%; order: 3; } }
