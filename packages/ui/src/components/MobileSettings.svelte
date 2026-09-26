@@ -87,7 +87,10 @@
         <BrainPage {store} />
       {:else if page === 'phone'}
         <div class="page phone-page">
-          <p class="scope" data-testid="mobile-settings-scope">{machine?.label ?? store.endpointUrl ?? strings.connection.current} · {strings.connection[store.connection]}</p>
+          <!-- Which machine these apply to, once there is a choice, and the connection when it is not working. -->
+          {#if workspace.machines.length > 1 || store.connection !== 'ready'}
+            <p class="scope" data-testid="mobile-settings-scope">{[workspace.machines.length > 1 ? (machine?.label ?? store.endpointUrl ?? strings.connection.current) : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · ')}</p>
+          {/if}
           <PhoneSettings {store} showServerSettings={false} />
           <TelemetrySettings {store} />
         </div>

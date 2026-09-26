@@ -142,9 +142,12 @@
             {#if machine.store !== primary}
               <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
             {/if}
-            <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-              >{strings.machines.open}<ArrowUpRight size={13} /></button
-            >
+            <!-- The machine already open has nowhere to go. -->
+            {#if machine.store !== workspace.active}
+              <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
+                >{strings.machines.open}<ArrowUpRight size={13} /></button
+              >
+            {/if}
           </div>
         </div>
         <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
