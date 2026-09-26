@@ -17,7 +17,7 @@ const baseline: Record<string, string> = { win32: 'bun-windows-x64-baseline', li
 const target = process.arch === 'x64' ? baseline[process.platform] : undefined;
 const result = Bun.spawnSync([
   process.execPath, 'build', '--compile', ...(target ? [`--target=${target}`] : []),
-  '--minify-whitespace', '--minify-syntax', '--bytecode', '--format=esm',
+  '--minify-whitespace', '--minify-syntax', '--bytecode', '--format=esm', '--env=BOITE_RELEASE_*',
   'src/main.ts', '--outfile', `dist/boite-core${suffix}`,
 ], {
   stdout: 'inherit', stderr: 'inherit', windowsHide: true,

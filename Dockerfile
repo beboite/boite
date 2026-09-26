@@ -13,6 +13,9 @@ COPY packages/core packages/core
 COPY packages/ui packages/ui
 ARG BOITE_VERSION
 RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; if (!/^\d+\.\d+\.\d+-nightly\.\d{8}\.[1-9]\d*$/.test(v)) throw Error("invalid nightly version"); const p="packages/core/package.json"; const j=await Bun.file(p).json(); j.version=v; await Bun.write(p,JSON.stringify(j));'; fi
+# Set by server.yml for a published image only; empty leaves the core without
+# an analytics relay (docs/analytics.md).
+ARG BOITE_RELEASE_TELEMETRY=
 RUN bun run build:ui && bun run build:core
 
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS agents
