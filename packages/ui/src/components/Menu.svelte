@@ -52,7 +52,8 @@
     onpick(item.id);
   }
 
-  function onWindowClick(event: MouseEvent) {
+  /** A press, not a click: another menu's trigger stops its click from bubbling here. */
+  function onWindowPointerdown(event: PointerEvent) {
     if (!popover.open) return;
     if (root && event.target instanceof Node && root.contains(event.target)) return;
     popover.hide();
@@ -93,7 +94,7 @@
   }
 </script>
 
-<svelte:window onclick={onWindowClick} />
+<svelte:window onpointerdown={onWindowPointerdown} />
 
 <div class="menu" bind:this={root}>
   <button
