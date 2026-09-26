@@ -142,6 +142,9 @@ jobs:
         env:
           BUILD_CHANNEL: ${{ inputs.channel || 'stable' }}
           BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
+          # Only a published installer reports to the analytics relay; a pull
+          # request's build stays silent (docs/analytics.md).
+          BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
           if ($env:BUILD_CHANNEL -eq 'nightly') {

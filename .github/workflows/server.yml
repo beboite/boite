@@ -54,6 +54,7 @@ jobs:
           build-args: |
             BOITE_CHANNEL=${{ inputs.channel }}
             BOITE_VERSION=${{ inputs.version }}
+            BOITE_RELEASE_TELEMETRY=${{ inputs.publish && '1' || '' }}
           cache-from: type=gha,scope=server-${{ matrix.arch }}
           # Written on main only, like every other cache: see ci.yml.
           cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,scope=server-{0},mode=max', matrix.arch) || '' }}

@@ -100,10 +100,17 @@ separate and require correcting `BOITE_TELEMETRY_URL`, not this file.
 
 ## Relay and dashboard
 
-The dedicated relay is configured in `telemetry/wrangler.toml`. Set
-`BOITE_TELEMETRY_URL` to override it, or to an empty string to disable networking.
-Only HTTPS is accepted, except loopback HTTP for tests. No analytics SDK loads
-in the UI or core.
+The dedicated relay is configured in `telemetry/wrangler.toml`. Only published
+builds default to it: the Windows installer of a nightly or stable release and
+the published server image. Their CI sets `BOITE_RELEASE_TELEMETRY=1` and every
+core build passes `--env=BOITE_RELEASE_*`, which inlines the flag. A run from
+sources, a local `build:shell` or `build:shell:dev`, a pull request's installer
+and every test have no relay, so a scratch data directory never counts as an
+installation. Settings then says that nothing is sent.
+
+Set `BOITE_TELEMETRY_URL` at runtime to override either default, or to an empty
+string to disable networking. Only HTTPS is accepted, except loopback HTTP for
+tests. No analytics SDK loads in the UI or core.
 
 The PostHog project is `boite`, separate from `boite-legacy`. Its dashboard
 follows the legacy layout with active installations, launches, countries,

@@ -4,13 +4,39 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Bus } from '../src/bus.ts';
 import type { Core } from '../src/core.ts';
-import { Telemetry, telemetryEvent } from '../src/telemetry.ts';
+import { RELAY, relayFor, Telemetry, telemetryEvent } from '../src/telemetry.ts';
 import relay, { buildBatch, type Env } from '../../../telemetry/src/index.ts';
 import { enhancedDetails, publicModel } from '../../contracts/src/telemetry.ts';
 
 const cleanups: (() => Promise<void>)[] = [];
 test('the core test runner disables the production relay', () => {
   expect(process.env.BOITE_TELEMETRY_URL).toBe('');
+});
+
+test('only a release build defaults to the relay, and the runtime override wins', () => {
+  expect(relayFor(false, undefined)).toBe('');
+  expect(relayFor(true, undefined)).toBe(RELAY);
+  expect(relayFor(true, '')).toBe('');
+  expect(relayFor(false, 'http://127.0.0.1:9')).toBe('http://127.0.0.1:9');
+});
+
+test('every core build inlines the release flag present at build time and only then', async () => {
+  const root = join(import.meta.dir, '..');
+  const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts as Record<string, string>;
+  for (const command of [scripts.build, scripts['build:linux'], readFileSync(join(root, 'bin', 'compile.ts'), 'utf8')]) {
+    expect(command).toContain('--env=BOITE_RELEASE_*');
+  }
+  // The CLI, as the build scripts run it: Bun.build reads the environment its process started with.
+  const bundle = (release: string | undefined) => {
+    const { BOITE_RELEASE_TELEMETRY: _, ...env } = process.env;
+    const result = Bun.spawnSync([process.execPath, 'build', join(root, 'src', 'telemetry.ts'), '--target', 'bun', '--env=BOITE_RELEASE_*'], {
+      env: release === undefined ? env : { ...env, BOITE_RELEASE_TELEMETRY: release }, windowsHide: true,
+    });
+    expect(result.exitCode).toBe(0);
+    return result.stdout.toString();
+  };
+  expect(bundle(undefined)).toContain('process.env.BOITE_RELEASE_TELEMETRY');
+  expect(bundle('1')).not.toContain('process.env.BOITE_RELEASE_TELEMETRY');
 });
 
 test('enhanced normalization preserves canonical defaults across host and relay', () => {
