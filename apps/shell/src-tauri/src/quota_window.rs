@@ -3,29 +3,57 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview, WebviewUrl, WebviewWindow};
 
 pub const LABEL: &str = "quotas";
-const HOVER_DELAY: Duration = Duration::from_millis(500);
+const HOVER_DELAY: Duration = Duration::from_millis(100);
 /// How long a hidden popup keeps its page. The page is a WebView2 renderer of
 /// its own, about 85 MB, plus a second socket to the core: a popup nobody
 /// opened again for this long gives both back, and the next hover builds it
-/// again during its 500 ms delay.
+/// again after its 100 ms delay.
 const IDLE_RELEASE: Duration = Duration::from_secs(45);
 
 #[derive(Default)]
 pub struct HoverState {
     generation: AtomicU64,
     over_icon: AtomicBool,
-    /// Counts every show, so a release planned at a hide knows whether the
+    /// Whether the popup is open: set by `show`, cleared by `hide` and when the
+    /// window goes away. A hover while it is open leaves it exactly as it is.
+    open: AtomicBool,
+    /// Counts every opening, so a release planned at a hide knows whether the
     /// popup was opened again since.
     opened: AtomicU64,
 }
 
 impl HoverState {
+    /// The pointer reached the icon. The generation a delayed show must still
+    /// find, or `None` when there is nothing to show: the pointer was already
+    /// counted over the icon, or the popup is open. The new generation still
+    /// cancels the close a leave had planned, so coming back to the icon of an
+    /// open popup keeps it open without showing it again.
+    fn entered(&self) -> Option<u64> {
+        if self.over_icon.swap(true, Ordering::AcqRel) { return None; }
+        let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        (!self.open.load(Ordering::Acquire)).then_some(generation)
+    }
+
     fn ready(&self, generation: u64, elapsed: Duration) -> bool {
-        elapsed >= HOVER_DELAY && self.over_icon.load(Ordering::Acquire) && self.generation.load(Ordering::Acquire) == generation
+        elapsed >= HOVER_DELAY && self.over_icon.load(Ordering::Acquire)
+            && self.generation.load(Ordering::Acquire) == generation && !self.open.load(Ordering::Acquire)
     }
 
     pub fn cancel_open(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Marks the popup open. False when it already was: that show then does
+    /// nothing, no second `show()` and no second `tray://open`, whose handler
+    /// replays the page's opening.
+    fn opening(&self) -> bool {
+        if self.open.swap(true, Ordering::AcqRel) { return false; }
+        self.opened.fetch_add(1, Ordering::AcqRel);
+        true
+    }
+
+    fn closed(&self) {
+        self.open.store(false, Ordering::Release);
     }
 
     /// Whether the popup hidden when `opened` was the count stayed hidden.
@@ -44,8 +72,10 @@ fn idle_release() -> Duration {
 /// than `close`, so no close handler can turn the release into another hide.
 pub fn hide<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.hide()?;
+    let state = app.state::<HoverState>();
+    state.closed();
     window.emit("tray://closed", ())?;
-    let opened = app.state::<HoverState>().opened.load(Ordering::Acquire);
+    let opened = state.opened.load(Ordering::Acquire);
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(idle_release());
@@ -94,20 +124,65 @@ pub fn position(icon_x: f64, icon_y: f64, width: f64, height: f64, monitor: (f64
     (x, y.clamp(top + 8.0, (bottom - height - 8.0).max(top + 8.0)))
 }
 
+/// The popup's page. `frame=native` tells it Windows draws the corners and the
+/// border, so the page draws no border of its own.
+fn page_url(native_frame: bool) -> &'static str {
+    if native_frame { "index.html?view=quotas&frame=native" } else { "index.html?view=quotas" }
+}
+
+/// The ground `index.html` paints first, so an opaque popup shown before its
+/// page has painted is not a white rectangle.
+fn ground(dark: bool) -> tauri::window::Color {
+    if dark { tauri::window::Color(16, 16, 19, 255) } else { tauri::window::Color(243, 243, 246, 255) }
+}
+
+/// The popup is an opaque window. It used to be transparent with a CSS radius
+/// on its page, which Windows 10 drew as square corners and a light edge around
+/// the rounded card. Windows 11 now rounds it and draws its border and shadow;
+/// Windows 10 gets square corners and no shadow band (`undecorated_shadow`).
+fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    #[cfg(windows)]
+    let native_frame = crate::window::undecorated_shadow(crate::material::windows_build());
+    #[cfg(not(windows))]
+    let native_frame = false;
+    let dark = app.get_webview_window(crate::browser::MAIN_LABEL).and_then(|main| main.theme().ok())
+        .is_none_or(|theme| theme == tauri::Theme::Dark);
+    let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App(page_url(native_frame).into()))
+        .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
+        .decorations(false).skip_taskbar(true).always_on_top(true)
+        .visible(false).focused(false).focusable(false)
+        .background_color(ground(dark))
+        .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
+    #[cfg(windows)]
+    if !native_frame { builder = builder.shadow(false); }
+    if let Some(profile) = crate::window::webview_profile() { builder = builder.data_directory(profile); }
+    if let Some(args) = crate::window::test_browser_args() { builder = builder.additional_browser_args(&args); }
+    let window = builder.build()?;
+    #[cfg(windows)]
+    if native_frame {
+        let rounded = window.hwnd().map_err(|error| error.to_string()).and_then(|hwnd| crate::platform::dwm::round_corners(hwnd.0));
+        if let Err(error) = rounded { eprintln!("[shell] the quota window keeps square corners: {error}"); }
+    }
+    Ok(window)
+}
+
+/// Opens the popup at `point`. A popup already open is left exactly as it is.
 pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tauri::Result<()> {
-    app.state::<HoverState>().opened.fetch_add(1, Ordering::AcqRel);
-    let window = if let Some(window) = app.get_webview_window(LABEL) { window } else {
-        let mut builder = tauri::WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html?view=quotas".into()))
-            .title("Boite quotas").inner_size(380.0, 460.0).resizable(false)
-            .decorations(false).skip_taskbar(true).always_on_top(true)
-            .visible(false).focused(false).focusable(false)
-            .on_navigation(|url| matches!(url.scheme(), "tauri" | "http" | "https") && matches!(url.host_str(), Some("tauri.localhost") | Some("localhost")));
-        #[cfg(windows)]
-        { builder = builder.transparent(true); }
-        if let Some(profile) = crate::window::webview_profile() { builder = builder.data_directory(profile); }
-        if let Some(args) = crate::window::test_browser_args() { builder = builder.additional_browser_args(&args); }
-        builder.build()?
-    };
+    let state = app.state::<HoverState>();
+    forget_a_closed_window(app);
+    if !state.opening() { return Ok(()); }
+    let shown = present(app, point);
+    if shown.is_err() { state.closed(); }
+    shown
+}
+
+/// A popup closed without `hide` (Alt+F4 destroys it) is not open any more.
+fn forget_a_closed_window<R: Runtime>(app: &AppHandle<R>) {
+    if app.get_webview_window(LABEL).is_none() { app.state::<HoverState>().closed(); }
+}
+
+fn present<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tauri::Result<()> {
+    let window = match app.get_webview_window(LABEL) { Some(window) => window, None => build_popup(app)? };
     if let Some(monitor) = window.monitor_from_point(point.x, point.y)? {
         let scale = monitor.scale_factor();
         let origin = monitor.position(); let size = monitor.size();
@@ -139,10 +214,40 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
     Ok(())
 }
 
+/// `(left, top, right, bottom)` in physical pixels, the right and bottom edges
+/// outside.
+type Rect = (f64, f64, f64, f64);
+
+fn contains(rect: Rect, (x, y): (f64, f64)) -> bool {
+    x >= rect.0 && y >= rect.1 && x < rect.2 && y < rect.3
+}
+
+/// Whether the pointer at `cursor` still belongs to the open popup: over the
+/// popup, over the tray icon, or in the gap between them that the pointer
+/// crosses going from one to the other, as wide as the icon. A close in that
+/// gap was the popup closing, then opening again, when the pointer went back
+/// from the popup to the icon.
+fn keeps_open(cursor: (f64, f64), popup: Rect, icon: Option<Rect>) -> bool {
+    if contains(popup, cursor) { return true; }
+    let Some(icon) = icon else { return false };
+    if contains(icon, cursor) { return true; }
+    let (top, bottom) = if popup.3 <= icon.1 { (popup.3, icon.1) } else if icon.3 <= popup.1 { (icon.3, popup.1) } else { return false };
+    contains((icon.0, top, icon.2, bottom), cursor)
+}
+
+/// The tray icon's bounds in physical pixels, read now: the taskbar may have
+/// moved it since the last event (auto-hide reveal).
+fn icon_bounds<R: Runtime>(app: &AppHandle<R>, cursor: PhysicalPosition<f64>) -> Option<Rect> {
+    let rect = app.tray_by_id("boite")?.rect().ok()??;
+    let scale = app.monitor_from_point(cursor.x, cursor.y).ok().flatten().map(|monitor| monitor.scale_factor()).unwrap_or(1.0);
+    let origin = rect.position.to_physical::<f64>(scale);
+    let size = rect.size.to_physical::<f64>(scale);
+    Some((origin.x, origin.y, origin.x + size.width, origin.y + size.height))
+}
+
 pub fn enter<R: Runtime>(app: &AppHandle<R>) {
-    let state = app.state::<HoverState>();
-    if state.over_icon.swap(true, Ordering::AcqRel) { return; }
-    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    forget_a_closed_window(app);
+    let Some(generation) = app.state::<HoverState>().entered() else { return };
     let started = Instant::now();
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -152,17 +257,13 @@ pub fn enter<R: Runtime>(app: &AppHandle<R>) {
             if !app.state::<HoverState>().ready(generation, started.elapsed()) { return; }
             // Read the current icon bounds after the taskbar reveal animation.
             // This also catches a missing Leave event when auto-hide moves it.
-            let Some(tray) = app.tray_by_id("boite") else { return; };
-            let Ok(Some(rect)) = tray.rect() else { return; };
             let Ok(cursor) = app.cursor_position() else { return; };
-            let scale = app.monitor_from_point(cursor.x, cursor.y).ok().flatten().map(|monitor| monitor.scale_factor()).unwrap_or(1.0);
-            let origin = rect.position.to_physical::<f64>(scale);
-            let size = rect.size.to_physical::<f64>(scale);
-            if cursor.x < origin.x || cursor.x >= origin.x + size.width || cursor.y < origin.y || cursor.y >= origin.y + size.height {
+            let Some(icon) = icon_bounds(&app, cursor) else { return; };
+            if !contains(icon, (cursor.x, cursor.y)) {
                 app.state::<HoverState>().over_icon.store(false, Ordering::Release);
                 return;
             }
-            let anchor = PhysicalPosition::new(origin.x + size.width / 2.0, origin.y);
+            let anchor = PhysicalPosition::new((icon.0 + icon.2) / 2.0, icon.1);
             if let Err(error) = show(&app, anchor) { eprintln!("[shell] quota window: {error}"); }
         }) { eprintln!("[shell] quota hover: {error}"); }
     });
@@ -179,7 +280,8 @@ pub fn leave<R: Runtime>(app: &AppHandle<R>) {
         loop {
             let state = handle.state::<HoverState>();
             if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { break; }
-            if handle.get_webview_window(LABEL).is_none() { break; }
+            // A popup that is not open has nothing to close.
+            if !state.open.load(Ordering::Acquire) || handle.get_webview_window(LABEL).is_none() { break; }
             let app = handle.clone();
             // Opening and closing share the UI thread. Recheck after dispatch
             // so an old Leave cannot close a newly entered or opened popup.
@@ -188,8 +290,11 @@ pub fn leave<R: Runtime>(app: &AppHandle<R>) {
                 if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { return; }
                 let Some(window) = app.get_webview_window(LABEL) else { return; };
                 let inside = match (app.cursor_position(), window.outer_position(), window.outer_size()) {
-                    (Ok(cursor), Ok(origin), Ok(size)) => cursor.x >= origin.x as f64 && cursor.y >= origin.y as f64
-                        && cursor.x < origin.x as f64 + size.width as f64 && cursor.y < origin.y as f64 + size.height as f64,
+                    (Ok(cursor), Ok(origin), Ok(size)) => keeps_open(
+                        (cursor.x, cursor.y),
+                        (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64),
+                        icon_bounds(&app, cursor),
+                    ),
                     _ => false,
                 };
                 if !inside {
@@ -225,17 +330,72 @@ pub async fn quota_window(app: AppHandle, webview: Webview, action: String) -> R
 mod tests {
     use super::*;
     #[test]
-    fn hover_requires_500ms_and_cannot_survive_leave_or_reentry() {
+    fn hover_requires_100ms_and_cannot_survive_leave_or_reentry() {
         let state = HoverState::default();
         state.over_icon.store(true, Ordering::Release);
-        assert!(!state.ready(0, Duration::from_millis(499)));
-        assert!(state.ready(0, Duration::from_millis(500)));
+        assert!(!state.ready(0, Duration::from_millis(99)));
+        assert!(state.ready(0, Duration::from_millis(100)));
         state.over_icon.store(false, Ordering::Release);
-        assert!(!state.ready(0, Duration::from_millis(600)));
+        assert!(!state.ready(0, Duration::from_millis(200)));
         state.generation.fetch_add(1, Ordering::AcqRel);
         state.over_icon.store(true, Ordering::Release);
-        assert!(!state.ready(0, Duration::from_millis(900)));
-        assert!(!state.ready(1, Duration::from_millis(499)));
+        assert!(!state.ready(0, Duration::from_millis(400)));
+        assert!(!state.ready(1, Duration::from_millis(99)));
+    }
+    /// What `leave` does to the state, without its polling thread.
+    fn pointer_leaves(state: &HoverState) {
+        state.over_icon.store(false, Ordering::Release);
+        state.generation.fetch_add(1, Ordering::AcqRel);
+    }
+    #[test]
+    fn the_icon_of_an_open_popup_keeps_it_open_and_shows_it_only_once() {
+        let state = HoverState::default();
+        let first = state.entered().expect("a closed popup is shown after the delay");
+        assert!(state.ready(first, HOVER_DELAY));
+        assert!(state.opening(), "the first show opens the popup");
+        // The pointer goes up to the popup, then back down to the icon.
+        pointer_leaves(&state);
+        let planned_close = state.generation.load(Ordering::Acquire);
+        assert_eq!(state.entered(), None, "no second show is scheduled");
+        assert_ne!(state.generation.load(Ordering::Acquire), planned_close, "the close the leave planned is cancelled");
+        // A show that still arrives, from the command or an older hover, does nothing.
+        assert!(!state.ready(first, Duration::from_secs(1)));
+        assert!(!state.opening(), "no second show and no second tray://open");
+        assert_eq!(state.opened.load(Ordering::Acquire), 1);
+        // Moving over the icon while it is open schedules nothing either.
+        assert_eq!(state.entered(), None);
+    }
+    #[test]
+    fn a_closed_popup_opens_again_on_the_next_hover() {
+        let state = HoverState::default();
+        assert!(state.opening());
+        state.closed();
+        let next = state.entered().expect("a hover over a closed popup opens it");
+        assert!(state.ready(next, HOVER_DELAY));
+        assert!(state.opening());
+        assert_eq!(state.opened.load(Ordering::Acquire), 2);
+    }
+    #[test]
+    fn the_pointer_keeps_the_popup_open_on_its_way_between_icon_and_popup() {
+        // A 24 px icon on a bottom taskbar, the popup 12 px above it.
+        let icon = (1800.0, 1044.0, 1824.0, 1068.0);
+        let popup = (1622.0, 572.0, 2002.0, 1032.0);
+        assert!(keeps_open((1700.0, 700.0), popup, Some(icon)), "over the popup");
+        assert!(keeps_open((1812.0, 1038.0), popup, Some(icon)), "in the gap above the icon");
+        assert!(keeps_open((1812.0, 1050.0), popup, Some(icon)), "over the icon");
+        assert!(!keeps_open((1700.0, 1038.0), popup, Some(icon)), "in the gap but beside the icon");
+        assert!(!keeps_open((1850.0, 1050.0), popup, Some(icon)), "on the taskbar beside the icon");
+        assert!(!keeps_open((1812.0, 1038.0), popup, None), "with no icon, the popup alone counts");
+        // A taskbar at the top puts the popup below the icon.
+        let icon = (1800.0, 12.0, 1824.0, 36.0);
+        let popup = (1622.0, 60.0, 2002.0, 520.0);
+        assert!(keeps_open((1812.0, 48.0), popup, Some(icon)));
+        assert!(!keeps_open((1812.0, 540.0), popup, Some(icon)));
+    }
+    #[test]
+    fn the_page_learns_whether_windows_draws_its_frame() {
+        assert_eq!(page_url(true), "index.html?view=quotas&frame=native");
+        assert_eq!(page_url(false), "index.html?view=quotas");
     }
     #[test]
     fn a_hidden_popup_is_released_only_when_nothing_opened_it_since() {

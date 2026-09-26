@@ -6,14 +6,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, Runtime, Webview};
-#[cfg(windows)]
-use tauri::{utils::config::WindowEffectsConfig, window::Effect};
 
 use crate::browser::{self, MAIN_LABEL};
 use crate::channel::Channel;
 #[cfg(windows)]
-use crate::material::{supported_materials, windows_build};
+use crate::material::{apply_material, supported_materials, windows_build};
 use crate::quota_window;
+
+/// Whether an undecorated window may keep the shadow Tauri gives it by default.
+/// Below Windows 11 (22000), tao answers `WM_NCCALCSIZE` for such a window with
+/// a client area shrunk by the resize frame on the left, right and bottom
+/// (8 px at 100%) and none at the top, and Windows paints its frame into that
+/// band: a grey edge on three sides. Windows 11 keeps the band invisible and
+/// draws its shadow and rounded corners from it. Pure, so every build is a test.
+pub(crate) fn undecorated_shadow(build: u32) -> bool {
+    build >= 22000
+}
 
 pub(crate) fn hidden() -> bool {
     std::env::var("BOITE_SHELL_HIDDEN").ok().as_deref() == Some("1")
@@ -158,23 +166,19 @@ pub(crate) fn build_main_window<R: Runtime>(
                     browser::close_all(window.app_handle());
                 }
             });
-    // Acrylic is what a window opens on where DWM draws it, and `lib/glass.ts`
-    // re-applies whatever the setting says as soon as the UI mounts. A Windows
-    // with no material but solid (Windows 10) gets an opaque window with
-    // nothing to composite; elsewhere the window stays opaque too.
+    // A window that can wear a material is built transparent, the one thing
+    // that cannot change later; the material itself is set once it exists. A
+    // Windows with no material but solid (Windows 10) gets an opaque window
+    // with nothing to composite, and no shadow band either.
+    #[cfg(windows)]
+    let build = windows_build();
     #[cfg(windows)]
     {
-        let kinds = supported_materials(windows_build());
-        if kinds.contains(&"mica") {
+        if supported_materials(build).contains(&"mica") {
             builder = builder.transparent(true);
         }
-        if kinds.contains(&"acrylic") {
-            builder = builder.effects(WindowEffectsConfig {
-                effects: vec![Effect::Acrylic],
-                state: None,
-                radius: None,
-                color: None,
-            });
+        if !undecorated_shadow(build) {
+            builder = builder.shadow(false);
         }
     }
     builder = match work_area(app) {
@@ -190,7 +194,17 @@ pub(crate) fn build_main_window<R: Runtime>(
     if let Some(args) = test_browser_args() {
         builder = builder.additional_browser_args(&args);
     }
-    builder.build()
+    let window = builder.build()?;
+    // Acrylic is what a window opens on where DWM draws it, and `lib/glass.ts`
+    // applies whatever the setting says as soon as the UI mounts.
+    #[cfg(windows)]
+    if supported_materials(build).contains(&"acrylic") {
+        let applied = window.hwnd().map_err(|error| error.to_string()).and_then(|hwnd| apply_material(hwnd.0, "acrylic", build));
+        if let Err(error) = applied {
+            eprintln!("[shell] the main window opens without its material: {error}");
+        }
+    }
+    Ok(window)
 }
 
 /// The window is created hidden and only reaches the screen here: at start
@@ -237,6 +251,15 @@ mod tests {
         // Never below the minimum size, and then pinned to the top left.
         assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (0.0, 0.0, 800.0, 500.0)), (0.0, 0.0, 880.0, 560.0));
         assert_eq!(super::centred((1280.0, 890.0), (880.0, 560.0), (60.0, 40.0, 800.0, 500.0)), (60.0, 40.0, 880.0, 560.0));
+    }
+
+    #[test]
+    fn an_undecorated_window_keeps_its_shadow_from_windows_11_only() {
+        // Windows 10 22H2 paints its frame into the shadow's band on three sides.
+        assert!(!super::undecorated_shadow(19045));
+        assert!(!super::undecorated_shadow(21999));
+        assert!(super::undecorated_shadow(22000));
+        assert!(super::undecorated_shadow(26200));
     }
 
     #[test]

@@ -77,8 +77,15 @@ build draws without lag: acrylic from build 22523, where DWM draws it as a
 system backdrop, mica from 22000, and solid always. Windows 10 offers solid
 alone, so the row is hidden there and the window opens opaque. A stored choice
 the build does not offer is shown and applied as solid. The shell refuses a
-material its build does not offer, because Tauri reports success for one it
-cannot draw and the page would turn transparent over nothing.
+material its build does not offer, because DWM accepts a value it cannot draw
+and the page would turn transparent over nothing.
+
+The shell sets every material, solid included, as one value of the DWM system
+backdrop and reads it back, so changes work in any order. It does not use
+Tauri's `set_effects`, whose clear (our solid) also sets the window's accent
+policy to disabled. That call is the only one the broken path made: a material
+picked after solid was stored by DWM, yet the window showed no backdrop and
+turned see-through.
 
 ## Context transfer
 

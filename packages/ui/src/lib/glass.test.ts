@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { applyGlass, effectiveGlass, GLASS_STORAGE_KEY, readGlass, setGlass, supportedGlass } from './glass';
+import { applyGlass, effectiveGlass, GLASS_STORAGE_KEY, hasMaterialChoice, readGlass, setGlass, supportedGlass } from './glass';
 
 type Shell = { __TAURI_INTERNALS__?: unknown };
 
@@ -91,6 +91,11 @@ describe('the window material', () => {
     expect(await supportedGlass()).toEqual(EVERY);
     expect(effectiveGlass('acrylic', ['mica', 'solid'])).toBe('solid');
     expect(effectiveGlass('mica', ['mica', 'solid'])).toBe('mica');
+    // Windows 10: a stored acrylic reads back as solid, and the setting hides itself.
+    expect(effectiveGlass('acrylic', ['solid'])).toBe('solid');
+    expect(hasMaterialChoice(['solid'])).toBe(false);
+    expect(hasMaterialChoice([])).toBe(false);
+    expect(hasMaterialChoice(['mica', 'solid'])).toBe(true);
   });
 
   test('material refusal keeps the document opaque', async () => {
