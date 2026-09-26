@@ -180,7 +180,7 @@ test('usage and reach explain themselves without delayed account lists or exits'
   expect(switches.length).toBe(0);
   expect(document.body.textContent).toContain('24% used');
   expect(document.body.textContent).toContain('5-hour limit');
-  expect(document.body.textContent).toContain('beside the clock');
+  expect(document.body.textContent).toContain('Hover the Boite icon');
 
   await click('onboarding-dot-reach');
   expect(document.querySelector('[data-testid=onboarding-pair]')).toBeNull();
