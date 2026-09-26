@@ -6,20 +6,25 @@
   import ModelPicker from '../ModelPicker.svelte';
   import EffortSlider from '../EffortSlider.svelte';
   import Menu from '../Menu.svelte';
+  import InfoTip from '../InfoTip.svelte';
 
   /**
    * Creates a record, or edits one in its Settings tab (`embedded`). An agent's model, effort and
    * permissions are edited beside it in `AgentRuntimeSettings`, which owns the allowed routes.
+   * A mission started from a conversation arrives with that conversation's members and team (`preset`).
    */
-  let { view, kind, record = null, embedded = false, ondone, oncancel }: {
+  let { view, kind, record = null, embedded = false, preset, heading, ondone, oncancel }: {
     view: AgentsView;
     kind: AgentEntryKind;
     record?: AgentEntities[AgentEntryKind] | null;
     embedded?: boolean;
+    preset?: { memberIds: string[]; teamId: string | null };
+    /** The embedded card's title, when it is not the record's identity. */
+    heading?: string;
     ondone: (selection: AgentSelection) => void;
     oncancel: () => void;
   } = $props();
-  const initial = untrack(() => ({ kind, record }));
+  const initial = untrack(() => ({ kind, record, preset }));
   const profile = initial.kind === 'profile' ? initial.record as AgentProfile | null : null;
   const group = initial.kind === 'group' ? initial.record as AgentGroup | null : null;
   const team = initial.kind === 'team' ? initial.record as AgentTeam | null : null;
@@ -37,14 +42,14 @@
   let tools = $state<string[]>(profile?.tools ?? [...TOOLS]);
   let status = $state(profile?.status ?? 'active');
   let accountIntegration = $state(profile?.accountIntegration ?? 'provider');
-  let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? []);
+  let memberIds = $state(group?.memberIds ?? team?.members.map(m => m.agentId) ?? mission?.agentIds ?? initial.preset?.memberIds ?? []);
   let responsibilities = $state<Record<string, string>>(Object.fromEntries(team?.members.map(m => [m.agentId, m.responsibility]) ?? []));
   let mode = $state(group?.mode ?? 'mentions');
   let maxTurns = $state(group?.maxTurns ?? mission?.maxTurns ?? 6);
   let perAgent = $state(group?.maxTurnsPerAgent ?? 2);
   let paused = $state(group?.paused ?? team?.paused ?? false);
   let groupId = $state(team?.groupId ?? null);
-  let teamId = $state(mission?.teamId ?? null);
+  let teamId = $state(mission?.teamId ?? initial.preset?.teamId ?? null);
   let projectId = $state(mission?.projectId ?? null);
   let projectIds = $state(team?.projectIds ?? []);
   let objective = $state(mission?.objective ?? '');
@@ -113,15 +118,8 @@
 {/snippet}
 
 <form class="agents-form" onsubmit={event => { event.preventDefault(); void save(); }} data-testid="agent-editor">
-  {#if creating}
-    <header class="agents-page-head">
-      <h2>{labels.newTitle[kind]}</h2>
-      <p>{labels.kindHints[kind]}</p>
-    </header>
-  {/if}
-
   <section class="card">
-    {#if embedded}<h2>{labels.identity}</h2>{/if}
+    {#if embedded}<h2>{heading ?? labels.identity}</h2>{/if}
     <label class="agent-field">{labels.name}<input required maxlength="200" bind:value={name} data-testid="agent-name" /></label>
 
     {#if kind === 'profile'}
@@ -134,9 +132,8 @@
       {/if}
     {:else if kind === 'group'}
       {@render members()}
-      <div class="agent-field"><span>{labels.mode}</span>
+      <div class="agent-field"><span class="agent-label">{labels.mode}<InfoTip topic={labels.mode} text={labels.modeHint} /></span>
         <Menu placement="bottom" label={labels.mode} items={(['mentions', 'round', 'autonomous'] as const).map(id => ({ id, label: labels[id], active: mode === id }))} onpick={id => { mode = id as AgentGroup['mode']; }}>{labels[mode]}</Menu>
-        <p class="hint">{labels.modeHint}</p>
       </div>
     {:else if kind === 'team'}
       <label class="agent-field">{labels.description}<textarea bind:value={description} rows="2"></textarea></label>
