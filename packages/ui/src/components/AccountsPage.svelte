@@ -7,6 +7,7 @@
   import QuotaList from './QuotaList.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
+  import ModelDefaultsSettings from './ModelDefaultsSettings.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { bytes, percent } from '../lib/format';
   import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
@@ -476,6 +477,8 @@
       </section>
     {/each}
   </div>
+
+  <ModelDefaultsSettings {store} />
 </div>
 
 <style>

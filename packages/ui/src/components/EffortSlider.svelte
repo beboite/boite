@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { Brain, Zap } from '@lucide/svelte';
+  import { Brain, Pin, Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { levelName } from '../lib/format';
 
   /**
@@ -18,7 +18,9 @@
     onpick,
     speeds = [],
     speed = null,
-    onspeed = () => {}
+    onspeed = () => {},
+    pinned = false,
+    onpin
   }: {
     levels: EffortLevel[];
     /** The level the thread or draft runs, the model's own default when it picked none. */
@@ -27,6 +29,10 @@
     speeds?: { id: string; label: string; description?: string }[];
     speed?: string | null;
     onspeed?: (id: string | null) => void;
+    /** Whether this device keeps the chip in the bar at the model's default. */
+    pinned?: boolean;
+    /** The chip's own pin, so the Options menu never lists the effort twice. */
+    onpin?: (on: boolean) => void;
   } = $props();
 
   const popover = new Closing();
@@ -167,6 +173,9 @@
     >
       <div class="heading">
         <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
+        {#if onpin}
+          <button type="button" class="ghost icon pin" class:on={pinned} aria-pressed={pinned} aria-label={fill(strings.composer.pin, { option: strings.composer.effortTitle })} title={fill(strings.composer.pin, { option: strings.composer.effortTitle })} data-testid="composer-pin-effort" onclick={() => onpin(!pinned)}><Pin size={13} strokeWidth={1.75} /></button>
+        {/if}
       </div>
 
       {#if levels.length > 0}
@@ -208,7 +217,11 @@
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-.heading { display: flex; justify-content: center; align-items: center; min-height: 22px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
+.heading { position: relative; display: flex; justify-content: center; align-items: center; min-height: 22px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
+.pin { position: absolute; right: -4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; color: var(--color-subtle); }
+.pin:active:not(:disabled) { transform: translateY(-50%) scale(0.97); }
+.pin.on { color: var(--color-accent); }
+.pin.on :global(svg) { fill: currentColor; }
 .level { white-space: nowrap; }
 .speed { height: var(--control-sm); color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
 .speed :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }

@@ -393,7 +393,7 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
   await click('onboarding-profile-everyday');
   expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('true');
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files' });
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files', developer: false });
   // The everyday answer asks before each action.
   expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({ permissionMode: 'default' });
 
@@ -402,5 +402,5 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('false');
   await click('onboarding-skip');
   await settle();
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes' });
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes', developer: true });
 });

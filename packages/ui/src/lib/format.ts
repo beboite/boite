@@ -12,7 +12,8 @@ interface Formatters {
   clock: Intl.DateTimeFormat;
   dayClock: Intl.DateTimeFormat;
   calendar: Intl.DateTimeFormat;
-  relative: Intl.RelativeTimeFormat;
+  /** `22 min` in both languages: French's narrow relative form reads `-22 min`. */
+  minutes: Intl.NumberFormat;
   counter: Intl.NumberFormat;
   plain: Intl.NumberFormat;
   /** One digit after the decimal sign, always: `38.0 s`, `38,0 s`. */
@@ -31,7 +32,7 @@ function formatters(): Formatters {
     clock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     dayClock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit' }),
     calendar: new Intl.DateTimeFormat(tag, { day: 'numeric', month: 'short' }),
-    relative: new Intl.RelativeTimeFormat(tag, { numeric: 'auto', style: 'narrow' }),
+    minutes: new Intl.NumberFormat(tag, { style: 'unit', unit: 'minute', unitDisplay: 'short' }),
     counter: new Intl.NumberFormat(tag, { notation: 'compact', maximumFractionDigits: 1 }),
     plain: new Intl.NumberFormat(tag),
     tenths: new Intl.NumberFormat(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
@@ -149,12 +150,12 @@ export function percent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-/** "now", "5 min ago", "14:02", "3 Sep": what a sidebar row needs and nothing more. */
+/** "now", "5 min", "14:02", "3 Sep": what a sidebar row needs and nothing more. */
 export function ago(value: number, now = Date.now()): string {
   const delta = now - value;
   if (delta < 45_000) return strings.time.now;
   const set = formatters();
-  if (delta < 3_600_000) return set.relative.format(-Math.round(delta / 60_000), 'minute');
+  if (delta < 3_600_000) return set.minutes.format(Math.round(delta / 60_000));
   const then = new Date(value);
   const today = new Date(now);
   const sameDay =

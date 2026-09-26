@@ -7,6 +7,8 @@
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import RemoteCoordination from './RemoteCoordination.svelte';
+  import PairingCard from './PairingCard.svelte';
+  import PhoneSettings from './PhoneSettings.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
@@ -62,7 +64,7 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{strings.machines.heading}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
+      <h1>{mobile ? strings.machines.heading : strings.settings.tabs.machines}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
     {#if !open}
       <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
@@ -117,7 +119,7 @@
     </div>
   </div>
 
-  <div class="machines">
+  <div class="machines" id="settings-machines">
     {#each workspace.machines as machine (machine.id)}
       <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
         <div class="main">
@@ -163,8 +165,15 @@
     {/each}
   </div>
 
-  {#if !mobile && workspace.machines.some(machine => machine.store.owner)}
+  <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
+  {#if !mobile && workspace.machines.filter(machine => machine.store.owner).length > 1}
     <RemoteCoordination />
+  {/if}
+
+  {#if !mobile}
+    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
+    <PairingCard store={workspace.active} />
+    <PhoneSettings store={workspace.active} />
   {/if}
 
   {#if workspace.active.owner && !mobile}
@@ -255,6 +264,7 @@
   .machines {
     display: grid;
     gap: 8px;
+    scroll-margin-top: 24px;
   }
   .machine-card {
     display: flex;

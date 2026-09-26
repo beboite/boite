@@ -7,6 +7,7 @@
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
+  import { work } from '../lib/work-prefs.svelte';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import Menu from './Menu.svelte';
@@ -74,7 +75,7 @@
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
     const toggles: MenuItem[] = [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }];
-    if (store.owner) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
+    if (store.owner && work.current.developer) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
     return [...toggles, separator('sep-toggles'), ...titleItems];
   });
 
@@ -172,6 +173,7 @@
            shell is the same: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
         {@const terminalKey = store.keyLabel('terminal')}
+        {#if work.current.developer}
         <button
           type="button"
           class="ghost trace in-title-menu"
@@ -184,6 +186,7 @@
         >
           <SquareTerminal size={16} strokeWidth={1.75} />
         </button>
+        {/if}
         <button
           type="button"
           class="ghost trace"

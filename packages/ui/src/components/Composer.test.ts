@@ -421,11 +421,33 @@ test('an install that already has conversations keeps every chip in the bar', as
   query('[data-testid=composer-worktree]');
   expect(input().placeholder).toBe('What do you want to do?');
 
-  // The Options menu still lists them, their pins pressed.
+  // Both are chips, so Options would only say them twice: it steps aside.
+  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
+  // The pin went with the chip: the effort popover carries it, pressed.
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(query('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('true');
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
+
+  // Unpinned there, effort goes back to Options, which comes back with it.
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').click();
+  await waitFor(() => effortChip() === null);
   query<HTMLButtonElement>('[data-testid=composer-more]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
-  expect(query('[data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('true');
-  expect(query('[data-testid=composer-pin-worktree]').getAttribute('aria-pressed')).toBe('true');
+  expect(query('[data-testid=composer-more-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
+  // The worktree chip is still in the bar, so Options does not list it.
+  expect(document.querySelector('[data-testid=composer-options-worktree]')).toBeNull();
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') === null);
+
+  // A chip with no popover of its own takes its pin on a right-click.
+  query('[data-testid=composer-worktree]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=pin]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=pin]').click();
+  await waitFor(() => work.current.pins.worktree === false);
 });
 
 test('a first run keeps effort and worktree in Options until pinned, and a worktree turned on stays in view', async () => {

@@ -32,7 +32,7 @@
   $effect(() => {
     if (page === 'phone' && store.connection === 'ready') void store.loadSessions();
   });
-  function back() { phone = false; archived = false; store.showSettings('general'); }
+  function back() { phone = false; archived = false; store.showSettings(); }
 </script>
 
 <!-- `settings` gives the detail pages the same grammar as the desktop ones. -->
@@ -43,16 +43,15 @@
       <h1>{strings.settings.heading}</h1>
       <section aria-labelledby="phone-preferences">
         <h2 id="phone-preferences">{strings.mobile.settingsDevice}</h2>
-        <p>{strings.mobile.settingsDeviceHint}</p>
         <div class="rows">
           <button class="ghost row" data-testid="mobile-settings-phone" onclick={() => { phone = true; }}>
-            <Bell size={20} /><span><strong>{strings.mobile.settingsPhone}</strong><small>{strings.mobile.settingsPhoneHint}</small></span><ChevronRight size={18} />
+            <Bell size={20} /><span>{strings.mobile.settingsPhone}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-appearance" onclick={() => store.showSettings('appearance')}>
-            <Palette size={20} /><span><strong>{strings.settings.tabs.appearance}</strong><small>{strings.mobile.settingsAppearanceHint}</small></span><ChevronRight size={18} />
+            <Palette size={20} /><span>{strings.settings.tabs.appearance}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
-            <Compass size={20} /><span><strong>{strings.onboarding.replay}</strong><small>{strings.onboarding.replayHint}</small></span><ChevronRight size={18} />
+            <Compass size={20} /><span>{strings.onboarding.replay}</span><ChevronRight size={18} />
           </button>
         </div>
       </section>
@@ -60,23 +59,22 @@
         <h2 id="remote-machines">{strings.machines.heading}</h2>
         <div class="rows">
           <button class="ghost row" data-testid="settings-tab-machines" onclick={() => store.showSettings('machines')}>
-            <Monitor size={20} /><span><strong>{strings.connection.manage}</strong><small>{strings.mobile.settingsMachinesHint}</small></span><ChevronRight size={18} />
+            <Monitor size={20} /><span>{strings.connection.manage}</span><ChevronRight size={18} />
           </button>
-          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span><strong>{strings.brain.heading}</strong><small>{strings.brain.description}</small></span><ChevronRight size={18} /></button>{/if}
+          {#if store.owner}<button class="ghost row" data-testid="settings-tab-brain" onclick={() => store.showSettings('brain')}><Brain size={20} /><span>{strings.brain.heading}</span><ChevronRight size={18} /></button>{/if}
           <button class="ghost row" data-testid="settings-tab-voice" onclick={() => store.showSettings('voice')}>
-            <Mic size={20} /><span><strong>{strings.speech.heading}</strong><small>{strings.speech.phoneHint}</small></span><ChevronRight size={18} />
+            <Mic size={20} /><span>{strings.speech.heading}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-usage" onclick={() => store.showSettings('usage')}>
-            <Coins size={20} /><span><strong>{strings.usage.heading}</strong><small>{strings.usage.phoneHint}</small></span><ChevronRight size={18} />
+            <Coins size={20} /><span>{strings.usage.heading}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
-            <Gauge size={20} /><span><strong>{strings.usage.limits}</strong><small>{strings.usage.limitsIntro}</small></span><ChevronRight size={18} />
+            <Gauge size={20} /><span>{strings.usage.limits}</span><ChevronRight size={18} />
           </button>
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
-            <ArchiveRestore size={20} /><span><strong>{strings.settings.archived.heading}</strong><small>{strings.mobile.settingsArchivedHint}</small></span><ChevronRight size={18} />
+            <ArchiveRestore size={20} /><span>{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
         </div>
-        <p>{strings.mobile.settingsRemoteHint}</p>
       </section>
     </div>
   {:else}
@@ -103,7 +101,6 @@
         <LimitsPage {store} />
       {:else if page === 'archived'}
         <div class="page archived-page">
-          <p class="lead">{strings.settings.archived.intro}</p>
           <ArchivedThreads {store} />
         </div>
       {:else}
@@ -124,19 +121,15 @@
   p { font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; margin: 8px 0 12px; }
   .rows { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
   /* A ghost button is muted; a row title reads like any other settings label. */
-  .row { display: flex; width: 100%; height: auto; min-height: 72px; gap: 12px; padding: 16px; text-align: left; border-radius: 0; white-space: normal; color: var(--color-foreground); }
+  .row { display: flex; align-items: center; width: 100%; height: auto; min-height: 56px; gap: 12px; padding: 12px 16px; font-size: var(--text-base); font-weight: 500; text-align: left; border-radius: 0; white-space: normal; color: var(--color-foreground); }
   .row + .row { border-top: 1px solid var(--color-border); }
   .row span { flex: 1; min-width: 0; }
   .row :global(svg) { flex: none; color: var(--color-muted-foreground); }
-  h2 + p { margin-top: 0; }
-  strong { display: block; font-size: var(--text-base); font-weight: 500; }
-  small { display: block; margin-top: 4px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.45; }
   header { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
   header .icon { width: 44px; min-height: 44px; }
   header h1 { font-size: var(--text-md); }
   .phone-page { padding: 16px; }
   .scope { overflow-wrap: anywhere; margin-top: 0; }
-  .lead { margin-top: 0; }
   .phone-page :global(.card) { padding: 18px; }
   .detail :global(.page), .detail :global(.machines-page) { padding: 16px; }
   /* The bar above already names the page, so its own title steps aside. */

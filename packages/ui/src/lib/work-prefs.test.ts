@@ -16,13 +16,13 @@ const stored = () => JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ??
 test('an install that already has conversations keeps every chip and the launcher', () => {
   work.settle(true);
   expect(work.current).toEqual(migratedWork());
-  expect(stored()).toEqual({ profile: null, pins: { effort: true, worktree: true }, startIn: 'project', panel: 'launcher' });
+  expect(stored()).toEqual({ profile: null, pins: { effort: true, worktree: true }, startIn: 'project', panel: 'launcher', developer: true });
 });
 
 test('a first run starts calm: nothing pinned, the drafts, the files panel', () => {
   work.settle(false);
   expect(work.current).toEqual(freshWork());
-  expect(stored()).toEqual({ profile: null, pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files' });
+  expect(stored()).toEqual({ profile: null, pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files', developer: false });
 });
 
 test('a record already on the device wins over both, and settles once', () => {
@@ -33,7 +33,7 @@ test('a record already on the device wins over both, and settles once', () => {
   // A later boot reads the same record back.
   work.load();
   work.settle(true);
-  expect(work.current).toEqual({ profile: 'developer', pins: { effort: true, worktree: false }, startIn: 'project', panel: 'changes' });
+  expect(work.current).toEqual({ profile: 'developer', pins: { effort: true, worktree: false }, startIn: 'project', panel: 'changes', developer: true });
 });
 
 test('each answer writes its preset, and every piece changes on its own afterwards', () => {
@@ -41,7 +41,15 @@ test('each answer writes its preset, and every piece changes on its own afterwar
   expect(work.current).toEqual({ profile: 'everyday', ...PRESETS.everyday });
   work.setStartIn('project');
   work.setPanel('launcher');
-  expect(stored()).toMatchObject({ profile: 'everyday', startIn: 'project', panel: 'launcher' });
+  work.setDeveloper(true);
+  expect(stored()).toMatchObject({ profile: 'everyday', startIn: 'project', panel: 'launcher', developer: true });
+});
+
+test('a record from before the developer switch keeps what its answer meant', () => {
+  const base = { pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files' };
+  expect(parseWork(JSON.stringify({ ...base, profile: 'everyday' }))?.developer).toBe(false);
+  expect(parseWork(JSON.stringify({ ...base, profile: 'developer' }))?.developer).toBe(true);
+  expect(parseWork(JSON.stringify({ ...base, profile: null }))?.developer).toBe(true);
 });
 
 test('a record that does not read like one is ignored', () => {
@@ -52,6 +60,7 @@ test('a record that does not read like one is ignored', () => {
     profile: null,
     pins: { effort: false, worktree: false },
     startIn: 'project',
-    panel: 'launcher'
+    panel: 'launcher',
+    developer: true
   });
 });

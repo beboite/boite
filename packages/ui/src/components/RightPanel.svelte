@@ -10,7 +10,7 @@
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { CARDS, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
+  import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
@@ -212,14 +212,14 @@
       return;
     }
     const key = event.key.toLowerCase();
-    const card = CARDS.find((one) => one.key.toLowerCase() === key);
+    const card = offeredCards().find((one) => one.key.toLowerCase() === key);
     if (!card) return;
     event.preventDefault();
     launch(card.kind);
   }
 
   let menuItems = $derived(
-    CARDS.map((card) => ({
+    offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
       disabled: !available(card.kind),

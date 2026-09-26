@@ -158,7 +158,7 @@ test('an archived thread comes back from Settings > General', async () => {
 
 test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {
   await mountOnFake();
-  store.showSettings('general');
+  store.showSettings('advanced');
   await waitFor(() => document.querySelector('[data-testid=scheduler-save]') !== null);
   const field = query<HTMLInputElement>('[data-testid=setting-maxConcurrentTurns]');
   field.value = '0';
@@ -182,7 +182,7 @@ test('the scheduler never says Saved after a refused save, and refuses an out-of
 
 test('the LAN switch saves when it flips, like every other switch in Settings', async () => {
   await mountOnFake();
-  store.showSettings('general');
+  store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=setting-listen-on-lan]') !== null);
   const before = store.settings?.listenOnLan ?? false;
   query<HTMLInputElement>('[data-testid=setting-listen-on-lan]').click();

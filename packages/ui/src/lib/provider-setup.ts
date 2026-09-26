@@ -44,6 +44,11 @@ export function setupStep(
   return provider.login ? 'sign-in' : 'external';
 }
 
+/** A provider something can run on right now: its agent is there and an account is signed in. */
+export function connected(provider: ProviderSummary, accounts: Account[]): boolean {
+  return provider.available && accounts.some((account) => account.providerId === provider.id && account.status === 'ok');
+}
+
 /** The account a sign-in from the row lands on: one Boite already made and nobody is logged into. */
 export function signInTarget(accounts: Account[]): Account | null {
   return accounts.find((account) => account.isolationDir !== null && account.status !== 'ok') ?? null;

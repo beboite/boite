@@ -24,7 +24,7 @@ export class Layout {
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
   renameRequested = $state(false);
   page = $state<Page>('chat');
-  settingsTab = $state<SettingsTab>('general');
+  settingsTab = $state<SettingsTab>('home');
   /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */
   settingsSection = $state<{ id: string; request: number } | null>(null);
   /** The phone drawer. */
@@ -64,7 +64,7 @@ export class Layout {
   // Navigation
   // -------------------------------------------------------------------------
 
-  showSettings(tab: SettingsTab = 'general', section: string | null = null): void {
+  showSettings(tab: SettingsTab = 'home', section: string | null = null): void {
     this.settingsTab = tab;
     this.settingsSection = section === null
       ? null

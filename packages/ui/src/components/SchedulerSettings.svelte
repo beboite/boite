@@ -43,6 +43,12 @@
     return strings.settings[key];
   }
 
+  const HINTS: Record<NumberKey, 'maxConcurrentTurnsHint' | 'perAccountConcurrencyHint' | 'warmProcessMinutesHint'> = {
+    maxConcurrentTurns: 'maxConcurrentTurnsHint',
+    perAccountConcurrency: 'perAccountConcurrencyHint',
+    warmProcessMinutes: 'warmProcessMinutesHint'
+  };
+
   async function save() {
     if (!allValid || saving) return;
     saving = true;
@@ -56,22 +62,16 @@
     if (ok) dirty = false;
   }
 
-  /** A switch saves when it flips, as every other switch in Settings does; a refusal puts it back. */
-  async function toggle(key: 'listenOnLan' | 'asyncQuestions', input: HTMLInputElement) {
-    const ok = await store.saveSettings({ [key]: input.checked });
-    if (!ok) input.checked = store.settings?.[key] ?? !input.checked;
-  }
 </script>
 
-<!-- The whole card is the owner's machine, so a paired device does not see it.
-     `listenOnLan` decides whether a phone can reach the core at all. -->
+<!-- The whole card is the owner's machine, so a paired device does not see it. -->
 {#if store.owner}
-  <section class="card" id="settings-scheduler" data-testid="scheduler-settings">
-    <h2>{strings.settings.scheduler}</h2>
+  <section class="card" id="settings-execution" data-testid="scheduler-settings">
+    <h2>{strings.settings.execution}</h2>
     <div class="grid">
       {#each FIELDS as field (field.key)}
         <label>
-          <span>{label(field.key)}</span>
+          <span class="name">{label(field.key)}<InfoTip topic={label(field.key)} text={strings.settings[HINTS[field.key]]} /></span>
           <input
             type="number"
             min={field.min}
@@ -89,23 +89,6 @@
         </label>
       {/each}
     </div>
-    <label for="{uid}-listen-on-lan" class="switch-row">
-      <span class="text">
-        <span id="{uid}-listen-on-lan-name">{strings.settings.listenOnLan}</span><InfoTip topic={strings.settings.listenOnLan} text={strings.settings.listenOnLanHint} />
-      </span>
-      <input id="{uid}-listen-on-lan" aria-labelledby="{uid}-listen-on-lan-name" type="checkbox" role="switch" data-testid="setting-listen-on-lan"
-        checked={store.settings?.listenOnLan ?? false} disabled={!store.settings}
-        onchange={(event) => void toggle('listenOnLan', event.currentTarget)} />
-    </label>
-    <label class="switch-row">
-      <span class="text">
-        {strings.settings.asyncQuestions}
-        <span class="hint">{strings.settings.asyncQuestionsHint}</span>
-      </span>
-      <input type="checkbox" role="switch" data-testid="setting-async-questions"
-        checked={store.settings?.asyncQuestions ?? true} disabled={!store.settings}
-        onchange={(event) => void toggle('asyncQuestions', event.currentTarget)} />
-    </label>
     <div class="actions">
       <button type="button" class="primary" data-testid="scheduler-save" disabled={!allValid || saving || !store.settings} onclick={() => void save()}>{strings.settings.save}</button>
       {#if savedAt !== null}
@@ -121,6 +104,9 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 10px;
   }
+
+  .grid label { display: grid; gap: 6px; }
+  .name { display: inline-flex; align-items: center; font-size: var(--text-sm); color: var(--color-muted-foreground); }
 
   input[type='number'] {
     width: 100%;

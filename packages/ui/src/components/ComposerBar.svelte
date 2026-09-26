@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { ArrowUp, GitBranch, Paperclip, ShieldAlert, ShieldCheck, Square } from '@lucide/svelte';
+  import { ArrowUp, GitBranch, Paperclip, Square } from '@lucide/svelte';
   import { tick } from 'svelte';
   import type { PermissionMode, ProviderSummary } from '@boite/contracts';
   import { tokens as formatTokens } from '../lib/format';
   import { confirm } from '../lib/confirm.svelte';
   import { switchDropsHistory, switchResetsCache, type CacheKey } from '../lib/switch-warning';
-  import { modeHint, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
+  import { modeHint, modeIcon, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import { work } from '../lib/work-prefs.svelte';
+  import { contextMenu } from '../lib/context-menu.svelte';
   import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
@@ -68,7 +69,10 @@
     modes.map((mode) => ({
       id: mode,
       label: modeLabel(mode, provider),
-      hint: modeHint(mode, provider),
+      // One word per row: what the mode allows is said on hover, not printed three times over.
+      title: modeHint(mode, provider),
+      glyph: modeIcon(mode),
+      live: mode === 'bypassPermissions',
       active: displayedMode === mode
     }))
   );
@@ -165,6 +169,12 @@
     else store.remember(choice);
   }
 
+  /** The worktree chip has no popover, so its pin rides its right click. */
+  function worktreeMenu(event: MouseEvent) {
+    const pinned = work.current.pins.worktree;
+    contextMenu.open(event, [{ id: 'pin', label: fill(pinned ? strings.composer.unpinOption : strings.composer.pin, { option: strings.composer.worktree }) }], () => work.pin('worktree', !pinned));
+  }
+
   function onchoose(event: Event) {
     const field = event.currentTarget as HTMLInputElement;
     const files = Array.from(field.files ?? []);
@@ -196,12 +206,13 @@
 
     <div class="desktop-options">
     {#if effortChip}
-      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
+      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} pinned={work.current.pins.effort} onpin={(on) => work.pin('effort', on)} />
     {/if}
 
     {#if modes.length > 0}
       <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
-        {#if displayedMode === 'bypassPermissions'}<span class="open-mode"><ShieldAlert size={14} strokeWidth={1.75} /></span>{:else}<ShieldCheck size={14} strokeWidth={1.75} />{/if}
+        {@const ModeIcon = modeIcon(displayedMode)}
+        <span class="mode-icon" class:open-mode={displayedMode === 'bypassPermissions'}><ModeIcon size={14} strokeWidth={1.75} /></span>
         {modeLabel(displayedMode, provider)}
       </Menu>
     {/if}
@@ -217,6 +228,7 @@
         aria-label={strings.composer.worktree}
         aria-pressed={store.draft.worktree}
         onclick={() => store.setDraftWorktree(!store.draft?.worktree)}
+        oncontextmenu={worktreeMenu}
       >
         <GitBranch size={14} strokeWidth={1.75} />
         {strings.composer.worktree}
@@ -224,7 +236,7 @@
     {/if}
 
     {#key `${key}:${store.draft?.projectId ?? ''}`}
-      <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
+      <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} inBar={{ effort: effortChip, worktree: worktreeChip }} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
     {/key}
     </div>
   </div>
@@ -289,7 +301,8 @@
   }
 
   /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
-  .open-mode { display: inline-flex; color: var(--color-live); }
+  .mode-icon { display: inline-flex; }
+  .open-mode { color: var(--color-live); }
   .chip.signed-out { color: var(--color-live); }
 
   .worktree.on {
