@@ -199,7 +199,7 @@ export const strings = {
     dynamic: 'All machines', recentHint: 'Most recent user message first',
     intro: 'Connect machines to see their projects and threads together. Each machine runs its own agents and files.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
-    addHint: 'On the other machine, open Settings, General, Phones and other devices, create a pairing link and paste it here. Turn on Full control there to manage its accounts and settings from this one.',
+    addHint: 'On the other machine, open Settings, Machines and devices, Phones and other devices, create a pairing link and paste it here. Turn on Full control there to manage its accounts and settings from this one.',
     labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
     removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
@@ -999,16 +999,12 @@ export const strings = {
     windows: 'Focus, audio and resource limits apply on the Windows host.',
   },
   resources: {
-    heading: 'Protection',
-    empty: 'No thread is using anything right now.',
-    live: 'Live processes',
-    totals: 'Totals',
+    empty: 'Nothing is running right now.',
     processes: 'processes',
     killTree: 'Kill tree',
     killConfirm: 'Kill every process of this thread?',
     killConfirmYes: 'Kill',
-    killConfirmNo: 'Cancel',
-    killed: 'Killed'
+    killConfirmNo: 'Cancel'
   },
 
   /** A provider whose files Boite downloads itself. */
@@ -1560,7 +1556,7 @@ export const strings = {
       task: 'Build my portfolio', secondTask: 'Fix the login', thirdTask: 'Write the tests', working: 'Working', request: 'Add a contact form', answer: 'The form is ready.', followup: 'Now check the accessibility', continued: 'Same thread. Same history.',
       voiceWords: 'Make the buttons easier to read', voiceHint: 'Speak, review the draft, then send.',
       changes: 'Changes', reviewed: 'Review the changes beside the chat.',
-      usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', tray: 'In your taskbar, beside the clock', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
+      usageLabel: 'Claude', window: '5-hour limit', used: '24% used', reset: 'Resets in 2 h 10 min', trayHint: 'Hover the Boite icon to see your limits without opening the app.',
       desktop: 'Your computer', phone: 'Your phone', synced: 'The same conversation', reachHint: 'After pairing by QR code, follow your agents from your phone. Your computer keeps running them.',
       notification: 'Contact form finished', quietBody: 'Let your agents work without taking over your screen or your speakers.',
       installVoice: 'Install local dictation', downloadVoice: 'About 200 MB. Audio stays on this computer.', installingVoice: 'Downloading voice engine', cancelVoice: 'Cancel download', readyVoice: 'Dictation is ready. Use the microphone in the composer.', retryVoice: 'Retry voice setup',

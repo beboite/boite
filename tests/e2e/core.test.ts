@@ -247,11 +247,11 @@ test(
     expect(records[0]?.threadId).toBe(thread.id);
     expect(records[0]?.exitedAt).not.toBeNull();
 
+    // The task manager is live: a thread lists there only while something runs.
     const resources = await client.call('resources.list', {});
-    const mine = resources.find((entry) => entry.threadId === thread.id);
+    for (const entry of resources) expect(entry.live.every((record) => record.exitedAt === null)).toBe(true);
     // The echo agent's title, written once the first turn was done: its prefix and the prompt's words.
-    expect(mine?.title).toBe('Echo: e2e');
-    expect(mine?.totals.processes).toBeGreaterThan(0);
+    expect((await client.call('threads.get', { threadId: thread.id })).title).toBe('Echo: e2e');
   },
   TIMEOUT,
 );

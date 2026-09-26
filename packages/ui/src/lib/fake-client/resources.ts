@@ -8,23 +8,18 @@ import type { FakeContext, FakeMethods } from './context';
 function resources(ctx: FakeContext): ThreadResources[] {
   const out: ThreadResources[] = [];
   for (const thread of ctx.threads.values()) {
-    const mine = ctx.processes.filter((p) => p.threadId === thread.id);
-    const live = mine.filter((p) => p.exitedAt === null);
-    // The core's rule: nothing ever ran, or archived with nothing running.
-    if (mine.length === 0 || (thread.archived && live.length === 0)) continue;
+    const live = ctx.processes.filter((p) => p.threadId === thread.id && p.exitedAt === null);
+    // The core's rule: only what runs now; what exited stays in the trace.
+    if (live.length === 0) continue;
     out.push({
       threadId: thread.id,
       title: thread.title,
       status: thread.status,
       live,
-      totals: {
-        processes: mine.length,
-        cpuMs: mine.reduce((sum, p) => sum + (p.cpuMs ?? 0), 0),
-        peakMemoryBytes: mine.reduce((max, p) => Math.max(max, p.peakMemoryBytes ?? 0), 0)
-      }
+      load: thread.load ?? { processes: live.length, cpuPercent: 0, memoryBytes: 0 }
     });
   }
-  return out.sort((a, b) => b.live.length - a.live.length);
+  return out.sort((a, b) => b.load.cpuPercent - a.load.cpuPercent);
 }
 
 export function resourceMethods(ctx: FakeContext) {

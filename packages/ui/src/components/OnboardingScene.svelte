@@ -7,6 +7,21 @@
   let { scene }: { scene: 'welcome' | 'agents' | 'voice' | 'panel' | 'usage' | 'reach' | 'quiet' } = $props();
   let paused = $state(false);
   let replay = $state(0);
+  let stage = $state<HTMLDivElement>();
+  /** Until the last of its animations ends, a scene is playing: it glows and offers a pause. */
+  let playing = $state(true);
+  function running(): boolean {
+    // An engine that cannot list animations is assumed to be playing, so the pause stays reachable.
+    if (!stage?.getAnimations) return true;
+    return stage.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running' || animation.playState === 'paused');
+  }
+  $effect(() => {
+    void scene; void replay;
+    playing = true;
+    const frame = requestAnimationFrame(() => { playing = running(); });
+    return () => cancelAnimationFrame(frame);
+  });
+  function ended() { if (!running()) playing = false; }
   // One markup per scene: the artwork reads the same strings as the tour around it.
   const t = $derived(strings.onboarding.demo);
   const description = $derived(scene === 'voice' ? t.voiceHint : scene === 'agents' ? t.continued : scene === 'panel' ? t.reviewed : scene === 'usage' ? t.trayHint : scene === 'reach' ? t.reachHint : scene === 'quiet' ? t.quietBody : strings.onboarding.welcome.body);
@@ -22,9 +37,9 @@
   <div class="chrome"><BoiteMark size={16} /><span>{t.task}</span><span class="chrome-end"><Check size={14} /></span></div>
 {/snippet}
 
-<figure data-testid="onboarding-scene" data-scene={scene} class:paused>
+<figure data-testid="onboarding-scene" data-scene={scene} class:paused class:playing={playing && !paused}>
   {#key `${scene}-${replay}`}
-    <div class="stage {scene}" role="img" aria-label={description} data-testid="onboarding-animation">
+    <div class="stage {scene}" role="img" aria-label={description} data-testid="onboarding-animation" bind:this={stage} onanimationend={ended}>
       {#if scene === 'welcome'}
         <ul class="tasks">
           {#each [{ name: t.task, provider: 'claude', result: t.taskResult }, { name: t.secondTask, provider: 'codex', result: t.loginResult }, { name: t.thirdTask, provider: 'claude', result: t.testsResult }] as item, i (i)}
@@ -109,14 +124,28 @@
       {/if}
     </div>
   {/key}
-  <figcaption>
-    <button class="ghost small" aria-pressed={paused} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={13} />{t.resume}{:else}<Pause size={13} />{t.pause}{/if}</button>
-    <button class="ghost small" data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={13} />{t.play}</button>
-  </figcaption>
+  <!-- The controls sit over the scene's top edge and show on hover, focus or pause. -->
+  <div class="controls">
+    {#if playing}
+      <button class="ghost icon" aria-pressed={paused} aria-label={paused ? t.resume : t.pause} title={paused ? t.resume : t.pause} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={14} />{:else}<Pause size={14} />{/if}</button>
+    {/if}
+    <button class="ghost icon" aria-label={t.play} title={t.play} data-testid="onboarding-animation-replay" onclick={() => { paused = false; replay++; }}><RotateCcw size={14} /></button>
+  </div>
 </figure>
 
 <style>
-  figure { margin: 18px 0 8px; container-type: inline-size; }
+  /* The frame's padding leaves room for the glow and the controls without moving the scene off the text column. */
+  figure { position: relative; margin: 12px -10px 4px; padding: 10px; border-radius: calc(var(--radius-lg) + 6px); container-type: inline-size; }
+  /* An inner accent glow while the scene plays, so it reads as an animation and not a picture. */
+  figure::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent), inset 0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent); opacity: 0; transition: opacity var(--dur-3) var(--ease-out-quint); }
+  figure.playing::after { opacity: 1; animation: glow calc(var(--dur-3) * 8) ease-in-out infinite alternate; }
+  /* A solid strip over the scene's top edge, under the glow so the ring stays whole. */
+  .controls { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 44px; padding: 0 10px; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: var(--color-surface); border-bottom: 1px solid var(--color-border); box-shadow: var(--shadow-e1); opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
+  .controls button { width: 28px; height: 28px; color: var(--color-muted-foreground); }
+  .controls button:hover { color: var(--color-foreground); }
+  figure:hover .controls, figure:focus-within .controls, figure.paused .controls { opacity: 1; transform: none; }
+  /* Without a pointer that hovers, the controls stay in view. */
+  @media (hover: none) { .controls { opacity: 1; transform: none; } }
   .stage { --demo-duration: calc(var(--dur-3) * 16); font-size: var(--text-sm); line-height: 1.5; color: var(--color-foreground); }
   /* The two conversation demos carry text to read; the others are over in under four seconds. */
   .stage.agents, .stage.voice { --demo-duration: calc(var(--dur-3) * 22); }
@@ -238,9 +267,8 @@
   .notification div { display: grid; gap: 2px; }
   .notification strong { font-size: var(--text-xs); }
   .notification > :global(svg:last-child) { color: var(--color-success); }
-  figcaption { display: flex; justify-content: flex-end; gap: 4px; margin-top: 7px; }
-  figcaption button { display: inline-flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); }
   .paused .stage, .paused .stage :global(*) { animation-play-state: paused !important; }
+  @keyframes glow { from { opacity: 1; } to { opacity: 0.55; } }
   @keyframes first { 0%, 45% { opacity: 1; } 53%, 100% { opacity: 0; } }
   @keyframes second { 0%, 48% { opacity: 0; } 58%, 100% { opacity: 1; } }
   @keyframes later { 0%, 65% { opacity: 0; transform: translateY(4px); } 76%, 100% { opacity: 1; transform: none; } }
@@ -274,9 +302,9 @@
   @media (prefers-reduced-motion: reduce) {
     .stage :global(*) { animation: none !important; }
     .agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span { opacity: 0; }
-    figcaption { display: none; }
+    .controls, figure::after { display: none; }
   }
   :global(html[data-motion="reduced"]) .stage :global(*) { animation: none !important; }
   :global(html[data-motion="reduced"]) :is(.agent-old, .agent-draft > span:first-child, .before-handoff, .recording-live, .task-working, .agent-menu, .pointer, .sync-link span) { opacity: 0; }
-  :global(html[data-motion="reduced"]) figcaption { display: none; }
+  :global(html[data-motion="reduced"]) .controls, :global(html[data-motion="reduced"]) figure::after { display: none; }
 </style>

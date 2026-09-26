@@ -445,6 +445,11 @@ export class ProcRegistry {
     return [...byPid.values()].map((entry) => ({ ...entry.record }));
   }
 
+  /** Threads with at least one process running now. */
+  liveThreads(): ThreadId[] {
+    return [...this.live].flatMap(([threadId, byPid]) => (byPid.size > 0 ? [threadId] : []));
+  }
+
   liveCount(threadId: ThreadId): number {
     return this.live.get(threadId)?.size ?? 0;
   }

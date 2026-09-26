@@ -509,18 +509,6 @@ export class Journal {
       .run(threadId, threadId);
   }
 
-  /** Process count, CPU time and peak memory of every thread that ran something, in one scan. */
-
-  processTotalsByThread(): Map<string, { processes: number; cpuMs: number; peakMemoryBytes: number }> {
-    const rows = this.db
-      .query(
-        `SELECT thread_id, COUNT(*) AS processes, COALESCE(SUM(cpu_ms), 0) AS cpu_ms, COALESCE(MAX(peak_memory_bytes), 0) AS peak
-         FROM processes GROUP BY thread_id`,
-      )
-      .all() as { thread_id: string; processes: number; cpu_ms: number; peak: number }[];
-    return new Map(rows.map((row) => [row.thread_id, { processes: row.processes, cpuMs: row.cpu_ms, peakMemoryBytes: row.peak }]));
-  }
-
   // -- accounts -------------------------------------------------------------
 
   putAccount(account: Account): void {

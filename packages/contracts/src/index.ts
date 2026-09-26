@@ -974,12 +974,14 @@ export interface ProcessRecord {
   ioBytes: number | null;
 }
 
+/** A thread with at least one process running now; what exited stays in `trace.get`. */
 export interface ThreadResources {
   threadId: ThreadId;
   title: string;
   status: ThreadStatus;
   live: ProcessRecord[];
-  totals: { processes: number; cpuMs: number; peakMemoryBytes: number };
+  /** The latest sample of the whole tree, the same one `ThreadSummary.load` carries. */
+  load: ThreadLoad;
 }
 
 /** What the trace can and cannot promise on this OS. */

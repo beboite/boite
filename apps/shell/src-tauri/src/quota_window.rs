@@ -1,9 +1,15 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, Webview, WebviewUrl, WebviewWindow};
 
 pub const LABEL: &str = "quotas";
 const HOVER_DELAY: Duration = Duration::from_millis(100);
+/// How often an open popup reads where the pointer is.
+const WATCH_EVERY: Duration = Duration::from_millis(150);
+/// Samples in a row the pointer must spend away before the popup closes, so a
+/// pointer cutting a corner between the icon and the popup does not close it.
+const AWAY_SAMPLES: u8 = 2;
 /// How long a hidden popup keeps its page. The page is a WebView2 renderer of
 /// its own, about 85 MB, plus a second socket to the core: a popup nobody
 /// opened again for this long gives both back, and the next hover builds it
@@ -25,9 +31,8 @@ pub struct HoverState {
 impl HoverState {
     /// The pointer reached the icon. The generation a delayed show must still
     /// find, or `None` when there is nothing to show: the pointer was already
-    /// counted over the icon, or the popup is open. The new generation still
-    /// cancels the close a leave had planned, so coming back to the icon of an
-    /// open popup keeps it open without showing it again.
+    /// counted over the icon, or the popup is open, so coming back to the icon
+    /// of an open popup keeps it open without showing it again.
     fn entered(&self) -> Option<u64> {
         if self.over_icon.swap(true, Ordering::AcqRel) { return None; }
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -60,6 +65,18 @@ impl HoverState {
     fn still_closed(&self, opened: u64) -> bool {
         self.opened.load(Ordering::Acquire) == opened
     }
+
+    /// Whether the popup opened as number `opened` is still the one open.
+    fn watching(&self, opened: u64) -> bool {
+        self.open.load(Ordering::Acquire) && self.opened.load(Ordering::Acquire) == opened
+    }
+}
+
+/// Counts one sample of the pointer: true once it has been away for
+/// [`AWAY_SAMPLES`] samples in a row. Coming back resets the count.
+fn away_long_enough(away: &AtomicU8, inside: bool) -> bool {
+    if inside { away.store(0, Ordering::Release); return false; }
+    away.fetch_add(1, Ordering::AcqRel).saturating_add(1) >= AWAY_SAMPLES
 }
 
 /// The popup's page stays alive while it is hidden for this long. Tests shorten it.
@@ -172,8 +189,51 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
     forget_a_closed_window(app);
     if !state.opening() { return Ok(()); }
     let shown = present(app, point);
-    if shown.is_err() { state.closed(); }
+    match shown {
+        Err(_) => state.closed(),
+        // A test shell never shows the window, and the pointer is the user's.
+        Ok(()) if !crate::window::hidden() => watch(app, state.opened.load(Ordering::Acquire)),
+        Ok(()) => {}
+    }
     shown
+}
+
+/// Closes the open popup once the pointer has left it, the icon and the gap
+/// between them. It runs for as long as the popup is open rather than waiting
+/// for the tray's `Leave`, which Windows often never sends (tray-icon 0.24):
+/// the popup then stayed up, and the pointer still counted over the icon kept
+/// the next hover from opening it. Closing here clears that mark too.
+fn watch<R: Runtime>(app: &AppHandle<R>, opened: u64) {
+    let handle = app.clone();
+    let away = Arc::new(AtomicU8::new(0));
+    std::thread::spawn(move || loop {
+        std::thread::sleep(WATCH_EVERY);
+        if !handle.state::<HoverState>().watching(opened) { break; }
+        let app = handle.clone();
+        let away = away.clone();
+        // Opening and closing share the UI thread. Recheck after dispatch so a
+        // sample taken for an older opening cannot close a newer one.
+        if handle.run_on_main_thread(move || {
+            let state = app.state::<HoverState>();
+            if !state.watching(opened) { return; }
+            let Some(window) = app.get_webview_window(LABEL) else { return };
+            if !away_long_enough(&away, pointer_keeps_open(&app, &window)) { return; }
+            state.over_icon.store(false, Ordering::Release);
+            state.cancel_open();
+            let _ = hide(&app, &window);
+        }).is_err() { break; }
+    });
+}
+
+fn pointer_keeps_open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> bool {
+    match (app.cursor_position(), window.outer_position(), window.outer_size()) {
+        (Ok(cursor), Ok(origin), Ok(size)) => keeps_open(
+            (cursor.x, cursor.y),
+            (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64),
+            icon_bounds(app, cursor),
+        ),
+        _ => false,
+    }
 }
 
 /// A popup closed without `hide` (Alt+F4 destroys it) is not open any more.
@@ -269,42 +329,12 @@ pub fn enter<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// The pointer left the icon: a show still waiting out its delay is cancelled.
+/// Closing an open popup is [`watch`]'s job, which does not count on this event.
 pub fn leave<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<HoverState>();
     state.over_icon.store(false, Ordering::Release);
-    let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
-    let handle = app.clone();
-    // Only runs while the pointer is travelling from the icon to the popup.
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(350));
-        loop {
-            let state = handle.state::<HoverState>();
-            if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { break; }
-            // A popup that is not open has nothing to close.
-            if !state.open.load(Ordering::Acquire) || handle.get_webview_window(LABEL).is_none() { break; }
-            let app = handle.clone();
-            // Opening and closing share the UI thread. Recheck after dispatch
-            // so an old Leave cannot close a newly entered or opened popup.
-            if handle.run_on_main_thread(move || {
-                let state = app.state::<HoverState>();
-                if state.generation.load(Ordering::Acquire) != generation || state.over_icon.load(Ordering::Acquire) { return; }
-                let Some(window) = app.get_webview_window(LABEL) else { return; };
-                let inside = match (app.cursor_position(), window.outer_position(), window.outer_size()) {
-                    (Ok(cursor), Ok(origin), Ok(size)) => keeps_open(
-                        (cursor.x, cursor.y),
-                        (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64),
-                        icon_bounds(&app, cursor),
-                    ),
-                    _ => false,
-                };
-                if !inside {
-                    state.cancel_open();
-                    let _ = hide(&app, &window);
-                }
-            }).is_err() { break; }
-            std::thread::sleep(Duration::from_millis(200));
-        }
-    });
+    state.cancel_open();
 }
 
 #[tauri::command]
@@ -342,7 +372,7 @@ mod tests {
         assert!(!state.ready(0, Duration::from_millis(400)));
         assert!(!state.ready(1, Duration::from_millis(99)));
     }
-    /// What `leave` does to the state, without its polling thread.
+    /// What `leave` does to the state.
     fn pointer_leaves(state: &HoverState) {
         state.over_icon.store(false, Ordering::Release);
         state.generation.fetch_add(1, Ordering::AcqRel);
@@ -391,6 +421,22 @@ mod tests {
         let popup = (1622.0, 60.0, 2002.0, 520.0);
         assert!(keeps_open((1812.0, 48.0), popup, Some(icon)));
         assert!(!keeps_open((1812.0, 540.0), popup, Some(icon)));
+    }
+    #[test]
+    fn the_popup_closes_only_after_the_pointer_stays_away() {
+        let away = AtomicU8::new(0);
+        assert!(!away_long_enough(&away, false), "one sample away is a corner cut");
+        assert!(!away_long_enough(&away, true), "back over the popup resets the count");
+        assert!(!away_long_enough(&away, false));
+        assert!(away_long_enough(&away, false), "two samples in a row close it");
+        let state = HoverState::default();
+        assert!(state.opening());
+        let opened = state.opened.load(Ordering::Acquire);
+        assert!(state.watching(opened));
+        state.closed();
+        assert!(!state.watching(opened), "a closed popup stops its watch");
+        assert!(state.opening());
+        assert!(!state.watching(opened), "a reopened popup has a watch of its own");
     }
     #[test]
     fn the_page_learns_whether_windows_draws_its_frame() {

@@ -9,23 +9,22 @@ export function registerTraceMethods(core: Core): void {
     core.journal.listProcesses(params.threadId, params.limit ?? DEFAULT_TRACE_LIMIT),
   );
   core.router.register('resources.list', (): ThreadResources[] => {
-    // Two queries whatever the number of threads. A thread that never ran a
-    // process, or an archived one with nothing running, has nothing to show.
-    const totals = core.journal.processTotalsByThread();
+    // Live only: a task manager shows what runs now. The client polls it while
+    // the page is open, so it walks the live table, never the journal's history.
     const out: ThreadResources[] = [];
-    for (const thread of core.journal.listThreads()) {
-      const live = core.procs.liveOf(thread.id);
-      const total = totals.get(thread.id);
-      if (live.length === 0 && (total === undefined || thread.archived)) continue;
+    for (const threadId of core.procs.liveThreads()) {
+      const thread = core.journal.getThread(threadId);
+      const live = core.procs.liveOf(threadId);
+      if (thread === null || live.length === 0) continue;
       out.push({
-        threadId: thread.id,
+        threadId,
         title: thread.title,
         status: thread.status,
         live,
-        totals: total ?? { processes: 0, cpuMs: 0, peakMemoryBytes: 0 },
+        load: core.procs.loadOf(threadId) ?? { processes: live.length, cpuPercent: 0, memoryBytes: 0 },
       });
     }
-    return out;
+    return out.sort((a, b) => b.load.cpuPercent - a.load.cpuPercent);
   });
   core.router.register('resources.killTree', (params) => {
     core.threads.require(params.threadId);

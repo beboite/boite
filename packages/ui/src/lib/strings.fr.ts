@@ -212,7 +212,7 @@ export const fr: Translation = {
     dynamic: 'Toutes les machines', recentHint: 'Message le plus récent en premier',
     intro: "Connectez des machines pour voir leurs projets et leurs conversations ensemble. Chaque machine exécute ses propres agents sur ses propres fichiers.",
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
-    addHint: "Sur l'autre machine, ouvrez Réglages, Général, Téléphones et appareils, créez un lien d'appairage et collez-le ici. Activez le contrôle total là-bas pour gérer ses comptes et ses réglages depuis celle-ci.",
+    addHint: "Sur l'autre machine, ouvrez Réglages, Machines et appareils, Téléphones et appareils, créez un lien d'appairage et collez-le ici. Activez le contrôle total là-bas pour gérer ses comptes et ses réglages depuis celle-ci.",
     labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
     remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
     removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
@@ -979,16 +979,12 @@ export const fr: Translation = {
     windows: "La mise au second plan, le son et les limites de ressources s'appliquent sur un hôte Windows.",
   },
   resources: {
-    heading: 'Protection',
-    empty: "Aucune conversation ne consomme quoi que ce soit pour l'instant.",
-    live: 'Processus en cours',
-    totals: 'Totaux',
+    empty: 'Rien ne tourne en ce moment.',
     processes: 'processus',
     killTree: "Tuer l'arborescence",
     killConfirm: 'Tuer tous les processus de cette conversation ?',
     killConfirmYes: 'Tuer',
-    killConfirmNo: 'Annuler',
-    killed: 'Tué'
+    killConfirmNo: 'Annuler'
   },
 
   install: {
@@ -1528,7 +1524,7 @@ export const fr: Translation = {
       task: 'Créer mon portfolio', secondTask: 'Réparer la connexion', thirdTask: 'Écrire les tests', working: 'En cours', request: 'Ajoute un formulaire de contact', answer: 'Le formulaire est prêt.', followup: "Vérifie maintenant l'accessibilité", continued: 'Même conversation. Même historique.',
       voiceWords: 'Rends les boutons plus lisibles', voiceHint: 'Parlez, relisez le brouillon, puis envoyez.',
       changes: 'Modifications', reviewed: 'Relisez les changements à côté du chat.',
-      usageLabel: 'Claude', window: 'Limite sur 5 h', used: '24 % utilisés', reset: 'Réinitialisation dans 2 h 10', tray: "Dans la barre des tâches, près de l'horloge", trayHint: "Survolez l'icône Boite pour voir vos limites sans ouvrir l'application.",
+      usageLabel: 'Claude', window: 'Limite sur 5 h', used: '24 % utilisés', reset: 'Réinitialisation dans 2 h 10', trayHint: "Survolez l'icône Boite pour voir vos limites sans ouvrir l'application.",
       desktop: 'Votre ordinateur', phone: 'Votre téléphone', synced: 'La même conversation', reachHint: "Après un appairage par QR code, suivez vos agents sur votre téléphone. Votre ordinateur continue de les faire tourner.",
       notification: 'Formulaire de contact terminé', quietBody: "Vos agents travaillent sans prendre votre écran ni vos haut-parleurs.",
       installVoice: 'Installer la dictée locale', downloadVoice: 'Environ 200 Mo. Le son reste sur cet ordinateur.', installingVoice: 'Téléchargement du moteur vocal', cancelVoice: 'Annuler le téléchargement', readyVoice: 'La dictée est prête. Utilisez le micro du champ de message.', retryVoice: 'Réessayer la configuration vocale',

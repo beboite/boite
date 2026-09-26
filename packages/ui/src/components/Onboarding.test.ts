@@ -79,8 +79,8 @@ test('demo artwork speaks the language of the tour around it', async () => {
   expect(query('[data-testid=onboarding-animation]').textContent).toContain('Rends les boutons plus lisibles');
   expect(query('[data-testid=onboarding-animation]').textContent).not.toContain('Build my portfolio');
   await click('onboarding-animation-pause');
-  expect(query('[data-testid=onboarding-animation-pause]').textContent).toContain('Reprendre');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Rejouer');
+  expect(query('[data-testid=onboarding-animation-pause]').getAttribute('aria-label')).toBe('Reprendre');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Rejouer');
   expect(query('[data-testid=onboarding-next]').textContent).toContain('Suivant');
 });
 
@@ -222,7 +222,7 @@ test('demo choices are labelled buttons and dictation keeps word spacing', async
   await click('onboarding-example-voice');
   expect(query('[data-testid=onboarding-scene]').textContent).toContain('Make the buttons easier to read');
   expect(query('[data-testid=onboarding-scene]').textContent).not.toContain('Illustration');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Replay');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Replay');
 });
 
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {

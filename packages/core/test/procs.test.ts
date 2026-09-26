@@ -124,25 +124,33 @@ describe('procs', () => {
     expect(Date.now() - started).toBeLessThan(5000);
   }, 15000);
 
-  test('resources.list carries threads that ran something, and no archived thread with nothing running', async () => {
+  test('resources.list carries only the threads running something now, archived or not', async () => {
     const client = await harness.connect();
-    const ran = await echoThread(harness, client, 'ran a process');
+    const running = await echoThread(harness, client, 'runs a process');
+    const done = await echoThread(harness, client, 'ran one, now done');
     const idle = await echoThread(harness, client, 'never ran one');
-    const archived = await echoThread(harness, client, 'ran one, then archived');
     const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
-    for (const threadId of [ran.threadId, archived.threadId]) {
-      await harness.core.procs.spawn(threadId, quick[0], [...quick[1]]).exited;
-      await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
-    }
-    await client.call('threads.archive', { threadId: archived.threadId, archived: true });
+    await harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]).exited;
+    await waitFor(() => harness.core.procs.liveCount(done.threadId) === 0, 5000);
+    const long = process.platform === 'win32' ? ['cmd', ['/c', 'ping -n 30 127.0.0.1 > nul']] as const : ['sleep', ['30']] as const;
+    harness.core.procs.spawn(running.threadId, long[0], [...long[1]]);
+    await waitFor(() => harness.core.procs.liveCount(running.threadId) > 0, 5000);
+    await client.call('threads.archive', { threadId: running.threadId, archived: true });
 
-    const resources = await client.call('resources.list', {});
-    const ids = resources.map((entry) => entry.threadId);
-    expect(ids).toContain(ran.threadId);
-    expect(ids).not.toContain(idle.threadId);
-    expect(ids).not.toContain(archived.threadId);
-    const mine = resources.find((entry) => entry.threadId === ran.threadId);
-    expect(mine).toMatchObject({ title: 'ran a process', live: [], totals: { processes: 1 } });
+    try {
+      const resources = await client.call('resources.list', {});
+      expect(resources.map((entry) => entry.threadId)).toEqual([running.threadId]);
+      const [mine] = resources;
+      expect(mine?.title).toBe('runs a process');
+      expect(mine?.live.length).toBeGreaterThan(0);
+      expect(mine?.live.every((record) => record.exitedAt === null)).toBe(true);
+      expect(mine?.load.processes).toBe(mine?.live.length);
+    } finally {
+      await harness.core.procs.stopAndWait(running.threadId);
+    }
+    // The trace still has what exited.
+    expect((await client.call('trace.get', { threadId: done.threadId })).length).toBe(1);
+    expect(await client.call('resources.list', {})).toEqual([]);
   }, 20000);
 
   test('the trace capability says what it can promise on this OS', async () => {
