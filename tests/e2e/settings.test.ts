@@ -33,7 +33,9 @@ test('provider settings show login controls and quota monitoring', async () => {
   await page.waitFor(`document.querySelector('${id('quota-monitor')}')`);
   await page.click(id('quota-monitor'));
   await page.waitFor(`!document.querySelector('${id('quota-monitor')}').checked`);
-  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).toContain('Quota monitoring is off');
+  // The switch says monitoring is off; no line under it repeats that.
+  expect(await page.evaluate(`document.querySelector('${id('quota-monitor')}').closest('.quota').querySelector('${id('quota-account')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).not.toContain('Quota monitoring is off');
   await page.click(id('quota-monitor'));
   await capture('providers-details.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 1, mobile: false });

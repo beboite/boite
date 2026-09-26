@@ -459,7 +459,7 @@
       {#if quota}
         <div class="quota">
           <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" class="switch-sm" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(entry.id, event.currentTarget.checked)} /></label>
-          <QuotaList rows={[quota]} bare />
+          {#if quota.status !== 'disabled'}<QuotaList rows={[quota]} bare />{/if}
         </div>
       {/if}
     </div>
@@ -475,7 +475,7 @@
       </div>
       <div class="quota">
         <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" class="switch-sm" data-testid="quota-cli-monitor" checked={source.enabled} onchange={(event) => void monitor(source.accountId, event.currentTarget.checked)} /></label>
-        <QuotaList rows={[source]} bare />
+        {#if source.status !== 'disabled'}<QuotaList rows={[source]} bare />{/if}
       </div>
     </div>
   {/if}
