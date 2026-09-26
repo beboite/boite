@@ -1119,6 +1119,7 @@ export const fr: Translation = {
     languageSystem: 'Système',
     languageNames: { en: 'English', fr: 'Français' },
     theme: 'Thème',
+    display: 'Affichage',
     accent: "Couleur d'accent",
     accentHint: 'Raisonnement, boutons, liens et indicateurs de focus',
     accentCustom: "Couleur d'accent personnalisée",

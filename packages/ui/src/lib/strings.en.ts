@@ -1141,6 +1141,7 @@ export const strings = {
     languageSystem: 'System',
     languageNames: { en: 'English', fr: 'Français' },
     theme: 'Theme',
+    display: 'Display',
     accent: 'Accent colour',
     accentHint: 'Reasoning, buttons, links and focus indicators',
     accentCustom: 'Custom accent colour',

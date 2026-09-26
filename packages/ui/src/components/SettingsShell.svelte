@@ -64,7 +64,7 @@
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
-    appearance: [{ id: 'theme', label: strings.settings.theme }, { id: 'workspace', label: strings.settings.workspace }],
+    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }],
     keyboard: [
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
