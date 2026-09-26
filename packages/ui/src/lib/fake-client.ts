@@ -123,6 +123,7 @@ export class FakeClient implements ObservableClient {
     unregisterCore(ctx);
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
     ctx.plugins.close();
+    ctx.workflows.close();
     ctx.bus.setState('closed');
     this.#dropPending('client closed');
   }
@@ -230,6 +231,7 @@ export class FakeClient implements ObservableClient {
     const ctx = this.#ctx;
     if (method.startsWith('agents.')) return Promise.resolve(ctx.agents.call(method as Extract<RpcMethodName, `agents.${string}`>, rawParams));
     if (ctx.plugins.handles(method)) return ctx.plugins.call(method, rawParams);
+    if (ctx.workflows.handles(method)) return ctx.workflows.call(method, rawParams);
     if (!Object.hasOwn(this.#methods, method)) {
       return Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `unknown method ${String(method)}` }));
     }

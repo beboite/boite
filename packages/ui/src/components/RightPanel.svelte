@@ -22,6 +22,7 @@
   import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
+  import WorkflowSurface from './WorkflowSurface.svelte';
 
   let {
     store,
@@ -372,6 +373,8 @@
   <div class="body">
     {#if active?.kind === 'agents'}
       <DelegationSurface {store} />
+    {:else if active?.kind === 'workflow'}
+      <WorkflowSurface {store} surface={active} {panel} />
     {:else if active?.kind === 'trace'}
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}

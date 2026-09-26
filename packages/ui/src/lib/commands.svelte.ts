@@ -64,6 +64,8 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
+    // Following a run is open to a paired device; starting one is the owner's, in the surface.
+    items.push({ id: 'workflows', kind: 'command', label: strings.palette.workflows, keywords: 'workflow steps graph plan run' });
     // The three read the working directory or the project's todos, which
     // `packages/core/src/access.ts` refuses to a paired device.
     if (store.owner) {
@@ -146,6 +148,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;
     case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
+    case 'workflows': store.showChat(); store.panel.toggleKind('workflow'); break;
     case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
     case 'settings': store.showSettings(); break;

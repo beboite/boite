@@ -6,11 +6,12 @@ import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { strings } from './strings';
 
 /**
- * The launcher's five cards, in the order they are drawn. Each carries the
+ * The launcher's cards, in the order they are drawn. Each carries the
  * letter its card shows, which is also the key the launcher answers to.
  */
 export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'agents', key: 'A' },
+  { kind: 'workflow', key: 'W' },
   { kind: 'browser', key: 'B' },
   { kind: 'changes', key: 'C' },
   { kind: 'files', key: 'F' },
@@ -21,6 +22,7 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
 /** The name of a kind, which a card, a tab and the new-surface menu all read. */
 export function kindName(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.heading;
+  if (kind === 'workflow') return strings.workflow.heading;
   if (kind === 'browser') return strings.rightPanel.browser;
   if (kind === 'changes') return strings.rightPanel.changes;
   if (kind === 'files') return strings.rightPanel.files;
@@ -31,6 +33,7 @@ export function kindName(kind: SurfaceKind): string {
 
 export function kindHint(kind: SurfaceKind): string {
   if (kind === 'agents') return strings.delegation.panelHint;
+  if (kind === 'workflow') return strings.workflow.panelHint;
   if (kind === 'browser') return strings.rightPanel.browserHint;
   if (kind === 'changes') return strings.rightPanel.changesHint;
   if (kind === 'files') return strings.rightPanel.filesHint;
@@ -40,7 +43,7 @@ export function kindHint(kind: SurfaceKind): string {
 
 /** A page needs a webview; everything else reads what only the owner may ask for. */
 export function available(kind: SurfaceKind, inShell: boolean, owner: boolean): boolean {
-  if (kind === 'agents') return true;
+  if (kind === 'agents' || kind === 'workflow') return true;
   return kind === 'browser' ? inShell : owner;
 }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, FileText, FolderTree, GitCompare, Globe, ListChecks, UsersRound } from '@lucide/svelte';
+  import { Activity, FileText, FolderTree, GitCompare, Globe, ListChecks, UsersRound, Workflow } from '@lucide/svelte';
   import type { SurfaceKind } from '../lib/right-panel.svelte';
 
   /** The icon of a kind of surface, on its tab and on its launcher card. */
@@ -10,6 +10,8 @@
   <Activity {size} strokeWidth={1.75} />
 {:else if kind === 'agents'}
   <UsersRound {size} strokeWidth={1.75} />
+{:else if kind === 'workflow'}
+  <Workflow {size} strokeWidth={1.75} />
 {:else if kind === 'changes'}
   <GitCompare {size} strokeWidth={1.75} />
 {:else if kind === 'files'}

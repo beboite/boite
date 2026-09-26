@@ -72,6 +72,14 @@ Stop all pauses the team and cancels queued and running children. Stopping or
 archiving the parent does the same. Parent failure and core restart pause the
 team. Resume is an owner action. An unsuccessful child is not retried by Boite.
 
+## Workflows
+
+A [workflow](workflows.md) is a plan of delegated steps the core runs by
+itself: dependencies, one step per item of an earlier step's output, and steps
+that run only when a condition holds. Its steps are ordinary children on this
+team's profiles and count against the same concurrency and turn budget. They
+do not count toward the agent total and are not listed among the team's agents.
+
 ## Agent commands
 
 ```sh

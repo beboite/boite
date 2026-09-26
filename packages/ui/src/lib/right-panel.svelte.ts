@@ -11,11 +11,12 @@ import { SvelteSet } from 'svelte/reactivity';
 import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 
-export type SurfaceKind = 'agents' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'workflow' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
   'agents',
+  'workflow',
   'trace',
   'browser',
   'changes',
@@ -28,7 +29,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'workflow', 'trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -46,6 +47,8 @@ export interface Surface {
   path?: string;
   /** The line a file tab lands on, when whoever opened it named one. */
   line?: number;
+  /** The run the workflow tab shows; absent means the newest one. */
+  runId?: string;
 }
 
 /** What the tab menu, the close button and the close key ask for. */
@@ -74,6 +77,7 @@ export const AGENTS_SURFACE_ID = 'agents';
 export const CHANGES_SURFACE_ID = 'changes';
 export const FILES_SURFACE_ID = 'files';
 export const TASKS_SURFACE_ID = 'tasks';
+export const WORKFLOW_SURFACE_ID = 'workflow';
 
 /** Past this the changes surface puts its diff beside the list rather than under it. */
 export const CHANGES_SPLIT_MIN = 900;
@@ -127,7 +131,7 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { id, kind, title, url, zoom, path, line } = surface as Surface;
+      const { id, kind, title, url, zoom, path, line, runId } = surface as Surface;
       if (typeof id !== 'string') continue;
       if (!SURFACE_KINDS.includes(kind)) continue;
       // A file tab with no path has nothing to read, so it is not a tab.
@@ -143,7 +147,8 @@ function parse(raw: string): Record<string, PanelState> {
         ...(typeof url === 'string' ? { url } : {}),
         ...stored,
         ...(typeof path === 'string' ? { path } : {}),
-        ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {})
+        ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
+        ...(typeof runId === 'string' ? { runId } : {})
       });
     }
     const active = (value as PanelState).activeSurfaceId;
@@ -390,6 +395,13 @@ export class BoundPanel {
     return this.open('tasks');
   }
 
+  /** The workflow tab, on one run when one is named. */
+  openWorkflow(runId?: string): Surface {
+    const opened = this.open('workflow');
+    if (runId !== undefined) this.update(opened.id, { runId });
+    return this.state.surfaces.find((surface) => surface.id === opened.id) ?? opened;
+  }
+
   /**
    * What the core's `panel.open` asked for, mapped onto this panel. `diff` is
    * the changes surface on one file, `browser` opens the url the way a page
@@ -401,6 +413,7 @@ export class BoundPanel {
     else if (surface.kind === 'diff') this.openChanges(surface.path);
     else if (surface.kind === 'browser') this.open('browser', surface.url);
     else if (surface.kind === 'tasks') this.openTasks();
+    else if (surface.kind === 'workflow') this.openWorkflow(surface.runId);
     else this.open('trace');
   }
 

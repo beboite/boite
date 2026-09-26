@@ -475,7 +475,7 @@ export function startServer(options: ServerOptions): RunningServer {
       if (!connection.authenticated) continue;
       if (!mayReceiveEvent(name, connection)) continue;
       if (connection.identity.principal === 'agent' && name !== 'todos.updated' && name !== 'agents.changed' && connection.identity.threadId !== threadId) continue;
-      if ((name === 'collaboration.changed' || name === 'delegation.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
+      if ((name === 'collaboration.changed' || name === 'delegation.changed' || name === 'workflows.changed') && !connection.subscriptions.has(threadId ?? '')) continue;
       if (scoped && (threadId === null || !connection.subscriptions.has(threadId))) continue;
       // The whole activity, loop history included, is for the clients that have
       // that thread open; an agent socket still gets its own thread's.

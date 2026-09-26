@@ -19,6 +19,7 @@ import type { CoreSettings } from './store/settings.svelte';
 import type { Terminals } from './store/terminals.svelte';
 import type { Threads } from './store/threads.svelte';
 import type { Workbench } from './store/workbench.svelte';
+import type { Workflows } from './store/workflows.svelte';
 
 export type Page = 'chat' | 'settings' | 'agents';
 export type SettingsTab = 'brain' | 'voice' | 'general' | 'machines' | 'appearance' | 'keyboard' | 'accounts' | 'plugins' | 'usage' | 'limits' | 'resources' | 'experiments';
@@ -138,6 +139,7 @@ export class Store {
     this.delegationLoading = false;
     this.delegationSaving = false;
     this.delegationError = null;
+    ctx.workflows.reset();
     for (const off of ctx.off) off();
     ctx.off = [];
     ctx.client = null;
@@ -487,6 +489,27 @@ export class Store {
   checkCoordinationPeer(...args: Parameters<Delegation['checkCoordinationPeer']>) { return this.#ctx.delegation.checkCoordinationPeer(...args); }
   trustCoordinationPeer(...args: Parameters<Delegation['trustCoordinationPeer']>) { return this.#ctx.delegation.trustCoordinationPeer(...args); }
   untrustCoordinationPeer(...args: Parameters<Delegation['untrustCoordinationPeer']>) { return this.#ctx.delegation.untrustCoordinationPeer(...args); }
+
+  // -------------------------------------------------------------------------
+  // Workflows: store/workflows.svelte.ts
+  // -------------------------------------------------------------------------
+
+  get workflows() { return this.#ctx.workflows.workflows; }
+  set workflows(value) { this.#ctx.workflows.workflows = value; }
+  get workflowsThreadId() { return this.#ctx.workflows.workflowsThreadId; }
+  set workflowsThreadId(value) { this.#ctx.workflows.workflowsThreadId = value; }
+  get workflowTemplates() { return this.#ctx.workflows.workflowTemplates; }
+  set workflowTemplates(value) { this.#ctx.workflows.workflowTemplates = value; }
+  get workflowsError() { return this.#ctx.workflows.workflowsError; }
+  set workflowsError(value) { this.#ctx.workflows.workflowsError = value; }
+
+  loadWorkflows(...args: Parameters<Workflows['loadWorkflows']>) { return this.#ctx.workflows.loadWorkflows(...args); }
+  workflowsOf(...args: Parameters<Workflows['workflowsOf']>) { return this.#ctx.workflows.workflowsOf(...args); }
+  isWorkflowStep(...args: Parameters<Workflows['isWorkflowStep']>) { return this.#ctx.workflows.isWorkflowStep(...args); }
+  controlWorkflow(...args: Parameters<Workflows['controlWorkflow']>) { return this.#ctx.workflows.controlWorkflow(...args); }
+  startWorkflowTemplate(...args: Parameters<Workflows['startWorkflowTemplate']>) { return this.#ctx.workflows.startWorkflowTemplate(...args); }
+  saveWorkflowTemplate(...args: Parameters<Workflows['saveWorkflowTemplate']>) { return this.#ctx.workflows.saveWorkflowTemplate(...args); }
+  removeWorkflowTemplate(...args: Parameters<Workflows['removeWorkflowTemplate']>) { return this.#ctx.workflows.removeWorkflowTemplate(...args); }
 
   // -------------------------------------------------------------------------
   // The workbench: store/workbench.svelte.ts
