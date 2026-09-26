@@ -52,6 +52,10 @@ test('the chat card opens the run top to bottom, an arrow per dependency, in the
 }, 40_000);
 
 test('on a phone the same run keeps its rows and arrows without scrolling sideways', async () => {
+  // Opened here too, so the test holds when it runs alone.
+  await page.click(`${id('thread-row')}[data-thread-id="t-trace"]`);
+  await page.waitFor(`document.querySelector('${id('workflow-activity')}')`);
+  await page.click(id('workflow-activity'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await page.waitFor(`document.querySelector('${id('workflow-graph')}')?.dataset.layout === 'rows'`);
   await page.waitFor(`document.querySelectorAll('${id('workflow-edge')}').length === 5`);
