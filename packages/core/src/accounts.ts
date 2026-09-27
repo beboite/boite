@@ -5,8 +5,9 @@ import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
 import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
+import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
+import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
@@ -20,24 +21,6 @@ const SIGN_IN_LINK = /oauth|authorize|redirect_uri|client_id|user_code|\/device|
 
 /** How long the one GET on a pasted redirect URL waits before it is called failed. */
 const CALLBACK_TIMEOUT_MS = 10_000;
-
-/**
- * What an isolation variable means when it is not set, as segments under the
- * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`)
- * puts its session file under that same variable, so the provider's own location
- * is the variable's own default, never `~/.<id>`.
- */
-const ISOLATION_DEFAULTS: Record<string, string[]> = {
-  XDG_DATA_HOME: ['.local', 'share'],
-  XDG_CONFIG_HOME: ['.config'],
-  XDG_STATE_HOME: ['.local', 'state'],
-  XDG_CACHE_HOME: ['.cache'],
-  CODEX_HOME: ['.codex'],
-  CLAUDE_CONFIG_DIR: ['.claude'],
-  GROK_HOME: ['.grok'],
-  PI_CODING_AGENT_DIR: ['.pi', 'agent'],
-};
 
 interface LoginRun {
   done: Promise<void>;
@@ -104,6 +87,8 @@ function refuseUnisolable(provider: ProviderDescriptor): void {
 
 export class AccountStore {
   private readonly logins = new Map<AccountId, LoginRun>();
+  /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
+  private readonly shareLog = new Map<AccountId, string>();
 
   constructor(private readonly core: Core) {}
 
@@ -170,7 +155,10 @@ export class AccountStore {
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
-    if (directory !== null) rmSync(directory, { recursive: true, force: true });
+    if (directory !== null) {
+      unshareProfile(directory);
+      rmSync(directory, { recursive: true, force: true });
+    }
     this.core.journal.append(
       { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
       () => {
@@ -227,26 +215,37 @@ export class AccountStore {
   }
 
   /**
-   * What has to exist before the agent ever runs: the descriptor's seed files
-   * under the isolation directory, and the browser launcher `BROWSER` points at
-   * when the profile names one. Both are idempotent, so this runs before every
-   * spawn as well as at account creation; a seed file already there is the
-   * agent's own and is left alone.
+   * What has to exist before the agent ever runs: the provider's own profile
+   * shared into the isolation directory (hooks, instructions, skills, plugins),
+   * the descriptor's seed files there, and the browser launcher `BROWSER`
+   * points at when the profile names one. All idempotent, so this runs before
+   * every spawn as well as at account creation; a seed file already there is
+   * the agent's own and is left alone. What could not be shared is returned and
+   * logged, never thrown: the agent still runs, with less of the profile.
    */
-  prepare(account: Account, provider: ProviderDescriptor): void {
+  prepare(account: Account, provider: ProviderDescriptor): ShareProblem[] {
     const profile = profileFor(provider);
-    if (profile === undefined) return;
+    if (profile === undefined) return [];
     if (Object.values(profile.env ?? {}).some((value) => value === browserNoopPath(this.core.dataDir))) {
       this.writeBrowserNoop();
     }
     const isolationDir = account.isolationDir;
-    if (isolationDir === null) return;
+    if (isolationDir === null) return [];
+    mkdirSync(isolationDir, { recursive: true });
+    // `BOITE_HOST_AGENTS=0` keeps a test core away from the developer's own profile too.
+    const problems = hostAgentsEnabled() ? shareProfile(isolationDir, profile, provider.shared ?? []) : [];
+    const said = problems.map((problem) => `${problem.path}: ${problem.message}`).join('; ');
+    if (said !== (this.shareLog.get(account.id) ?? '')) {
+      this.shareLog.set(account.id, said);
+      if (said.length > 0) this.core.log('warn', `accounts: ${account.label} (${provider.id}) does not share ${said}`);
+    }
     for (const [path, content] of Object.entries(provider.seedFiles ?? {})) {
       const target = join(isolationDir, path);
       if (existsSync(target)) continue;
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, 'utf8');
     }
+    return problems;
   }
 
   private writeBrowserNoop(): void {

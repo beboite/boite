@@ -41,6 +41,34 @@ The same environment goes to every process of that account: a turn, a probe, a
 login. That is why the map lives on the OS profile rather than in a driver, and
 why a new provider needs no code to get isolation.
 
+## What an isolated account shares
+
+Isolation moves the whole configuration directory, so without more an isolated
+account runs with none of the user's settings, hooks, skills or instructions.
+The descriptor's `shared` block ([providers.md](providers.md#hooks-and-shared-configuration))
+names what it takes from the user's own directory, and the core lays it out
+before every spawn (`packages/core/src/profile-share.ts`):
+
+- A directory is linked: a junction on Windows, a symlink elsewhere. The account
+  sees the user's `skills` or `plugins` as they are now, and an edit through the
+  link lands in the user's own directory.
+- A file is copied, so an agent that rewrites its settings writes its own copy.
+  The next spawn replaces a copy that differs from the source; the user's file
+  wins over the agent's edit. A copy listed under `retarget` has the source's
+  paths rewritten to the account's own.
+- Something already there that Boite did not put there is set aside once as
+  `<name>.own-<date>`, never deleted. A file or directory the user removed from
+  their own directory goes from the account too, as long as it is still what
+  Boite put there.
+- `.boite-shared.json` in the account directory records the links and the hash
+  of each copy, which is how Boite tells its own work from the account's.
+
+A path that fails is logged once and shown under the account in Settings >
+Brain > Hooks; the spawn goes on without it. The login files never move: a
+share that would cover one is refused when the descriptor loads. The default
+account needs none of this, since it runs on the user's own directory. A test
+core (`BOITE_HOST_AGENTS=0`) shares nothing.
+
 ## The default account
 
 An account whose `isolationDir` is null runs on the provider's own default
@@ -205,6 +233,8 @@ descriptor's `close.processes` names what to close first, which matters for an
 agent that keeps a background process on its configuration directory. An account
 that runs under `node` names nothing there, because the process in the job is
 `node` and killing every `node` on the machine is not a thing Boite will ever do.
+The shared links are removed before the directory, so deleting the account
+never walks into the user's own `skills` or `plugins`.
 
 ## Quotas and account pools
 

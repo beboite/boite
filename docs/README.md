@@ -9,6 +9,7 @@
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
 - [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.
+- [Agent hooks](hooks.md): each agent's hooks on every account, and what they blocked.
 - [Model switching](model-switching.md): changing models and providers in one conversation.
 - [Context](context.md): context usage and compaction.
 - [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.

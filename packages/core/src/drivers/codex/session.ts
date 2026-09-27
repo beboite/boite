@@ -1,6 +1,7 @@
-import type { QuestionAnswer } from '@boite/contracts';
+import type { HookOutcome, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
+import { tildePath } from '../../paths.ts';
 import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
@@ -16,7 +17,7 @@ import {
   textOf,
   toolViewOf,
 } from './mapping.ts';
-import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
+import type { CodexHookRun, CodexHooksListed, CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
 import {
   CLIENT_NAME,
   COMMAND_TOOL_NAME,
@@ -37,6 +38,14 @@ const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread n
 
 /** `thread/resume` refused a thread the agent no longer has. */
 class ThreadLostError extends Error {}
+
+/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
+const HOOK_OUTCOMES: Record<string, HookOutcome> = {
+  completed: 'ok',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'stopped',
+};
 
 /** How long a stopped turn waits for the agent to end it before its process is stopped. */
 const STOP_GRACE_MS = 3_000;
@@ -72,6 +81,8 @@ export class CodexSession {
   /** Armed by a stop: an agent that has not ended the turn by then loses its process. */
   private stopTimer: Timer | null = null;
   private contextSink: CodexTurn['ctx']['context'] | null = null;
+  /** The context the process was opened with, for a hook that runs while no turn is. */
+  private opener: TurnContext | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
   /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
@@ -277,12 +288,14 @@ export class CodexSession {
     });
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
+    this.opener = ctx;
 
     await rpc.request('initialize', {
       clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
       capabilities: null,
     });
     rpc.notify('initialized', {});
+    void this.reportSkippedHooks(rpc, ctx);
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
@@ -415,6 +428,10 @@ export class CodexSession {
       this.reportUsage(params);
       return;
     }
+    if (method === 'hook/completed') {
+      this.onHook(params['run'] as CodexHookRun | undefined);
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
     switch (method) {
@@ -482,6 +499,56 @@ export class CodexSession {
         // the mcpServer, account, project and realtime families: the contract
         // has no part for them, so they are dropped.
         break;
+    }
+  }
+
+  /**
+   * One run of the user's hooks: counted, and when it refused the prompt or
+   * stopped the turn, drawn in the thread as a quiet line, since the agent
+   * writes nothing else for it. A denied tool shows on its own card already.
+   */
+  private onHook(run: CodexHookRun | undefined): void {
+    if (run === undefined) return;
+    const outcome = HOOK_OUTCOMES[run.status];
+    if (outcome === undefined) return;
+    const turn = this.current ?? this.active;
+    const said = (run.entries ?? [])
+      .filter((entry) => entry.kind !== 'context')
+      .map((entry) => entry.text.trim())
+      .filter((text) => text.length > 0)
+      .join('\n');
+    const ctx = turn?.ctx ?? this.opener;
+    ctx?.hook?.({ event: run.eventName, name: tildePath(run.sourcePath), outcome, message: said.length === 0 ? null : said });
+    if (turn === null || turn.settled) return;
+    if (outcome === 'stopped' || (outcome === 'blocked' && run.eventName === 'userPromptSubmit')) {
+      turn.part(turn.takeIndex(), { type: 'hook', event: run.eventName, outcome, message: said.slice(0, 500) });
+    }
+  }
+
+  /**
+   * Codex runs no hook the user has not reviewed in Codex, and skips one that
+   * changed since, without a word in the turn. Asked once per process, so
+   * Settings can say which ones and why. An older Codex without `hooks/list`
+   * is one line in the log.
+   */
+  private async reportSkippedHooks(rpc: CodexRpc, ctx: TurnContext): Promise<void> {
+    try {
+      const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
+      for (const entry of listed.data ?? []) {
+        for (const hook of entry.hooks ?? []) {
+          if (hook.enabled === false || (hook.trustStatus !== 'untrusted' && hook.trustStatus !== 'modified')) continue;
+          ctx.hook?.({
+            event: hook.eventName,
+            name: tildePath(hook.sourcePath),
+            outcome: 'skipped',
+            message: hook.trustStatus === 'modified'
+              ? 'changed since it was reviewed, so Codex skips it until it is reviewed again in Codex'
+              : 'not reviewed yet, so Codex skips it until it is reviewed in Codex',
+          });
+        }
+      }
+    } catch (error) {
+      ctx.log('info', `codex: hooks/list failed: ${messageOf(error)}`);
     }
   }
 

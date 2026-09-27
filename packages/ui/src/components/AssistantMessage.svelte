@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { CircleAlert } from '@lucide/svelte';
+  import { CircleAlert, FishingHook } from '@lucide/svelte';
   import type { Account, Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
   import { promptText, visibleAnswer } from '../lib/message-display';
@@ -110,6 +110,14 @@
           </span>
           <span class="rule"></span>
         </div>
+      {:else if part.type === 'hook'}
+        <!-- The user's own hook ended the turn: a line of the timeline, not an error. -->
+        {@const label = part.outcome === 'blocked' ? strings.chat.hookBlocked : strings.chat.hookStopped}
+        <p class="hook" data-testid="hook-part" data-outcome={part.outcome}>
+          <FishingHook size={14} strokeWidth={1.75} />
+          <span class="text">{part.message.trim() ? fill(strings.chat.hookSays, { label, message: part.message.trim() }) : label}</span>
+          <span class="event">{part.event}</span>
+        </p>
       {:else if part.type === 'error'}
         <div class="error" data-testid="error-part">
           <span class="section-label error-head"><CircleAlert size={13} strokeWidth={2} />{strings.chat.error}</span>
@@ -149,7 +157,8 @@
   .part[data-kind='error'] + .part,
   .part + .part[data-kind='text'],
   .part + .part[data-kind='thinking'],
-  .part + .part[data-kind='error'] {
+  .part + .part[data-kind='error'],
+  .part + .part[data-kind='hook'] {
     margin-top: 10px;
   }
 
@@ -199,5 +208,37 @@
 
   .compaction .label {
     flex: none;
+  }
+
+  /* One muted line, the words wrapping under their own start, the event name last and quieter. */
+  .hook {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    margin: 0;
+    padding: 2px 0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--color-muted-foreground);
+  }
+
+  .hook :global(svg) {
+    flex: none;
+    align-self: flex-start;
+    margin-top: 3px;
+  }
+
+  .hook .text {
+    flex: 1 1 16em;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .hook .event {
+    flex: none;
+    font-size: var(--text-xs);
+    color: var(--color-subtle);
   }
 </style>

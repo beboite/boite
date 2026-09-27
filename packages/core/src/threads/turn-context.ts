@@ -149,6 +149,9 @@ export class TurnContexts {
         if ((this.threads.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.threads.agentState.noteContext(threadId, use);
       },
       tasks: (list) => this.core.activity.tasks(threadId, list),
+      hook: (report) => {
+        this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report);
+      },
       background: (list) => {
         if ((this.core.journal.getThread(threadId)?.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.threads.agentState.noteBackground(threadId, list);
       },

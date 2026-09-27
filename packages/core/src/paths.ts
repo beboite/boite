@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import type { Channel, Os } from '@boite/contracts';
 
 export function currentOs(): Os {
@@ -46,6 +46,13 @@ export function resolveDataDir(override?: string | undefined, channel: Channel =
 
 export function homePath(): string {
   return homedir();
+}
+
+/** A path as a person reads it: `~` for the home directory, `/` between segments. */
+export function tildePath(path: string): string {
+  const inside = relative(homePath(), path);
+  if (inside.length > 0 && !inside.startsWith('..') && !/^[a-zA-Z]:/.test(inside)) return `~/${inside.split(sep).join('/')}`;
+  return path.split(sep).join('/');
 }
 
 /** Everything a managed install of this provider owns: downloads, releases, the current link. */

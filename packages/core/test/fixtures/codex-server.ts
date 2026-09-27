@@ -22,13 +22,14 @@
  * survive.
  */
 import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -418,6 +419,19 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         interrupted.delete(turnId);
         notify('turn/completed', { threadId, turn: turnRecord(turnId, 'interrupted') });
         return;
+      case 'hook-block':
+        // A userPromptSubmit hook that exits 2: the turn ends with nothing said (0.157.1).
+        notify('hook/completed', {
+          threadId,
+          turnId,
+          run: {
+            id: 'hook-run-1', eventName: 'userPromptSubmit', handlerType: 'command', executionMode: 'sync', scope: 'turn',
+            sourcePath: join(process.cwd(), 'hooks.json'), source: 'user', displayOrder: 0, status: 'blocked', statusMessage: null,
+            startedAt: Date.now(), completedAt: Date.now(), durationMs: 3,
+            entries: [{ kind: 'feedback', text: 'blocked by test hook' }],
+          },
+        });
+        break;
       case 'crash':
         process.stderr.write('boom\n');
         setTimeout(() => {
@@ -446,6 +460,21 @@ function handle(method: string, raw: unknown): unknown {
         codexHome: process.cwd(),
         platformFamily: process.platform === 'win32' ? 'windows' : 'unix',
         platformOs: process.platform === 'win32' ? 'windows' : 'linux',
+      };
+    case 'hooks/list':
+      log('hooks/list');
+      // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.
+      if (process.env['CODEX_FAKE_HOOKS'] !== '1') return { data: [] };
+      return {
+        data: [{
+          cwd: process.cwd(),
+          warnings: [],
+          errors: [],
+          hooks: [
+            { key: 'a', eventName: 'preToolUse', sourcePath: join(process.cwd(), 'hooks.json'), enabled: true, trustStatus: 'untrusted' },
+            { key: 'b', eventName: 'stop', sourcePath: join(process.cwd(), 'hooks.json'), enabled: true, trustStatus: 'trusted' },
+          ],
+        }],
       };
     case 'model/list':
       log('model/list');

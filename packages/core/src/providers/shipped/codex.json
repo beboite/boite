@@ -58,10 +58,20 @@
   },
   "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
   "login": { "command": ["codex", "login", "--device-auth"] },
+  "shared": [
+    {
+      "variable": "CODEX_HOME",
+      "paths": ["config.toml", "hooks.json", "AGENTS.md", "skills", "rules", "prompts", "plugins"],
+      "retarget": { "config.toml": ["hooks.json", "config.toml"] }
+    }
+  ],
+  "hookSources": [
+    { "variable": "CODEX_HOME", "path": "hooks.json", "format": "events" }
+  ],
   "models": [{ "id": "default", "name": "Codex default", "default": true }],
   "capabilities": {
     "approvals": true,
-    "hooks": false,
+    "hooks": true,
     "checkpoint": false,
     "images": true,
     "planMode": true,

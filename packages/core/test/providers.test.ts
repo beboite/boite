@@ -318,7 +318,7 @@ describe('providers', () => {
     expect(opencode?.models).toEqual([{ id: 'default', name: 'OpenCode default', default: true }]);
     expect(opencode?.capabilities).toEqual({
       approvals: true,
-      hooks: false,
+      hooks: true,
       checkpoint: false,
       images: false,
       planMode: false,
@@ -478,7 +478,7 @@ describe('providers', () => {
     expect(codex?.models).toEqual([{ id: 'default', name: 'Codex default', default: true }]);
     expect(codex?.capabilities).toEqual({
       approvals: true,
-      hooks: false,
+      hooks: true,
       checkpoint: false,
       images: true,
       planMode: true,

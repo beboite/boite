@@ -278,7 +278,9 @@ export function seedThreads() {
           },
           // The agent compacted on its way out: the divider under the answer.
           { type: 'compaction', trigger: 'auto', preTokens: 184_000, postTokens: 31_000 },
-          { type: 'text', text: 'The loader test now names that case too.' }
+          { type: 'text', text: 'The loader test now names that case too.' },
+          // The user's own PostToolUse hook ended the turn there: the line under the answer.
+          { type: 'hook', event: 'PostToolUse', outcome: 'stopped', message: 'Lint failed in src/descriptors.ts. Stopping here so you can look.' }
         ],
         state: 'complete',
         createdAt: T0 + 320_000

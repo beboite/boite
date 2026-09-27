@@ -70,6 +70,7 @@
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
     ],
+    brain: [{ id: 'brain-folder', label: strings.brain.folder }, { id: 'hooks', label: strings.hooks.heading }],
     // The page's order: connected providers first, then the ones still to add.
     accounts: [...providerList.connected, ...providerList.rest].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
     usage: [

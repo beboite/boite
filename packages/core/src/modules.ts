@@ -1,6 +1,7 @@
 import type { Core } from './core.ts';
 import { registerPersistentAgents } from './agents/store.ts';
 import { registerAccountMethods } from './accounts.ts';
+import { registerHookMethods } from './hooks.ts';
 import { registerAgentMethods } from './agent.ts';
 import { registerImportMethods } from './imports.ts';
 import { registerKeybindingMethods } from './keybindings.ts';
@@ -33,6 +34,7 @@ export function registerModules(core: Core): void {
   core.router.register('brain.status', () => core.brain.status());
   core.router.register('brain.configure', params => core.brain.configure(params));
   core.router.register('brain.sync', () => core.brain.sync());
+  registerHookMethods(core);
   registerTelemetry(core);
   registerCoordination(core);
   registerSpeechMethods(core);

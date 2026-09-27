@@ -128,6 +128,12 @@ export interface TurnContext {
    * tells the clients; a driver calls it once per turn, at the end.
    */
   context(use: Omit<import('@boite/contracts').ContextUse, 'at'>): void;
+  /**
+   * One of the user's own hooks ran and the agent said so. The core counts it
+   * and keeps the ones that did not pass for Settings; the thread shows only
+   * what the driver draws itself (a blocked prompt, a stopped turn).
+   */
+  hook?(report: import('../hooks.ts').HookReport): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
   /** The inline question card. One call per question, and they are asked in order. */
   askQuestion(ask: QuestionAsk): QuestionTicket;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { permissionSentence } from '../lib/tool-summary';
   import Prose from './Prose.svelte';
 
@@ -24,6 +24,8 @@
             <p class="card">{permissionSentence(part.toolName, undefined)}</p>
           {:else if part.type === 'question'}
             <p class="card">{part.text}</p>
+          {:else if part.type === 'hook'}
+            <p class="card" data-testid="delegation-hook">{part.message.trim() ? fill(strings.chat.hookSays, { label: part.outcome === 'blocked' ? strings.chat.hookBlocked : strings.chat.hookStopped, message: part.message.trim() }) : part.outcome === 'blocked' ? strings.chat.hookBlocked : strings.chat.hookStopped}</p>
           {/if}
         {/each}
         {#if message.state === 'streaming'}<span class="caret" aria-label={strings.chat.streaming}></span>{/if}

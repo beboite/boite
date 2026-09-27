@@ -224,6 +224,40 @@ export interface ProviderIsolation {
 }
 
 /**
+ * What an account with a directory of its own takes from the provider's own
+ * profile, so a second login still runs the user's hooks, instructions, skills
+ * and plugins. `variable` is one of the profile's isolation variables: its
+ * default location is the source, the account's value of it the destination.
+ * A directory is linked there, a file is copied again whenever the source
+ * changed. A path that holds or contains a login file is refused at load time.
+ */
+export interface ProviderShare {
+  variable: string;
+  /** Relative to the variable's directory, no `..`. */
+  paths: string[];
+  /**
+   * Files among `paths` whose copy names other files among `paths` by absolute
+   * path, with those names: the copy points at the account's own file instead.
+   * Codex keys the trust of each hook by the absolute path of `hooks.json`.
+   */
+  retarget?: Record<string, string[]>;
+}
+
+/**
+ * Where the agent reads the user's own hooks, so Settings can say how many it
+ * has. `events` is a JSON file, or every `.json` file of a directory, shaped
+ * `{ "hooks": { "<Event>": [{ "hooks": [ ... ] }] } }`; each inner entry is one
+ * hook. `modules` is a directory whose entries are each one module the agent
+ * loads, hooks included (pi extensions, OpenCode plugins).
+ */
+export interface ProviderHookSource {
+  /** An isolation variable, resolved like `ProviderShare.variable`. Absent means `path` starts with `~/`. */
+  variable?: string;
+  path: string;
+  format: 'events' | 'modules';
+}
+
+/**
  * Quirks a driver applies to one agent's dialect of a protocol. A value the
  * core does not know is refused at load time rather than ignored.
  */
@@ -280,6 +314,10 @@ export interface ProviderDescriptor {
    * already there is left alone, because the agent owns it afterwards.
    */
   seedFiles?: Record<string, string>;
+  /** What an isolated account shares with the provider's own profile. Absent shares nothing. */
+  shared?: ProviderShare[];
+  /** Where the user's own hooks live. Only with `capabilities.hooks`. */
+  hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */
   quirks?: ProviderQuirk[];
   models: ModelInfo[];
@@ -808,6 +846,12 @@ export type MessagePart =
    * left after when it says so. Drawn as a divider in the timeline.
    */
   | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null }
+  /**
+   * One of the user's own hooks ended the turn: it blocked the prompt, or told
+   * the agent to stop. `event` is the agent's own name for the hook event. A
+   * hook that denied a tool call shows on that tool's card instead.
+   */
+  | { type: 'hook'; event: string; outcome: 'blocked' | 'stopped'; message: string }
   | { type: 'error'; message: string };
 
 export interface Message {
@@ -1610,6 +1654,70 @@ export interface BrainStatus {
 }
 
 /**
+ * What one hook run came to. `skipped` is a hook the agent has but will not
+ * run, Codex's untrusted or modified ones.
+ */
+export type HookOutcome = 'ok' | 'blocked' | 'failed' | 'stopped' | 'skipped';
+
+/** One hook run that did not simply pass. The core keeps the newest ones in memory, since it started. */
+export interface HookRun {
+  at: Timestamp;
+  providerId: ProviderId;
+  accountId: AccountId | null;
+  threadId: ThreadId | null;
+  /** The agent's own name for the event: `PreToolUse`, `userPromptSubmit`. */
+  event: string;
+  /** What the agent calls the hook, `PreToolUse:Bash`, or the file it comes from. */
+  name: string;
+  outcome: Exclude<HookOutcome, 'ok'>;
+  /** What the hook or the agent said about it, at most 500 characters. */
+  message: string | null;
+}
+
+/** One place the agent reads the user's hooks from, as Settings shows it. */
+export interface HookSourceState {
+  /** The path read, the home directory written `~`. */
+  path: string;
+  format: ProviderHookSource['format'];
+  /** Hooks (`events`) or modules (`modules`) found there. Null when the path does not exist. */
+  count: number | null;
+  /** Why it could not be read, null when it was. */
+  error: string | null;
+}
+
+/** An account with a directory of its own, and what it does not get from the provider's own profile. */
+export interface HookShareState {
+  accountId: AccountId;
+  label: string;
+  problems: { path: string; message: string }[];
+}
+
+export interface ProviderHooks {
+  providerId: ProviderId;
+  name: string;
+  /** `capabilities.hooks`: the agent runs the hooks the user configured for it. */
+  runsHooks: boolean;
+  /** Boite sees each run (Claude, Codex); for the others only the configuration is known. */
+  reports: boolean;
+  sources: HookSourceState[];
+  accounts: HookShareState[];
+  /** Since `HooksStatus.since`. */
+  runs: number;
+  blocked: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface HooksStatus {
+  /** When this core started counting. */
+  since: Timestamp;
+  /** Every provider available on this core's machine. */
+  providers: ProviderHooks[];
+  /** Newest first, at most 50. */
+  recent: HookRun[];
+}
+
+/**
  * A shell the core runs in a pseudo-terminal. Its id names what it belongs to:
  * `terminal:<threadId>` for a thread's, `login:<accountId>` for a sign-in.
  */
@@ -1632,6 +1740,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'brain.configure': { params: BrainConfig; result: BrainStatus };
   /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
   'brain.sync': { params: Record<string, never>; result: BrainStatus };
+  /** Where each agent reads the user's hooks, what separate accounts miss of them, and the runs that did not pass. */
+  'hooks.status': { params: Record<string, never>; result: HooksStatus };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
@@ -2140,6 +2250,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'process.muted': { threadId: ThreadId; pid: number; at: Timestamp };
 
   'scheduler.updated': SchedulerState;
+  /** A hook blocked, failed, stopped a turn or was skipped: `hooks.status` has it. Runs that passed only count. */
+  'hooks.changed': { at: Timestamp };
   'accounts.updated': Account;
   /** An account `accounts.remove` deleted. */
   'accounts.removed': { accountId: AccountId };

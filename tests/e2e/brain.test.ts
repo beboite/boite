@@ -89,3 +89,52 @@ test('configure, inspect, synchronize and disconnect a brain at desktop and phon
   expect(await page.evaluate(`document.querySelector('${id('brain-error')}').textContent`)).toContain('absolute');
   await capture('brain-phone-error.png');
 }, 30_000);
+
+test('the hooks card and a hook line in the thread at desktop and phone widths', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  const text = (selector: string) => page.evaluate<string>(`document.querySelector(${JSON.stringify(selector)})?.textContent.replace(/\\s+/g, ' ').trim() ?? ''`);
+  const show = (selector: string, block: 'start' | 'center' | 'end') => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: '${block}' })`);
+  await page.evaluate(`localStorage.removeItem('boite.locale')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  // The seeded thread ends on a turn its own PostToolUse hook stopped.
+  await page.waitFor(`document.querySelector('${id('hook-part')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('hook-part')}').dataset.outcome`)).toBe('stopped');
+  expect(await text(id('hook-part'))).toBe('A hook stopped the turn: Lint failed in src/descriptors.ts. Stopping here so you can look. PostToolUse');
+  await show(id('hook-part'), 'center');
+  await capture('hook-part-desktop.png');
+  await page.click(id('nav-settings'));
+  await page.click(id('settings-tab-brain'));
+  // Shown with no brain folder connected: hooks are the agents' own, not the brain's.
+  await page.waitFor(`document.querySelectorAll('${id('hooks-provider')}').length === 5 && document.querySelector('${id('hooks-recent')}')`);
+  expect(await text(`${id('hooks-provider')}[data-provider="codex"] ${id('hooks-issue')}`)).toContain('Work does not get config.toml');
+  expect(await text(id('hooks-without'))).toBe('Antigravity and Echo do not run hooks.');
+  expect(await page.evaluate(`document.querySelectorAll('${id('hooks-run')}').length`)).toBe(5);
+  await page.click(`${id('hooks-provider')}[data-provider="claude"] summary`);
+  await page.waitFor(`document.querySelector('${id('hooks-provider')}[data-provider="claude"] details').open`);
+  expect(await text(`${id('hooks-provider')}[data-provider="claude"] .detail`)).toContain('Shared with 1 separate account');
+  await show(id('hooks-card'), 'start');
+  await capture('brain-hooks-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.waitFor(`document.querySelector('${id('hooks-card')}')`);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+  await show(id('hooks-card'), 'start');
+  await capture('brain-hooks-phone.png');
+  await show(id('hooks-recent'), 'end');
+  await capture('brain-hooks-phone-recent.png');
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('hook-part')}')`);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
+  await show(id('hook-part'), 'center');
+  await capture('hook-part-phone.png');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.click(id('nav-settings'));
+  await page.click(id('settings-tab-brain'));
+  await page.waitFor(`document.querySelectorAll('${id('hooks-provider')}').length === 5 && document.querySelector('${id('hooks-recent')}')`);
+  expect(await text(`${id('hooks-provider')}[data-provider="claude"] ${id('hooks-counters')}`)).toBe('412 exécutions · 2 bloquées · 1 en échec');
+  await show(id('hooks-card'), 'start');
+  await capture('brain-hooks-desktop-fr.png');
+  await page.evaluate(`localStorage.removeItem('boite.locale')`);
+}, 30_000);

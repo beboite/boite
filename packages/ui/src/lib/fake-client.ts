@@ -1,6 +1,7 @@
 import {
   RpcErrorCode,
   type CoreInfo,
+  type HookRun,
   type Principal,
   type RpcEventName,
   type RpcEvents,
@@ -14,6 +15,7 @@ import { accountMethods } from './fake-client/accounts';
 import { activityMethods, pauseActivity } from './fake-client/activity';
 import { brainMethods } from './fake-client/brain';
 import { FakeContext, type FakeClientOptions, type FakeMethods } from './fake-client/context';
+import { hookMethods, recordHookRun } from './fake-client/hooks';
 import { coordinationMethods, registerCore, unregisterCore } from './fake-client/coordination';
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
@@ -211,6 +213,11 @@ export class FakeClient implements ObservableClient {
     this.#ctx.emit('accounts.updated', structuredClone(account));
   }
 
+  /** A hook that blocked, failed, stopped a turn or was skipped, as the core records it and announces it with `hooks.changed`. */
+  recordHookRun(run: HookRun): void {
+    recordHookRun(this.#ctx, run);
+  }
+
   /** The core's recovery settling every request a thread still waits on (`fake-client/requests.ts`, after `packages/core/src/threads/cards.ts`). */
   clearRequestsOf(threadId: ThreadId): void {
     clearRequestsOf(this.#ctx, threadId);
@@ -253,6 +260,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projectMethods(ctx),
       ...threadMethods(ctx),
