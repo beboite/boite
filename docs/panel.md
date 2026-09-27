@@ -15,7 +15,8 @@ it is available.
 
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
-than parked, since the UI has no way to show an archived thread again. The one
+than parked: a thread restored from Archived threads comes back with a fresh
+panel, never with what it had open. The one
 exception is the thread on screen when another client archives it: it stays
 open with its tabs and unsaved file edits, reconnects included, and its layout
 goes when this client opens another thread or a draft. Each machine's
@@ -108,7 +109,8 @@ from it; a browser opened on that core's own address shows them.
 The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
 the owner's and the thread's own agent's. `files.write`, `todos.remove` and a
 todo's `done` are the owner's alone, and `todos.updated` goes to the owner and
-to the agents of that project. A paired phone has no Panel button.
+to the agents of that project. A paired phone has the Panel button too, and its
+menu offers the Agents and Workflows surfaces, the two it may follow.
 
 ## What the agent can ask
 

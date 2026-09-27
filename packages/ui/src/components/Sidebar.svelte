@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Command, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -15,7 +15,6 @@
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
   let { store }: { store: Store } = $props();
-  let searchBox = $state<HTMLInputElement>();
   let projectButton = $state<HTMLButtonElement>();
   let now = $state(Date.now());
   let filter = $state<string | null>(null);
@@ -47,10 +46,6 @@
     const timer = setInterval(() => (now = Date.now()), 30_000);
     return () => clearInterval(timer);
   });
-  export function focusSearch() {
-    searchBox?.focus();
-    searchBox?.select();
-  }
   function addProject() {
     store.projectPickerOpen = true;
   }
@@ -61,6 +56,8 @@
       [
         { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: projectName(project) }) },
         { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
+        // An archived thread leaves this list: its way back starts where it was.
+        { id: 'archived', label: strings.settings.archived.heading },
         ...(owner.owner
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
@@ -72,6 +69,10 @@
       async (action) => {
         if (action === 'new') await workspace.select(owner, undefined, project.id);
         if (action === 'copy') await owner.copy(project.path);
+        if (action === 'archived') {
+          if (workspace.active !== owner) await workspace.select(owner);
+          owner.showSettings('general', 'archived');
+        }
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);
@@ -121,7 +122,6 @@
     <div class="top">
       <label class="search"
         ><Search size={15} /><input
-          bind:this={searchBox}
           bind:value={store.search}
           placeholder={strings.sidebar.search}
           aria-label={strings.sidebar.search}
@@ -224,6 +224,8 @@
   {/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
+    <!-- The palette's only pointer and touch door: its chord is the tooltip. -->
+    <button class="ghost icon" aria-label={strings.keyboard.commands.palette} title={`${strings.keyboard.commands.palette}${store.keyHint('palette')}`} data-testid="nav-palette" onclick={() => (store.paletteOpen = true)}><Command size={16} /></button>
     <button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>
     <button
       class="ghost icon"

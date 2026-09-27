@@ -271,3 +271,121 @@ test('templates are kept per project, refreshed by name, started by id, and the 
   expect(await runCli(['workflow', 'check', '{"name":"x","steps":[{"id":"a","profile":"gone","task":"t"}]}'], { out: t => out.push(t), err: t => out.push(t), env, cwd: h.dataDir })).toBe(1);
   expect(out.join('')).toContain('steps[0].profile');
 });
+
+test('a failed step stops what never launched, and a retry past an archived conversation opens a new one', async () => {
+  const { held } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : taskOf(ctx.prompt) === 'x' ? '```json\n{"items": [1, 2, 3, 4]}\n```' : { hold: true });
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Fan', limits: { maxConcurrent: 2 }, steps: [
+    { id: 'list', profile: 'fast', task: 'x', output: { items: ['number'] } },
+    { id: 'each', profile: 'fast', forEach: 'list.items', task: 'do {{item}}' },
+  ] }, requestId: 'fan' });
+  await waitFor(() => held.size === 2);
+  const first = h.core.workflows.get(threadId, run.id).nodes[1]!.instances[0]!.threadId!;
+  const second = h.core.workflows.get(threadId, run.id).nodes[1]!.instances[1]!.threadId!;
+  held.get(first)!('', 'error');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[1]!.instances[0]!.status === 'failed');
+  // The run is halted but not over while a step it launched still works.
+  expect(h.core.workflows.get(threadId, run.id).status).toBe('running');
+  held.get(second)!('Two done.');
+  const failed = await settled(h, threadId, run.id);
+  expect(failed.status).toBe('failed');
+  expect(failed.error).toStartWith('each: ');
+  const each = failed.nodes[1]!;
+  expect(each.status).toBe('failed');
+  expect(each.instances.map(i => [i.status, i.threadId === null])).toEqual([['failed', false], ['done', false], ['stopped', true], ['stopped', true]]);
+  expect(each.instances[2]!.error).toBe('Not started: another step of the run failed');
+
+  await owner.call('threads.archive', { threadId: first });
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'retry' });
+  await waitFor(() => held.size === 2);
+  const retried = h.core.workflows.get(threadId, run.id).nodes[1]!.instances;
+  expect(retried[0]!.threadId).not.toBeNull();
+  expect(retried[0]!.threadId).not.toBe(first);
+  expect(retried.map(i => i.status)).toEqual(['running', 'done', 'running', 'waiting']);
+  // The archived conversation speaks for nothing once the step moved on.
+  const stale = await connect(h.url, h.core.agents.tokenFor(first));
+  try {
+    await expect(stale.call('workflows.output', { threadId: first, value: null })).rejects.toThrow('is not running');
+  } finally { stale.close(); }
+  for (const finish of [...held.values()]) finish('ok');
+  await waitFor(() => held.size === 1);
+  for (const finish of [...held.values()]) finish('ok');
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+});
+
+test('retrying the failed step also reopens a parallel step that stopped before it launched', async () => {
+  const { held } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : taskOf(ctx.prompt) === 'x' ? '```json\n{"items": [1, 2, 3]}\n```' : { hold: true });
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Side', limits: { maxConcurrent: 2 }, steps: [
+    { id: 'lone', profile: 'fast', task: 'lone' },
+    { id: 'list', profile: 'fast', task: 'x', output: { items: ['number'] } },
+    { id: 'each', profile: 'fast', forEach: 'list.items', task: 'do {{item}}' },
+  ] }, requestId: 'side' });
+  await waitFor(() => held.size === 2);
+  const lone = h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.threadId!;
+  const first = h.core.workflows.get(threadId, run.id).nodes[2]!.instances[0]!.threadId!;
+  held.get(lone)!('', 'error');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'failed');
+  held.get(first)!('One done.');
+  const failed = await settled(h, threadId, run.id);
+  expect(failed.nodes[2]!.status).toBe('stopped');
+  expect(failed.nodes[2]!.instances.map(i => i.status)).toEqual(['done', 'stopped', 'stopped']);
+
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'lone' });
+  await waitFor(() => held.size === 2);
+  const reopened = h.core.workflows.get(threadId, run.id);
+  expect(reopened.nodes[2]!.status).toBe('running');
+  expect(reopened.nodes[2]!.instances.map(i => [i.status, i.error])).toEqual([['done', null], ['running', null], ['waiting', null]]);
+  while (h.core.workflows.get(threadId, run.id).status === 'running') {
+    for (const finish of [...held.values()]) finish('ok');
+    await Bun.sleep(20);
+  }
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+});
+
+test('a paused run lets its running steps end, and is done once every step is', async () => {
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const two = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'two' });
+  await waitFor(() => held.size === 1);
+  await owner.call('workflows.control', { threadId, runId: two.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, two.id).nodes[0]!.status === 'done');
+  const paused = h.core.workflows.get(threadId, two.id);
+  expect([paused.status, paused.nodes[1]!.status]).toEqual(['paused', 'waiting']);
+  await Bun.sleep(20);
+  expect(held.size).toBe(0);
+  await owner.call('workflows.control', { threadId, runId: two.id, action: 'stop' });
+
+  const one = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
+  await waitFor(() => held.size === 1);
+  await owner.call('workflows.control', { threadId, runId: one.id, action: 'pause' });
+  [...held.values()][0]!('A done');
+  expect((await settled(h, threadId, one.id)).status).toBe('done');
+});
+
+test('a summary held by the spent turn budget says why, and goes once the owner raises it', async () => {
+  const { prompts } = scripted(ctx => ctx.thread.parentThreadId ? 'step done' : 'noted');
+  const { h, owner, threadId, config } = await setup({ maxTurns: 1 });
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
+  await settled(h, threadId, run.id);
+  await waitFor(() => !!h.core.workflows.get(threadId, run.id).deliveryError);
+  const held = h.core.workflows.get(threadId, run.id);
+  expect([held.status, held.delivered, held.deliveryError]).toEqual(['done', false, 'delegation turn budget reached; the owner can increase it in Agents']);
+  await owner.call('delegation.configure', { threadId, config: { ...config, maxTurns: 5 } });
+  await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
+  expect(h.core.workflows.get(threadId, run.id).deliveryError).toBeNull();
+  await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.includes('Boite workflow done')));
+});
+
+test('an agent saves new templates but never replaces a saved one', async () => {
+  scripted(() => 'ok');
+  const { h, owner, threadId } = await setup();
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    const saved = await agent.call('workflows.templates.save', { threadId, name: 'Review', plan: REVIEW });
+    await expect(agent.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } })).rejects.toThrow('a template named "Review" already exists');
+    await expect(agent.call('workflows.templates.save', { threadId, name: 'Other', plan: REVIEW, templateId: saved.id })).rejects.toThrow('already exists');
+    expect((await owner.call('workflows.templates.save', { threadId, name: 'Review', plan: { ...REVIEW, steps: REVIEW.steps.slice(0, 1) } })).id).toBe(saved.id);
+  } finally { agent.close(); }
+});

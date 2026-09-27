@@ -221,11 +221,22 @@ export class FakeAgents {
       }
       case 'agents.routine.save': {
         const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId);
-        const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, same = previous?.enabled && JSON.stringify(previous.schedule) === JSON.stringify(s);
-        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled ? null : same ? previous.nextAt : nextOccurrence(s, Date.now()) } });
+        const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, changed = JSON.stringify(previous?.schedule) !== JSON.stringify(s);
+        const spent = s.kind === 'once' && !changed && previous?.lastScheduledAt != null;
+        // The core's save: run bookkeeping comes from the record, and a new once date clears the run it replaces.
+        const lastScheduledAt = s.kind === 'once' && changed ? null : previous?.lastScheduledAt ?? null;
+        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled || spent ? null : previous?.enabled && !changed ? previous.nextAt : s.kind === 'once' ? s.at : nextOccurrence(s, Date.now()), lastWorkId: previous?.lastWorkId ?? null, lastScheduledAt } });
       }
       case 'agents.routine.run': {
-        const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => { const routine = this.get('routine', p.routineId); if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished'); const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: crypto.randomUUID() }); this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now() }); return work; });
+        const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => {
+          const routine = this.get('routine', p.routineId);
+          if (this.get('profile', routine.agentId).status !== 'active') this.refuse('routine: agent is paused or archived');
+          if (routine.lastWorkId && !['done','cancelled'].includes(this.get('work', routine.lastWorkId).status)) this.refuse('previous work is unfinished');
+          const work = this.work({ agentId: routine.agentId, scope: { kind: 'agent', id: routine.agentId }, prompt: routine.prompt, episodeId: crypto.randomUUID() });
+          // The core's run: the next date moves on, and a once routine is done.
+          this.update('routine', { ...routine, lastWorkId: work.id, lastScheduledAt: Date.now(), nextAt: routine.enabled && routine.schedule.kind !== 'once' ? nextOccurrence(routine.schedule, Date.now()) : null, enabled: routine.enabled && routine.schedule.kind !== 'once' });
+          return work;
+        });
       }
       case 'agents.context.compact': { const p = raw as RpcParams<typeof method>, session = this.get('session', p.sessionId); return this.once(p.requestId, p, () => this.work({ agentId: session.agentId, scope: session.scope, prompt: 'Compact context', purpose: 'compaction', episodeId: crypto.randomUUID() })); }
       case 'agents.snapshot': return this.snapshot();

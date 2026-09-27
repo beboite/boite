@@ -65,7 +65,7 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['workflows.control', 'pause, stop or retry runs it started; resuming a paused team stays with the owner'],
   ['workflows.output', 'the structured result of the step this thread is, checked against its declared shape'],
   ['workflows.templates.list', 'the plans kept for its own project'],
-  ['workflows.templates.save', 'keeping a plan for its own project; a template runs only through workflows.start'],
+  ['workflows.templates.save', 'keeping a new plan for its own project, never replacing a saved one; a template runs only through workflows.start'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],

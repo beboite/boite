@@ -2,6 +2,7 @@
 
 Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
+A phone has its own Experiments row under Settings, This phone.
 
 ## Chat files and previews
 

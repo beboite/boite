@@ -405,6 +405,7 @@ export const strings = {
     files: 'Show the files',
     tasks: 'Show the tasks',
     workflows: 'Show the workflows',
+    agents: 'Open the agents',
     pin: 'Pin this thread',
     unpin: 'Unpin this thread',
     rename: 'Rename this thread',
@@ -1278,7 +1279,8 @@ export const strings = {
       intro: 'An archived thread leaves the sidebar and its agent stops. Restore it to bring the conversation back; its agent starts again with the next message.',
       show: 'Show archived threads',
       empty: 'No archived thread on this machine.',
-      restore: 'Restore'
+      restore: 'Restore',
+      open: 'Open'
     },
     pairing: {
       heading: 'Phones and other devices',

@@ -24,6 +24,7 @@ const SUMMARY_CHARS = 10000;
 const BUSY = ['queued', 'running', 'waiting'];
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'failed' || status === 'skipped' || status === 'stopped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
+const NOT_STARTED = 'Not started: another step of the run failed';
 
 function text(value: unknown, field: string, max: number): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw invalidParams(`${field}: expected 1 to ${max} characters`);
@@ -78,6 +79,7 @@ export class Workflows {
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed) return;
       if (name === 'turn.finished') this.turnFinished(payload as Turn);
+      else if (name === 'delegation.changed') this.redeliver((payload as { threadId: string }).threadId);
       else if (name === 'thread.updated') {
         const thread = payload as ThreadSummary;
         if (thread.archived && !thread.parentThreadId) this.stopRoot(thread.id, 'The thread was archived.');
@@ -102,6 +104,10 @@ export class Workflows {
       db.query('INSERT OR REPLACE INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(run.id, run.rootThreadId, run.status, run.createdAt, run.updatedAt, JSON.stringify(run));
     });
     this.core.bus.emit('workflows.changed', { threadId: run.rootThreadId, runId: run.id });
+    // A step's conversation shows its parent's runs, and a client reading it subscribes to that thread alone.
+    for (const node of run.nodes) for (const inst of node.instances) {
+      if (inst.threadId) this.core.bus.emit('workflows.changed', { threadId: inst.threadId, runId: run.id });
+    }
   }
   /** Load, change, save. `change` returns false to leave the record untouched. */
   private mutate(runId: string, change: (run: WorkflowRun) => boolean | void): WorkflowRun | null {
@@ -250,7 +256,10 @@ export class Workflows {
 
   private step(runId: string): void {
     let run = this.load(runId);
-    if (!run || run.status !== 'running') return;
+    if (!run) return;
+    // Paused, nothing new launches, but the turns already out still end their steps.
+    if (run.status === 'paused') return this.settle(runId);
+    if (run.status !== 'running') return;
     if (this.settleNodes(run)) this.save(run);
     const config = this.core.delegation.config(run.rootThreadId);
     if (!config.enabled || config.paused) {
@@ -389,11 +398,14 @@ export class Workflows {
     let changed = this.settleNodes(run);
     const now = Date.now();
     const running = run.nodes.some(node => node.instances.some(i => i.status === 'running'));
-    if (run.status === 'running' && !running) {
-      const failure = run.nodes.find(node => broken(node.status));
-      if (failure) Object.assign(run, { status: 'failed', error: `${failure.title}: ${failure.error ?? failure.status}`, finishedAt: now });
-      else if (run.nodes.every(node => node.status === 'done' || node.status === 'skipped')) Object.assign(run, { status: 'done', error: null, finishedAt: now });
-      changed ||= run.status !== 'running';
+    const was = run.status;
+    if ((was === 'running' || was === 'paused') && !running) {
+      // The step that failed names the run's failure, not one stopped because of it.
+      const failure = run.nodes.find(node => node.status === 'failed') ?? run.nodes.find(node => broken(node.status));
+      // A paused run fails only once resumed, where retry is offered; one with every step done is over either way.
+      if (failure && was === 'running') Object.assign(run, { status: 'failed', error: `${failure.title}: ${failure.error ?? failure.status}`, finishedAt: now });
+      else if (!failure && run.nodes.every(node => node.status === 'done' || node.status === 'skipped')) Object.assign(run, { status: 'done', error: null, finishedAt: now });
+      changed ||= run.status !== was;
     }
     if (changed) this.save(run);
     if (run.status === 'done' || run.status === 'failed') this.deliver(run.id);
@@ -409,9 +421,10 @@ export class Workflows {
       const running = node.instances.some(i => i.status === 'running');
       const done = node.instances.every(i => ended(i.status));
       if (!done && (running || !halted)) continue;
+      // Halted, what never launched will not launch now: it reads stopped, and a retry opens it again.
+      for (const inst of node.instances) if (inst.status === 'waiting') Object.assign(inst, { status: 'stopped', error: NOT_STARTED, finishedAt: now });
       const failed = node.instances.find(i => i.status === 'failed');
       const stopped = node.instances.find(i => i.status === 'stopped');
-      if (!failed && !stopped && !done) continue;
       node.status = failed ? 'failed' : stopped ? 'stopped' : 'done';
       node.error = (failed ?? stopped)?.error ?? null;
       node.finishedAt = now;
@@ -442,7 +455,8 @@ export class Workflows {
     let fix: string | null = null;
     this.mutate(entry.runId, run => {
       const inst = this.instance(run, entry.key);
-      if (!inst || inst.status !== 'running') return false;
+      // A retry past an archived conversation runs in a new one: the old one speaks for nothing.
+      if (!inst || inst.status !== 'running' || inst.threadId !== turn.threadId) return false;
       const step = run.plan.steps.find(s => s.id === entry.key.split('#')[0])!;
       const now = Date.now();
       if (turn.status === 'done') {
@@ -500,7 +514,7 @@ export class Workflows {
     if (!entry) throw refused('boite workflow output works only inside a workflow step');
     const run = this.load(entry.runId)!;
     const inst = this.instance(run, entry.key);
-    if (!inst || inst.status !== 'running') throw refused(`step ${entry.key} is not running`);
+    if (!inst || inst.status !== 'running' || inst.threadId !== threadId) throw refused(`step ${entry.key} is not running`);
     const shape: WorkflowShape | undefined = run.plan.steps.find(s => s.id === entry.key.split('#')[0])?.output;
     const mismatch = (shape === undefined ? null : shapeMismatch(value, shape)) ?? this.tooLong(value);
     if (mismatch) throw invalidParams(`${mismatch}${shape === undefined ? '' : `; expected shape ${JSON.stringify(shape)}`}`);
@@ -546,10 +560,19 @@ export class Workflows {
         });
         this.core.workforce.changed();
       } else this.core.threads.startTurn(root.id, prompt, [], undefined, 'delegation', undefined, undefined, display);
-      this.mutate(run.id, current => { current.delivered = true; });
+      this.mutate(run.id, current => { current.delivered = true; current.deliveryError = null; });
     } catch (error) {
-      this.core.log('warn', `workflow ${run.id} result not delivered: ${messageOf(error)}`);
+      // Said on the run, so the panel shows why the summary is held rather than waiting in silence.
+      const reason = messageOf(error);
+      this.core.log('warn', `workflow ${run.id} result not delivered: ${reason}`);
+      this.mutate(run.id, current => current.deliveryError === reason ? false : void (current.deliveryError = reason));
     }
+  }
+
+  /** A held summary goes again once the team's settings change: a raised budget or a resume lets it through. */
+  private redeliver(rootId: string): void {
+    const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0 AND json_extract(data, '$.deliveryError') IS NOT NULL", rootId);
+    if (held.length) this.later(() => { for (const run of held) this.deliver(run.id); });
   }
 
   // -- control -----------------------------------------------------------------
@@ -583,9 +606,15 @@ export class Workflows {
         this.resumeTeam(run.rootThreadId, principal);
         for (const node of run.nodes) {
           const target = nodes.includes(node);
-          for (const inst of node.instances) if (target && broken(inst.status)) Object.assign(inst, { status: 'waiting', finishedAt: null });
+          for (const inst of node.instances) if (target && broken(inst.status)) {
+            // An archived or removed step conversation takes no turn: the retry gets a new one.
+            const gone = inst.threadId !== null && this.core.journal.getThread(inst.threadId)?.archived !== false;
+            Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
+          }
+          // Stopped only because another step failed, it never ran: it waits again with the retried one.
+          else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
           if (target && !node.instances.length && broken(node.status)) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
-          else if (target && node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
+          else if (node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
           // A stop left later steps unopened; they wait for the retried ones again.
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }
@@ -675,7 +704,7 @@ export class Workflows {
     return (this.core.journal.db.query('SELECT data FROM workflow_templates WHERE project_id IS ? ORDER BY name').all(root.projectId) as DataRow[]).map(row => JSON.parse(row.data) as WorkflowTemplate);
   }
 
-  saveTemplate(params: RpcParams<'workflows.templates.save'>): WorkflowTemplate {
+  saveTemplate(params: RpcParams<'workflows.templates.save'>, principal: Principal): WorkflowTemplate {
     const root = this.rootOf(params.threadId);
     const name = text(params.name, 'name', 80).trim();
     // Profiles are checked when a run starts: a template outlives today's routes.
@@ -686,6 +715,8 @@ export class Workflows {
     if (params.templateId !== undefined && !byId) throw invalidParams(`templateId: no template ${params.templateId} in this project`);
     const byName = byId ?? this.core.journal.db.query('SELECT data FROM workflow_templates WHERE name = ? AND project_id IS ?').get(name, root.projectId) as DataRow | null;
     const previous = byName ? JSON.parse(byName.data) as WorkflowTemplate : null;
+    // The owner runs a template by its name: an agent adds plans, it never swaps one under that name.
+    if (previous && principal === 'agent') throw refused(`a template named "${previous.name}" already exists in this project; save the plan under a new name`);
     const template: WorkflowTemplate = { id: previous?.id ?? newId('wft_'), projectId: root.projectId, name, plan: { ...plan, name }, createdAt: previous?.createdAt ?? now, updatedAt: now };
     this.core.journal.append({ type: 'workflow.template', threadId: root.id, version: 1, payload: { id: template.id, name } }, db => {
       db.query('INSERT OR REPLACE INTO workflow_templates VALUES (?, ?, ?, ?, ?, ?)').run(template.id, template.projectId, template.name, template.createdAt, template.updatedAt, JSON.stringify(template));
@@ -719,6 +750,6 @@ export function registerWorkflowMethods(core: Core): void {
   core.router.register('workflows.control', (params, ctx) => core.workflows.control(params, principal(ctx)));
   core.router.register('workflows.output', params => core.workflows.output(params.threadId, params.value));
   core.router.register('workflows.templates.list', params => core.workflows.templates(params.threadId));
-  core.router.register('workflows.templates.save', params => core.workflows.saveTemplate(params));
+  core.router.register('workflows.templates.save', (params, ctx) => core.workflows.saveTemplate(params, principal(ctx)));
   core.router.register('workflows.templates.remove', params => core.workflows.removeTemplate(params.threadId, params.templateId));
 }

@@ -90,6 +90,41 @@ test('a failed step fails the run and only the owner retries it', async () => {
   } finally { client.close(); }
 });
 
+test('a failed step stops what never launched, and a paused run still ends its running steps', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  await client.connect();
+  try {
+    const narrow: WorkflowPlan = { name: 'Narrow', limits: { maxConcurrent: 1 }, steps: [{ id: 'try', profile: 'implementer', task: 'Please fail now.' }, { id: 'side', profile: 'reviewer', task: 'Waits its turn.' }] };
+    const run = await client.call('workflows.start', { threadId: 't-trace', plan: narrow, requestId: 'narrow' });
+    const failed = await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status !== 'running');
+    expect([failed.status, failed.error]).toEqual(['failed', 'try: The turn failed']);
+    expect(failed.nodes.map(node => node.status)).toEqual(['failed', 'stopped']);
+    expect(failed.nodes[1]!.instances.map(inst => [inst.status, inst.threadId, inst.error])).toEqual([['stopped', null, 'Not started: another step of the run failed']]);
+    // Retrying the failed step reopens the one it held back.
+    const retried = await client.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry', stepId: 'try' });
+    expect(retried.status).toBe('running');
+    expect(retried.nodes[1]!.instances[0]!.error).toBeNull();
+    await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status === 'failed');
+
+    const one = await client.call('workflows.start', { threadId: 't-trace', plan: { name: 'One', steps: [{ id: 'a', profile: 'implementer', task: 'Quick.' }] }, requestId: 'one' });
+    await client.call('workflows.control', { threadId: 't-trace', runId: one.id, action: 'pause' });
+    const done = await until(() => client.call('workflows.get', { threadId: 't-trace', runId: one.id }), value => value.status !== 'paused');
+    expect(done.status).toBe('done');
+  } finally { client.close(); }
+});
+
+test('an agent saves new templates but never replaces a saved one', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  await client.connect();
+  try {
+    const saved = await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan });
+    client.becomes('agent');
+    await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Lexer', plan })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan, templateId: saved.id })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect((await client.call('workflows.templates.save', { threadId: 't-trace', name: 'Other', plan })).id).not.toBe(saved.id);
+  } finally { client.close(); }
+});
+
 test('a paired device follows, pauses and stops a run but cannot start or resume one', async () => {
   const phone = new FakeClient({ delayMs: 0, principal: 'session', delegationDemo: true });
   await phone.connect();

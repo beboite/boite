@@ -345,7 +345,7 @@ export class Threads {
     else this.threads.push(summary);
   }
 
-  /** What the UI keeps per thread, dropped once the thread is archived or gone: the UI cannot unarchive. */
+  /** What the UI keeps per thread, dropped once the thread is archived or gone: a restored thread starts fresh. */
   forgetThread(threadId: ThreadId): void {
     const s = this.ctx.store;
     const composer = this.ctx.composer;

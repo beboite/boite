@@ -55,6 +55,7 @@ const LIST_LIMIT = 20;
 const STEP_TICKS = 60;
 const ended = (status: WorkflowStepStatus) => status === 'done' || status === 'skipped';
 const broken = (status: WorkflowStepStatus) => status === 'failed' || status === 'stopped';
+const NOT_STARTED = 'Not started: another step of the run failed';
 
 function invalid(message: string): RpcFailure {
   return new RpcFailure({ code: RpcErrorCode.InvalidParams, message });
@@ -158,7 +159,7 @@ export class FakeWorkflows {
       if (!entry) throw refusal('boite workflow output works only inside a workflow step');
       const run = this.#runs.get(entry.runId)!;
       const inst = this.#instance(run, entry.key);
-      if (!inst || inst.status !== 'running') throw refusal(`step ${entry.key} is not running`);
+      if (!inst || inst.status !== 'running' || inst.threadId !== threadId) throw refusal(`step ${entry.key} is not running`);
       const shape = run.plan.steps.find(s => s.id === entry.key.split('#')[0])?.output;
       const mismatch = shape === undefined ? null : shapeMismatch(value, shape);
       if (mismatch) throw invalid(`${mismatch}; expected shape ${JSON.stringify(shape)}`);
@@ -180,6 +181,7 @@ export class FakeWorkflows {
       const byId = params.templateId === undefined ? null : mine.find(t => t.id === params.templateId) ?? null;
       if (params.templateId !== undefined && !byId) throw invalid(`templateId: no template ${params.templateId} in this project`);
       const previous = byId ?? mine.find(t => t.name === name) ?? null;
+      if (previous && this.host.principal() === 'agent') throw refusal(`a template named "${previous.name}" already exists in this project; save the plan under a new name`);
       const now = this.host.now();
       const template: WorkflowTemplate = { id: previous?.id ?? `wft_${++this.#seq}`, projectId: root.projectId, name, plan: { ...plan, name }, createdAt: previous?.createdAt ?? now, updatedAt: now };
       this.#templates.set(template.id, template);
@@ -277,6 +279,8 @@ export class FakeWorkflows {
   #save(run: WorkflowRun): void {
     run.updatedAt = this.host.now();
     this.host.changed(run.rootThreadId, run.id);
+    // A step's conversation shows its parent's runs, as the core tells it.
+    for (const node of run.nodes) for (const inst of node.instances) if (inst.threadId) this.host.changed(inst.threadId, run.id);
   }
 
   #instance(run: WorkflowRun, key: string): WorkflowInstance | undefined {
@@ -303,7 +307,10 @@ export class FakeWorkflows {
 
   #advance(runId: string): void {
     const run = this.#runs.get(runId);
-    if (!run || run.status !== 'running') return;
+    if (!run) return;
+    // Paused, nothing new launches, but the steps already out still end.
+    if (run.status === 'paused') return this.#settle(run);
+    if (run.status !== 'running') return;
     this.#settleNodes(run);
     const config = this.host.config(run.rootThreadId);
     if (!config.enabled || config.paused) {
@@ -330,12 +337,19 @@ export class FakeWorkflows {
       if (!node) break;
       this.#launch(run, node, node.instances.find(i => i.status === 'waiting')!, config);
     }
+    this.#settle(run);
+  }
+
+  /** The core's `settle`: a run with nothing running is over, a paused one only once every step is done. */
+  #settle(run: WorkflowRun): void {
     this.#settleNodes(run);
     const now = this.host.now();
+    const was = run.status;
     if (!run.nodes.some(node => node.instances.some(i => i.status === 'running'))) {
-      const failure = run.nodes.find(node => broken(node.status));
-      if (failure) Object.assign(run, { status: 'failed', error: `${failure.title}: ${failure.error ?? failure.status}`, finishedAt: now });
-      else if (run.nodes.every(node => ended(node.status))) Object.assign(run, { status: 'done', error: null, finishedAt: now, delivered: true });
+      const failure = run.nodes.find(node => node.status === 'failed') ?? run.nodes.find(node => broken(node.status));
+      // The fake has no parent turn to wait for: the summary counts as handed back at once.
+      if (failure && was === 'running') Object.assign(run, { status: 'failed', error: `${failure.title}: ${failure.error ?? failure.status}`, finishedAt: now, delivered: true });
+      else if (!failure && run.nodes.every(node => ended(node.status))) Object.assign(run, { status: 'done', error: null, finishedAt: now, delivered: true });
     }
     this.#save(run);
   }
@@ -401,9 +415,9 @@ export class FakeWorkflows {
       const running = node.instances.some(i => i.status === 'running');
       const done = node.instances.every(i => ended(i.status));
       if (!done && (running || !halted)) continue;
+      for (const inst of node.instances) if (inst.status === 'waiting') Object.assign(inst, { status: 'stopped', error: NOT_STARTED, finishedAt: now });
       const failed = node.instances.find(i => i.status === 'failed');
       const stopped = node.instances.find(i => i.status === 'stopped');
-      if (!failed && !stopped && !done) continue;
       node.status = failed ? 'failed' : stopped ? 'stopped' : 'done';
       node.error = (failed ?? stopped)?.error ?? null;
       node.finishedAt = now;
@@ -438,9 +452,16 @@ export class FakeWorkflows {
         this.#resumeTeam(run.rootThreadId);
         for (const node of run.nodes) {
           const target = nodes.includes(node);
-          for (const inst of node.instances) if (target && broken(inst.status)) Object.assign(inst, { status: 'waiting', finishedAt: null });
+          for (const inst of node.instances) if (target && broken(inst.status)) {
+            // An archived step conversation takes no turn: the retry gets a new one.
+            const gone = inst.threadId !== null && this.#archived(inst.threadId);
+            if (gone) this.#steps.delete(inst.threadId!);
+            Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
+          }
+          // Stopped only because another step failed, it never ran: it waits again with the retried one.
+          else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
           if (target && !node.instances.length && broken(node.status)) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
-          else if (target && node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
+          else if (node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }
         if (this.#halted(run)) throw refusal('nothing to retry in that step; retry the step that failed');
@@ -453,6 +474,14 @@ export class FakeWorkflows {
     this.#save(run);
     this.#advance(run.id);
     return run;
+  }
+
+  #archived(threadId: ThreadId): boolean {
+    try {
+      return this.host.thread(threadId).archived;
+    } catch {
+      return true;
+    }
   }
 
   #resumeTeam(rootId: ThreadId): void {

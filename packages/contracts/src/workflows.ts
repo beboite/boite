@@ -114,6 +114,12 @@ export interface WorkflowRun {
   templateId: string | null;
   /** Whether the final summary reached the root thread as a turn. */
   delivered: boolean;
+  /**
+   * Why the summary has not reached the root yet (the team's turn budget spent,
+   * delegation paused), cleared once it does. It is tried again when the root
+   * ends a turn or its delegation settings change. Absent on older runs.
+   */
+  deliveryError?: string | null;
   usage: Usage;
   createdAt: Timestamp;
   updatedAt: Timestamp;

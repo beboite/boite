@@ -99,7 +99,8 @@
 
   {#if run}
     <div class="actions">
-      {#if run.status === 'running'}
+      <!-- Only the owner resumes, so only the owner is offered a pause: on a phone it would leave Stop alone. -->
+      {#if run.status === 'running' && store.owner}
         <button type="button" class="quiet small" data-testid="workflow-pause" onclick={() => void store.controlWorkflow(run, 'pause')}><Pause size={13} strokeWidth={1.75} />{strings.workflow.pause}</button>
       {:else if run.status === 'paused' && store.owner}
         <button type="button" class="quiet small" data-testid="workflow-resume" onclick={() => void store.controlWorkflow(run, 'resume')}><Play size={13} strokeWidth={1.75} />{strings.workflow.resume}</button>
@@ -116,6 +117,7 @@
     {#if run.error && run.status !== 'done'}<p class="notice" data-testid="workflow-error">{run.error}</p>{/if}
     {#if (run.status === 'done' || run.status === 'failed')}
       <p class="notice quiet-notice">{run.delivered ? strings.workflow.delivered : strings.workflow.waitingDelivery}</p>
+      {#if !run.delivered && run.deliveryError}<p class="notice" data-testid="workflow-delivery-error">{run.deliveryError}</p>{/if}
     {/if}
     {#if !store.owner && (run.status === 'paused' || retryable(run))}<p class="notice quiet-notice">{strings.workflow.ownerOnly}</p>{/if}
 
@@ -182,7 +184,10 @@
   .main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .main > :global(*) { flex: 1; }
   .empty-state { padding: 24px 16px; gap: 6px; }
-  .empty { margin: 0; color: var(--color-foreground); font-size: var(--text-sm); }
+  /* Two lines of text, one under the other: the stretch the graph gets would push them apart. */
+  .empty-state > p { flex: none; }
+  /* The global .empty pads itself; here the two lines share the column's edge. */
+  .empty { margin: 0; padding: 0; color: var(--color-foreground); font-size: var(--text-sm); }
   .empty-hint { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .templates { flex: none; padding: 6px 16px 10px; border-top: 1px solid var(--color-border); }
   .templates .count { color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }

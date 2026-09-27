@@ -168,9 +168,7 @@
           <span class="label">{strings.delegation.heading}</span>
         </button>
       {/if}
-      <!-- Every surface of the panel reads something only the owner may ask
-           for, so the button is not in a paired device's header at all. The
-           shell is the same: a phone reaches it by this button, not by Ctrl+J. -->
+      <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
         {@const terminalKey = store.keyLabel('terminal')}
         {#if work.current.developer}
@@ -187,6 +185,10 @@
           <SquareTerminal size={16} strokeWidth={1.75} />
         </button>
         {/if}
+      {/if}
+      <!-- A paired device opens the panel too: the Agents and Workflows surfaces are
+           its to follow, and the panel's menu offers only what available() allows. -->
+      {#if thread}
         <button
           type="button"
           class="ghost trace"

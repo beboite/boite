@@ -2,7 +2,8 @@
 
 Agents is a page beside chat. An identity keeps its instructions, memberships
 and scoped memory when its provider, account or model changes. Pausing or
-archiving an identity stops its current execution and prevents new work.
+archiving an identity stops its current execution and prevents new work; the
+stopped work item says the agent was paused or archived.
 
 ## Conversations and teams
 
@@ -155,7 +156,10 @@ core wakes them without an idle model loop. One unfinished occurrence blocks
 the next. After downtime, at most one overdue occurrence enters the durable
 queue; missed intervals are not replayed. Daily routines run once per local
 date, even when clocks move back. A skipped local time runs the following day.
-Pausing the identity or the engine also holds its routines.
+Pausing the identity or the engine also holds its routines. A single-date
+routine is done once it ran, on schedule or through Run now: the card reads
+Done and offers no Resume, and only a new date schedules it again, even one
+saved while the routine is paused.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.

@@ -569,7 +569,7 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Archive']);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -2019,8 +2019,8 @@ test('a dialog waiting for an answer holds the window chords', async () => {
  * be offered them, once as the desktop, which must still have every one.
  */
 
-/** Everything owner-only that is drawn without leaving the chat. */
-const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=panel-toggle]'];
+/** Everything owner-only that is drawn without leaving the chat. The panel is not: its Agents and Workflows surfaces are the device's to follow. */
+const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]'];
 
 /** Everything owner-only on the settings nav and its Machines page. */
 const OWNER_ONLY_IN_SETTINGS = [
@@ -2055,7 +2055,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   // The project's own menu: no Remove, and no transcript import behind it.
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
@@ -2082,7 +2082,7 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'remove']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 

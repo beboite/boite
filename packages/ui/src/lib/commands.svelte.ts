@@ -12,6 +12,7 @@ import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
 import type { Store } from './store.svelte';
+import { hiddenKind } from './surface-labels';
 import { setTheme } from './theme';
 
 /** What marks an agent's own command apart from Boite's in a mixed list. */
@@ -72,13 +73,17 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
       items.push(row('changes', strings.palette.changes, 'git diff working tree'));
       items.push(row('files', strings.palette.files, 'tree directory explorer'));
       items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
-      items.push(row('trace', strings.palette.trace, 'processes load'));
+      // The trace is a developer's tool: while its switch is off the panel would close it at once.
+      if (!hiddenKind('trace')) items.push(row('trace', strings.palette.trace, 'processes load'));
       items.push(row('terminal', strings.palette.terminal, 'shell console powershell cmd bash'));
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
+  items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material'));
+  // The one way back to an archived thread: no chord, so written like the tour.
+  items.push({ id: 'archived', kind: 'command', label: strings.settings.archived.heading, keywords: 'archive restore unarchive old hidden' });
   if (store.owner) {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
@@ -144,15 +149,17 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'rename': store.showChat(); store.renameRequested = true; break;
     case 'retitle': if (open) void store.retitle(open.id); break;
     case 'panel': store.showChat(); store.togglePanel(); break;
-    case 'trace': store.showChat(); store.panel.toggleKind('trace'); break;
+    case 'trace': if (!hiddenKind('trace')) { store.showChat(); store.panel.toggleKind('trace'); } break;
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;
     case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
     case 'workflows': store.showChat(); store.panel.toggleKind('workflow'); break;
     case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
+    case 'agents': store.showAgents(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
+    case 'archived': store.showSettings('general', 'archived'); break;
     case 'providers': store.showSettings('accounts'); break;
     case 'pair': store.showSettings('machines', 'devices'); break;
     case 'tour': store.showChat(); openTour(); break;
