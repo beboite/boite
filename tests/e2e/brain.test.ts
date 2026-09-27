@@ -95,8 +95,10 @@ test('the hooks card and a hook line in the thread at desktop and phone widths',
   const text = (selector: string) => page.evaluate<string>(`document.querySelector(${JSON.stringify(selector)})?.textContent.replace(/\\s+/g, ' ').trim() ?? ''`);
   const show = (selector: string, block: 'start' | 'center' | 'end') => page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: '${block}' })`);
   await page.evaluate(`localStorage.removeItem('boite.locale')`);
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  // Navigate before leaving the phone layout: the last test ends on the phone
+  // settings overlay, whose history.back() on a resize cancels a pending navigation.
   await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   // The seeded thread ends on a turn its own PostToolUse hook stopped.
   await page.waitFor(`document.querySelector('${id('hook-part')}')`);
   expect(await page.evaluate(`document.querySelector('${id('hook-part')}').dataset.outcome`)).toBe('stopped');
@@ -128,8 +130,8 @@ test('the hooks card and a hook line in the thread at desktop and phone widths',
   await show(id('hook-part'), 'center');
   await capture('hook-part-phone.png');
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.click(id('nav-settings'));
   await page.click(id('settings-tab-brain'));
   await page.waitFor(`document.querySelectorAll('${id('hooks-provider')}').length === 5 && document.querySelector('${id('hooks-recent')}')`);
