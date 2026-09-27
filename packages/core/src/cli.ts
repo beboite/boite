@@ -18,6 +18,7 @@ import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
+import { workflowCommand } from './workflow-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -33,7 +34,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
-  open trace|tasks|changes|files [dir]
+  open trace|tasks|changes|files|workflow [dir|run-id]
   status                         git status of the working directory
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
@@ -64,6 +65,16 @@ export const USAGE = `usage: boite <command> [args] [--json]
   delegate spawn <profile> <brief>
   delegate send <thread-id> <text>
   delegate stop [thread-id]      stop one child, or pause the whole team
+  workflow help                  the plan format, with an example
+  workflow check|run <plan>      validate, or start, a JSON plan (file or inline)
+  workflow list|show [run-id]    runs of this thread, or one run's steps and results
+  workflow extend <run-id> <steps>
+  workflow pause|resume|stop <run-id>
+  workflow retry <run-id> [step]
+  workflow output <json>         a step's structured result, checked on the spot
+  workflow templates             plans kept for this project
+  workflow save <name> <plan|run-id>
+  workflow start <template>      run a kept plan by name or id
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -285,6 +296,10 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       } else throw new Usage('agents expects list, inbox, send or reply');
       return;
     }
+    case 'workflow': {
+      await workflowCommand(client, threadId, rest, io, print, parsed.requestId);
+      return;
+    }
     case 'where': {
       const where = await client.call('agent.where', { threadId });
       print(
@@ -316,8 +331,9 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       return;
     }
     case 'open': {
-      const kind = want(0, 'trace, tasks, changes or files');
+      const kind = want(0, 'trace, tasks, changes, files or workflow');
       if (kind === 'trace' || kind === 'tasks') await opened({ kind });
+      else if (kind === 'workflow') await opened(rest[1] === undefined ? { kind } : { kind, runId: rest[1] });
       else if (kind === 'changes') await opened({ kind: 'diff' });
       else if (kind === 'files') {
         const dir = rest[1];

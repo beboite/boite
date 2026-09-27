@@ -14,6 +14,7 @@
   import AssistantMessage from './AssistantMessage.svelte';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
+  import WorkflowActivity from './WorkflowActivity.svelte';
 
   let {
     store,
@@ -37,8 +38,10 @@
   const letterRows = $derived.by(() => new Map(letters.map(letter => [`coordination:${letter.id}`, letter])));
   const team = $derived(delegation?.rootThreadId === threadId ? delegation.agents : []);
   const teamRowId = $derived(`delegation:${threadId}`);
+  /** The runs this thread started, each a card where it began. */
+  const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
   const timeline = $derived.by(() => {
-    if (letters.length === 0 && team.length === 0) return messages;
+    if (letters.length === 0 && team.length === 0 && workflowRows.size === 0) return messages;
     const ids = new Set(letters.map(letter => letter.id));
     const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
     const forwarded = letters.map((letter): Message => ({
@@ -54,7 +57,8 @@
       id: teamRowId, threadId, turnId: teamRowId, role: 'system', parts: [], state: 'complete',
       createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
     }] : [];
-    return [...visible, ...forwarded, ...activity].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
+    return [...visible, ...forwarded, ...activity, ...runs].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   });
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
@@ -478,6 +482,8 @@
         >
           {#if message.id === teamRowId}
             <DelegationActivity {store} agents={team} />
+          {:else if workflowRows.has(message.id)}
+            <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if message.role === 'user'}

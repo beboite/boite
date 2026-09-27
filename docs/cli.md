@@ -74,6 +74,8 @@ boite delegate profiles|list
 boite delegate spawn <profile-id> <brief>
 boite delegate send <thread-id> <text>
 boite delegate stop [thread-id]
+boite workflow help|check|run|list|show|extend|pause|resume|stop|retry
+boite workflow output|templates|save|start
 boite help
 ```
 
@@ -139,6 +141,9 @@ the source context. Use `--json` to preserve the structured result.
 team budget. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
+[Workflows](workflows.md) run a JSON plan of such children: `workflow help`
+prints the whole format, `workflow run` starts it and opens it in the panel,
+and the results come back as one message when the run ends.
 
 ## Where the command lives
 

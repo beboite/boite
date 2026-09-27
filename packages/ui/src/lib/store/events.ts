@@ -73,6 +73,10 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('collaboration.changed', ({ threadId }) => {
     if (s.openThread?.id === threadId) void s.loadCoordination(threadId, false);
   });
+  on('workflows.changed', ({ threadId }) => {
+    const open = s.openThread;
+    if (open && (threadId === open.id || threadId === open.parentThreadId)) void s.loadWorkflows(open.id);
+  });
   on('delegation.changed', ({ threadId }) => {
     const open = s.openThread;
     const view = s.delegation;

@@ -92,7 +92,8 @@ export class Delegation {
       if (!current()) return;
       this.delegation = view;
       const selected = this.delegationSelectedAgentId;
-      if (selected && !view.agents.some(agent => agent.thread.id === selected)) {
+      // A workflow step is shown the same way but is not a member of the team.
+      if (selected && !view.agents.some(agent => agent.thread.id === selected) && !s.isWorkflowStep(selected)) {
         await s.selectDelegatedAgent(null);
       } else if (selected && this.delegationThread?.id === selected) {
         const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;

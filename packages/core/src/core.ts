@@ -35,6 +35,7 @@ import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
 import { Delegation } from './delegation.ts';
+import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { TerminalStore } from './terminals.ts';
 
@@ -128,6 +129,7 @@ export class Core {
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
   readonly delegation: Delegation;
+  readonly workflows: Workflows;
   readonly brain: BrainStore;
   readonly terminals: TerminalStore;
 
@@ -194,6 +196,7 @@ export class Core {
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
     this.delegation = new Delegation(this);
+    this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
     this.terminals = new TerminalStore(this);
 
@@ -265,6 +268,7 @@ export class Core {
     if (this.#drainPromise !== null) return this.#drainPromise;
     this.#stopping = true;
     this.delegation.beginClose();
+    this.workflows.beginClose();
     this.coordination.beginClose();
     this.activity.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));

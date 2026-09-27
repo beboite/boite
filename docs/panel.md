@@ -36,6 +36,7 @@ Appearance, Workspace changes it ([onboarding.md](onboarding.md)).
 | Files    | one      | the working directory as a tree, `files.list` one directory at a time         |
 | File     | per path | a text editor with save, an image viewer with zoom and pan, a video or audio player |
 | Tasks    | one      | goal and loop, the agent's tasks, the project's todo list                     |
+| Workflows | one     | the thread's workflow runs as a graph, a step's detail, saved plans, see [workflows.md](workflows.md) |
 | Trace    | one      | the thread's processes, see [trace.md](trace.md)                              |
 
 The Browser is the shell's child webview and shares the main webview's profile
@@ -112,7 +113,8 @@ to the agents of that project. A paired phone has no Panel button.
 ## What the agent can ask
 
 The `boite` CLI ([cli.md](cli.md)) calls `panel.open` with a surface: a file
-at a line, the changes, one file's diff, a url, the tree, the trace, the tasks.
+at a line, the changes, one file's diff, a url, the tree, the trace, the tasks,
+a workflow run.
 The core validates it and emits `panel.requested` on every client subscribed
 to the thread. The store opens that surface on that thread's panel, and opens
 the panel itself when the thread is the one on screen. A thread nobody is
@@ -123,4 +125,4 @@ watching keeps the request on its panel for the next open.
 `panel` toggles the panel, `browser`, `changes`, `files`, `tasks` and `trace`
 open their surface, `close-surface` closes the active tab. The defaults are in
 [keybindings.md](keybindings.md). With the launcher showing, a single letter
-opens a surface: B, C, F, K, T.
+opens a surface: B, C, F, K, T, W.

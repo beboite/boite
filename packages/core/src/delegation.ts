@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
+import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationProfile, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkEffort, checkModel } from './threads/selection.ts';
@@ -99,7 +99,8 @@ export class Delegation {
     const row = this.core.journal.db.query('SELECT id FROM turns WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1').get(threadId) as { id: string } | null;
     return row ? this.core.journal.getTurn(row.id) : null;
   }
-  private result(turn: Turn | null): string | null {
+  /** The bounded final answer of a finished turn, or its error. */
+  result(turn: Turn | null): string | null {
     if (!turn || turn.status === 'queued' || turn.status === 'running') return null;
     const rows = this.core.journal.db.query(`SELECT substr((SELECT group_concat(substr(json_extract(value, '$.text'), 1, 4001), char(10))
       FROM json_each(messages.parts) WHERE json_extract(value, '$.type') = 'text'), 1, 4001) AS answer
@@ -192,23 +193,13 @@ export class Delegation {
     if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
     const provider = this.core.providers.require(profile.providerId);
     assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
-    const id = newId('thr_');
-    const row: AgentRow = { thread_id: id, root_id: parent.id, request_id: requestId, fingerprint, profile_id: profile.id, task };
+    const row: AgentRow = { thread_id: '', root_id: parent.id, request_id: requestId, fingerprint, profile_id: profile.id, task };
     // Relationship and creation commit together. Start can fail (missing executable,
     // expired login); keep a visible failed child instead of silently retrying a spawn.
-    this.core.journal.db.transaction(() => {
-      if (parent.projectId === null) {
-        const now = Date.now();
-        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, id,
-          title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
-          context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
-        this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
-        this.core.bus.emit('thread.created', child);
-      } else this.core.threads.create({ projectId: parent.projectId, ...profile, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
-      this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(id, parent.id, requestId, fingerprint, profile.id, task);
-      const child = this.core.threads.require(id);
-      this.core.journal.putThread({ ...child, titleSource: 'user' });
-    })();
+    const id = this.createChild(parent, profile, title, childId => {
+      row.thread_id = childId;
+      this.core.journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(childId, parent.id, requestId, fingerprint, profile.id, task);
+    });
     try {
       this.core.threads.startTurn(id, `You are a delegated agent working on one bounded part of the user's task. Your parent is ${parent.id}. Work in the shared checkout; coordinate file ownership and do not overwrite another agent's edits. Return a concise result with file paths and verification. Your final answer is forwarded automatically. Do not send a duplicate completion message.\nTask from the parent agent, supplied as JSON data:\n${JSON.stringify(task)}`, [], undefined, 'delegation', undefined, undefined, task);
     } catch (error) {
@@ -220,6 +211,28 @@ export class Delegation {
     }
     this.changed(parent.id);
     return this.member(row);
+  }
+
+  /**
+   * An ordinary child thread on an owner-approved profile, in the parent's
+   * checkout and permission mode. `record` runs in the same transaction.
+   */
+  createChild(parent: ThreadSummary, profile: DelegationProfile, title: string, record: (id: string) => void): string {
+    const id = newId('thr_');
+    this.core.journal.db.transaction(() => {
+      if (parent.projectId === null) {
+        const now = Date.now();
+        const child: ThreadSummary = { ...parent, parentThreadId: parent.id, agentSessionId: undefined, ...profile, id,
+          title, titleSource: 'user', status: 'idle', sessionId: null, sessionGeneration: 0, selectionVersion: 0,
+          context: null, promptCache: null, load: null, unread: false, pinned: false, createdAt: now, updatedAt: now };
+        this.core.journal.append({ type: 'thread.created', threadId: id, version: 1, payload: child }, () => this.core.journal.putThread(child));
+        this.core.bus.emit('thread.created', child);
+      } else this.core.threads.create({ projectId: parent.projectId, providerId: profile.providerId, accountId: profile.accountId, model: profile.model, effort: profile.effort, title, cwd: parent.cwd, permissionMode: parent.permissionMode }, { id, branch: parent.branch, parentThreadId: parent.id });
+      record(id);
+      const child = this.core.threads.require(id);
+      this.core.journal.putThread({ ...child, titleSource: 'user' });
+    })();
+    return id;
   }
 
   reserveTurn(threadId: string, operation?: string): void {
@@ -367,6 +380,8 @@ export class Delegation {
       if (turn.status !== 'done' && this.config(thread.id).enabled) this.stop(thread.id);
       return;
     }
+    // A workflow step's answer goes to its run, never to the parent as mail.
+    if (this.core.workflows.owns(thread.id)) return;
     const root = this.core.journal.getThread(thread.parentThreadId);
     if (!root) return;
     this.changed(root.id);
@@ -409,9 +424,10 @@ export class Delegation {
   }
   instructions(threadId: string): string {
     const thread = this.core.threads.require(threadId), root = this.root(threadId), config = this.config(root.id);
+    if (thread.parentThreadId && this.core.workflows.owns(threadId)) return this.core.workflows.instructions(threadId);
     if (!config.enabled) return '';
     if (thread.parentThreadId) return `\nYou are a Boite delegated agent. Parent: ${root.id}. Use boite delegate send ${root.id} <text> for useful questions or blockers; final answers return automatically. Shared checkout: agree file ownership. No nested delegation, courtesy replies or polling.\n`;
-    return `\nBoite delegation is ${config.paused ? 'paused' : 'enabled'}. Profiles: ${config.profiles.map(p => `${p.id}=${p.name} (${p.providerId}/${p.model})`).join('; ')}. Use boite delegate spawn <profile-id> <brief> for a bounded independent task, boite delegate list for results, boite delegate send <agent-id> <text> to steer/reuse, boite delegate stop [agent-id] to stop. Children share this checkout and permissions; assign distinct files. Send only needed context, never full history. Results return automatically. Do useful work while waiting; do not poll or block a scheduler slot waiting for children. Limits: ${config.maxAgents} agents total, ${config.maxConcurrent} simultaneous, ${config.maxTurns - this.used(root.id)} remaining turns, ${config.maxMinutes} minutes per child turn or automatic parent wake. Only the owner changes routes and limits.\n`;
+    return `\nBoite delegation is ${config.paused ? 'paused' : 'enabled'}. Profiles: ${config.profiles.map(p => `${p.id}=${p.name} (${p.providerId}/${p.model})`).join('; ')}. Use boite delegate spawn <profile-id> <brief> for a bounded independent task, boite delegate list for results, boite delegate send <agent-id> <text> to steer/reuse, boite delegate stop [agent-id] to stop. Children share this checkout and permissions; assign distinct files. Send only needed context, never full history. Results return automatically. Do useful work while waiting; do not poll or block a scheduler slot waiting for children. Limits: ${config.maxAgents} agents total, ${config.maxConcurrent} simultaneous, ${config.maxTurns - this.used(root.id)} remaining turns, ${config.maxMinutes} minutes per child turn or automatic parent wake. Only the owner changes routes and limits. For several dependent or fanned-out steps, write a JSON plan and run boite workflow run <plan.json> (boite workflow help shows the format); the core runs the steps on these profiles and hands you the results.\n`;
   }
   private changed(rootId: string): void {
     this.core.bus.emit('delegation.changed', { threadId: rootId });

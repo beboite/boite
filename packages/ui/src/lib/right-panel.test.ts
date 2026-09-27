@@ -23,6 +23,18 @@ describe('the right panel', () => {
     window.localStorage.clear();
   });
 
+  test('one workflow tab follows the run it was last pointed at, across a reload', () => {
+    const { bound } = panel();
+
+    bound.showSurface({ kind: 'workflow', runId: 'wfr_1' });
+    bound.openWorkflow('wfr_2');
+    bound.openWorkflow();
+
+    expect(bound.surfaces).toHaveLength(1);
+    expect(bound.active).toMatchObject({ kind: 'workflow', runId: 'wfr_2' });
+    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'workflow', runId: 'wfr_2' });
+  });
+
   test('opens the panel on the surface it just made', () => {
     const { bound } = panel();
 
