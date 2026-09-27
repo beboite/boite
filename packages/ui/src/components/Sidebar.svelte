@@ -61,6 +61,8 @@
       [
         { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: projectName(project) }) },
         { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
+        // An archived thread leaves this list: its way back starts where it was.
+        { id: 'archived', label: strings.settings.archived.heading },
         ...(owner.owner
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
@@ -72,6 +74,10 @@
       async (action) => {
         if (action === 'new') await workspace.select(owner, undefined, project.id);
         if (action === 'copy') await owner.copy(project.path);
+        if (action === 'archived') {
+          if (workspace.active !== owner) await workspace.select(owner);
+          owner.showSettings('general', 'archived');
+        }
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);

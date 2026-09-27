@@ -79,6 +79,8 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   items.push(row('sidebar', strings.palette.sidebar));
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material'));
+  // The one way back to an archived thread: no chord, so written like the tour.
+  items.push({ id: 'archived', kind: 'command', label: strings.settings.archived.heading, keywords: 'archive restore unarchive old hidden' });
   if (store.owner) {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
@@ -153,6 +155,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'sidebar': store.toggleSidebar(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
+    case 'archived': store.showSettings('general', 'archived'); break;
     case 'providers': store.showSettings('accounts'); break;
     case 'pair': store.showSettings('machines', 'devices'); break;
     case 'tour': store.showChat(); openTour(); break;

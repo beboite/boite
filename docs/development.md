@@ -164,8 +164,12 @@ Archiving stops the thread's running turn, its pending questions and its child
 agents, so the sidebar menu, the header and the palette ask first when the thread
 is working, waits on an answer or has a live child agent. An idle thread archives
 at once. Settings > General > Archived threads (on a phone, Settings > Archived
-threads) lists the archived conversations on demand and restores one to the
-sidebar; stopped work does not resume.
+threads) lists the archived conversations and restores one to the sidebar;
+stopped work does not resume. The General page reads the list only on its
+button. The palette's Archived threads command and each project's `...` menu
+open the same card with the list already read, and the phone's page reads it
+when it opens. A restored row keeps its place with Open, which goes to the
+thread.
 
 ## Pending prompts, goals and loops
 

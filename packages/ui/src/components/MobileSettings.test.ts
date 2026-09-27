@@ -61,8 +61,7 @@ test('a thread archived on the phone comes back from its own settings list', asy
   store.showSettings('general');
   await waitFor(() => document.querySelector('[data-testid=mobile-settings-home]') !== null);
   query<HTMLButtonElement>('[data-testid=mobile-settings-archived]').click();
-  await waitFor(() => document.querySelector('[data-testid=archived-show]') !== null);
-  query<HTMLButtonElement>('[data-testid=archived-show]').click();
+  // The page of its own reads the list at once: no second tap on Show.
   await waitFor(() => document.querySelector('[data-testid=archived-restore]') !== null);
   expect(query('[data-testid=archived-list]').textContent).toContain('Finish the trace tab');
   query<HTMLButtonElement>('[data-testid=archived-restore]').click();
@@ -70,4 +69,12 @@ test('a thread archived on the phone comes back from its own settings list', asy
 
   query<HTMLButtonElement>('[data-testid=mobile-settings-back]').click();
   await waitFor(() => document.querySelector('[data-testid=mobile-settings-home]') !== null);
+
+  // The desktop's jump to the card (palette, project menu) lands on the same page here.
+  // The jump scrolls the card into view, which jsdom does not draw.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  store.showSettings('general', 'archived');
+  await waitFor(() => document.querySelector('[data-testid=archived-list], [data-testid=archived-empty]') !== null);
+  expect(document.querySelector('[data-testid=archived-show]')).toBeNull();
+  expect(query('[data-testid=mobile-settings-detail]')).toBeTruthy();
 });

@@ -18,10 +18,15 @@
 
   let { store }: { store: Store } = $props();
   let phone = $state(false);
-  /** The phone has no General page, so the archive, which lives there on the desktop, gets a page of its own. */
+  /**
+   * The phone has no General page, so the archive, which lives there on the
+   * desktop, gets a page of its own; a jump to the desktop's card (the palette,
+   * the project menu) lands on it too.
+   */
   let archived = $state(false);
+  let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
   let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
-    ? store.settingsTab : phone ? 'phone' : archived ? 'archived' : 'home');
+    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'archived' ? strings.settings.archived.heading
@@ -107,7 +112,7 @@
         <LimitsPage {store} />
       {:else if page === 'archived'}
         <div class="page archived-page">
-          <ArchivedThreads {store} />
+          <ArchivedThreads {store} eager />
         </div>
       {:else}
         <MachinesPage mobile />

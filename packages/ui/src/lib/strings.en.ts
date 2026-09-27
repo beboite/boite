@@ -1278,7 +1278,8 @@ export const strings = {
       intro: 'An archived thread leaves the sidebar and its agent stops. Restore it to bring the conversation back; its agent starts again with the next message.',
       show: 'Show archived threads',
       empty: 'No archived thread on this machine.',
-      restore: 'Restore'
+      restore: 'Restore',
+      open: 'Open'
     },
     pairing: {
       heading: 'Phones and other devices',

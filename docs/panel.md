@@ -15,7 +15,8 @@ it is available.
 
 A thread that is archived, here or from another client, or removed with its
 project, takes its layout with it, and its browser views are destroyed rather
-than parked, since the UI has no way to show an archived thread again. The one
+than parked: a thread restored from Archived threads comes back with a fresh
+panel, never with what it had open. The one
 exception is the thread on screen when another client archives it: it stays
 open with its tabs and unsaved file edits, reconnects included, and its layout
 goes when this client opens another thread or a draft. Each machine's

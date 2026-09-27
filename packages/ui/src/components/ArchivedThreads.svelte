@@ -5,13 +5,27 @@
   import { ago, projectName } from '../lib/format';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
 
-  let { store }: { store: Store } = $props();
+  /** `eager` reads the list at once: the phone's page of its own, where the archive is all there is to see. */
+  let { store, eager = false }: { store: Store; eager?: boolean } = $props();
 
-  /** Null until asked for: the archive is read on the button, never when the page opens. */
+  /**
+   * Null until asked for: the General page opens without reading the archive.
+   * Asked for is the button, the phone's page, or a jump to this card (the
+   * palette, the project menu, the settings search), which is the same ask.
+   */
   let threads = $state<ThreadSummary[] | null>(null);
   let loading = $state(false);
   let restoring = $state<ThreadId | null>(null);
+  /** Once per mount: a read that fails leaves the button, not a retry loop. */
+  let asked = false;
+
+  $effect(() => {
+    if (asked || (!eager && store.settingsSection?.id !== 'archived') || store.connection !== 'ready') return;
+    asked = true;
+    void load();
+  });
 
   function fail(error: unknown) {
     store.error = error instanceof Error ? error.message : String(error);
@@ -28,11 +42,14 @@
     }
   }
 
+  /** Restored rows stay, their button now Open: a restore is usually followed by reading it. */
+  let restored = $state<ThreadId[]>([]);
+
   async function restore(thread: ThreadSummary) {
     restoring = thread.id;
     try {
       await restoreThread(store, thread.id);
-      threads = threads?.filter((t) => t.id !== thread.id) ?? null;
+      restored = [...restored, thread.id];
     } catch (error) {
       fail(error);
     } finally {
@@ -60,9 +77,15 @@
         <li data-thread-id={thread.id}>
           <span class="title" title={thread.title}>{thread.title}</span>
           <span class="subtle meta">{projectOf(thread)} · {ago(thread.updatedAt)}</span>
-          <button type="button" class="small" data-testid="archived-restore" disabled={restoring !== null} onclick={() => void restore(thread)}>
-            {strings.settings.archived.restore}
-          </button>
+          {#if restored.includes(thread.id)}
+            <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
+              {strings.settings.archived.open}
+            </button>
+          {:else}
+            <button type="button" class="small" data-testid="archived-restore" disabled={restoring !== null} onclick={() => void restore(thread)}>
+              {strings.settings.archived.restore}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>

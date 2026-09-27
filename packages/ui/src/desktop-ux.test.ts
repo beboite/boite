@@ -7,6 +7,7 @@ import { writeExperiments } from './lib/experiments';
 import { closeTour } from './lib/onboarding.svelte';
 import { work } from './lib/work-prefs.svelte';
 import { archiveThread } from './lib/archive';
+import { runCommand } from './lib/commands.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
@@ -153,7 +154,29 @@ test('an archived thread comes back from Settings > General', async () => {
   expect(query('[data-testid=archived-list]').textContent).toContain('Finish the trace tab');
   query<HTMLButtonElement>('[data-testid=archived-restore]').click();
   await waitFor(() => store.threads.find((t) => t.id === 't-trace')?.archived === false);
-  await waitFor(() => document.querySelector('[data-testid=archived-empty]') !== null);
+  // The row stays, its button now Open, which lands in the thread.
+  await waitFor(() => document.querySelector('[data-testid=archived-open]') !== null);
+  query<HTMLButtonElement>('[data-testid=archived-open]').click();
+  await waitFor(() => store.page === 'chat' && store.openThread?.id === 't-trace');
+});
+
+test('the palette and the project menu reach the archive, its list already read', async () => {
+  // A jump to a card scrolls it into view, which jsdom does not draw.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  await mountOnFake();
+  expect(await archiveThread(store, 't-trace')).toBe(true);
+  await waitFor(() => !store.threads.some((t) => t.id === 't-trace' && !t.archived));
+  runCommand(store, 'archived', false);
+  await waitFor(() => document.querySelector('[data-testid=archived-list]') !== null);
+  expect(document.querySelector('[data-testid=archived-show]')).toBeNull();
+  expect(query('[data-testid=archived-list]').textContent).toContain('Finish the trace tab');
+
+  store.showChat();
+  await waitFor(() => document.querySelector('[data-testid=project-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=project-menu]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archived]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archived]').click();
+  await waitFor(() => store.page === 'settings' && document.querySelector('[data-testid=archived-list]') !== null);
 });
 
 test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {

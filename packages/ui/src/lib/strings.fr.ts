@@ -1256,7 +1256,8 @@ export const fr: Translation = {
       intro: "Une conversation archivée quitte la barre latérale et son agent s'arrête. Restaurez-la pour retrouver la conversation ; son agent repart au prochain message.",
       show: 'Afficher les conversations archivées',
       empty: 'Aucune conversation archivée sur cette machine.',
-      restore: 'Restaurer'
+      restore: 'Restaurer',
+      open: 'Ouvrir'
     },
     pairing: {
       heading: 'Téléphones et appareils',
