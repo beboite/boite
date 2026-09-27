@@ -165,6 +165,17 @@ test('download progress and retry stay visible without overflowing a narrow desk
   await page.waitFor(`document.querySelector('${id('app-update-check')}')`);
 }, 30_000);
 
+test('a running check keeps its button on the card, disabled, on a wide and a narrow desktop', async () => {
+  await settings('checking', true);
+  await page.waitFor(`document.querySelector('${id('app-update-check')}')?.disabled === true`);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-check')}').getAttribute('aria-busy')`)).toBe('true');
+  await capture('checking-desktop');
+  await width(880);
+  await page.evaluate(`document.querySelector('${id('app-update-check')}').scrollIntoView({ block: 'center' })`);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
+  await capture('checking-narrow');
+}, 30_000);
+
 test('phone and ordinary browser settings never offer native app installation', async () => {
   await page.navigate(`${base}/?fake=1`);
   await width(390);

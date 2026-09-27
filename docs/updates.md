@@ -33,8 +33,10 @@ silently moved.
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. A manual check is available in the card. Checks
-and downloads run one at a time. A ready update is kept until installation or
+then repeats every six hours. The card's Check for updates button checks at
+once; it stays on the card during a check, disabled, and only makes way for
+the download progress and the install action. Checks and downloads run one at
+a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.
 
 No request has a total deadline, because an installer on a slow link may take
@@ -78,7 +80,12 @@ it, is stopped and replaced by the core shipped with the shell.
 
 Offline checks, missing releases, signature failures and installation failures
 appear in the card with a retry action. They do not display a system dialog or
-restart the application. A restart discards a previously downloaded cache and
+restart the application. A panic inside a check or a download ends the same
+way: an async Tauri command that panics never answers the window, so each one
+runs its work under `catch_unwind` and reports the panic as an error. Nightlies
+up to 2026-09-26 predate that guard and panic on every check while building
+the release client, so their card stays on "Checking for updates": replace
+them once with a manual install. A restart discards a previously downloaded cache and
 checks again. Only the channel preference persists in `update-channel.json`.
 
 ## Scope

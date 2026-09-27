@@ -124,17 +124,19 @@ function queryFixture(): AppUpdateTestFixture | undefined {
   if (!import.meta.env.DEV || query.get('fake') !== '1') return undefined;
   if (window.__BOITE_APP_UPDATE_TEST__) return window.__BOITE_APP_UPDATE_TEST__;
   const phase = query.get('appUpdate');
-  if (!['ready', 'downloading', 'error'].includes(phase ?? '')) return undefined;
+  if (!['checking', 'ready', 'downloading', 'error'].includes(phase ?? '')) return undefined;
   const channel: UpdateChannel = query.get('appUpdateChannel') === 'nightly' ? 'nightly' : 'stable';
   const currentChannel: UpdateChannel = query.get('appUpdateCurrentChannel') === 'nightly' ? 'nightly' : 'stable';
+  // A running check has found nothing yet: the shell clears the offer when it starts one.
+  const offered = phase !== 'checking';
   const snapshot: UpdateSnapshot = {
-    phase: phase as 'ready' | 'downloading' | 'error',
+    phase: phase as 'checking' | 'ready' | 'downloading' | 'error',
     currentVersion: currentChannel === 'nightly' ? '2.0.0-nightly.7' : '2.0.0-beta.1',
     currentChannel,
     channel,
-    version: channel === 'nightly' ? '2.0.0-nightly.8' : '2.0.0-beta.2',
-    notes: '## What changed\n\n- Faster startup\n- More reliable desktop updates',
-    publishedAt: '2026-09-22T12:00:00Z',
+    version: !offered ? null : channel === 'nightly' ? '2.0.0-nightly.8' : '2.0.0-beta.2',
+    notes: offered ? '## What changed\n\n- Faster startup\n- More reliable desktop updates' : null,
+    publishedAt: offered ? '2026-09-22T12:00:00Z' : null,
     received: phase === 'downloading' ? 38_000_000 : 0,
     total: phase === 'downloading' ? 100_000_000 : null,
     error: phase === 'error' ? 'The release server did not answer.' : null,

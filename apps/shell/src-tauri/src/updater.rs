@@ -155,6 +155,21 @@ fn offer_version(current: &semver::Version, next: &semver::Version, track: Track
         if Track::of(&current.to_string()) != track { next != current } else { next > current }
 }
 
+/// A panic inside an async command drops its reply: Tauri never answers the
+/// promise, so the card reads "checking" until the app restarts and offers no
+/// way to check again. Nightlies up to 2026-09-26 did that on every check,
+/// when building the release client panicked. The work of each command runs
+/// through this, so a panic ends as an error the card can retry.
+async fn unwinding<T>(work: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    use futures_util::FutureExt;
+    std::panic::AssertUnwindSafe(work).catch_unwind().await.unwrap_or_else(|panic| {
+        let reason = panic.downcast_ref::<&str>().copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("no reason given");
+        Err(format!("The updater stopped unexpectedly: {reason}"))
+    })
+}
+
 #[tauri::command]
 pub fn app_update_status(webview: Webview, state: State<'_, AppUpdater>) -> Result<Snapshot, String> {
     crate::browser::only_main(&webview)?;
@@ -168,7 +183,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
     state.pending.lock().unwrap().take();
     state.change(&app, |s| { s.phase = "checking".into(); s.channel = channel; s.error = None;
         s.version = None; s.notes = None; s.published_at = None; s.received = 0; s.total = None; });
-    let result = async {
+    let result = unwinding(async {
         let temporary = state.preference.with_extension("tmp");
         std::fs::write(&temporary, serde_json::to_vec(&channel).unwrap()).map_err(|e| format!("Cannot save update channel: {e}"))?;
         std::fs::rename(temporary, &state.preference).map_err(|e| format!("Cannot save update channel: {e}"))?;
@@ -187,7 +202,7 @@ pub async fn app_update_check(webview: Webview, app: AppHandle, state: State<'_,
             Ok(state.change(&app, |s| { s.phase = "available".into(); s.version = Some(version);
                 s.notes = release.body; s.published_at = release.published_at; }))
         } else { Ok(state.change(&app, |s| s.phase = "current".into())) }
-    }.await;
+    }).await;
     Ok(result.unwrap_or_else(|e| state.fail(&app, e)))
 }
 
@@ -200,14 +215,16 @@ pub async fn app_update_download(webview: Webview, app: AppHandle, state: State<
     state.change(&app, |s| { s.phase = "downloading".into(); s.received = 0; s.total = None; });
     let mut received = 0;
     let mut emitted = Instant::now();
-    let result = update.download(|length, total| {
-        received += length as u64;
-        // At most ten UI events per second, regardless of network chunk size.
-        if emitted.elapsed() >= Duration::from_millis(100) {
-            state.change(&app, |s| { s.received = received; s.total = total; });
-            emitted = Instant::now();
-        }
-    }, || {}).await;
+    let result = unwinding(async {
+        update.download(|length, total| {
+            received += length as u64;
+            // At most ten UI events per second, regardless of network chunk size.
+            if emitted.elapsed() >= Duration::from_millis(100) {
+                state.change(&app, |s| { s.received = received; s.total = total; });
+                emitted = Instant::now();
+            }
+        }, || {}).await.map_err(|e| e.to_string())
+    }).await;
     match result {
         Ok(bytes) => {
             if let Err(e) = std::fs::write(&state.cache, &bytes) { return Ok(state.fail(&app, format!("Cannot cache update: {e}"))); }
@@ -217,7 +234,7 @@ pub async fn app_update_download(webview: Webview, app: AppHandle, state: State<
             if let Some(pending) = state.pending.lock().unwrap().as_mut() { pending.path = Some(state.cache.clone()); pending.digest = Some(digest); }
             Ok(state.change(&app, |s| { s.phase = "ready".into(); s.received = size; s.total = Some(size); }))
         }
-        Err(e) => Ok(state.fail(&app, e.to_string())),
+        Err(e) => Ok(state.fail(&app, e)),
     }
 }
 
@@ -297,6 +314,16 @@ mod tests {
         assert!(state.begin().is_err());
         drop(guard);
         assert!(state.begin().is_ok());
+    }
+
+    #[test]
+    fn a_panic_in_update_work_answers_with_an_error() {
+        fn panics(payload: impl std::any::Any + Send) -> Result<(), String> { std::panic::panic_any(payload) }
+        // What building the release client did in nightlies up to 2026-09-26.
+        let text = tauri::async_runtime::block_on(unwinding(async { panics("no process-level CryptoProvider available") }));
+        assert_eq!(text.unwrap_err(), "The updater stopped unexpectedly: no process-level CryptoProvider available");
+        let formatted = tauri::async_runtime::block_on(unwinding(async { panics(format!("page {} of the release list", 3)) }));
+        assert_eq!(formatted.unwrap_err(), "The updater stopped unexpectedly: page 3 of the release list");
     }
 
     #[test]

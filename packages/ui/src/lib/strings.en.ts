@@ -262,6 +262,7 @@ export const strings = {
     notes: 'Release notes',
     retained: 'Changing channels keeps your conversations and settings.',
     check: 'Check for updates',
+    checkingAction: 'Checking',
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',

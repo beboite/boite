@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { RefreshCw } from '@lucide/svelte';
   import InfoTip from './InfoTip.svelte';
   import Prose from './Prose.svelte';
   import { appUpdater, type AppUpdater, type UpdateChannel } from '../lib/app-update.svelte';
@@ -123,9 +124,17 @@
         <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-retry">
           {strings.appUpdate.retry}
         </button>
-      {:else if !updater.busy}
-        <button type="button" onclick={() => updater.check(update.channel)} data-testid="app-update-check">
-          {strings.appUpdate.check}
+      {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
+        <!-- It stays in place while a check runs, so the card always says how to check again. -->
+        <button
+          type="button"
+          disabled={update.phase === 'checking'}
+          aria-busy={update.phase === 'checking'}
+          onclick={() => updater.check(update.channel)}
+          data-testid="app-update-check"
+        >
+          <RefreshCw size={13} class={update.phase === 'checking' ? 'spinning' : undefined} />
+          {update.phase === 'checking' ? strings.appUpdate.checkingAction : strings.appUpdate.check}
         </button>
       {/if}
     </div>
@@ -226,6 +235,11 @@
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
   }
+
+  .actions :global(.spinning) { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .actions :global(.spinning) { animation: none; } }
+  :global(html[data-motion='reduced']) .actions :global(.spinning) { animation: none; }
 
   @media (max-width: 540px) {
     .channel-row { align-items: flex-start; flex-direction: column; gap: 8px; }
