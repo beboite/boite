@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { ChevronDown, FolderOpen } from '@lucide/svelte';
   import type { ProjectId } from '@boite/contracts';
   import { separator, type MenuItem } from '../lib/menu';
@@ -15,6 +16,15 @@
   let { store }: { store: Store } = $props();
 
   let thread = $derived(store.openThread);
+  // Whether other agents can reach this conversation. Off, it takes no room
+  // here: the setting lives in the Agents panel.
+  let threadId = $derived(thread?.id);
+  let agentSession = $derived(!!thread?.agentSessionId);
+  $effect(() => {
+    const id = threadId;
+    if (id && !agentSession) untrack(() => void store.loadCoordination(id, false));
+  });
+  let reachable = $derived(!!threadId && !agentSession && store.coordination?.self.threadId === threadId && store.coordination.config.mode !== 'off');
   let project = $derived(store.openProject);
   let draftChoice = $derived(store.defaultChoice());
   let draftModel = $derived(store.modelOf(draftChoice));
@@ -34,17 +44,19 @@
     ...(workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => {
       const here = machine.store === store;
       const drafts = machine.store.draftsProject;
+      // One machine names no machine: the path alone tells the projects apart.
+      const place = workspace.machines.length > 1 ? machine.label : '';
       return [
         {
           id: JSON.stringify([machine.id, null]),
           label: strings.drafts.name,
-          hint: machine.label ? `${machine.label} · ${strings.drafts.hint}` : strings.drafts.hint,
+          hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
           active: here && store.draftInDrafts
         },
         ...machine.store.projects.filter((entry) => entry.id !== drafts?.id).map((entry) => ({
           id: JSON.stringify([machine.id, entry.id]),
           label: projectName(entry),
-          hint: machine.label ? `${machine.label} · ${entry.path}` : entry.path,
+          hint: place ? `${place} · ${entry.path}` : entry.path,
           active: here && entry.id === store.draft?.projectId
         }))
       ];
@@ -75,7 +87,7 @@
 
 
     {#if thread}
-      {#if !thread.agentSessionId}{#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}{/if}
+      {#if reachable}{#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}{/if}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->

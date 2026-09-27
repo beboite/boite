@@ -129,7 +129,7 @@
     </div>
   {/if}
 
-  <h3>{strings.machines.linkedAgents}</h3>
+  {#if machines.some(machine => (peers[machine.id] ?? []).length > 0)}<h3>{strings.machines.linkedAgents}</h3>{/if}
   <div class="rows">
     {#each machines as machine (machine.id)}
       {#each peers[machine.id] ?? [] as peer (peer.coreId)}

@@ -38,7 +38,7 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-The `listenOnLan` switch in General settings is the same decision without a
+The `listenOnLan` switch in Settings, Machines and devices is the same decision without a
 command line: the core reads it from the journal at start, before it binds, and
 `0.0.0.0` is what it binds when the switch is on. A `--host` or a `--lan` on the
 command line always wins over it, because the person who typed the flag meant it.

@@ -50,6 +50,7 @@ tauri-winrt-notification = "0.8"
 windows-version = "0.1"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",

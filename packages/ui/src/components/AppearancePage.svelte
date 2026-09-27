@@ -86,6 +86,7 @@
   </header>
 
   <section class="card" id="settings-theme">
+    <h2>{strings.settings.display}</h2>
     <div class="switch-row">
       <span class="text">{strings.settings.language}<InfoTip topic={strings.settings.language} text={strings.settings.languageHint} /></span>
       <div class="segmented" role="group" aria-label={strings.settings.language}>

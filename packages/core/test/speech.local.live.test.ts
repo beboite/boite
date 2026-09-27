@@ -24,10 +24,13 @@ test.skipIf(process.env.BOITE_E2E_SPEECH_LOCAL !== '1')('Whisper downloads verif
     audio.write('RIFF', 0); audio.writeUInt32LE(audio.length - 8, 4); audio.write('WAVEfmt ', 8);
     audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22); audio.writeUInt32LE(16000, 24);
     audio.writeUInt32LE(32000, 28); audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write('data', 36); audio.writeUInt32LE(pcm.length, 40); pcm.copy(audio, 44);
-    const result = await harness.core.speech.transcribe('live-test', { revision: harness.core.speech.status().revision, requestId: 'fixture', audio: audio.toString('base64') });
+    const revision = harness.core.speech.status().revision;
+    const preview = await harness.core.speech.transcribe('live-test', { revision, requestId: 'preview', audio: audio.toString('base64'), preview: true });
+    expect(preview.language).toBe('english');
+    const result = await harness.core.speech.transcribe('live-test', { revision, requestId: 'fixture', audio: audio.toString('base64'), language: preview.language });
     expect(result.text.toLowerCase()).toContain('ask not');
     expect(readdirSync(harness.core.speech.local.root).some(name => name.startsWith('speech-'))).toBe(false);
     await harness.core.speech.uninstall();
-    expect(existsSync(harness.core.speech.local.model)).toBe(false);
+    expect(existsSync(harness.core.speech.local.modelFile(harness.core.speech.get()))).toBe(false);
   } finally { await harness.stop(); }
 }, 660_000);

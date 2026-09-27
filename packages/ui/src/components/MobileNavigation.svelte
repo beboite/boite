@@ -15,6 +15,9 @@
   let search = $state('');
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
+  /** With one machine its name says nothing, and a working connection needs no word either. */
+  let several = $derived(machines.length > 1);
+  let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
   let project = $derived(store.openProject ?? store.projects[0]);
   let entries = $derived(machines.flatMap(machine => {
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
@@ -26,7 +29,7 @@
     .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
   let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
-    id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: m.label,
+    id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '',
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
@@ -76,7 +79,7 @@
     <button class="ghost icon" aria-label={strings.mobile.threads} onclick={() => show('threads')}><ArrowLeft size={20} /></button>
   {/if}
   <div class="identity">
-    <span class="machine">{machine?.label} · {strings.connection[store.connection]}</span>
+    {#if place}<span class="machine">{place}</span>{/if}
     <Menu items={projects} onpick={pickProject} label={strings.mobile.project} placement="bottom" variant="text" testid="mobile-project">
       {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
     </Menu>
@@ -88,14 +91,13 @@
   <section class="mobile-list" data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     <div class="list-heading">
       <h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>
-      <p class="muted">{screen === 'activity' ? strings.mobile.activityHint : strings.mobile.threadsHint}</p>
       <input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} />
     </div>
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
       <div class="row">
         <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
           <StatusMark status={row.thread.status} />
-          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{projectName(row.project)} · {row.machine.label}</span></span>
+          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{several ? `${projectName(row.project)} · ${row.machine.label}` : projectName(row.project)}</span></span>
           {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>

@@ -60,6 +60,8 @@ test('paired phone transcribes on the core but cannot read config, change keys o
     await expect(phone.call('speech.config', {})).rejects.toThrow('owner only');
     await expect(phone.call('speech.configure', DEFAULT_SPEECH)).rejects.toThrow('owner only');
     await expect(phone.call('speech.install', {})).rejects.toThrow('owner only');
+    await expect(phone.call('speech.uninstall', {})).rejects.toThrow('owner only');
+    expect(await phone.call('speech.warm', {})).toEqual({ ok: true });
     expect(await phone.call('speech.transcribe', { revision: harness.core.speech.status().revision, requestId: 'phone', audio: testWav() })).toEqual({ text: 'Bonjour depuis le téléphone.' });
     expect(existsSync(join(harness.dataDir, 'speech'))).toBe(false);
   } finally { phone.close(); }
@@ -245,15 +247,194 @@ describe('a local speech download on a bad connection', () => {
   });
 });
 
+/** A runtime that holds both programs, so an install fetches only the model. */
+function fakeRuntime(): void {
+  const runtime = join(harness.core.speech.local.root, 'runtime');
+  mkdirSync(runtime, { recursive: true });
+  for (const file of ['whisper-cli.exe', 'whisper-server.exe']) writeFileSync(join(runtime, file), 'fixture');
+}
+
 test('installing again after a failed model download does not fetch the runtime it already has', async () => {
+  const local = harness.core.speech.local;
+  if (!local.canInstallRuntime) return;
+  fakeRuntime();
+  const urls: string[] = [];
+  fetchSpy = stubFetch(async (url) => { urls.push(String(url)); return new Response('gone', { status: 404 }); });
+  harness.core.speech.install();
+  await waitFor(() => !local.installing);
+  expect(urls).toHaveLength(1);
+  expect(urls[0]).toContain('ggml-small');
+});
+
+test('a runtime without whisper-server still transcribes and is offered again for the resident engine', () => {
   const local = harness.core.speech.local;
   if (!local.canInstallRuntime) return;
   mkdirSync(join(local.root, 'runtime'), { recursive: true });
   writeFileSync(join(local.root, 'runtime', 'whisper-cli.exe'), 'fixture');
-  const urls: string[] = [];
-  fetchSpy = stubFetch(async (url) => { urls.push(String(url)); return new Response('gone', { status: 404 }); });
-  local.start();
-  await waitFor(() => !local.installing);
-  expect(urls).toHaveLength(1);
-  expect(urls[0]).toContain('ggml-small');
+  expect(harness.core.speech.status().runtimeOutdated).toBe(true);
+  expect(local.serverCommand('')).toBeNull();
+  writeFileSync(join(local.root, 'runtime', 'whisper-server.exe'), 'fixture');
+  expect(harness.core.speech.status().runtimeOutdated).toBe(false);
+  expect(local.serverCommand('')).toEqual([join(local.root, 'runtime', 'whisper-server.exe')]);
+});
+
+describe('the model choice', () => {
+  /** The 48 bytes whisper.cpp reads first, then some weights. */
+  function ggml(options: { magic?: number; audioCtx?: number; mels?: number } = {}): Uint8Array {
+    const bytes = new Uint8Array(4096);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, options.magic ?? 0x67676d6c, true);
+    const header = [51865, options.audioCtx ?? 1500, 384, 6, 4, 448, 384, 6, 4, options.mels ?? 80, 1];
+    header.forEach((value, index) => view.setInt32(4 + index * 4, value, true));
+    return bytes;
+  }
+  const files: Record<string, () => Response> = {
+    '/ggml-tiny-fixture.bin': () => new Response(ggml(), { headers: { 'content-length': '4096' } }),
+    '/ggerganov/whisper.cpp/blob/main/ggml-tiny.bin': () => new Response(`<!doctype html><html><head><title>ggml-tiny.bin</title></head>${' '.repeat(4000)}</html>`),
+    '/model.gguf': () => new Response(ggml({ magic: 0x46554747 })),
+    '/ggml-silero-vad.bin': () => new Response(ggml({ audioCtx: 512 })),
+  };
+  let urls: string[] = [];
+  beforeEach(() => {
+    urls = [];
+    fakeRuntime();
+    fetchSpy = stubFetch(async (url) => {
+      urls.push(String(url));
+      const file = files[new URL(String(url)).pathname];
+      return file ? file() : new Response('gone', { status: 404 });
+    });
+  });
+
+  test('a link downloads a checked Whisper file, becomes the model in use, and removing it goes back to the default', async () => {
+    const speech = harness.core.speech;
+    await expect(Promise.resolve().then(() => speech.install({ url: 'http://models.example/ggml-tiny-fixture.bin' }))).rejects.toThrow('https://');
+    await expect(Promise.resolve().then(() => speech.install({ url: 'https://user:pass@models.example/ggml-tiny-fixture.bin' }))).rejects.toThrow('without a user name');
+    expect(urls).toHaveLength(0);
+    const url = 'https://models.example/ggml-tiny-fixture.bin';
+    const started = speech.install({ url });
+    expect(started.downloading).toMatch(/^custom-[a-f0-9]{12}$/);
+    expect(started.models.at(-1)).toMatchObject({ kind: 'custom', name: 'ggml-tiny-fixture.bin', host: 'models.example' });
+    await waitFor(() => !speech.local.installing);
+    const status = speech.status();
+    expect(status.error).toBeNull();
+    const custom = status.models.find(model => model.kind === 'custom')!;
+    expect(custom).toEqual({ id: started.downloading!, kind: 'custom', name: 'ggml-tiny-fixture.bin', bytes: 4096, host: 'models.example', installed: true });
+    expect(speech.get().model).toBe(custom.id);
+    // The link stays on the core; a status carries only its host.
+    expect(JSON.stringify(status)).not.toContain(url);
+    const removed = await speech.uninstall({ model: custom.id });
+    expect(removed.models.some(model => model.kind === 'custom')).toBe(false);
+    expect(speech.get().model).toBe('small-q5_1');
+    expect(existsSync(join(speech.local.models.customDir, `${custom.id}.bin`))).toBe(false);
+  });
+
+  test.each([
+    ['https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-tiny.bin', 'web page'],
+    ['https://models.example/model.gguf', 'GGUF'],
+    ['https://models.example/ggml-silero-vad.bin', 'not a Whisper model'],
+    ['https://models.example/missing.bin', 'HTTP 404'],
+  ])('a link that is not a Whisper model is refused and leaves no row: %s', async (url, reason) => {
+    const speech = harness.core.speech;
+    speech.install({ url });
+    await waitFor(() => !speech.local.installing);
+    expect(speech.status().error).toContain(reason);
+    expect(speech.status().models.some(model => model.kind === 'custom')).toBe(false);
+    expect(speech.get().model).toBe('small-q5_1');
+  });
+
+  test('a catalogue model downloads from its pinned file; an unknown one is refused with the choices', async () => {
+    const speech = harness.core.speech;
+    expect(() => speech.install({ model: 'ggml-small' })).toThrow('speech.model must be one of base-q5_1, small-q5_1, large-v3-turbo-q5_0');
+    expect(() => speech.install({ model: 'custom-000000000000' })).toThrow('not a model on this core');
+    expect(() => speech.install({ model: 'base-q5_1', url: 'https://models.example/ggml-tiny-fixture.bin' })).toThrow('either model or url');
+    speech.install({ model: 'base-q5_1' });
+    expect(speech.status().totalBytes).toBe(59707625);
+    await waitFor(() => !speech.local.installing);
+    expect(urls).toEqual(['https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin']);
+    expect(speech.get().model).toBe('small-q5_1');
+  });
+
+  test('removing the model in use hands over to another one already here', async () => {
+    const speech = harness.core.speech;
+    const { root } = speech.local;
+    for (const file of ['ggml-base-q5_1.bin', 'ggml-small-q5_1.bin']) writeFileSync(join(root, file), 'fixture');
+    speech.configure({ ...DEFAULT_SPEECH, model: 'small-q5_1' });
+    const revision = speech.status().revision;
+    const status = await speech.uninstall({ model: 'small-q5_1' });
+    expect(existsSync(join(root, 'ggml-small-q5_1.bin'))).toBe(false);
+    expect(existsSync(join(root, 'ggml-base-q5_1.bin'))).toBe(true);
+    expect(speech.get().model).toBe('base-q5_1');
+    expect(status.revision).not.toBe(revision);
+    expect(status.models.filter(model => model.installed).map(model => model.id)).toEqual(['base-q5_1']);
+    // Choosing a model already here needs no download.
+    expect(speech.install({ model: 'base-q5_1' }).installing).toBe(false);
+    expect(urls).toHaveLength(0);
+  });
+
+  test('a speech.json from before the model choice keeps Whisper Small', async () => {
+    const saved = { engine: 'local', language: '', apiProvider: 'groq', fallback: false, executable: '', modelPath: '' };
+    writeFileSync(join(harness.dataDir, 'speech.json'), JSON.stringify(saved));
+    const loaded = new SpeechStore(harness.core);
+    try {
+      expect(loaded.get()).toEqual({ ...saved, model: 'small-q5_1' } as typeof DEFAULT_SPEECH);
+      expect(loaded.status().error).toBeNull();
+    } finally { await loaded.close(); }
+  });
+});
+
+describe('the resident whisper-server', () => {
+  let model: string;
+  const log = () => readFileSync(`${model}.log`, 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, string | number | null>);
+  const request = (id: string, extra: { preview?: boolean; language?: string } = {}) =>
+    harness.core.speech.transcribe('one', { revision: harness.core.speech.status().revision, requestId: id, audio: testWav(), ...extra });
+
+  beforeEach(() => {
+    model = join(harness.dataDir, 'fixture-model.bin');
+    writeFileSync(model, 'fixture model');
+    harness.core.speech.local.serverOverride = [process.execPath, join(import.meta.dir, 'fixtures', 'whisper-server.ts')];
+    harness.core.speech.configure({ ...DEFAULT_SPEECH, executable: process.execPath, modelPath: model });
+  });
+
+  test('a warm loads the model once; previews and the final request reuse it, the final one with the language a preview heard', async () => {
+    const { server } = harness.core.speech.local;
+    const client = await harness.connect();
+    expect(await client.call('speech.warm', {})).toEqual({ ok: true });
+    client.close();
+    await waitFor(() => server.running);
+    expect(await request('preview', { preview: true })).toEqual({ text: 'Bonjour tout le monde.', language: 'french' });
+    expect(await request('final', { language: 'french' })).toEqual({ text: 'Bonjour tout le monde.', language: 'french' });
+    const [preview, final] = log();
+    expect(preview).toMatchObject({ language: 'auto', audio_ctx: String(Math.ceil(1 * 50) + 64), response_format: 'verbose_json', no_language_probabilities: 'true', bytes: 32044 });
+    expect(final).toMatchObject({ language: 'french', audio_ctx: null });
+    expect(final!.pid).toBe(preview!.pid);
+    expect(Number(preview!.threads)).toBeGreaterThanOrEqual(1);
+    await expect(request('bad', { language: 'fr-FR' })).rejects.toThrow('speech.language');
+  });
+
+  test('a configured language wins over what a preview heard', async () => {
+    harness.core.speech.configure({ ...DEFAULT_SPEECH, language: 'en', executable: process.execPath, modelPath: model });
+    await request('final', { language: 'french' });
+    expect(log()[0]).toMatchObject({ language: 'en' });
+  });
+
+  test('the server stops when the model changes, after its idle wait, and on close; a bad model says so', async () => {
+    const speech = harness.core.speech;
+    const { server } = speech.local;
+    await request('one');
+    expect(server.running).toBe(true);
+    const other = join(harness.dataDir, 'other-model.bin');
+    writeFileSync(other, 'fixture model');
+    speech.configure({ ...DEFAULT_SPEECH, executable: process.execPath, modelPath: other });
+    await waitFor(() => !server.running);
+    server.idleMs = 150;
+    model = other;
+    await request('two');
+    expect(server.running).toBe(true);
+    await waitFor(() => !server.running, 5_000);
+    const broken = join(harness.dataDir, 'broken-model.bin');
+    writeFileSync(broken, 'broken fixture');
+    speech.configure({ ...DEFAULT_SPEECH, executable: process.execPath, modelPath: broken });
+    await expect(request('three')).rejects.toThrow('could not load broken-model.bin');
+    expect(server.running).toBe(false);
+  });
 });

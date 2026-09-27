@@ -16,7 +16,7 @@ beforeAll(async () => {
   uiUrl = `http://127.0.0.1:${port}`;
   server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
-  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="chat"]')`);
   await page.evaluate(`(async () => {
     const [{ workspace }, { FakeClient }] = await Promise.all([import('/src/lib/workspace.svelte.ts'), import('/src/lib/fake-client.ts')]);
     const local = workspace.active.client;
@@ -41,6 +41,8 @@ beforeAll(async () => {
     });
   })()`);
   await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 2`);
+  // Reachable by other agents now, the conversation shows its coordination bar.
+  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')`);
 }, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);

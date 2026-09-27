@@ -28,11 +28,13 @@ async function missionJourney() {
   await page.waitFor(`document.querySelector('.agent-knowledge').textContent.includes('Keep the prototype playable')`);
   await capture('agents-memory-desktop.png');
 
-  await page.click('[data-testid="agents-create"]');
-  await page.click('[data-value="mission"]');
+  // A mission starts inside the conversation it belongs to, with that conversation's team and members.
+  await page.evaluate(`document.querySelector('[data-testid="agent-entry-' + window.__agentsFixture.group.id + '"]').click()`);
+  await page.click('[data-testid="agent-tab-missions"]');
+  await page.click('[data-testid="agent-mission-new"]');
   await page.type('[data-testid="agent-name"]', 'Prototype review');
   await page.type('[data-testid="agent-editor"] textarea', 'Describe a small playable prototype.');
-  await page.evaluate(`Array.from(document.querySelectorAll('#app input[type="checkbox"], [data-testid="agent-editor"] input[type="checkbox"]')).find(c => c.closest('label')?.textContent.includes('Atlas')).click()`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agent-editor"] input[type="checkbox"]')).filter(c => c.checked).length`)).toBe(3);
   await page.click('[data-testid="agent-save"]');
   await page.waitFor(`document.querySelector('[data-testid="agent-mission-finish"]')`);
   await page.evaluate(`Array.from(document.querySelectorAll('.agents-main button')).find(b => b.textContent === 'Add task').click()`);
@@ -81,6 +83,8 @@ test('create, converse, configure the resident engine and follow background work
   await page.waitFor(`document.querySelector('[data-testid="agents-page"]')`);
   await capture('agents-welcome-desktop.png');
   await page.click('[data-testid="agents-create"]');
+  await page.waitFor(`document.querySelector('[data-testid="agents-create-menu"]')`);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="agents-create-menu"] [data-value]')).map(i => i.dataset.value)`)).toEqual(['profile', 'group']);
   await page.click('[data-value="profile"]');
   await page.type('[data-testid="agent-name"]', 'Mira');
   await page.type('textarea', 'Explore ideas and report useful findings.');

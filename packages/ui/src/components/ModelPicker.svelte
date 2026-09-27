@@ -231,7 +231,7 @@
     } finally { favoritePending = false; }
   }
 
-  /** The download happens on the Accounts page now, so the picker sends you there. */
+  /** Installing and signing in happen on the Providers page, so the picker sends you there. */
   function openInstall() {
     popover.hide();
     store.showSettings('accounts');
@@ -313,7 +313,7 @@
         <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
       <div class="column rail">
-        <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} />
+        <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
       </div>
 
       <div class="column models main-models">

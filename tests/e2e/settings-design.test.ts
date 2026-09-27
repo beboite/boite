@@ -17,7 +17,7 @@ test("settings reveal sections and protection switches persist across navigation
   }
   try {
     await page.click("[data-testid=nav-settings]");
-    await page.waitFor('document.querySelector("[data-testid=settings-page]")');
+    await page.waitFor('document.querySelector("[data-testid=settings-home]")');
     await settled();
     await page.screenshot("tests/e2e/.artifacts/settings-after.png");
     await page.click("[data-testid=settings-tab-resources]");

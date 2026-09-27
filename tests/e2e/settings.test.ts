@@ -33,7 +33,9 @@ test('provider settings show login controls and quota monitoring', async () => {
   await page.waitFor(`document.querySelector('${id('quota-monitor')}')`);
   await page.click(id('quota-monitor'));
   await page.waitFor(`!document.querySelector('${id('quota-monitor')}').checked`);
-  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).toContain('Quota monitoring is off');
+  // The switch says monitoring is off; no line under it repeats that.
+  expect(await page.evaluate(`document.querySelector('${id('quota-monitor')}').closest('.quota').querySelector('${id('quota-account')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).not.toContain('Quota monitoring is off');
   await page.click(id('quota-monitor'));
   await capture('providers-details.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -110,21 +112,26 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
-  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length === 5 && document.querySelector('progress')`);
-  expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
-  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('inset(0px round 12px)');
+  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('progress')`);
+  // The popup window is opaque and square: the page paints the canvas to every corner and rounds nothing.
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).backgroundColor`)).not.toBe('rgba(0, 0, 0, 0)');
+  expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('none');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderRadius`)).toBe('0px');
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('1px');
   await capture('quota-popup.png');
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`)).toEqual(['claude', 'codex', 'antigravity', 'grok', 'opencode']);
+  // Only signed-in providers the user reads: Antigravity's CLI source is off, echo and pi report nothing.
+  const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
+  expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode']));
+  for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  await page.click('[data-provider="antigravity"] .summary');
-  await page.click('[data-provider="antigravity"] input');
-  await page.waitFor(`document.querySelector('[data-provider="antigravity"] progress')`);
-  await page.click('[data-provider="antigravity"] input');
-  await page.waitFor(`!document.querySelector('[data-provider="antigravity"] progress')`);
-  await page.evaluate(`document.querySelector('[data-provider="antigravity"] input').scrollIntoView({ block: 'nearest' })`);
-  await capture('quota-popup-setup.png');
-  await page.click('[data-provider="antigravity"] .summary');
+  // Unfolded, a provider lists each window with its own bar; there is nothing to set here.
+  await page.click('[data-provider="claude"] .summary');
+  await page.waitFor(`document.querySelectorAll('#usage-claude progress').length === 3`);
+  expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').querySelector('input') === null`)).toBe(true);
+  await capture('quota-popup-open.png');
+  await page.click('[data-provider="claude"] .summary');
+  await page.waitFor(`!document.querySelector('#usage-claude')`);
   expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -132,6 +139,10 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.evaluate(`document.documentElement.dataset.theme = 'grain'`);
   await capture('quota-popup-grain.png');
   expect(await page.evaluate(`getComputedStyle(document.documentElement).backgroundColor`)).toBe('rgba(0, 0, 0, 0)');
+  // Where Windows 11 draws the rounded frame, the page draws no border inside it.
+  await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas&frame=native`);
+  await page.waitFor(`document.querySelector('${id('quota-popup')}')`);
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).borderTopWidth`)).toBe('0px');
 }, 30_000);
 
 test('machines list each execution host and disconnect only the selected host', async () => {

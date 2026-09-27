@@ -52,7 +52,8 @@
     onpick(item.id);
   }
 
-  function onWindowClick(event: MouseEvent) {
+  /** A press, not a click: another menu's trigger stops its click from bubbling here. */
+  function onWindowPointerdown(event: PointerEvent) {
     if (!popover.open) return;
     if (root && event.target instanceof Node && root.contains(event.target)) return;
     popover.hide();
@@ -93,7 +94,7 @@
   }
 </script>
 
-<svelte:window onclick={onWindowClick} />
+<svelte:window onpointerdown={onWindowPointerdown} />
 
 <div class="menu" bind:this={root}>
   <button
@@ -142,10 +143,12 @@
           disabled={item.disabled}
           data-row
           data-value={item.id}
+          title={item.title}
           onclick={() => pick(item)}
         >
           <span class="label">
             {#if item.icon === 'settings'}<Settings size={14} strokeWidth={1.75} />{/if}
+            {#if item.glyph}<span class="glyph" class:live={item.live}><item.glyph size={14} strokeWidth={1.75} /></span>{/if}
             {#if item.status}<span class="status-dot" data-tone={item.status.tone} role="img" aria-label={item.status.label} title={item.status.label}></span>{/if}
             {item.label}
           </span>
@@ -162,6 +165,8 @@
 <style>
   .separator { height: 1px; background: var(--color-border); margin: 4px 6px; }
   .label { display: flex; align-items: center; gap: 6px; }
+  .glyph { display: inline-flex; color: var(--color-muted-foreground); margin-right: 2px; }
+  .glyph.live { color: var(--color-live); }
   .item.hide-mark.active { background: var(--color-active); }
   .status-dot { display: inline-block; width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--color-live); }
   .status-dot[data-tone='success'] { background: var(--color-success); }

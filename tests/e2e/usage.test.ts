@@ -122,7 +122,9 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await viewport(390, 844, true);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=usage-chart] svg path')`);
   expect(await fits()).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header p').getBoundingClientRect().height > 0`)).toBe(true);
+  // The bar above names the page and carries its info mark; the page's own title steps aside.
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-settings-info]').getBoundingClientRect().height > 0`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header').getBoundingClientRect().height`)).toBe(0);
   await capture('usage-phone-dark.png');
 
   await page.evaluate(`document.querySelector('[data-testid=usage-chart]').scrollIntoView({ block: 'center' })`);

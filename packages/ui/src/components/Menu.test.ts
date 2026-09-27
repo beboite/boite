@@ -110,6 +110,33 @@ test('Escape closes and gives the trigger the focus back', async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
+test('pressing another menu trigger closes the open menu and opens the other one', async () => {
+  open();
+  const second = mount(Menu, {
+    target: document.body,
+    props: {
+      items: ITEMS,
+      onpick: () => {},
+      label: 'Model',
+      testid: 'model',
+      children: createRawSnippet(() => ({ render: () => '<span>Model</span>' }))
+    }
+  });
+  flushSync();
+  query<HTMLButtonElement>('[data-testid=mode]').click();
+  await settle();
+  expect(document.querySelector('[data-testid=mode-menu]')).not.toBeNull();
+
+  // The other trigger stops its click, so only the press can reach the open menu.
+  const other = query<HTMLButtonElement>('[data-testid=model]');
+  other.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  other.click();
+  await settle();
+  expect(document.querySelector('[data-testid=mode-menu]')).toBeNull();
+  expect(document.querySelector('[data-testid=model-menu]')).not.toBeNull();
+  unmount(second, { outro: false });
+});
+
 test('the popover holds one animation on the way out and unmounts on animationend', async () => {
   // jsdom runs no animation, so the helper closes on the spot unless the node
   // says one is running. This is what a browser reports while it plays.

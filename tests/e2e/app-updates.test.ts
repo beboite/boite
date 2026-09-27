@@ -17,6 +17,8 @@ async function settings(phase: string, nightly = false) {
   await page.navigate(`${base}/?fake=1&appUpdate=${phase}${nightly ? '&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly' : ''}`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
+  await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
 }
 async function pickDesktopLocale(locale: 'en' | 'fr') {
@@ -59,9 +61,9 @@ test('titlebar details open and scroll to the card on the first and later clicks
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
   await capture('titlebar-first-click');
-  await page.click('[data-settings-section="phone"]');
-  await page.waitFor(`document.querySelector('[data-settings-section="phone"]').classList.contains('chosen')`);
-  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-phone');
+  await page.click('[data-settings-section="conversations"]');
+  await page.waitFor(`document.querySelector('[data-settings-section="conversations"]').classList.contains('chosen')`);
+  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-conversations');
   expect(await page.evaluate(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`)).toBe(false);
   await page.evaluate('window.__appUpdateScrollTarget = null');
   await page.click(id('titlebar-update-details'));
@@ -135,6 +137,8 @@ test('an installed nightly calls itself boite (de nuit)', async () => {
   expect(await page.evaluate(mentions)).toBe(1);
   await capture('nightly-desktop');
   await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
+  await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate(mentions)).toBe(1);
   // Settings keep the track's own name.

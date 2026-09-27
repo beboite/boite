@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SurfaceKind } from '../lib/right-panel.svelte';
   import { strings } from '../lib/strings';
-  import { CARDS, kindHint, kindName, unavailable } from '../lib/surface-labels';
+  import { offeredCards, kindHint, kindName, unavailable } from '../lib/surface-labels';
   import SurfaceIcon from './SurfaceIcon.svelte';
 
   /** The empty panel: one card per kind of surface, each with the letter that opens it. */
@@ -20,7 +20,7 @@
     <!-- A card that cannot open stays and says why: a page needs the
          desktop shell's webview, and the rest read what a paired device
          is refused. -->
-    {#each CARDS as card (card.kind)}
+    {#each offeredCards() as card (card.kind)}
       <button
         type="button"
         class="card"

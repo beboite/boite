@@ -79,8 +79,8 @@ test('demo artwork speaks the language of the tour around it', async () => {
   expect(query('[data-testid=onboarding-animation]').textContent).toContain('Rends les boutons plus lisibles');
   expect(query('[data-testid=onboarding-animation]').textContent).not.toContain('Build my portfolio');
   await click('onboarding-animation-pause');
-  expect(query('[data-testid=onboarding-animation-pause]').textContent).toContain('Reprendre');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Rejouer');
+  expect(query('[data-testid=onboarding-animation-pause]').getAttribute('aria-label')).toBe('Reprendre');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Rejouer');
   expect(query('[data-testid=onboarding-next]').textContent).toContain('Suivant');
 });
 
@@ -180,7 +180,7 @@ test('usage and reach explain themselves without delayed account lists or exits'
   expect(switches.length).toBe(0);
   expect(document.body.textContent).toContain('24% used');
   expect(document.body.textContent).toContain('5-hour limit');
-  expect(document.body.textContent).toContain('beside the clock');
+  expect(document.body.textContent).toContain('Hover the Boite icon');
 
   await click('onboarding-dot-reach');
   expect(document.querySelector('[data-testid=onboarding-pair]')).toBeNull();
@@ -222,7 +222,7 @@ test('demo choices are labelled buttons and dictation keeps word spacing', async
   await click('onboarding-example-voice');
   expect(query('[data-testid=onboarding-scene]').textContent).toContain('Make the buttons easier to read');
   expect(query('[data-testid=onboarding-scene]').textContent).not.toContain('Illustration');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Replay');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Replay');
 });
 
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
@@ -393,7 +393,7 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
   await click('onboarding-profile-everyday');
   expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('true');
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files' });
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files', developer: false });
   // The everyday answer asks before each action.
   expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({ permissionMode: 'default' });
 
@@ -402,5 +402,5 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('false');
   await click('onboarding-skip');
   await settle();
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes' });
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes', developer: true });
 });

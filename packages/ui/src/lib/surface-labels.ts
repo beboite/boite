@@ -4,6 +4,7 @@
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { strings } from './strings';
+import { work } from './work-prefs.svelte';
 
 /**
  * The launcher's five cards, in the order they are drawn. Each carries the
@@ -17,6 +18,19 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'tasks', key: 'K' },
   { kind: 'trace', key: 'T' }
 ];
+
+/** The trace is a developer's tool: it is offered only while this device shows them. */
+const DEVELOPER_KINDS: readonly SurfaceKind[] = ['trace'];
+
+/** Whether this device hides a kind: a developer's tool while their switch is off. */
+export function hiddenKind(kind: SurfaceKind): boolean {
+  return !work.current.developer && DEVELOPER_KINDS.includes(kind);
+}
+
+/** The cards this device offers, CARDS minus the developer's while their switch is off. */
+export function offeredCards(): { kind: SurfaceKind; key: string }[] {
+  return CARDS.filter((card) => !hiddenKind(card.kind));
+}
 
 /** The name of a kind, which a card, a tab and the new-surface menu all read. */
 export function kindName(kind: SurfaceKind): string {

@@ -65,17 +65,23 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   await page.waitFor(`document.querySelector('${id('harness-update-notices')}') === null`);
 }, 20_000);
 
-test('Settings, Providers lists every agent, offers a skipped version again and carries the automatic switch', async () => {
+test('Settings, Providers shows every agent version on its row, offers a skipped version again and carries the automatic switch', async () => {
   await page.click(`${notice('claude')} ${id('harness-update-skip')}`);
   await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
-  await page.waitFor(`document.querySelectorAll('${id('harness-update-row')}').length === 4`);
-  const text = await page.evaluate(`document.querySelector('${id('harness-updates-card')}').textContent`) as string;
+  await page.waitFor(`document.querySelectorAll('${id('provider-update')}').length === 4`);
+  const text = await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`) as string;
   expect(text).toContain('2.1.278 skipped');
-  expect(text).toContain('Up to date');
-  // An agent that cannot name its newest release offers its updater instead of a version.
-  expect(text).toContain('Checks by itself');
-  expect(await page.evaluate(`document.querySelector('[data-update-provider="antigravity"] ${id('harness-update-row-blind')}') !== null`)).toBe(true);
+  // The separate updates card is gone: every version sits on its provider's row.
+  expect(await page.evaluate(`document.querySelector('${id('harness-updates-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"]').closest('${id('provider-settings')}').dataset.providerId`)).toBe('opencode');
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"] .version').title`)).toContain('Up to date');
+  // An agent that cannot name its newest release offers its updater instead of a version,
+  // on the one Antigravity row its CLI shares with the download Boite manages.
+  const cli = '[data-update-provider="antigravity-cli"]';
+  expect(await page.evaluate(`document.querySelector('${cli} .version').title`)).toContain('Checks by itself');
+  expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${cli}').closest('${id('provider-settings')}').dataset.providerId`)).toBe('antigravity');
 
   await page.click(id('setting-auto-update-harnesses'));
   await page.waitFor(`document.querySelector('${id('setting-auto-update-harnesses')}').checked`);

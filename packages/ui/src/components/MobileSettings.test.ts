@@ -62,7 +62,6 @@ test('a thread archived on the phone comes back from its own settings list', asy
   await waitFor(() => document.querySelector('[data-testid=mobile-settings-home]') !== null);
   query<HTMLButtonElement>('[data-testid=mobile-settings-archived]').click();
   await waitFor(() => document.querySelector('[data-testid=archived-show]') !== null);
-  expect(query('[data-testid=mobile-settings-detail]').textContent).toContain('Restore it to bring the conversation back');
   query<HTMLButtonElement>('[data-testid=archived-show]').click();
   await waitFor(() => document.querySelector('[data-testid=archived-restore]') !== null);
   expect(query('[data-testid=archived-list]').textContent).toContain('Finish the trace tab');

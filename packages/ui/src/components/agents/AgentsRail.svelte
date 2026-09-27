@@ -1,102 +1,132 @@
 <script lang="ts">
-  import { ArrowLeft, Bell, Plus, Search, Settings2 } from '@lucide/svelte';
-  import type { AgentEntryKind, AgentFocus, AgentsView } from '../../lib/agents.svelte';
+  import { ArrowLeft, Bell, Ellipsis, Search, Settings2, SquarePen, UserRoundPlus, Users } from '@lucide/svelte';
+  import { chatKey, previewOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
+  import { ago } from '../../lib/format';
+  import { separator, type MenuItem } from '../../lib/menu';
   import { fill, strings } from '../../lib/strings';
   import { workspace } from '../../lib/workspace.svelte';
   import Menu from '../Menu.svelte';
+  import AgentAvatar from './AgentAvatar.svelte';
 
-  let { view, focus, attention, onfocus, oncreate }: {
+  let { view, chats, active, attention, onfocus, oncreate }: {
     view: AgentsView;
-    focus: AgentFocus | null;
+    chats: AgentChat[];
+    /** The row the open conversation belongs to. */
+    active: string | null;
     attention: number;
     onfocus: (focus: AgentFocus) => void;
     oncreate: (kind: AgentEntryKind) => void;
   } = $props();
 
+  /** Past this many rows the list gets its search field. */
+  const SEARCH_FROM = 6;
   const labels = $derived(strings.agents);
-  const kinds = ['profile', 'group', 'team', 'mission'] as const;
-  const plural = { profile: 'profiles', group: 'groups', team: 'teams', mission: 'missions' } as const;
   let query = $state('');
-
-  type Entry = { id: string; name: string; hint: string; status: string };
-  /** One list, one section per kind. Empty kinds stay out of the way until they have entries. */
-  const sections = $derived.by(() => {
-    const snapshot = view.snapshot;
-    if (!snapshot) return [];
-    const running = new Set(snapshot.work.filter(w => w.status === 'running').map(w => w.agentId));
-    const all: Record<AgentEntryKind, Entry[]> = {
-      profile: snapshot.profiles.filter(a => a.status !== 'archived').map(a => ({ id: a.id, name: a.name, hint: a.domain, status: running.has(a.id) ? 'running' : a.status })),
-      group: snapshot.groups.map(g => ({ id: g.id, name: g.name, hint: fill(labels.memberCount, { count: String(g.memberIds.length) }), status: g.paused ? 'paused' : 'active' })),
-      team: snapshot.teams.map(t => ({ id: t.id, name: t.name, hint: t.description, status: t.paused ? 'paused' : 'active' })),
-      mission: snapshot.missions.map(m => ({ id: m.id, name: m.title, hint: labels[m.status], status: m.status }))
-    };
-    const needle = query.trim().toLowerCase();
-    return kinds
-      .map(kind => ({ kind, entries: all[kind].filter(e => !needle || `${e.name} ${e.hint}`.toLowerCase().includes(needle)) }))
-      .filter(section => section.entries.length);
+  let now = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(timer);
   });
+
+  const snapshot = $derived(view.snapshot);
+  const profiles = $derived(new Map(snapshot?.profiles.map(a => [a.id, a]) ?? []));
+  const needle = $derived(query.trim().toLowerCase());
+  const shown = $derived(needle ? chats.filter(c => c.name.toLowerCase().includes(needle)) : chats);
+  /** A search also reaches what the list leaves out: archived agents and missions. */
+  const found = $derived(needle && snapshot ? [
+    ...snapshot.profiles.filter(a => a.status === 'archived' && a.name.toLowerCase().includes(needle)).map(a => ({ kind: 'profile' as const, id: a.id, name: a.name, avatar: a.avatar, state: labels.archived })),
+    ...snapshot.missions.filter(m => m.title.toLowerCase().includes(needle)).map(m => ({ kind: 'mission' as const, id: m.id, name: m.title, avatar: '', state: labels[m.status] }))
+  ] : []);
   const counts = $derived({
-    running: view.snapshot?.work.filter(w => w.status === 'running').length ?? 0,
-    pending: view.snapshot?.work.filter(w => w.status === 'pending').length ?? 0
+    running: snapshot?.work.filter(w => w.status === 'running').length ?? 0,
+    pending: snapshot?.work.filter(w => w.status === 'pending').length ?? 0,
+    paused: snapshot?.limits.paused ?? false
   });
   const machine = $derived(workspace.machines.find(m => m.store === view.store));
+  const multi = $derived(workspace.machines.length > 1);
+  const more = $derived<MenuItem[]>([
+    ...(multi ? [...workspace.machines.map(m => ({ id: `machine:${m.id}`, label: m.label, active: m.store === view.store })), ...(view.store.owner ? [separator()] : [])] : []),
+    ...(view.store.owner ? [{ id: 'engine', label: labels.engineSettings, glyph: Settings2 }] : [])
+  ]);
 
-  function chosen(kind: string, id?: string): boolean {
-    return focus?.kind === kind && (id === undefined || ('id' in focus && focus.id === id));
+  function memberList(chat: AgentChat) {
+    return chat.members.flatMap(id => profiles.get(id) ?? []);
   }
-  function pickMachine(id: string) {
-    const target = workspace.machines.find(m => m.id === id);
+  function preview(chat: AgentChat): string {
+    if (chat.status === 'waiting' || chat.status === 'running') return labels[chat.status];
+    const last = chat.last;
+    if (last) {
+      const text = previewOf(last.text);
+      const sender = last.senderId === null ? labels.user : chat.kind === 'profile' ? '' : profiles.get(last.senderId)?.name ?? '';
+      return sender ? fill(labels.previewFrom, { name: sender, text }) : text;
+    }
+    if (chat.kind === 'profile') return profiles.get(chat.id)?.domain ?? '';
+    return memberList(chat).map(a => a.name).join(', ');
+  }
+  function pickMore(id: string) {
+    if (id === 'engine') { onfocus({ kind: 'engine' }); return; }
+    const target = workspace.machines.find(m => `machine:${m.id}` === id);
     if (target) void workspace.select(target.store).then(() => target.store.showAgents());
   }
 </script>
 
 <aside class="agents-rail" aria-label={labels.heading}>
   <header>
-    <button type="button" class="ghost icon" aria-label={labels.back} title={labels.back} onclick={() => view.store.showChat()}><ArrowLeft size={16} strokeWidth={1.75} /></button>
+    <button type="button" class="ghost icon agents-leave" aria-label={labels.back} title={labels.back} onclick={() => view.store.showChat()}><ArrowLeft size={16} strokeWidth={1.75} /></button>
     <h1>{labels.heading}</h1>
+    {#if multi}<span class="agents-machine">{machine?.label ?? view.store.core?.hostname ?? strings.machines.local}</span>{/if}
+    <span class="agents-grow"></span>
+    {#if more.length}
+      <Menu placement="bottom" align="end" variant="ghost" label={labels.more} testid="agents-more" items={more} onpick={pickMore}><Ellipsis size={16} strokeWidth={1.75} /></Menu>
+    {/if}
     {#if view.store.owner}
-      <Menu placement="bottom" align="end" variant="ghost" label={labels.create} testid="agents-create" items={kinds.map(kind => ({ id: kind, label: labels.kinds[kind], hint: labels.kindHints[kind] }))} onpick={id => oncreate(id as AgentEntryKind)}>
-        <Plus size={15} strokeWidth={1.75} />{labels.create}
+      <Menu placement="bottom" align="end" variant="ghost" label={labels.create} testid="agents-create" items={[{ id: 'profile', label: labels.newTitle.profile, glyph: UserRoundPlus }, { id: 'group', label: labels.newTitle.group, glyph: Users }]} onpick={id => oncreate(id as AgentEntryKind)}>
+        <SquarePen size={16} strokeWidth={1.75} />
       </Menu>
     {/if}
   </header>
 
-  {#if view.snapshot && (view.snapshot.profiles.length || view.snapshot.groups.length)}
+  {#if chats.length >= SEARCH_FROM || query}
     <label class="agents-search"><Search size={14} strokeWidth={1.75} /><input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} /></label>
   {/if}
 
   <div class="agents-rail-list">
-    {#if attention}
-      <button type="button" class="ghost agents-row attention" class:active={chosen('attention')} aria-current={chosen('attention') ? 'page' : undefined} onclick={() => onfocus({ kind: 'attention' })} data-testid="agents-attention">
-        <span class="agent-avatar"><Bell size={14} strokeWidth={1.75} /></span>
-        <span class="agents-row-text"><strong>{labels.attention}</strong></span>
-        <span class="agent-count">{attention}</span>
+    {#each shown as chat (chatKey(chat.kind, chat.id))}
+      {@const key = chatKey(chat.kind, chat.id)}
+      <button type="button" class="ghost agents-row" class:active={active === key} aria-current={active === key ? 'page' : undefined} onclick={() => onfocus({ kind: chat.kind, id: chat.id })} data-testid="agent-entry-{chat.id}">
+        <AgentAvatar kind={chat.kind} id={chat.id} name={chat.name} avatar={chat.avatar} members={memberList(chat)} status={chat.status} />
+        <span class="agents-row-text">
+          <span class="agents-row-line">
+            <strong>{chat.name}</strong>
+            <time datetime={new Date(chat.at).toISOString()}>{ago(chat.at, now)}</time>
+          </span>
+          <span class="agents-row-line">
+            <small data-status={chat.status}>{preview(chat)}</small>
+            {#if chat.attention}<span class="agent-count" data-tone="live" role="img" aria-label="{labels.attention}: {chat.attention}">{chat.attention}</span>
+            {:else if chat.unread}<span class="agent-count" role="img" aria-label={fill(labels.unread, { count: String(chat.unread) })}>{chat.unread}</span>{/if}
+          </span>
+        </span>
       </button>
-    {/if}
-    {#each sections as section (section.kind)}
-      <div class="agents-rail-section">
-        <h2 class="section-label">{labels[plural[section.kind]]}</h2>
-        {#each section.entries as entry (entry.id)}
-          <button type="button" class="ghost agents-row" class:active={chosen(section.kind, entry.id)} aria-current={chosen(section.kind, entry.id) ? 'page' : undefined} onclick={() => onfocus({ kind: section.kind, id: entry.id })} data-testid="agent-entry-{entry.id}">
-            <span class="agent-avatar" data-kind={section.kind}>{entry.name.slice(0, 1)}<i data-status={entry.status}></i></span>
-            <span class="agents-row-text"><strong>{entry.name}</strong>{#if entry.hint}<small>{entry.hint}</small>{/if}</span>
-          </button>
-        {/each}
-      </div>
-    {:else}
-      {#if query}<p class="agent-empty">{labels.empty}</p>{/if}
     {/each}
+    {#each found as entry (`${entry.kind}:${entry.id}`)}
+      <button type="button" class="ghost agents-row" onclick={() => onfocus({ kind: entry.kind, id: entry.id })} data-testid="agent-entry-{entry.id}">
+        <AgentAvatar kind={entry.kind} id={entry.id} name={entry.name} avatar={entry.avatar} />
+        <span class="agents-row-text"><strong>{entry.name}</strong><small>{entry.state}</small></span>
+      </button>
+    {/each}
+    {#if needle && !shown.length && !found.length}<p class="agent-empty">{labels.noMatch}</p>{/if}
   </div>
 
-  <footer>
-    <span class="agents-summary"><i data-status={counts.running ? 'running' : view.snapshot?.limits.paused ? 'paused' : 'idle'}></i>{view.snapshot?.limits.paused ? labels.paused : counts.running || counts.pending ? fill(labels.summary, { running: String(counts.running), pending: String(counts.pending) }) : labels.idleSummary}</span>
-    <div class="agents-footer-actions">
-      {#if workspace.machines.length > 1}
-        <Menu placement="top" variant="ghost" label={strings.machines.heading} items={workspace.machines.map(m => ({ id: m.id, label: m.label, active: m.store === view.store }))} onpick={pickMachine}>{machine?.label ?? view.store.core?.hostname ?? strings.machines.local}</Menu>
+  {#if counts.running || counts.pending || counts.paused || attention}
+    <footer>
+      {#if counts.running || counts.pending || counts.paused}
+        <span class="agents-summary"><i data-status={counts.paused ? 'paused' : 'running'}></i>{counts.paused ? labels.paused : fill(labels.summary, { running: String(counts.running), pending: String(counts.pending) })}</span>
       {/if}
-      {#if view.store.owner}
-        <button type="button" class="ghost icon" class:active={chosen('engine')} aria-label={labels.engineSettings} title={labels.engineSettings} onclick={() => onfocus({ kind: 'engine' })} data-testid="agents-engine"><Settings2 size={15} strokeWidth={1.75} /></button>
+      {#if attention}
+        <button type="button" class="ghost agents-attention" class:active={active === 'attention'} aria-current={active === 'attention' ? 'page' : undefined} onclick={() => onfocus({ kind: 'attention' })} data-testid="agents-attention">
+          <Bell size={14} strokeWidth={1.75} />{labels.attention}<span class="agent-count" data-tone="live">{attention}</span>
+        </button>
       {/if}
-    </div>
-  </footer>
+    </footer>
+  {/if}
 </aside>

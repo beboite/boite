@@ -47,7 +47,7 @@
 </script>
 
 {#if store.owner}
-  <section class="card" data-testid="telemetry-settings">
+  <section class="card" id="settings-privacy" data-testid="telemetry-settings">
     <h2>{strings.telemetry.heading}<InfoTip topic={strings.telemetry.heading} text={strings.telemetry.description} /></h2>
     {#if consent}
       {#if !consent.configured}<p class="hint">{strings.telemetry.unconfigured}</p>{/if}

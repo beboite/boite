@@ -1,41 +1,55 @@
 <script lang="ts">
   import { isThisPC, workspace } from '../lib/workspace.svelte';
   import { Monitor, TriangleAlert } from '@lucide/svelte';
-
-
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
   import { separator, type MenuItem } from '../lib/menu';
+
+  /**
+   * The footer's machine button. One machine that is connected says nothing, so
+   * nothing is drawn; a second machine, a filter or a connection in trouble
+   * brings back one icon, the count or the chosen machine's name beside it
+   * only while it filters the list.
+   */
   let { store, filter = null, onfilter }: { store: Store; filter?: string | null; onfilter?: (id: string | null) => void } = $props();
 
   const machines = $derived([...(workspace.machines.length ? workspace.machines : [{ id: 'current', label: strings.machines.local, store }])]
     .sort((a, b) => Number(isThisPC(b)) - Number(isThisPC(a))));
-  const connected = $derived(machines.filter(m => m.store.connection === 'ready').length);
   const issues = $derived(machines.filter(m => m.store.connection === 'closed' || (m.store.booted && m.store.connection !== 'ready')).length);
+  const chosen = $derived(filter === null ? null : machines.find(m => m.id === filter) ?? null);
+  const shown = $derived(machines.length > 1 || issues > 0 || chosen !== null);
+  const label = $derived(issues > 0 ? `${strings.machines.filter} · ${issues} ${strings.connection.issues}` : strings.machines.filter);
   const items = $derived<MenuItem[]>([
-    { id: 'all', label: strings.machines.all, active: filter === null, hideActiveMark: true },
-    ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: m.store.connection === 'ready' ? 'success' as const : m.store.connection === 'closed' ? 'danger' as const : 'warning' as const, label: strings.connection[m.store.connection] }, active: m.id === filter })),
-    separator('manage-separator'),
+    ...(machines.length > 1 ? [
+      { id: 'all', label: strings.machines.all, active: filter === null, hideActiveMark: true },
+      ...machines.map(m => ({ id: m.id, label: m.label, status: { tone: m.store.connection === 'ready' ? 'success' as const : m.store.connection === 'closed' ? 'danger' as const : 'warning' as const, label: strings.connection[m.store.connection] }, active: m.id === filter })),
+      separator('manage-separator')
+    ] : []),
     { id: 'manage', label: strings.connection.manage, icon: 'settings' }
   ]);
   function pick(id: string) {
     if (id === 'manage') store.showSettings('machines');
     else onfilter?.(id === 'all' ? null : id);
-  }</script>
+  }
+</script>
 
-<div class="machines" class:problem={issues > 0} data-testid="status-connection" data-state={store.connection} aria-live="polite">
-  <Menu {items} onpick={pick} label={strings.machines.filter} variant="ghost" testid="machine-status">
-    {#if issues}<TriangleAlert size={14} />{:else}<Monitor size={14} />{/if}
-    <span>{connected} {connected === 1 ? strings.connection.oneMachine : strings.connection.machines}</span>
-    {#if issues}<span class="count" title={`${issues} ${strings.connection.issues}`}>{issues}</span>{/if}
-  </Menu>
+<!-- The wrapper stays, empty, so the connection state is always readable on it. -->
+<div class="machines" class:problem={issues > 0} class:filtered={chosen !== null} data-testid="status-connection" data-state={store.connection} aria-live="polite">
+  {#if shown}
+    <Menu {items} onpick={pick} {label} variant="ghost" testid="machine-status">
+      {#if issues}<TriangleAlert size={15} />{:else}<Monitor size={15} />{/if}
+      {#if chosen}<span class="name">{chosen.label}</span>{/if}
+    </Menu>
+  {/if}
 </div>
 
 <style>
-  .machines { flex: 1; min-width: 0; color: var(--color-muted-foreground); }
-  .machines :global(.trigger) { width: 100%; justify-content: flex-start; font-size: var(--text-xs); padding: 0 4px; gap: 6px; }
-  .machines span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .machines { min-width: 0; color: var(--color-muted-foreground); }
+  .machines :global(.trigger) { font-size: var(--text-xs); }
+  /* A filter hides threads, so while one is on the button says which machine. */
+  .filtered :global(.trigger) { width: auto; max-width: 160px; padding: 0 8px; gap: 6px; background: var(--color-active); color: var(--color-foreground); }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .problem { color: var(--color-live); }
-  .count { color: var(--color-live); flex: none; }
+  .problem :global(.trigger) { color: var(--color-live); }
 </style>

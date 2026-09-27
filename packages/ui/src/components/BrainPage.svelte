@@ -2,6 +2,7 @@
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
+  import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
@@ -75,7 +76,7 @@
 </script>
 
 <div class="page" data-testid="brain-page" aria-busy={busy}>
-  <header><div><h1>{t.heading}</h1><p>{t.description}</p></div></header>
+  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.description} /></h1></div></header>
   {#if error}<p class="error" role="alert" data-testid="brain-error">{error}</p>{/if}
   {#if status && !status.config.path}
     {#each status.links ?? [] as link (link.path)}
@@ -179,7 +180,6 @@
   h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
   header { margin-bottom: 28px; }
   p { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  header p { margin-top: 6px; }
   .brain-connection { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; }
   .connection-top { display: flex; align-items: center; gap: 14px; padding: 24px 24px 0; }
   .folder-mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); flex: none; }

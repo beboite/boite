@@ -11,6 +11,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
   import AgentElapsed from './AgentElapsed.svelte';
+  import CoordinationPanel from './CoordinationPanel.svelte';
   import { agentProgress } from '../lib/delegation-progress';
 
   let { store }: { store: Store } = $props();
@@ -130,6 +131,10 @@
       </div>
     {/if}
   </header>
+
+  {#if store.openThread && !store.openThread.agentSessionId}
+    {#key store.openThread.id}<CoordinationPanel {store} threadId={store.openThread.id} embedded />{/key}
+  {/if}
 
   {#if store.delegationLoading && !view}
     <p class="empty">{strings.delegation.loading}</p>

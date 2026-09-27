@@ -13,14 +13,14 @@
   import { ago, projectName } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';
   import StatusMark from './StatusMark.svelte';
-  import LoadGauge from './LoadGauge.svelte';
   let {
     machine,
     project,
     thread,
     now,
     hidden = false,
-    showProject = true
+    showProject = true,
+    showMachine = true
   }: {
     machine: Machine;
     project: Project;
@@ -30,12 +30,16 @@
     hidden?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
+    /** Off while only one machine is connected: every row would carry the same icon. */
+    showMachine?: boolean;
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
+  /** The second line only exists when it says something: a project, a pull request, a machine. */
+  let meta = $derived(showProject || pullRequest !== null || showMachine);
 
   let prLoading = $state(false);
   async function refreshPr(manual = false) {
@@ -114,7 +118,7 @@
   />
 {:else}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="thread" class:open class:unread={thread.unread} class:pinned={thread.pinned} oncontextmenu={menu}>
+  <div class="thread" class:open class:unread={thread.unread} class:pinned={thread.pinned} class:meta oncontextmenu={menu}>
     <button
       type="button"
       class="ghost row"
@@ -131,22 +135,25 @@
       <span class="headline"
         ><StatusMark status={thread.status} unread={thread.unread} />
         <span class="title">{thread.title}</span>
-        {#if thread.load}<LoadGauge load={thread.load} />{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
         <span class="when">{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
       </span>
     </button>
+    {#if meta}
     <div class="metadata">
       {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
       {/if}
-      <span class="machine" class:offline={owner.connection !== 'ready'}
-        title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
-        <MachineIcon icon={machine.icon} os={owner.core?.os} />
-      </span>
+      {#if showMachine}
+        <span class="machine" class:offline={owner.connection !== 'ready'}
+          title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
+          <MachineIcon icon={machine.icon} os={owner.core?.os} />
+        </span>
+      {/if}
     </div>
+    {/if}
     <button
       type="button"
       class="ghost small icon actions"
@@ -176,10 +183,15 @@
     align-items: stretch;
     width: 100%;
     height: auto;
-    min-height: calc(var(--row) + 22px);
-    padding: 9px 10px 28px;
+    min-height: var(--row);
+    padding: 8px 10px;
     gap: 7px;
     background: transparent;
+  }
+  /* The metadata line sits over the row's bottom padding, so the whole card stays one target. */
+  .meta .row {
+    min-height: calc(var(--row) + 22px);
+    padding: 9px 10px 28px;
   }
   .row:hover:not(:disabled) {
     background: transparent;
@@ -276,7 +288,7 @@
   }
   .rename {
     width: 100%;
-    height: calc(var(--row) + 22px);
+    height: var(--row);
   }
   @media (max-width: 720px) {
     .actions {

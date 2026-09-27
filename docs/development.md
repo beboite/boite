@@ -208,7 +208,8 @@ Tasks come from ACP plans, Codex plan notifications or successful task tools
 such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
 tasks gets no invented task list. Pi uses the same successful-tool observation.
 
-General settings stores a default model and effort per provider on this device.
+Each connected provider's row in Settings, Providers stores a default model and
+effort for that provider on this device.
 Initial defaults are Claude Opus 5 High, Codex GPT 5.6 Sol Medium and Grok 4.6
 High. The account must offer the model; a first send probes when needed and
 refuses an unavailable default by name. New thread uses these defaults;

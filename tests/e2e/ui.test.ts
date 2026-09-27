@@ -604,7 +604,10 @@ test(
   'settings show the core the UI is connected to',
   async () => {
     await page.click(testid('nav-settings'));
-    await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
+    await page.waitFor(`document.querySelector('${testid('settings-home')}')`);
+    // The core the UI talks to sits under Advanced, with the rest a developer reads.
+    await page.click(testid('settings-tab-advanced'));
+    await page.waitFor(`document.querySelector('${testid('settings-endpoint')}')`);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
     await page.click(testid('settings-tab-machines'));
@@ -714,6 +717,7 @@ test(
 
       // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
       await page.click(testid('nav-settings'));
+      await page.click(testid('settings-tab-machines'));
       await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
       const client = await connect(core.url, core.token);
       try {

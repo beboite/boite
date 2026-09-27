@@ -48,7 +48,7 @@ test('phone settings separate device preferences from remote administration, inc
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
   await page.click('[data-testid=settings-tab-machines]');
   await page.waitFor(`document.querySelector('[data-testid=machine-add-open]')`);
-  expect(await page.evaluate(`document.querySelector('.origins') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=browser-origins]') === null`)).toBe(true);
   await capture('phone-settings-machines.png');
   await page.click('[data-testid=mobile-settings-back]');
   await page.click('[data-testid=settings-tab-appearance]');

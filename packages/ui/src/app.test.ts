@@ -137,7 +137,8 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   const text = document.body.textContent ?? '';
   expect(text).toContain('boite');
   expect(text).toContain('Port the scheduler');
-  expect(text).toContain('1 machine connected');
+  // One machine that is connected needs no word about it.
+  expect(text).not.toContain('1 machine connected');
   expect(document.querySelector('[data-testid=composer-input]')).not.toBeNull();
   expect(document.querySelectorAll('[data-testid=thread-row]').length).toBe(4);
   // The most recent thread opens on its own; nothing to click first.
@@ -377,9 +378,9 @@ test('the picker rails the providers as logos and gives the shown one its accoun
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  // One tile per provider, in the core's order, the one whose files are still to
-  // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok', 'muse']);
+  // One tile per provider an account answers for, in the core's order: the
+  // one still to download or sign into is Settings' business, one tile away.
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -388,10 +389,6 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=echo]').click();
   await waitFor(() => shownModels().length === 1);
   expect(seats()).toEqual([]);
-
-  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
-  expect(shownModels()).toEqual([]);
 
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=claude]').click();
   await waitFor(() => shownModels().length === 3);
@@ -912,6 +909,18 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.textContent).toContain('21140');
   expect(row.textContent).toContain('CPU time');
   expect(row.querySelector('.command')?.textContent).toContain('claude');
+});
+
+test('turning the developer switch off closes an open trace tab', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.open('trace');
+  await waitFor(() => document.querySelector('[data-testid=trace-panel]') !== null);
+  work.setDeveloper(false);
+  await waitFor(() => document.querySelector('[data-testid=trace-panel]') === null);
+  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
 });
 
 test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
@@ -1541,7 +1550,7 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   expect(image.alt).toBe('one pixel');
 });
 
-test('a provider Boite installs says so in the picker and sends you to Settings, then becomes pickable', async () => {
+test('a provider Boite installs waits in Settings, one tile away, and joins the rail once signed in', async () => {
   await mountOnFake();
   // An open thread locks its provider; a draft is where another one can be picked.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
@@ -1549,29 +1558,29 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
 
-  // Nothing is on the machine yet: the tile is pickable and its column says why
-  // it offers no model. The download itself lives on the Accounts page.
-  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
-  expect(document.querySelector('[data-testid=install-start]')).toBeNull();
-  expect(shownModels()).toEqual([]);
-
-  query<HTMLButtonElement>('[data-testid=picker-install-settings]').click();
+  // Nothing is on the machine yet, so the rail leaves it out and its last
+  // tile goes where it is installed and signed into.
+  expect(document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=picker-more-providers]').click();
   await waitFor(() => store.page === 'settings' && store.settingsTab === 'accounts');
   // The picker closed on the way out.
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
 
-  // The fake ticks for about two seconds, then the provider is one tile like any other.
+  // The fake ticks for about two seconds; installed is not yet signed in, so the rail still waits.
   await store.installProvider('antigravity');
   await waitFor(() => store.installOf('antigravity')?.state === 'installed');
   store.showChat();
   await waitFor(() => document.querySelector('[data-testid=composer-picker]') !== null);
-
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  expect(document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]')).toBeNull();
+
+  // Signed in, it is one tile like any other, in the open rail too.
+  store.accounts = store.accounts.map((account) => account.id === 'a-antigravity' ? { ...account, status: 'ok' as const } : account);
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') === null);
-  await waitFor(() => shownModels().length > 0);
+  // Its models are read once it is shown: Claude's leave the column first.
+  await waitFor(() => shownModels().length > 0 && !shownModels().includes('claude-opus-5'));
 
   expect(shownModels()).not.toContain('default');
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-model]').click();
@@ -1588,16 +1597,24 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  const absent = '[data-testid=provider-settings][data-provider-id=antigravity]';
-  await waitFor(() => document.querySelector(absent) !== null);
+  // One Antigravity row: its CLI is signed in, so the row reads ready and the
+  // download Boite manages waits inside it.
+  const family = '[data-testid=provider-settings][data-provider-id=antigravity]';
+  await waitFor(() => document.querySelector(family) !== null);
+  expect(document.querySelectorAll(family)).toHaveLength(1);
+  expect(document.querySelector('[data-testid=provider-settings][data-provider-id=antigravity-cli]')).toBeNull();
+  expect(query(family).getAttribute('data-step')).toBe('ready');
+  await openProviderDetails('antigravity');
+  const absent = `${family} [data-testid=provider-member][data-provider-id=antigravity]`;
+  expect(document.querySelector(`${family} [data-testid=provider-member][data-provider-id=antigravity-cli]`)).not.toBeNull();
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
   expect(query(absent).getAttribute('data-step')).toBe('install');
   expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
   expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // The fake's OpenCode runs from the user's own install, so the updates card
-  // owns its version and the row offers no Update beside that card's "Up to date".
+  // The fake's OpenCode runs from the user's own install, so its own updater
+  // owns the version and the row offers no Update beside it.
   const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
   await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
   expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
@@ -1939,7 +1956,8 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   store.showSettings('accounts');
   await store.installProvider('antigravity');
   await waitFor(() => store.providerOf('antigravity')?.available === true);
-  // Installed and nobody signed in: the row's one button is the sign-in.
+  // Installed and nobody signed in: its block in the Antigravity row offers the sign-in.
+  await openProviderDetails('antigravity');
   const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);
   query<HTMLButtonElement>(loginButton).click();
@@ -2004,12 +2022,11 @@ test('a dialog waiting for an answer holds the window chords', async () => {
 /** Everything owner-only that is drawn without leaving the chat. */
 const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=panel-toggle]'];
 
-/** Everything owner-only on the settings nav and its General page. */
+/** Everything owner-only on the settings nav and its Machines page. */
 const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-accounts]',
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
-  '[data-testid=settings-add-project]',
   '[data-testid=setting-listen-on-lan]',
   '[data-testid=pairing-mint]'
 ];
@@ -2042,13 +2059,11 @@ test('a paired device is offered none of the affordances the core refuses it', a
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
-  store.showSettings();
-  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-card]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
   // A screen that loses a control keeps the line saying whose app has it.
-  const settingsText = document.body.textContent ?? '';
-  expect(settingsText).toContain('Folders are added and removed from the app the core runs in.');
-  expect(settingsText).toContain('This device is paired with a key of its own.');
+  expect(document.body.textContent ?? '').toContain('This device is paired with a key of its own.');
   expect(store.error).toBeNull();
 });
 
@@ -2071,8 +2086,8 @@ test('the desktop still has every one of them', async () => {
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
-  store.showSettings();
-  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
@@ -2106,6 +2121,24 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);
+});
+
+test('a machine filter whose machine goes away lists the remaining machine again', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const threads = () => document.querySelectorAll('[data-thread-id]').length;
+  await waitFor(() => threads() > 0 && document.querySelector('[data-testid=machine-status]') !== null);
+  const everything = threads();
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  query<HTMLButtonElement>('[data-testid=machine-status]').click();
+  await waitFor(() => document.querySelector(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`) !== null);
+  query<HTMLButtonElement>(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => threads() < everything);
+  workspace.machines = workspace.machines.filter((machine) => machine !== remote);
+  flushSync();
+  // One machine draws no machine button, so a filter left on the gone one could never be cleared.
+  expect(document.querySelector('[data-testid=machine-status]')).toBeNull();
+  expect(threads()).toBeGreaterThan(0);
 });
 
 test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {

@@ -22,7 +22,11 @@
   let machines = $derived(
     workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]
   );
-  let visible = $derived(machines.filter((m) => filter === null || m.id === filter));
+  /** One machine says nothing about where a thread runs: its icon only shows once there are two. */
+  let multi = $derived(machines.length > 1);
+  /** A filter on a machine that has since gone filters nothing, so the list never empties itself. */
+  let shownFilter = $derived(machines.some((m) => m.id === filter) ? filter : null);
+  let visible = $derived(machines.filter((m) => shownFilter === null || m.id === shownFilter));
   let needle = $derived(store.search.trim().toLowerCase());
   let groups = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   let recent = $derived(
@@ -159,7 +163,7 @@
           data-testid="draft-row"
           onclick={() => store.startDraft(store.draft?.projectId)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
         >{/if}
-      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} />{/each}
+      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} showProject={groups.length > 1} showMachine={multi} />{/each}
       {#if groups.length > 0 && recent.length === 0}<p class="none">
           {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
         </p>{/if}
@@ -180,14 +184,13 @@
               data-testid="project-row"
               data-project-id={project.id}
               aria-expanded={!collapsed}
-              title={`${project.path} · ${machine.label}`}
+              title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
             >
               <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
                 >{projectName(project).slice(0, 1).toUpperCase()}</span
-              ><span class="name">{projectName(project)}</span><span class="host" title={machine.label}
-                ><MachineIcon icon={machine.icon} os={owner.core?.os} /></span
-              >
+              ><span class="name">{projectName(project)}</span
+              >{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
             <button
               class="ghost small icon project-actions"
@@ -204,7 +207,7 @@
                   data-testid="draft-row"
                   onclick={() => owner.startDraft(project.id)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
                 >{/if}
-              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} />{/each}
+              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={multi} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
                 </p>{/if}
@@ -220,7 +223,7 @@
     >
   {/if}
   <div class="foot">
-    <MachineStatus {store} {filter} onfilter={id => (filter = id)} />
+    <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
     <button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>
     <button
       class="ghost icon"
@@ -408,8 +411,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px 6px 12px;
+    padding: 6px 8px;
     border-top: 1px solid var(--color-border);
+  }
+  /* The machine button, when there is one, sits alone on the left. */
+  .foot :global(.machines) {
+    margin-right: auto;
   }
 
   .add-project {

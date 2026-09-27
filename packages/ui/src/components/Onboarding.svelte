@@ -165,7 +165,6 @@
           {:else if step === 'usage'}
             <p class="lead">{strings.onboarding.usage.body}</p>
             <OnboardingScene scene="usage" />
-            <p class="caption">{strings.onboarding.demo.tray}</p><p class="detail">{strings.onboarding.demo.trayHint}</p>
           {:else if step === 'reach'}
             <p class="lead">{strings.onboarding.demo.reachHint}</p>
             <OnboardingScene scene="reach" />
@@ -222,7 +221,6 @@
   }
   p { margin: 0; }
   .lead, .detail { color: var(--color-muted-foreground); font-size: var(--text-base); line-height: 1.6; }
-  .caption { font-size: var(--text-base); font-weight: 500; margin-top: 12px; }
   .detail { margin-top: 6px; }
   .preferences { display: grid; gap: 12px; }
   .preference { display: flex; align-items: center; gap: 10px; }

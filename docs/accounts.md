@@ -211,23 +211,37 @@ that runs under `node` names nothing there, because the process in the job is
 Providers shows one row per provider and its next step. A row's chevron opens
 its accounts: sign in again for an isolated one, Check (the session file, then a
 model probe), Remove, quotas, `Add another account`, which names the account
-after the provider and starts its sign-in, and `Use my command-line login` when
-no account uses the default location. Default-location accounts keep their
+after the provider and starts its sign-in, `Use my command-line login` when
+no account uses the default location, and the provider's default model and
+effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
 come from `account/rateLimits/read`, without starting a conversation.
 
-The tray Usage window always lists Claude, Codex, Antigravity, Grok and OpenCode
-Go. Each row shows the lowest remaining limit across its monitored accounts and
-the next reported reset. Open a row for individual windows, account names and
-monitoring switches. Missing accounts lead to Providers.
+The tray Usage window and Settings, Limits list only the providers with a
+signed-in account whose limits are monitored. Each tray row shows the lowest
+remaining limit across those accounts and the next reported reset; opening it
+shows each window's own bar and reset time, by account when there are several.
+Monitoring switches live on each account in Settings, Providers, not in the
+tray or on Limits. With nothing
+signed in, both offer to connect a provider. The last reading stays on screen
+while the next one loads, from this browser's storage after a restart.
 
-The tray popup opens after 500 ms of continuous hover. Leaving the icon cancels
+The tray popup opens after 100 ms of continuous hover. Leaving the icon cancels
 that opening; a click does not bypass the delay. On Windows it stays inside the
 monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
 full height even while sliding offscreen. The popup keeps its position when the
-taskbar retracts and allows moving from the icon into the popup before closing.
+taskbar retracts and allows moving from the icon into the popup and back before
+closing. Hovering the icon of an open popup leaves it as it is. While it is open
+the shell reads the pointer every 150 ms and closes it after two readings in a
+row outside the icon, the popup and the gap between them. It does not wait for
+the tray's leave event, which Windows often never sends: the popup then stayed
+up and the next hover could not open it again. For the same reason a move over
+the icon starts a hover as an entry does: without that leave event the tray
+reports no entry again, only moves. The popup is an
+opaque window: Windows 11 rounds its corners and draws its border, Windows 10
+keeps it square.
 
 Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
 percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
@@ -237,8 +251,8 @@ OpenCode Go reads the `opencode-go` API login in the account's
 usage API. It never substitutes another provider's login or local token totals.
 
 Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
-or later and sign in once, then expand Antigravity in the tray and enable the
-switch. Boite reads `agy -p /usage --output-format json` in a temporary directory,
+or later and sign in once, then open the Antigravity row in Settings, Providers
+and turn on monitoring under Antigravity CLI. Boite reads `agy -p /usage --output-format json` in a temporary directory,
 with a version check, output limit and timeout. It does not send a model prompt.
 The report belongs to the CLI login on the core's computer, not an isolated ACP
 account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring

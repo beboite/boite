@@ -151,7 +151,7 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
     case 'providers': store.showSettings('accounts'); break;
-    case 'pair': store.showSettings('general'); break;
+    case 'pair': store.showSettings('machines', 'devices'); break;
     case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;

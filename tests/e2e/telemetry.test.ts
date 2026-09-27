@@ -32,6 +32,7 @@ test('owner controls consent on desktop and phone; captures both layouts', async
   await page.waitFor(`!document.querySelector('[data-testid="onboarding"]')`);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.click('[data-testid="nav-settings"]');
+  await page.click('[data-testid="settings-tab-general"]');
   await page.waitFor(`document.querySelector('${card} input')`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${card} input')).map(x => x.checked)`)).toEqual([true, false]);
   await page.click(`${card} input`);

@@ -7,22 +7,20 @@
   import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import RemoteCoordination from './RemoteCoordination.svelte';
+  import PairingCard from './PairingCard.svelte';
+  import PhoneSettings from './PhoneSettings.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
     url = $state(''),
     token = $state('');
   let busy = $state(false);
-  let origins = $state('');
   /** The add form stays folded behind its button, unless there is nothing else to show. */
   let adding = $state(false);
   let open = $derived(adding || workspace.machines.length === 0);
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
   let linkInput = $state<HTMLInputElement | null>(null);
-  $effect(() => {
-    origins = (workspace.active.settings?.browserOrigins ?? []).join('\n');
-  });
   /** Forgetting a machine drops its saved address and key: getting it back takes a new pairing link made there. */
   async function removeMachine(machine: { id: string; label: string }) {
     const ok = await confirm.ask({
@@ -62,7 +60,7 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{strings.machines.heading}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
+      <h1>{mobile ? strings.machines.heading : strings.settings.tabs.machines}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
     {#if !open}
       <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
@@ -117,7 +115,7 @@
     </div>
   </div>
 
-  <div class="machines">
+  <div class="machines" id="settings-machines">
     {#each workspace.machines as machine (machine.id)}
       <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
         <div class="main">
@@ -144,9 +142,12 @@
             {#if machine.store !== primary}
               <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
             {/if}
-            <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-              >{strings.machines.open}<ArrowUpRight size={13} /></button
-            >
+            <!-- The machine already open has nowhere to go. -->
+            {#if machine.store !== workspace.active}
+              <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
+                >{strings.machines.open}<ArrowUpRight size={13} /></button
+              >
+            {/if}
           </div>
         </div>
         <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
@@ -163,25 +164,15 @@
     {/each}
   </div>
 
-  {#if !mobile && workspace.machines.some(machine => machine.store.owner)}
+  <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
+  {#if !mobile && workspace.machines.filter(machine => machine.store.owner).length > 1}
     <RemoteCoordination />
   {/if}
 
-  {#if workspace.active.owner && !mobile}
-    <details class="card origins disclosure">
-      <summary>{strings.machines.browserOrigins}</summary>
-      <p class="hint">{strings.machines.browserOriginsHint}</p>
-      <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
-      <button
-        onclick={() =>
-          void workspace.active.saveSettings({
-            browserOrigins: origins
-              .split('\n')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          })}>{strings.settings.save}</button
-      >
-    </details>
+  {#if !mobile}
+    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
+    <PairingCard store={workspace.active} />
+    <PhoneSettings store={workspace.active} />
   {/if}
 </div>
 
@@ -206,11 +197,6 @@
   h2 {
     font-size: var(--text-base);
     margin: 0;
-  }
-  .hint {
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    line-height: 1.6;
   }
   .add-open {
     flex: none;
@@ -255,6 +241,7 @@
   .machines {
     display: grid;
     gap: 8px;
+    scroll-margin-top: 24px;
   }
   .machine-card {
     display: flex;
@@ -362,23 +349,6 @@
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
-  .origins {
-    padding: 14px 20px;
-  }
-  .origins summary {
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-  .origins[open] summary {
-    margin-bottom: 10px;
-    color: var(--color-foreground);
-  }
-  textarea {
-    display: block;
-    width: 100%;
-    margin: 12px 0;
-  }
   label {
     display: flex;
     flex-direction: column;
@@ -390,7 +360,7 @@
   input {
     width: 100%;
   }
-  details:not(.origins) {
+  details {
     margin-top: 8px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
