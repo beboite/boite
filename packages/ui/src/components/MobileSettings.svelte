@@ -1,12 +1,13 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { mobileOverlay } from '../lib/mobile-history';
   import { openTour } from '../lib/onboarding.svelte';
   import AppearancePage from './AppearancePage.svelte';
+  import ExperimentsPage from './ExperimentsPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
@@ -25,15 +26,17 @@
    */
   let archived = $state(false);
   let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
-  let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits'
+  let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
     ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
-    : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits : strings.machines.heading);
+    : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
+    : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
-  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}` : page === 'limits' ? strings.usage.limitsIntro : '');
+  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}` : page === 'limits' ? strings.usage.limitsIntro
+    : page === 'experiments' ? strings.settings.experiments.intro : '');
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
 
@@ -60,6 +63,10 @@
           </button>
           <button class="ghost row" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>
             <Compass size={20} /><span>{strings.onboarding.replay}</span><ChevronRight size={18} />
+          </button>
+          <!-- Experiments are kept per device, so the phone turns its own on. -->
+          <button class="ghost row" data-testid="settings-tab-experiments" onclick={() => store.showSettings('experiments')}>
+            <FlaskConical size={20} /><span>{strings.settings.tabs.experiments}</span><ChevronRight size={18} />
           </button>
         </div>
       </section>
@@ -110,6 +117,8 @@
         <UsagePage {store} />
       {:else if page === 'limits'}
         <LimitsPage {store} />
+      {:else if page === 'experiments'}
+        <ExperimentsPage />
       {:else if page === 'archived'}
         <div class="page archived-page">
           <ArchivedThreads {store} eager />

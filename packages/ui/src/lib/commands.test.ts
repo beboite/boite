@@ -4,6 +4,7 @@ import { setExperiment, writeExperiments } from './experiments';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { THEME_STORAGE_KEY } from './theme';
+import { work } from './work-prefs.svelte';
 
 /**
  * The one list and the one dispatcher the palette and the composer's slash menu
@@ -38,8 +39,10 @@ test('the list carries every app command, the thread ones only while one is open
     'add-project',
     'import-session',
     'sidebar',
+    'agents',
     'settings',
     'appearance',
+    'archived',
     'providers',
     'pair',
     'tour',
@@ -64,8 +67,10 @@ test('the list carries every app command, the thread ones only while one is open
     'trace',
     'terminal',
     'sidebar',
+    'agents',
     'settings',
     'appearance',
+    'archived',
     'providers',
     'pair',
     'tour',
@@ -104,6 +109,19 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   store.showChat();
   runCommand(store, 'no-such-command', false);
   expect(store.page).toBe('chat');
+});
+
+test('the trace is offered only with the developer switch on, and Agents opens its page', async () => {
+  await store.open('t-descriptors');
+  work.setDeveloper(false);
+  expect(ids()).not.toContain('trace');
+  runCommand(store, 'trace', false);
+  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
+  work.setDeveloper(true);
+  expect(ids()).toContain('trace');
+
+  runCommand(store, 'agents', false);
+  expect(store.page).toBe('agents');
 });
 
 test('slashName reads the word a row completes to', () => {

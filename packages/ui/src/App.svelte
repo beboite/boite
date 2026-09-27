@@ -33,7 +33,6 @@
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   // What the first screen does not draw stays out of the first chunk: the right
@@ -425,7 +424,7 @@
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
-      <Sidebar bind:this={sidebar} {store} />
+      <Sidebar {store} />
       <div class="notice">
         <h1>{strings.app.noEndpointTitle}</h1>
         <p class="muted">{strings.app.noEndpointBody}</p>
@@ -441,7 +440,7 @@
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
-      <Sidebar bind:this={sidebar} {store} />
+      <Sidebar {store} />
       {#if scrim.shown}
         <button
           type="button"

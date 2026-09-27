@@ -415,6 +415,7 @@ export const fr: Translation = {
     files: 'Afficher les fichiers',
     tasks: 'Afficher les tâches',
     workflows: 'Afficher les workflows',
+    agents: 'Ouvrir les agents',
     pin: 'Épingler cette conversation',
     unpin: 'Désépingler cette conversation',
     rename: 'Renommer cette conversation',

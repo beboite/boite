@@ -24,6 +24,7 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { providerGroups } from '../lib/provider-family';
+  import { workspace } from '../lib/workspace.svelte';
 
   let { store }: { store: Store } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -73,6 +74,7 @@
     accounts: [...providerList.connected, ...providerList.rest].map((row) => ({ id: `provider-${row.id}`, label: row.name })),
     usage: [
       { id: 'usage-overview', label: strings.usage.overview },
+      { id: 'usage-chart', label: strings.usage.chart },
       { id: 'usage-breakdown', label: strings.usage.breakdown },
       { id: 'usage-threads', label: strings.usage.threads }
     ],
@@ -83,6 +85,8 @@
     ],
     machines: [
       { id: 'machines', label: strings.machines.heading },
+      // MachinesPage draws the card only while this window owns two machines.
+      ...(workspace.machines.filter((machine) => machine.store.owner).length > 1 ? [{ id: 'agent-links', label: strings.machines.agentLinks }] : []),
       { id: 'devices', label: strings.settings.pairing.heading },
       { id: 'phone', label: strings.phone.heading }
     ],
@@ -104,7 +108,8 @@
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
-    ['general', 'app', strings.settings.closeToTray],
+    // The switch lives in the shell's own card: a browser has no tray.
+    ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
     ['general', 'app', strings.settings.developer],
     ['general', 'app', strings.onboarding.label],
     ['appearance', 'theme', strings.settings.accent],

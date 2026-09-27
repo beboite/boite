@@ -184,7 +184,10 @@
   .main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .main > :global(*) { flex: 1; }
   .empty-state { padding: 24px 16px; gap: 6px; }
-  .empty { margin: 0; color: var(--color-foreground); font-size: var(--text-sm); }
+  /* Two lines of text, one under the other: the stretch the graph gets would push them apart. */
+  .empty-state > p { flex: none; }
+  /* The global .empty pads itself; here the two lines share the column's edge. */
+  .empty { margin: 0; padding: 0; color: var(--color-foreground); font-size: var(--text-sm); }
   .empty-hint { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .templates { flex: none; padding: 6px 16px 10px; border-top: 1px solid var(--color-border); }
   .templates .count { color: var(--color-subtle); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }

@@ -89,6 +89,7 @@
         },
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
+        { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
         separator(),
         { id: 'archive', label: strings.sidebar.archive, danger: true }
       ],
@@ -98,6 +99,7 @@
         if (action === 'retitle') void owner.retitle(thread.id);
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
         if (action === 'pr') void refreshPr(true);
+        if (action === 'copy') void owner.copy(thread.cwd);
         if (action === 'archive') void archiveThread(owner, thread.id);
       }
     );

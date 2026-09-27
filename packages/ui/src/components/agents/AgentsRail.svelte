@@ -37,6 +37,8 @@
     ...snapshot.profiles.filter(a => a.status === 'archived' && a.name.toLowerCase().includes(needle)).map(a => ({ kind: 'profile' as const, id: a.id, name: a.name, avatar: a.avatar, state: labels.archived })),
     ...snapshot.missions.filter(m => m.title.toLowerCase().includes(needle)).map(m => ({ kind: 'mission' as const, id: m.id, name: m.title, avatar: '', state: labels[m.status] }))
   ] : []);
+  /** The search is their only door, so it shows as soon as there is one behind it, however short the list. */
+  const hidden = $derived(!!snapshot && (snapshot.profiles.some(a => a.status === 'archived') || snapshot.missions.length > 0));
   const counts = $derived({
     running: snapshot?.work.filter(w => w.status === 'running').length ?? 0,
     pending: snapshot?.work.filter(w => w.status === 'pending').length ?? 0,
@@ -86,7 +88,7 @@
     {/if}
   </header>
 
-  {#if chats.length >= SEARCH_FROM || query}
+  {#if chats.length >= SEARCH_FROM || query || hidden}
     <label class="agents-search"><Search size={14} strokeWidth={1.75} /><input type="search" bind:value={query} aria-label={labels.search} placeholder={labels.search} /></label>
   {/if}
 

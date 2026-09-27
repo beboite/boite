@@ -65,7 +65,7 @@
       <input id="{uid}-developer" aria-labelledby="{uid}-developer-name" type="checkbox" role="switch" data-testid="setting-developer"
         checked={work.current.developer} onchange={(event) => work.setDeveloper(event.currentTarget.checked)} />
     </label>
-    <div class="switch-row" id="settings-tour">
+    <div class="switch-row">
       <span class="text">
         <span>{strings.onboarding.label}</span><InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} />
       </span>

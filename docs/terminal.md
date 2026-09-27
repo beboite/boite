@@ -2,9 +2,10 @@
 
 Each thread has a shell under the chat, opened in the thread's working
 directory. `Ctrl+J` (the `terminal` command, [keybindings.md](keybindings.md))
-shows and hides it, and so does the terminal button in the thread header. The
-top edge of the drawer sets its height, which the browser keeps per device. The
-cross ends the shell; hiding the drawer does not.
+shows and hides it at any time. The terminal button in the thread header does
+the same while Settings, General, Developer tools is on. The top edge of the
+drawer sets its height, which the browser keeps per device. The cross ends the
+shell; hiding the drawer does not.
 
 ## Where the shell runs
 

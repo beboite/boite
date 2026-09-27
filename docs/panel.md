@@ -109,7 +109,8 @@ from it; a browser opened on that core's own address shows them.
 The reads (`git.*`, `files.list`, `files.read`, `todos.list`, the tasks) are
 the owner's and the thread's own agent's. `files.write`, `todos.remove` and a
 todo's `done` are the owner's alone, and `todos.updated` goes to the owner and
-to the agents of that project. A paired phone has no Panel button.
+to the agents of that project. A paired phone has the Panel button too, and its
+menu offers the Agents and Workflows surfaces, the two it may follow.
 
 ## What the agent can ask
 

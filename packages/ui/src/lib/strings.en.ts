@@ -405,6 +405,7 @@ export const strings = {
     files: 'Show the files',
     tasks: 'Show the tasks',
     workflows: 'Show the workflows',
+    agents: 'Open the agents',
     pin: 'Pin this thread',
     unpin: 'Unpin this thread',
     rename: 'Rename this thread',

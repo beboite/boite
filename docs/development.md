@@ -129,7 +129,8 @@ Two menus open over the composer while typing, above the box, shortened to the
 room left under the title bar, or below the box when that side has more room
 (`lib/menu-fit.ts`). `/` on an empty box lists the
 commands: the agent's own first (`Thread.commands`, whatever its protocol
-reported), then Boite's, the same list as the palette. `@` at the start of a
+reported), then Boite's, the same list as the palette, which the command
+button at the foot of the sidebar opens without a keyboard. `@` at the start of a
 word lists the project's files, ranked by `projects.files` on the word after
 it, and the pick writes the path in as `@src/lib/store.ts`. That is plain text
 in the prompt: Claude Code reads a mention as the file itself, every other
