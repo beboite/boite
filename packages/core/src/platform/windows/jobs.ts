@@ -14,7 +14,16 @@ import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
-import { commandLineOf, cpuMsOf, exitCodeOf, imageNameOf, ioBytesOf, parentPidOf, workingSetOf } from './process-reads.ts';
+import {
+  commandLineOf,
+  cpuMsOf,
+  createdAtOf,
+  exitCodeOf,
+  imageNameOf,
+  ioBytesOf,
+  parentPidOf,
+  workingSetOf,
+} from './process-reads.ts';
 
 import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventSink, ProcessLimits } from '../types.ts';
 
@@ -44,6 +53,8 @@ const PROCESS_TERMINATE = 0x1;
 const PROCESS_VM_READ = 0x10;
 const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
+/** Enough for GetProcessTimes, and granted on processes the full query right is not. */
+const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 const ERROR_ACCESS_DENIED = 5;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
@@ -376,6 +387,24 @@ export function releaseThreadJob(threadId: string): void {
   threadJobs.delete(threadId);
   threadsByKey.delete(job.key);
   native?.close(job.handle);
+}
+
+/**
+ * When the process that holds `pid` now was created, in ms since the epoch, or
+ * null when no process holds it or Windows will not open it. A fresh open by pid
+ * on purpose: the question is who wears the pid today.
+ */
+export function processStartedAt(pid: number): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const api = ensureNative();
+  if (api === null) return null;
+  const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
+  if (handle === 0) return null;
+  try {
+    return createdAtOf(api, handle);
+  } finally {
+    api.close(handle);
+  }
 }
 
 /** How many thread jobs are open. Read by the tests only. */

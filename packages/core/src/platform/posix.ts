@@ -1,10 +1,11 @@
 import { availableParallelism } from 'node:os';
-import { LinuxLoad } from './linux-load.ts';
+import { LinuxLoad, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
- * also measures their load from procfs; macOS has no such files and reports none.
+ * also measures their load and reads start times from procfs; macOS has no such
+ * files and reports neither.
  */
 export function createPosixPlatform(
   os: 'linux' | 'macos',
@@ -29,5 +30,6 @@ export function createPosixPlatform(
     warm() {},
     forget() {},
     guardStatus: () => ({ running: false, hook: null, failure: null, audio: 'off', mutedPids: [] }),
+    startedAt: (pid) => (os === 'linux' ? linuxStartedAt(pid) : null),
   };
 }

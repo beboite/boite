@@ -74,4 +74,11 @@ export interface ProcessPlatform {
   /** The registry forgot an idle thread: drop what the platform keeps for it. */
   forget(threadId: string): void;
   guardStatus(): GuardStatus;
+  /**
+   * When the process that holds `pid` now started, in ms since the epoch, or
+   * null when none does or the OS will not say. A pid given back is handed out
+   * again, so this is what tells the process that wrote a pid down from the one
+   * wearing it today.
+   */
+  startedAt(pid: number): number | null;
 }

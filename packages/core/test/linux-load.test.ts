@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
-import { cpuTicks, LinuxLoad, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
+import { cpuTicks, LinuxLoad, linuxStartedAt, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import { ProcRegistry } from '../src/procs.ts';
 import { waitFor } from './harness.ts';
@@ -48,6 +48,19 @@ describe('the procfs parsers', () => {
   test('resident memory is VmRSS in bytes, and a zombie without the line has none', () => {
     expect(residentBytes(status(2048))).toBe(2048 * 1024);
     expect(residentBytes(status(null))).toBeNull();
+  });
+
+  test('a start time is the boot time plus field 22 in ticks, and a gone process has none', () => {
+    // Fields 3 to 21 as the kernel writes them, then starttime, then the rest cut short.
+    const fields = ['S', '1', '42', '42', '0', '-1', '4194560', '100', '0', '0', '0', '7', '3', '0', '0', '20', '0', '1', '0', '12345', '99999'];
+    const files = new Map([
+      ['/proc/42/stat', `42 (a) b (c) ${fields.join(' ')}\n`],
+      ['/proc/stat', 'cpu  1 2 3 4\nbtime 1790500000\nprocesses 900\n'],
+    ]);
+    const read = (path: string): string | null => files.get(path) ?? null;
+    expect(linuxStartedAt(42, read)).toBe(1_790_500_000_000 + (12345 * 1000) / USER_HZ);
+    expect(linuxStartedAt(43, read)).toBeNull();
+    expect(linuxStartedAt(0, read)).toBeNull();
   });
 });
 
