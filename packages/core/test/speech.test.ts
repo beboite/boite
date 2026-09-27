@@ -426,7 +426,9 @@ describe('the resident whisper-server', () => {
     writeFileSync(other, 'fixture model');
     speech.configure({ ...DEFAULT_SPEECH, executable: process.execPath, modelPath: other });
     await waitFor(() => !server.running);
-    server.idleMs = 150;
+    // Shorter than the fixture's own load: the wait counts from the loaded model,
+    // or a slow start would be stopped halfway through it.
+    server.idleMs = 40;
     model = other;
     await request('two');
     expect(server.running).toBe(true);
