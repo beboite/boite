@@ -55,7 +55,11 @@ never appears on stdout.
 One core per data directory. The first one to start takes `<dataDir>/core.lock`
 and a second one refuses to start rather than rewrite the first one's live turns
 as crashes. A lock whose holder is gone is taken over, so a core killed hard
-leaves nothing to clean up by hand.
+leaves nothing to clean up by hand. Gone includes a pid another process wears
+now: after a reboot, Windows can hand the dead core's pid to a browser tab, so a
+holder that started more than 2 s after the lock was written does not count.
+Windows reads the start time with `GetProcessTimes` and Linux from procfs; macOS
+cannot say, and there a live pid still holds the lock.
 
 Flags: `--port` (0 asks the OS for a free one), `--host`, `--lan` (which is
 `--host 0.0.0.0`) and `--data-dir`. There is a fifth, `--channel`, which takes

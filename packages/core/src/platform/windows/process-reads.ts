@@ -38,9 +38,12 @@ const OFF_WORKING_SET = 16;
 const IO_COUNTERS_SIZE = 48;
 const OFF_READ_TRANSFER = 24;
 const OFF_WRITE_TRANSFER = 32;
-/** GetProcessTimes writes four FILETIMEs; kernel is the third, user the fourth. */
+/** GetProcessTimes writes four FILETIMEs; creation is the first, kernel the third, user the fourth. */
+const OFF_CREATION_TIME = 0;
 const OFF_KERNEL_TIME = 16;
 const OFF_USER_TIME = 24;
+/** 1970-01-01 as a FILETIME, in the 100 ns intervals since 1601 it counts. */
+const FILETIME_UNIX_EPOCH = 116_444_736_000_000_000n;
 /** The longest command line Windows accepts, so anything past it is a bad read. */
 const MAX_COMMAND_LINE_BYTES = 32768;
 
@@ -102,6 +105,15 @@ export function cpuMsOf(api: ProcessReads, handle: number): number | null {
   const view = new DataView(times.buffer);
   const total = view.getBigUint64(OFF_KERNEL_TIME, true) + view.getBigUint64(OFF_USER_TIME, true);
   return Math.round(Number(total) / 10_000);
+}
+
+/** When the process was created, in ms since the Unix epoch. */
+export function createdAtOf(api: ProcessReads, handle: number): number | null {
+  const times = new Uint8Array(32);
+  if (!api.processTimes(handle, times)) return null;
+  const created = new DataView(times.buffer).getBigUint64(OFF_CREATION_TIME, true);
+  if (created <= FILETIME_UNIX_EPOCH) return null;
+  return Number((created - FILETIME_UNIX_EPOCH) / 10_000n);
 }
 
 /** Bytes the process read and wrote, files, pipes and devices alike. */

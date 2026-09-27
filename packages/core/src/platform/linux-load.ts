@@ -2,7 +2,8 @@
  * A thread's load on Linux, read from procfs: CPU time from `/proc/<pid>/stat`
  * and resident memory from `/proc/<pid>/status`, summed over the thread's
  * registered processes. Those are the direct children only, what the registry
- * knows off Windows; what they started is not counted.
+ * knows off Windows; what they started is not counted. The same stat line also
+ * says when a process started, which the data directory lock asks.
  *
  * No native code: the reader and the clock are given, so
  * `test/linux-load.test.ts` runs every case on fake files, on any platform.
@@ -28,19 +29,38 @@ function readProc(path: string): string | null {
 }
 
 /**
- * utime plus stime, fields 14 and 15 of the stat line, in clock ticks. The
- * command name (field 2) sits in parentheses and may hold spaces or a `)`, so
- * the fields are counted from the last `)`.
+ * The numbered field of a stat line. The command name (field 2) sits in
+ * parentheses and may hold spaces or a `)`, so the fields are counted from the
+ * last `)`.
  */
-export function cpuTicks(stat: string): number | null {
+function statField(stat: string, field: number): number | null {
   const close = stat.lastIndexOf(')');
   if (close < 0) return null;
   // After ") ": field 3 (state) is index 0, so field n is index n - 3.
-  const fields = stat.slice(close + 2).split(' ');
-  const user = Number(fields[14 - 3]);
-  const system = Number(fields[15 - 3]);
-  if (!Number.isFinite(user) || !Number.isFinite(system)) return null;
+  const value = Number(stat.slice(close + 2).split(' ')[field - 3]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** utime plus stime, fields 14 and 15 of the stat line, in clock ticks. */
+export function cpuTicks(stat: string): number | null {
+  const user = statField(stat, 14);
+  const system = statField(stat, 15);
+  if (user === null || system === null) return null;
   return user + system;
+}
+
+/**
+ * When the process that holds `pid` started, in ms since the epoch: its stat
+ * line's field 22, in clock ticks after boot, plus the boot time `/proc/stat`
+ * gives in whole seconds. Null when the process is gone.
+ */
+export function linuxStartedAt(pid: number, read: ProcRead = readProc): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const stat = read(`/proc/${pid}/stat`);
+  const ticks = stat === null ? null : statField(stat, 22);
+  const boot = /^btime\s+(\d+)$/m.exec(read('/proc/stat') ?? '');
+  if (ticks === null || boot === null) return null;
+  return Number(boot[1]) * 1000 + Math.round((ticks * 1000) / USER_HZ);
 }
 
 /** VmRSS of a status file in bytes, or null when the line is missing (a zombie has none). */

@@ -16,12 +16,20 @@ import { CORE_VERSION, Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
+import { processPlatform } from './platform/index.ts';
 import { startServerOnStickyPort } from './server.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
 
 /** How long a graceful shutdown may take before the process leaves anyway. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/**
+ * How much later than the lock's own time a holder may have started and still
+ * be the core that wrote it. The core starts before it writes the lock, so this
+ * only absorbs the clocks: procfs gives the boot time in whole seconds.
+ */
+const LOCK_CLOCK_MARGIN_MS = 2000;
 
 interface CoreFile {
   port: number;
@@ -132,6 +140,13 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Did the process wearing `pid` start after the lock that names it was written? */
+function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: number) => number | null): boolean {
+  if (lockedAt === null) return false;
+  const started = startedAt(pid);
+  return started !== null && started > lockedAt + LOCK_CLOCK_MARGIN_MS;
+}
+
 /**
  * One core per data directory, taken before the journal is opened.
  *
@@ -142,8 +157,17 @@ function alive(pid: number): boolean {
  * its threads and its `core.json` and the user watched his answer turn into an
  * error. A lock whose holder is gone is taken over, so a core killed hard does
  * not leave the directory unusable.
+ *
+ * Gone includes a pid worn by someone else. A core that died without releasing
+ * the lock, in a reboot say, leaves its pid to whatever asks next: a browser
+ * tab held the pid of a dead core and kept every later core from starting. A
+ * holder that started after the lock was written is not the core that wrote it.
+ * Where `startedAt` cannot say (macOS), a live pid still holds the lock.
  */
-export function lockDataDir(dataDir: string): () => void {
+export function lockDataDir(
+  dataDir: string,
+  startedAt: (pid: number) => number | null = processPlatform.startedAt,
+): () => void {
   const file = join(dataDir, 'core.lock');
   const release = (): void => {
     try {
@@ -161,13 +185,15 @@ export function lockDataDir(dataDir: string): () => void {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let holder: number | null = null;
+      let lockedAt: number | null = null;
       try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number }>;
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number }>;
         holder = typeof parsed.pid === 'number' ? parsed.pid : null;
+        lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
       } catch {
         holder = null;
       }
-      if (holder !== null && holder !== process.pid && alive(holder)) {
+      if (holder !== null && holder !== process.pid && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
         throw new Error(
           `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
         );
@@ -230,6 +256,16 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
   }
 }
 
+/**
+ * Why the core will not start, on one line, then out. A throw left to Bun
+ * printed lines of the minified bundle around it, and the shell shows the user
+ * everything the core wrote before it died.
+ */
+function refuseToStart(error: unknown): never {
+  process.stderr.write(`boite-core: ${messageOf(error)}\n`);
+  process.exit(1);
+}
+
 export function main(argv: string[]): void {
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
@@ -263,12 +299,18 @@ export function main(argv: string[]): void {
     return;
   }
 
-  const flags = parseFlags(argv);
-  const dataDir = resolveDataDir(flags.dataDir, flags.channel);
-  mkdirSync(dataDir, { recursive: true });
-
-  // Before the journal is opened, because opening it is already a write.
-  const unlock = lockDataDir(dataDir);
+  let flags: Flags;
+  let dataDir: string;
+  let unlock: () => void;
+  try {
+    flags = parseFlags(argv);
+    dataDir = resolveDataDir(flags.dataDir, flags.channel);
+    mkdirSync(dataDir, { recursive: true });
+    // Before the journal is opened, because opening it is already a write.
+    unlock = lockDataDir(dataDir);
+  } catch (error) {
+    refuseToStart(error);
+  }
   const coreFile = join(dataDir, 'core.json');
   const previous = readPreviousRun(coreFile);
   const token = previous.token ?? newToken();
@@ -277,10 +319,8 @@ export function main(argv: string[]): void {
     core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
   } catch (error) {
     // A journal from a newer release, among others: say why and leave the data as it is.
-    process.stderr.write(`boite-core: ${messageOf(error)}
-`);
     unlock();
-    process.exit(1);
+    refuseToStart(error);
   }
   const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
   if (publicUrl !== undefined) core.settings.set({ publicUrl });

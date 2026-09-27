@@ -39,4 +39,5 @@ export const platform: ProcessPlatform = {
   },
   forget: jobs.releaseThreadJob,
   guardStatus: guard.guardStatus,
+  startedAt: jobs.processStartedAt,
 };
