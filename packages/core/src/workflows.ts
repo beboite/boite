@@ -611,8 +611,10 @@ export class Workflows {
             const gone = inst.threadId !== null && this.core.journal.getThread(inst.threadId)?.archived !== false;
             Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
           }
+          // Stopped only because another step failed, it never ran: it waits again with the retried one.
+          else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
           if (target && !node.instances.length && broken(node.status)) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
-          else if (target && node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
+          else if (node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
           // A stop left later steps unopened; they wait for the retried ones again.
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }

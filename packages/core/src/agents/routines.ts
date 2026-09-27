@@ -35,10 +35,12 @@ export class AgentRoutines {
     if(previous&&previous.agentId!==agent.id)throw refused('agentId: a routine cannot change owner');
     const schedule=checkSchedule(v.schedule),enabled=boolean(v.enabled,'enabled');
     const changed=JSON.stringify(previous?.schedule)!==JSON.stringify(schedule);
-    // A once routine that already ran is done: resuming it must not fire it again at its past date. A new date re-arms it.
+    // A once routine that already ran is done: resuming it must not fire it again at its past date.
+    // A new date re-arms it, even saved while paused, so that run no longer counts.
     const spent=schedule.kind==='once'&&!changed&&previous?.lastScheduledAt!=null;
     const nextAt=!enabled||spent?null:previous?.enabled&&!changed?previous.nextAt:schedule.kind==='once'?schedule.at:nextOccurrence(schedule,Date.now());
-    const value={agentId:agent.id,name:text(v.name,'name',120),prompt:text(v.prompt,'prompt',16000),schedule,enabled,nextAt,lastWorkId:previous?.lastWorkId??null,lastScheduledAt:previous?.lastScheduledAt??null};
+    const lastScheduledAt=schedule.kind==='once'&&changed?null:previous?.lastScheduledAt??null;
+    const value={agentId:agent.id,name:text(v.name,'name',120),prompt:text(v.prompt,'prompt',16000),schedule,enabled,nextAt,lastWorkId:previous?.lastWorkId??null,lastScheduledAt};
     const result=params.id?this.r.update('routine',params.id,params.expectedRevision!,value):this.r.create('routine',value);
     this.core.workforce.changed();return result;
   }

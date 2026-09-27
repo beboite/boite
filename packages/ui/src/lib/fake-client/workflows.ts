@@ -458,8 +458,10 @@ export class FakeWorkflows {
             if (gone) this.#steps.delete(inst.threadId!);
             Object.assign(inst, { status: 'waiting', finishedAt: null, ...(gone ? { threadId: null } : {}) });
           }
+          // Stopped only because another step failed, it never ran: it waits again with the retried one.
+          else if (inst.status === 'stopped' && inst.error === NOT_STARTED) Object.assign(inst, { status: 'waiting', error: null, finishedAt: null });
           if (target && !node.instances.length && broken(node.status)) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
-          else if (target && node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
+          else if (node.instances.some(i => i.status === 'waiting')) Object.assign(node, { status: 'running', error: null, finishedAt: null });
           else if (node.status === 'stopped' && !node.instances.length) Object.assign(node, { status: 'waiting', error: null, startedAt: null, finishedAt: null });
         }
         if (this.#halted(run)) throw refusal('nothing to retry in that step; retry the step that failed');

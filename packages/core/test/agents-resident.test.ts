@@ -99,6 +99,14 @@ test('a once routine that ran stays done: resuming it fires nothing, a new date 
  const at=Date.now()+3600000;
  expect((await client.call('agents.routine.save',{id:resumed.id,expectedRevision:resumed.revision,value:{...resumed,schedule:{kind:'once',at}}})).nextAt).toBe(at);
 });
+test('a once routine given a new date while paused runs that date once resumed',async()=>{
+ const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Tomorrow',prompt:'Look once',schedule:{kind:'once',at:Date.now()+86400000},enabled:true,nextAt:null,lastWorkId:null,lastScheduledAt:null}});
+ await client.call('agents.routine.run',{routineId:routine.id,requestId:'once-moved'});
+ const ran=h.core.workforce.records.get('routine',routine.id),at=Date.now()+3600000;
+ const moved=await client.call('agents.routine.save',{id:ran.id,expectedRevision:ran.revision,value:{...ran,schedule:{kind:'once',at}}});
+ expect([moved.enabled,moved.nextAt]).toEqual([false,null]);
+ expect((await client.call('agents.routine.save',{id:moved.id,expectedRevision:moved.revision,value:{...moved,enabled:true}})).nextAt).toBe(at);
+});
 
 test('routine results appear once in the identity conversation', async () => {
  const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Proposal',prompt:'A private puzzle prototype proposal',schedule:{kind:'interval',everyMinutes:60},enabled:false,nextAt:null,lastWorkId:null,lastScheduledAt:null}});

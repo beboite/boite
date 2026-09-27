@@ -313,6 +313,36 @@ test('a failed step stops what never launched, and a retry past an archived conv
   expect((await settled(h, threadId, run.id)).status).toBe('done');
 });
 
+test('retrying the failed step also reopens a parallel step that stopped before it launched', async () => {
+  const { held } = scripted(ctx => !ctx.thread.parentThreadId ? 'noted' : taskOf(ctx.prompt) === 'x' ? '```json\n{"items": [1, 2, 3]}\n```' : { hold: true });
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Side', limits: { maxConcurrent: 2 }, steps: [
+    { id: 'lone', profile: 'fast', task: 'lone' },
+    { id: 'list', profile: 'fast', task: 'x', output: { items: ['number'] } },
+    { id: 'each', profile: 'fast', forEach: 'list.items', task: 'do {{item}}' },
+  ] }, requestId: 'side' });
+  await waitFor(() => held.size === 2);
+  const lone = h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.threadId!;
+  const first = h.core.workflows.get(threadId, run.id).nodes[2]!.instances[0]!.threadId!;
+  held.get(lone)!('', 'error');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'failed');
+  held.get(first)!('One done.');
+  const failed = await settled(h, threadId, run.id);
+  expect(failed.nodes[2]!.status).toBe('stopped');
+  expect(failed.nodes[2]!.instances.map(i => i.status)).toEqual(['done', 'stopped', 'stopped']);
+
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'retry', stepId: 'lone' });
+  await waitFor(() => held.size === 2);
+  const reopened = h.core.workflows.get(threadId, run.id);
+  expect(reopened.nodes[2]!.status).toBe('running');
+  expect(reopened.nodes[2]!.instances.map(i => [i.status, i.error])).toEqual([['done', null], ['running', null], ['waiting', null]]);
+  while (h.core.workflows.get(threadId, run.id).status === 'running') {
+    for (const finish of [...held.values()]) finish('ok');
+    await Bun.sleep(20);
+  }
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+});
+
 test('a paused run lets its running steps end, and is done once every step is', async () => {
   const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId } = await setup();

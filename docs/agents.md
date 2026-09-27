@@ -158,7 +158,8 @@ queue; missed intervals are not replayed. Daily routines run once per local
 date, even when clocks move back. A skipped local time runs the following day.
 Pausing the identity or the engine also holds its routines. A single-date
 routine is done once it ran, on schedule or through Run now: the card reads
-Done and offers no Resume, and only a new date schedules it again.
+Done and offers no Resume, and only a new date schedules it again, even one
+saved while the routine is paused.
 
 Models and limits separates the required default route, allowed main routes,
 and allowed subagent profiles. A route names a provider, account and model.

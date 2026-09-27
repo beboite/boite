@@ -100,6 +100,11 @@ test('a failed step stops what never launched, and a paused run still ends its r
     expect([failed.status, failed.error]).toEqual(['failed', 'try: The turn failed']);
     expect(failed.nodes.map(node => node.status)).toEqual(['failed', 'stopped']);
     expect(failed.nodes[1]!.instances.map(inst => [inst.status, inst.threadId, inst.error])).toEqual([['stopped', null, 'Not started: another step of the run failed']]);
+    // Retrying the failed step reopens the one it held back.
+    const retried = await client.call('workflows.control', { threadId: 't-trace', runId: run.id, action: 'retry', stepId: 'try' });
+    expect(retried.status).toBe('running');
+    expect(retried.nodes[1]!.instances[0]!.error).toBeNull();
+    await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status === 'failed');
 
     const one = await client.call('workflows.start', { threadId: 't-trace', plan: { name: 'One', steps: [{ id: 'a', profile: 'implementer', task: 'Quick.' }] }, requestId: 'one' });
     await client.call('workflows.control', { threadId: 't-trace', runId: one.id, action: 'pause' });

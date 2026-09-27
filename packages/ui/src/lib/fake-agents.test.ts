@@ -23,6 +23,24 @@ test('the fake executes bounded groups, keeps native contexts distinct and refus
   } finally { client.close(); }
 });
 
+test('the fake keeps a fired once routine done, and a new date saved while paused re-arms it', async () => {
+  const client = new FakeClient({ delayMs: 0 }); await client.connect();
+  try {
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Scout', domain: '', instructions: '', avatar: '', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' as const }, status: 'active' as const, tools: ['messages'], accountIntegration: 'provider' as const } });
+    const routine = await client.call('agents.routine.save', { value: { agentId: agent.id, name: 'Tomorrow', prompt: 'Look once', schedule: { kind: 'once', at: Date.now() + 86400000 }, enabled: true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
+    await client.call('agents.routine.run', { routineId: routine.id, requestId: 'fake_once_001' });
+    const ran = (await client.call('agents.snapshot', {})).routines.find(r => r.id === routine.id)!;
+    expect([ran.enabled, ran.nextAt]).toEqual([false, null]);
+    const resumed = await client.call('agents.routine.save', { id: ran.id, expectedRevision: ran.revision, value: { ...ran, enabled: true } });
+    expect(resumed.nextAt).toBeNull();
+    const at = Date.now() + 3600000;
+    const moved = await client.call('agents.routine.save', { id: resumed.id, expectedRevision: resumed.revision, value: { ...resumed, enabled: false, schedule: { kind: 'once', at } } });
+    expect(moved.nextAt).toBeNull();
+    expect((await client.call('agents.routine.save', { id: moved.id, expectedRevision: moved.revision, value: { ...moved, enabled: true } })).nextAt).toBe(at);
+  } finally { client.close(); }
+});
+
 test('the fake denies persistent configuration and engine shutdown to paired devices', async () => {
   const client = new FakeClient({ delayMs: 0, principal: 'session' }); await client.connect();
   try {

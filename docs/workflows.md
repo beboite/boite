@@ -88,7 +88,8 @@ that never launched read stopped ("Not started"), then the run fails and its
 summary goes back to the conversation. `boite workflow retry <run-id> <step>`
 runs the failed executions again in their own conversations, with the previous
 error in the prompt; an execution whose conversation was archived since gets a
-new one.
+new one. The executions held back as "Not started" wait again with it, in any
+step.
 
 Handing the summary back is a turn of the parent, so it counts against the
 team's turn budget like a step turn. When the budget is spent or delegation is

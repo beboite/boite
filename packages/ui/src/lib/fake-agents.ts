@@ -223,7 +223,9 @@ export class FakeAgents {
         const p = raw as RpcParams<typeof method>; this.get('profile', p.value.agentId);
         const previous = p.id ? this.get('routine', p.id) : null, s = p.value.schedule, changed = JSON.stringify(previous?.schedule) !== JSON.stringify(s);
         const spent = s.kind === 'once' && !changed && previous?.lastScheduledAt != null;
-        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled || spent ? null : previous?.enabled && !changed ? previous.nextAt : s.kind === 'once' ? s.at : nextOccurrence(s, Date.now()) } });
+        // The core's save: run bookkeeping comes from the record, and a new once date clears the run it replaces.
+        const lastScheduledAt = s.kind === 'once' && changed ? null : previous?.lastScheduledAt ?? null;
+        return this.save('routine', { ...p, value: { ...p.value, nextAt: !p.value.enabled || spent ? null : previous?.enabled && !changed ? previous.nextAt : s.kind === 'once' ? s.at : nextOccurrence(s, Date.now()), lastWorkId: previous?.lastWorkId ?? null, lastScheduledAt } });
       }
       case 'agents.routine.run': {
         const p = raw as RpcParams<typeof method>; return this.once(p.requestId, p, () => {
