@@ -3,6 +3,7 @@ import {
   RpcErrorCode,
   type Account,
   type BrainStatus,
+  type KeybindingCommand,
   type Keybindings,
   type ProviderSummary,
   type Settings
@@ -50,8 +51,8 @@ export interface SyncReport {
   settings: Settings;
   /** How many portable settings had another value on the target. */
   changed: number;
-  /** The target's keybindings file after the copy. */
-  keybindings: Keybindings;
+  /** The target's keybindings file after the copy, null when either core has no keybindings to copy. */
+  keybindings: Keybindings | null;
   /** `copied` when both brains are connected, `absent` when only the source has one. */
   brain: 'copied' | 'absent' | 'none';
   /** Providers the user works with on the source and has not signed into on the target. */
@@ -74,51 +75,99 @@ export function providersToConnect(source: Omit<SyncEnd, 'client'>, target: Omit
   return providerRows(source.providers).filter((row) => on(source, row.id) && !on(target, row.id));
 }
 
+/** The three parts of a copy, in the order they reach the target. */
+export type SyncStage = 'settings' | 'keybindings' | 'brain';
+
+/** A copy that stopped partway: the stages before `stage` are on the target and stay there. */
+export class SyncFailure extends Error {
+  constructor(readonly stage: SyncStage, error: unknown) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+  }
+}
+
+const unknownMethod = (error: unknown): boolean => error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound;
+
 /** A core that predates a method has nothing of it to copy. */
 async function optional<T>(call: Promise<T>): Promise<T | null> {
   try {
     return await call;
   } catch (error) {
-    if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return null;
+    if (unknownMethod(error)) return null;
     throw error;
   }
 }
 
+async function stage<T>(name: SyncStage, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw new SyncFailure(name, error);
+  }
+}
+
+/**
+ * The file only names what differs from the defaults, so the target takes each
+ * command where the two files disagree: the source's chord, its unbinding, or
+ * back to the default where the source names nothing. One entry at a time, and
+ * nothing the target names is dropped before its replacement is in: a call that
+ * fails puts every entry already changed back as it was.
+ */
+async function copyKeybindings(source: Client, target: Client): Promise<Keybindings | null> {
+  const [from, to] = await Promise.all([
+    optional(source.call('keybindings.get', {})),
+    optional(target.call('keybindings.get', {}))
+  ]);
+  if (from === null || to === null) return null;
+  const write = (command: KeybindingCommand, chord: string | null | undefined) =>
+    chord === undefined ? target.call('keybindings.reset', { command }) : target.call('keybindings.set', { command, chord });
+  const changed: KeybindingCommand[] = [];
+  let result = to;
+  try {
+    for (const command of KEYBINDING_COMMANDS) {
+      if (from.bindings[command] === to.bindings[command]) continue;
+      changed.push(command);
+      result = await write(command, from.bindings[command]);
+    }
+  } catch (error) {
+    for (const command of changed.reverse()) await write(command, to.bindings[command]).catch(() => undefined);
+    // A target that reads its file but cannot write an entry has kept its own.
+    if (unknownMethod(error)) return null;
+    throw error;
+  }
+  return result;
+}
+
+/** Settings, then keybindings, then the brain: a failure names its stage in a SyncFailure. */
 export async function syncSettings(source: SyncEnd, target: SyncEnd): Promise<SyncReport> {
-  const [fromSettings, toSettings] = await Promise.all([
-    source.client.call('settings.get', {}),
-    target.client.call('settings.get', {})
-  ]);
-  const patch = portable(fromSettings);
-  const changed = Object.entries(patch).filter(([key, value]) => toSettings[key as keyof Settings] !== value).length;
-  const settings = await target.client.call('settings.set', patch);
+  const { settings, changed } = await stage('settings', async () => {
+    const [fromSettings, toSettings] = await Promise.all([
+      source.client.call('settings.get', {}),
+      target.client.call('settings.get', {})
+    ]);
+    const patch = portable(fromSettings);
+    const changed = Object.entries(patch).filter(([key, value]) => toSettings[key as keyof Settings] !== value).length;
+    return { settings: await target.client.call('settings.set', patch), changed };
+  });
 
-  // The file only names what differs from the defaults: the target starts from
-  // them too, then takes each entry of the source, an unbound command included.
-  const fromKeys = await source.client.call('keybindings.get', {});
-  let keybindings = await target.client.call('keybindings.reset', {});
-  for (const command of KEYBINDING_COMMANDS) {
-    const chord = fromKeys.bindings[command];
-    if (chord !== undefined) keybindings = await target.client.call('keybindings.set', { command, chord });
-  }
+  const keybindings = await stage('keybindings', () => copyKeybindings(source.client, target.client));
 
-  let brain: SyncReport['brain'] = 'none';
-  const [fromBrain, toBrain] = await Promise.all([
-    optional<BrainStatus>(source.client.call('brain.status', {})),
-    optional<BrainStatus>(target.client.call('brain.status', {}))
-  ]);
-  if (fromBrain?.config.path) {
-    if (toBrain?.config.path) {
-      // The folder is the target's own; only the switches come across.
-      await target.client.call('brain.configure', {
-        ...toBrain.config,
-        ...(fromBrain.config.autoPull ? { autoPull: fromBrain.config.autoPull } : {}),
-        ...(fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
-        ...(fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
-      });
-      brain = 'copied';
-    } else if (toBrain) brain = 'absent';
-  }
+  const brain = await stage('brain', async (): Promise<SyncReport['brain']> => {
+    const [fromBrain, toBrain] = await Promise.all([
+      optional<BrainStatus>(source.client.call('brain.status', {})),
+      optional<BrainStatus>(target.client.call('brain.status', {}))
+    ]);
+    if (!fromBrain?.config.path) return 'none';
+    if (!toBrain?.config.path) return toBrain ? 'absent' : 'none';
+    // The folder is the target's own; only the switches come across.
+    await target.client.call('brain.configure', {
+      ...toBrain.config,
+      enabled: fromBrain.config.enabled,
+      ...(fromBrain.config.autoPull ? { autoPull: fromBrain.config.autoPull } : {}),
+      ...(fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
+      ...(fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
+    });
+    return 'copied';
+  });
 
   return { settings, changed, keybindings, brain, providers: providersToConnect(source, target) };
 }

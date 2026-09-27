@@ -13,7 +13,7 @@
   import InfoTip from './InfoTip.svelte';
   import { Plus, ArrowUpRight, Copy, RefreshCw, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
-  import { syncSettings } from '../lib/settings-sync';
+  import { SyncFailure, syncSettings } from '../lib/settings-sync';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
@@ -63,10 +63,15 @@
         { client: machine.store.client, providers: machine.store.providers, accounts: machine.store.accounts }
       );
       machine.store.settings = report.settings;
-      machine.store.keybindings = report.keybindings;
+      if (report.keybindings) machine.store.keybindings = report.keybindings;
       synced[machine.id] = { source: from.label, report };
     } catch (error) {
-      machine.store.error = error instanceof Error ? error.message : String(error);
+      // What reached the target before the failure stays there, and its events
+      // have already brought this window's copy of it up to date.
+      const message = error instanceof Error ? error.message : String(error);
+      machine.store.error = error instanceof SyncFailure
+        ? fill(strings.machines.syncStopped, { stage: strings.machines.syncStages[error.stage], error: message })
+        : message;
     } finally {
       syncing = null;
     }
@@ -226,6 +231,7 @@
           {@const done = synced[machine.id]!}
           <div class="sync-report" role="status" data-testid="machine-sync-report">
             <p>{fill(strings.machines.synced, { source: done.source })}</p>
+            {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
             {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
             {#if done.report.providers.length > 0}
               <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>

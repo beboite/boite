@@ -2,13 +2,22 @@ import { expect, test, vi } from 'vitest';
 import { RpcErrorCode } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { FakeClient } from './fake-client';
-import { PORTABLE_SETTINGS, syncSettings, type SyncEnd } from './settings-sync';
+import { PORTABLE_SETTINGS, SyncFailure, syncSettings, type SyncEnd } from './settings-sync';
 
 async function machine(options: { uninstalled?: boolean } = {}): Promise<FakeClient> {
   const client = new FakeClient({ delayMs: 0, ...options });
   await client.connect();
   return client;
 }
+
+/** The same core, answering `answer` instead for the methods it names. */
+function older(client: FakeClient, answer: (method: string, params: unknown) => Promise<never> | null): Client {
+  const call = client.call.bind(client) as Client['call'];
+  return Object.assign(Object.create(client) as Client, {
+    call: ((method, params) => answer(method, params) ?? call(method, params)) as Client['call']
+  });
+}
+const unknown = (method: string) => Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: `${method}: unknown method` }));
 
 async function end(client: Client): Promise<SyncEnd> {
   const [{ loaded }, accounts] = await Promise.all([client.call('providers.list', {}), client.call('accounts.list', {})]);
@@ -37,7 +46,7 @@ test('the target takes the portable settings, the keybindings and the brain swit
   // The whole file: the source's own entries, and nothing the target had alone.
   const sourceKeys = await from.call('keybindings.get', {});
   expect((await to.call('keybindings.get', {})).bindings).toEqual(sourceKeys.bindings);
-  expect(report.keybindings.bindings).toEqual(sourceKeys.bindings);
+  expect(report.keybindings?.bindings).toEqual(sourceKeys.bindings);
   expect(report.brain).toBe('copied');
   expect((await to.call('brain.status', {})).config).toMatchObject({ path: 'E:/Target/brain', enabled: true, globalInstructions: false, boiteGuide: false });
 });
@@ -65,14 +74,53 @@ test('a core without a brain is skipped, not failed', async () => {
   const from = await machine();
   const to = await machine();
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true });
-  const call = to.call.bind(to) as Client['call'];
-  const older: Client = Object.assign(Object.create(to) as Client, {
-    call: ((method, params) => method === 'brain.status'
-      ? Promise.reject(new RpcFailure({ code: RpcErrorCode.MethodNotFound, message: 'brain.status: unknown method' }))
-      : call(method, params)) as Client['call']
-  });
-
-  const report = await syncSettings(await end(from), await end(older));
+  const report = await syncSettings(await end(from), await end(older(to, (method) => method === 'brain.status' ? unknown(method) : null)));
 
   expect(report.brain).toBe('none');
+});
+
+test('a source brain switched off switches the target one off, its folder kept', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('brain.configure', { path: 'D:/Source/brain', enabled: false });
+  await to.call('brain.configure', { path: 'E:/Target/brain', enabled: true });
+
+  expect((await syncSettings(await end(from), await end(to))).brain).toBe('copied');
+
+  expect((await to.call('brain.status', {})).config).toMatchObject({ path: 'E:/Target/brain', enabled: false });
+});
+
+test('a core without keybindings leaves them alone and the copy goes on to the brain', async () => {
+  const from = await machine();
+  const to = await machine();
+  await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, boiteGuide: false });
+  await to.call('brain.configure', { path: 'E:/Target/brain', enabled: true, boiteGuide: true });
+  await to.call('keybindings.set', { command: 'theme-light', chord: 'mod+alt+t' });
+  await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
+  const before = (await to.call('keybindings.get', {})).bindings;
+
+  const report = await syncSettings(await end(from), await end(older(to, (method) => method === 'keybindings.set' ? unknown(method) : null)));
+
+  expect(report.keybindings).toBeNull();
+  expect((await to.call('keybindings.get', {})).bindings).toEqual(before);
+  expect(report.brain).toBe('copied');
+  expect((await to.call('brain.status', {})).config.boiteGuide).toBe(false);
+});
+
+test('a keybinding the target refuses puts back what the copy changed and names the stage', async () => {
+  const from = await machine();
+  const to = await machine();
+  await to.call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' });
+  await from.call('keybindings.set', { command: 'terminal', chord: 'mod+shift+t' });
+  const before = (await to.call('keybindings.get', {})).bindings;
+  const refused = () => Promise.reject(new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'keybindings.json: the file does not parse' }));
+
+  // The terminal's entry fails; the target's own panel entry, dropped before it, comes back.
+  const target = older(to, (method, params) => method === 'keybindings.set' && (params as { command: string }).command === 'terminal' ? refused() : null);
+  const failed = await syncSettings(await end(from), await end(target)).catch((error: unknown) => error);
+
+  expect(failed).toBeInstanceOf(SyncFailure);
+  expect((failed as SyncFailure).stage).toBe('keybindings');
+  expect((failed as SyncFailure).message).toContain('does not parse');
+  expect((await to.call('keybindings.get', {})).bindings).toEqual(before);
 });

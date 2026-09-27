@@ -51,7 +51,9 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
   let timer: Timer | null = null;
   try {
     const died = new Promise<never>((_resolve, reject) => {
-      child.once('exit', (code) => {
+      // `close` and not `exit`: stderr is flushed by then, so the refusal
+      // carries the line the agent printed on its way out.
+      child.once('close', (code) => {
         reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), {
           providerId: ctx.provider.id,
           accountId: ctx.accountId,

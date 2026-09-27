@@ -69,11 +69,17 @@
    */
   async function choose() {
     if (!store.pickerAvailable) return browse(path || undefined);
+    // The dialog stays open as long as the user likes: a folder picked for a
+    // core this page no longer shows must not be saved to the one it shows now.
+    const current = revision;
+    const client = store.client;
+    const stale = () => current !== revision || client !== store.client;
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const picked = await open({ directory: true, multiple: false, defaultPath: path.trim() || undefined });
+      if (stale()) return;
       if (typeof picked === 'string' && picked.length > 0) path = picked;
-    } catch (cause) { error = failure(cause); }
+    } catch (cause) { if (!stale()) error = failure(cause); }
   }
 
   async function browse(target?: string) {

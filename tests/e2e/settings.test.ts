@@ -139,6 +139,10 @@ test('the Agents page waits behind its experiment', async () => {
   // Switched off while it is open, the page closes with it.
   await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', false))`);
   await page.waitFor(`!document.querySelector('${id('agents-page')}') && document.querySelector('${id('nav-settings')}') && !document.querySelector('${id('nav-agents')}')`);
+  // Switched on again, the chat stays where it is: nobody navigated to the page.
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', true))`);
+  await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('agents-page')}') === null`)).toBe(true);
 }, 30_000);
 
 test('the compact quota page shows limits and reset times', async () => {

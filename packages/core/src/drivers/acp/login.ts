@@ -53,7 +53,8 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
   // Listened for before the SDK loads: an agent that exits at once would
   // otherwise be gone before anyone heard it.
   const died = new Promise<never>((_resolve, reject) => {
-    child.once('exit', (code) => {
+    // `close` and not `exit`: stderr is flushed by then.
+    child.once('close', (code) => {
       const head = `the agent exited with code ${code ?? 'unknown'} before it authenticated`;
       reject(new Error(lastStderr.length === 0 ? head : `${head}: ${lastStderr}`));
     });

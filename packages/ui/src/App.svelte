@@ -92,6 +92,12 @@
     void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
       .catch(() => { agentsLoadError = strings.agents.offline; });
   });
+  // Switched off with the page open: every machine goes back to its chat, so
+  // switching it on again does not reopen a page nobody navigated to.
+  $effect(() => {
+    if (experimentOn('resident-agents')) return;
+    for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
+  });
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
