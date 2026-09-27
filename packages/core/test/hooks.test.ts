@@ -103,6 +103,8 @@ describe('hook sources', () => {
     writeFileSync(join(root, 'hooks', 'c.json'), '{ not json');
     expect(readSource({ variable: 'MINE_HOME', path: 'hooks', format: 'events' }).error).toContain('not valid JSON');
     expect(readSource({ variable: 'MINE_HOME', path: 'missing.json', format: 'events' })).toMatchObject({ count: null, error: null });
+    // Under a file: ENOENT on Windows, ENOTDIR on Linux and macOS, missing either way.
+    expect(readSource({ variable: 'MINE_HOME', path: 'settings.json/hooks.json', format: 'events' })).toMatchObject({ count: null, error: null });
   });
 
   test('a modules directory counts scripts and packages, never dotfiles or notes', () => {

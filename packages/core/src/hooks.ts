@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   Account,
@@ -18,7 +18,7 @@ import type {
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { homePath, tildePath } from './paths.ts';
-import { variableHome } from './profile-share.ts';
+import { statEntry, variableHome } from './profile-share.ts';
 import { hostAgentsEnabled, profileFor } from './providers/resolve.ts';
 
 /** How many runs that did not pass the core keeps, newest first. */
@@ -153,7 +153,7 @@ export function readSource(source: ProviderHookSource): HookSourceState {
   const shown = tildePath(path);
   // A test core never reads the developer's own profile: the path is all it says.
   if (!hostAgentsEnabled()) return { path: shown, format: source.format, count: null, error: null };
-  const found = statSync(path, { throwIfNoEntry: false });
+  const found = statEntry(path, true);
   if (found === undefined) return { path: shown, format: source.format, count: null, error: null };
   try {
     if (source.format === 'modules') {

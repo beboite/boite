@@ -110,13 +110,13 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
 export function unshareProfile(isolationDir: string): void {
   for (const key of readMarker(isolationDir).links) {
     const target = join(isolationDir, key);
-    if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink() === true) unlinkSync(target);
+    if (statEntry(target)?.isSymbolicLink() === true) unlinkSync(target);
   }
 }
 
 function syncPath(source: string, target: string, key: string, retarget: [string, string][], marker: Marker): void {
-  const found = statSync(source, { throwIfNoEntry: false });
-  const current = lstatSync(target, { throwIfNoEntry: false });
+  const found = statEntry(source, true);
+  const current = statEntry(target);
   if (found === undefined) {
     if (current?.isSymbolicLink() === true && marker.links.includes(key)) unlinkSync(target);
     else if (current?.isFile() === true && marker.files[key] === digest(readFileSync(target))) unlinkSync(target);
@@ -227,6 +227,20 @@ function readMarker(isolationDir: string): Marker {
     return { links, files };
   } catch {
     return { links: [], files: {} };
+  }
+}
+
+/**
+ * What is at a path, or nothing. A path under a file is nothing too: Windows
+ * says ENOENT there, Linux and macOS ENOTDIR, which `throwIfNoEntry` lets through.
+ */
+export function statEntry(path: string, follow = false): Stats | undefined {
+  try {
+    return follow ? statSync(path) : lstatSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    throw error;
   }
 }
 
