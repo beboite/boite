@@ -99,7 +99,8 @@
 
   {#if run}
     <div class="actions">
-      {#if run.status === 'running'}
+      <!-- Only the owner resumes, so only the owner is offered a pause: on a phone it would leave Stop alone. -->
+      {#if run.status === 'running' && store.owner}
         <button type="button" class="quiet small" data-testid="workflow-pause" onclick={() => void store.controlWorkflow(run, 'pause')}><Pause size={13} strokeWidth={1.75} />{strings.workflow.pause}</button>
       {:else if run.status === 'paused' && store.owner}
         <button type="button" class="quiet small" data-testid="workflow-resume" onclick={() => void store.controlWorkflow(run, 'resume')}><Play size={13} strokeWidth={1.75} />{strings.workflow.resume}</button>
@@ -116,6 +117,7 @@
     {#if run.error && run.status !== 'done'}<p class="notice" data-testid="workflow-error">{run.error}</p>{/if}
     {#if (run.status === 'done' || run.status === 'failed')}
       <p class="notice quiet-notice">{run.delivered ? strings.workflow.delivered : strings.workflow.waitingDelivery}</p>
+      {#if !run.delivered && run.deliveryError}<p class="notice" data-testid="workflow-delivery-error">{run.deliveryError}</p>{/if}
     {/if}
     {#if !store.owner && (run.status === 'paused' || retryable(run))}<p class="notice quiet-notice">{strings.workflow.ownerOnly}</p>{/if}
 

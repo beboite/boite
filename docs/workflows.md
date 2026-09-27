@@ -83,20 +83,33 @@ counts against the team's turn budget.
 
 ## Failure, stop and restart
 
-A failed step stops new launches. Steps already running finish, then the run
-fails and its summary goes back to the conversation. `boite workflow retry
-<run-id> <step>` runs the failed executions again in their own conversations,
-with the previous error in the prompt.
+A failed step stops new launches. Steps already running finish, the executions
+that never launched read stopped ("Not started"), then the run fails and its
+summary goes back to the conversation. `boite workflow retry <run-id> <step>`
+runs the failed executions again in their own conversations, with the previous
+error in the prompt; an execution whose conversation was archived since gets a
+new one.
+
+Handing the summary back is a turn of the parent, so it counts against the
+team's turn budget like a step turn. When the budget is spent or delegation is
+paused, the run keeps the reason as `deliveryError` and the panel shows it; the
+summary goes again when the parent ends another turn or its delegation settings
+change, a raised budget or a resume included.
 
 Stop cancels every running step and marks the steps that did not start as
 stopped; retry runs them again. Stopping or archiving the parent conversation
-stops its runs too. A core restart never resumes paid work by itself: running
-runs pause, and each interrupted execution waits on its own thread. Resume runs
-it again with "Interrupted by a core restart" in its prompt.
+stops its runs too. A parent turn that ends in an error pauses the team, and so
+every running run, until the owner resumes it. Pause launches nothing new, but
+the steps already running still finish, and a paused run whose every step ended
+is done. A core restart never resumes paid work by itself: running runs pause,
+and each interrupted execution waits on its own thread. Resume runs it again
+with "Interrupted by a core restart" in its prompt.
 
 Resume is an owner action. An agent pauses, stops, retries and extends only the
-runs it started, and retries none while the run is paused. A paired phone can
-follow a run, pause it and stop it.
+runs it started, and retries none while the run is paused. An agent saves new
+templates but never replaces one already saved under that name. A paired phone
+can follow a run and stop it; Pause is not offered there, since only the owner
+resumes.
 
 The summary reaches the conversation once it is idle. When the run ends during
 one of its turns, delivery waits for that turn to finish.
