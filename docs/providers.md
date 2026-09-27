@@ -15,7 +15,8 @@ the plan without writing anything.
 
 ## The fields
 
-OpenCode's descriptor, with the `linux` and `macos` profiles left out:
+OpenCode's descriptor, with the `linux` and `macos` profiles, `shared` and
+`hookSources` left out:
 
 ```json
 {
@@ -40,7 +41,7 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
   "auth": { "kind": "oauth-cli", "session": ["opencode/auth.json"] },
   "login": { "command": ["opencode", "auth", "login"], "terminal": true },
   "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
-  "capabilities": { "approvals": true, "hooks": false, "checkpoint": false, "images": false, "planMode": false, "resume": true }
+  "capabilities": { "approvals": true, "hooks": true, "checkpoint": false, "images": false, "planMode": false, "resume": true }
 }
 ```
 
@@ -72,6 +73,8 @@ OpenCode's descriptor, with the `linux` and `macos` profiles left out:
 - `capabilities` is six booleans: `approvals`, `hooks`, `checkpoint`, `images`,
   `planMode`, `resume`. `approvals: false` means the thread's permission mode
   never reaches that agent, and the UI stops promising a gate that does not exist.
+  `hooks: true` says the agent runs hooks of its own, which is what lets the
+  descriptor name `hookSources` and puts the agent in Settings > Brain > Hooks.
   `images: false` refuses a turn's image attachments before anything is sent, so a
   driver whose protocol carries no image at all never has to. Where `images` is
   true, each protocol hands an attachment over in its own shape: the Claude
@@ -151,6 +154,53 @@ session protocol either.
 
 An `update` block says how the user's own install updates itself; see
 [agent updates](agent-updates.md).
+
+## Hooks and shared configuration
+
+Two optional descriptor fields carry the user's own configuration to isolated
+accounts and tell Settings where the agent's hooks are ([hooks.md](hooks.md)).
+Codex's:
+
+```json
+"shared": [{
+  "variable": "CODEX_HOME",
+  "paths": ["config.toml", "hooks.json", "AGENTS.md", "skills", "rules", "prompts", "plugins"],
+  "retarget": { "config.toml": ["hooks.json", "config.toml"] }
+}],
+"hookSources": [{ "variable": "CODEX_HOME", "path": "hooks.json", "format": "events" }]
+```
+
+- `shared[].variable` is an isolation variable of the profile. Each path is
+  relative to the directory it names: for the default account, the user's own
+  (`~/.codex`); for an isolated one, the account's. At every spawn a directory
+  there is linked and a file is copied ([accounts.md](accounts.md#what-an-isolated-account-shares)).
+- `retarget` maps a copied file to the shared paths whose absolute location it
+  may spell. The copy has each spelling (raw, forward slashes, doubled
+  backslashes) rewritten to the account's own path. Codex needs it for
+  `config.toml`, which keys each hook's trust by the path of `hooks.json`.
+- `hookSources[]` is a place the agent reads hooks from, with the same
+  `variable` and relative `path`, or no variable and a path starting with `~/`,
+  for a file another agent owns: Grok reads Claude's `~/.claude/settings.json`.
+  `format` is `events`, a JSON file or directory of them shaped like Claude's
+  `hooks` block, or `modules`, a directory of plugin scripts.
+
+A share or a source is refused at load when a path is absolute or has a `..`,
+`.` or empty segment, when no profile isolates its variable, when a share's
+variable is set outside `{isolationDir}` by any profile, when a `retarget`
+entry names something outside `paths`, or when a shared path covers or sits
+inside a file the account keeps to itself: `auth.session`, a profile's
+`session` or a `seedFiles` entry. That is why OpenCode, whose config and data
+homes are the same directory, lists `opencode/opencode.json` and its siblings
+one by one and never `opencode`, which holds `opencode/auth.json`.
+`hookSources` also needs `capabilities.hooks`.
+
+| Provider | Shared from the user's own directory | Hook sources |
+|---|---|---|
+| Claude | `settings.json`, `CLAUDE.md`, `skills`, `plugins`, `agents`, `commands`, `hooks`, `output-styles` | `settings.json` |
+| Codex | `config.toml`, `hooks.json`, `AGENTS.md`, `skills`, `rules`, `prompts`, `plugins` | `hooks.json` |
+| Grok | `config.toml`, `hooks`, `AGENTS.md`, `AGENT.md`, `skills`, `trusted_folders.toml`, `installed-plugins` | `hooks`, `~/.claude/settings.json` |
+| pi | `settings.json`, `AGENTS.md`, `extensions`, `skills`, `prompts`, `themes` | `extensions` |
+| OpenCode | under `opencode/`: `opencode.json`, `opencode.jsonc`, `AGENTS.md`, `package.json`, `plugins`, `plugin`, `agents`, `agent`, `commands`, `command`, `skills`, `node_modules` | `opencode/plugins` |
 
 ## The tokens
 
@@ -425,7 +475,8 @@ once and starts no process. `BROWSER` points at
 a Job Object and in the trace like any other, then asks the protocol's own
 question:
 
-- Claude: SDK `supportedModels()` without a user prompt. Effort levels, adaptive
+- Claude: SDK `supportedModels()` without a user prompt, with
+  `settings.disableAllHooks` so no `SessionStart` hook fires. Effort levels, adaptive
   thinking and Fast support come from each returned model. Descriptor effort
   controls stay hidden until that account has answered.
 - ACP: `initialize` and `session/new`, then whichever of two answers the agent

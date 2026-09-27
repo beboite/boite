@@ -45,10 +45,19 @@
   },
   "auth": { "kind": "oauth-cli", "session": ["opencode/auth.json"] },
   "login": { "command": ["opencode", "auth", "login"], "terminal": true },
+  "shared": [
+    {
+      "variable": "XDG_CONFIG_HOME",
+      "paths": ["opencode/opencode.json", "opencode/opencode.jsonc", "opencode/AGENTS.md", "opencode/package.json", "opencode/plugins", "opencode/plugin", "opencode/agents", "opencode/agent", "opencode/commands", "opencode/command", "opencode/skills", "opencode/node_modules"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "XDG_CONFIG_HOME", "path": "opencode/plugins", "format": "modules" }
+  ],
   "models": [{ "id": "default", "name": "OpenCode default", "default": true }],
   "capabilities": {
     "approvals": true,
-    "hooks": false,
+    "hooks": true,
     "checkpoint": false,
     "images": false,
     "planMode": false,

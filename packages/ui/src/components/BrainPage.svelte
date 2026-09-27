@@ -2,6 +2,7 @@
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
+  import HooksCard from './HooksCard.svelte';
   import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
@@ -84,7 +85,7 @@
     {/each}
   {/if}
   {#if status?.config.path}
-    <section class="brain-connection" data-testid="brain-sync-card">
+    <section class="brain-connection" id="settings-brain-folder" data-testid="brain-sync-card">
       <div class="connection-top">
         <div class="folder-mark"><Brain size={24} strokeWidth={1.5} /></div>
         <div class="folder-info"><h2>{folderName}</h2><code>{status.config.path}</code></div>
@@ -132,7 +133,7 @@
     </section>
   {/if}
   {#if status && (!status.config.path || editing)}
-    <form class="folder-form" onsubmit={event => { event.preventDefault(); void run('save'); }}>
+    <form class="folder-form" id={status.config.path ? undefined : 'settings-brain-folder'} onsubmit={event => { event.preventDefault(); void run('save'); }}>
       {#if !status.config.path}<Brain size={32} strokeWidth={1.5} /><h2>{t.empty}</h2><p>{t.emptyHint}</p>{/if}
       <label for="brain-path">{t.folder}</label>
       <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} onclick={() => void browse(path || undefined)}><Folder size={15} />{t.browse}</button></div>
@@ -170,6 +171,8 @@
     </section>
     {#if status.git}<details class="git-details"><summary><GitBranch size={14} />{t.details}</summary><div><code>{status.git.branch}{#if status.git.upstream} → {status.git.upstream}{/if}</code><p>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</p></div></details>{/if}
   {/if}
+  <!-- The agents' own hooks are theirs, not the brain folder's: the card shows with or without one. -->
+  <HooksCard {store} />
 </div>
 
 <style>
@@ -180,6 +183,7 @@
   h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
   header { margin-bottom: 28px; }
   p { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
+  #settings-brain-folder { scroll-margin-top: 24px; }
   .brain-connection { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; }
   .connection-top { display: flex; align-items: center; gap: 14px; padding: 24px 24px 0; }
   .folder-mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); flex: none; }

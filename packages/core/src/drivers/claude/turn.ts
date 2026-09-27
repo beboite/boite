@@ -14,6 +14,7 @@ import {
   subagentOf,
 } from './mapping.ts';
 import type { StreamEvent } from './mapping.ts';
+import { hookEndPart } from './hooks.ts';
 import { PROMPT_EFFORT } from './query.ts';
 import type { ClaudeSession } from './session.ts';
 
@@ -152,9 +153,14 @@ export class ClaudeTurn {
   /**
    * `commands_changed`: the CLI relearned its slash commands mid-session.
    * `compact_boundary`: it compacted the conversation, drawn as a divider.
+   * `informational` with `prevent_continuation`: one of the user's hooks ended
+   * the turn, drawn as a quiet line; the CLI writes nothing else for it.
    */
   private handleSystem(message: Extract<SDKMessage, { type: 'system' }>): void {
     if (message.subtype === 'commands_changed') this.ctx.commands(commandsOf(message.commands));
+    if (message.subtype === 'informational' && message.prevent_continuation === true) {
+      this.part(this.takeIndex(), hookEndPart(message.content));
+    }
     if (message.subtype === 'compact_boundary') {
       const meta = message.compact_metadata;
       this.part(this.takeIndex(), {

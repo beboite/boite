@@ -113,8 +113,10 @@ After the build, `scripts/ci/budgets.ts` fails the job when the UI's entry
 chunk, the whole UI without its `.br` and `.gz` copies, or the core's
 `dist/main.js` grows past its limit in `scripts/ci/budgets.json`. The limits
 sit about 10% above the sizes measured on 2026-09-26 (337 KB, 2221 KB and
-649 KB; `main` built a 681 KB core that day). Raise one in the change that
-explains the growth. Timings are not
+649 KB; `main` built a 681 KB core that day). The core's limit moved on
+2026-09-27 to 10% above the 726 KB core of the agent hooks change, whose
+descriptor checks, profile sharing and hook ledger all run at startup. Raise
+one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.

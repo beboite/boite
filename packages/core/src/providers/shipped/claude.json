@@ -43,6 +43,15 @@
   },
   "auth": { "kind": "oauth-cli", "session": [".credentials.json"] },
   "login": { "command": ["claude", "auth", "login"] },
+  "shared": [
+    {
+      "variable": "CLAUDE_CONFIG_DIR",
+      "paths": ["settings.json", "CLAUDE.md", "skills", "plugins", "agents", "commands", "hooks", "output-styles"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "CLAUDE_CONFIG_DIR", "path": "settings.json", "format": "events" }
+  ],
   "models": [
     {
       "id": "claude-fable-5-1",

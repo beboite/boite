@@ -232,6 +232,14 @@ a Job Object and in the trace like any agent process, and its output streams bac
 line by line with the first link it prints carried separately.
 [docs/accounts.md](accounts.md).
 
+Isolation moves the agent's whole configuration directory, so before each
+spawn the core links or copies what the descriptor's `shared` block names
+from the user's own directory: settings, hooks, skills, instructions, never a
+login file. Drivers that hear about hook runs (Claude's `hook_response`,
+Codex's `hook/completed`) report them through `TurnContext.hook`, and
+`core.hooks` keeps the counts and the recent failures in memory for
+`hooks.status`. [docs/hooks.md](hooks.md).
+
 ## The probe, because an agent owns its models
 
 A descriptor's model list is a starting point. A Claude, ACP, Codex, pi or agy agent owns the

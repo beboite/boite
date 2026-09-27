@@ -11,6 +11,7 @@ import {
   type CoreInfo,
   type DelegationConfig,
   type HarnessUpdate,
+  type HooksStatus,
   type ImportableSession,
   type Keybindings,
   type ModelInfo,
@@ -46,6 +47,7 @@ import type { FakeFinishedTurn } from '../fake-usage';
 import { finishActivityTurn } from './activity';
 import { FakeBus } from './bus';
 import { FAKE_TREE } from './files';
+import { seedHooks } from './hooks';
 import { delegationConfig, workflowAnswer, workflowChild } from './delegation';
 import { FakePlugins } from './plugins';
 import { initialHarnessUpdates } from './provider-installs';
@@ -97,6 +99,8 @@ export class FakeContext {
   workflowLag = 0;
 
   brain: BrainStatus = { config: { path: null, enabled: false }, entries: [], problems: [], git: null, lastSync: null };
+  /** Each agent's own hooks and the runs that did not pass (`hooks.ts`). */
+  hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   projects: Project[] = [];
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */

@@ -57,6 +57,26 @@ export interface CodexTurnRecord {
   error?: CodexTurnError | null;
 }
 
+/** `HookRunSummary`, what `hook/completed` carries (0.157.1), the fields read. */
+export interface CodexHookRun {
+  eventName: string;
+  sourcePath: string;
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped';
+  entries?: { kind: 'warning' | 'stop' | 'feedback' | 'context' | 'error'; text: string }[];
+}
+
+/** `HooksListResponse`: every hook Codex found for each cwd, and whether it trusts it. */
+export interface CodexHooksListed {
+  data?: {
+    hooks?: {
+      eventName: string;
+      sourcePath: string;
+      enabled?: boolean;
+      trustStatus: 'managed' | 'untrusted' | 'trusted' | 'modified';
+    }[];
+  }[];
+}
+
 /** `TokenUsageBreakdown`. */
 export interface CodexTokenUsage {
   totalTokens?: number;

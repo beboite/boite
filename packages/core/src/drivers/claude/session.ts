@@ -4,6 +4,7 @@ import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { TurnContext } from '../types.ts';
+import { hookReport } from './hooks.ts';
 import { backgroundKind, commandsOf, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
 import { childEnv, liveSetup, PromptQueue, STDERR_MAX } from './query.ts';
@@ -306,6 +307,9 @@ export class ClaudeSession {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
+    // Counted once here, with or without a turn: an adopted message is handed
+    // to the turn that opens for it later.
+    if (message.type === 'system' && message.subtype === 'hook_response') (this.head()?.ctx ?? this.ctx).hook?.(hookReport(message));
     const turn = this.head();
     if (turn === null) {
       this.adopt(message);
@@ -502,6 +506,8 @@ export class ClaudeSession {
       settingSources: ['user', 'project', 'local'],
       settings: { fastMode: ctx.thread.speed === 'fast' },
       includePartialMessages: true,
+      // Every run of the user's own hooks, for the ledger Settings shows.
+      includeHookEvents: true,
       abortController: this.abortController,
       env: childEnv(ctx.accountEnv),
       canUseTool: this.gate.canUseTool,

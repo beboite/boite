@@ -689,3 +689,20 @@ test('an account check or provider reload that changes nothing stays silent, as 
     expect(heard).toEqual([]);
   } finally { client.close(); }
 });
+
+test('fake hook counters move the way the core ledger moves them', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = (await client.call('hooks.status', {})).providers.find(provider => provider.providerId === 'claude')!;
+    const run = { at: Date.now(), providerId: 'claude', accountId: null, threadId: null, event: 'Stop', name: 'Stop', message: null } as const;
+    client.recordHookRun({ ...run, outcome: 'stopped' });
+    client.recordHookRun({ ...run, outcome: 'skipped' });
+    const after = (await client.call('hooks.status', {})).providers.find(provider => provider.providerId === 'claude')!;
+    // A stop counts as a blocked run; a skipped hook never ran.
+    expect(after.runs - before.runs).toBe(1);
+    expect(after.blocked - before.blocked).toBe(1);
+    expect(after.skipped - before.skipped).toBe(1);
+    expect(after.failed).toBe(before.failed);
+  } finally { client.close(); }
+});

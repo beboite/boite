@@ -37,6 +37,7 @@ import { Coordination } from './coordination.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
+import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
 
 export const CORE_VERSION: string = pkg.version;
@@ -131,6 +132,8 @@ export class Core {
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
+  /** What the user's own hooks did since this core started, for Settings. */
+  readonly hooks: HookLedger;
   readonly terminals: TerminalStore;
 
   /**
@@ -198,6 +201,7 @@ export class Core {
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
+    this.hooks = new HookLedger(this);
     this.terminals = new TerminalStore(this);
 
     this.workforce = new AgentStore(this);

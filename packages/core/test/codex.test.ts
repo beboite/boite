@@ -11,7 +11,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -927,4 +927,36 @@ describe('codex driver', () => {
     expect(done.error).toBeNull();
     expect(done.status).toBe('done');
   }
+});
+
+describe('codex hooks', () => {
+  test('a prompt a hook refused shows why in the thread, and a hook Codex skips is reported once', async () => {
+    process.env['CODEX_FAKE_HOOKS'] = '1';
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[hook-block]' });
+    expect((await finished).status).toBe('done');
+    await waitFor(() => fakeLog().includes('hooks/list'));
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.at(-1)?.parts).toEqual([
+      { type: 'hook', event: 'userPromptSubmit', outcome: 'blocked', message: 'blocked by test hook' },
+    ]);
+    await waitFor(() => harness!.core.hooks.status().recent.length === 2);
+    const status = await client.call('hooks.status', {});
+    expect(status.providers.find((provider) => provider.providerId === 'codex-fake'))
+      .toMatchObject({ runs: 1, blocked: 1, failed: 0, skipped: 1 });
+    expect(status.recent.map((run) => [run.event, run.outcome])).toEqual(
+      expect.arrayContaining([['userPromptSubmit', 'blocked'], ['preToolUse', 'skipped']]),
+    );
+    expect(status.recent.find((run) => run.outcome === 'skipped')?.message).toContain('not reviewed yet');
+
+    // No warm process in tests: the next turn starts a second one, which asks again and adds nothing.
+    const again = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    expect((await again).status).toBe('done');
+    await waitFor(() => fakeLog().split('hooks/list').length === 3);
+    expect((await client.call('hooks.status', {})).recent).toHaveLength(2);
+  });
 });

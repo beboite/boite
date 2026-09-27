@@ -20,6 +20,8 @@ export async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Pro
     query = queryFn({ prompt: prompts.stream(), options: {
       cwd: ctx.cwd, pathToClaudeCodeExecutable: executable, abortController,
       env: childEnv(ctx.accountEnv), settingSources: ['user'], persistSession: false,
+      // The user's settings for the model list, never their hooks: a probe is no session.
+      settings: { disableAllHooks: true },
       tools: [], mcpServers: {},
       spawnClaudeCodeProcess: (options: SdkSpawnOptions): SpawnedChild => {
         const child = ctx.spawnChild(options.command, options.args, { cwd: options.cwd, env: options.env });

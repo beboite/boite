@@ -7,12 +7,14 @@ import type {
   ProviderAuth,
   ProviderCapabilities,
   ProviderDescriptor,
+  ProviderHookSource,
   ProviderInstall,
   ProviderSelfUpdate,
   ProviderIsolation,
   ProviderLogin,
   ProviderQuirk,
   ProviderRejected,
+  ProviderShare,
 } from '@boite/contracts';
 import { expandDescriptor, OS_KEYS } from './expand.ts';
 import { isNpmSpec } from './npm.ts';
@@ -22,6 +24,7 @@ const PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'codex-appserver', 'muse',
 const AUTH_KINDS: readonly ProviderAuth['kind'][] = ['oauth-cli', 'api-key', 'none'];
 const CANDIDATE_KINDS: readonly ExecutableCandidate['kind'][] = ['path', 'file', 'npm'];
 const QUIRKS: readonly ProviderQuirk[] = ['antigravity', 'grok'];
+const HOOK_FORMATS: readonly ProviderHookSource['format'][] = ['events', 'modules'];
 const CAPABILITY_KEYS: readonly (keyof ProviderCapabilities)[] = [
   'approvals',
   'hooks',
@@ -43,6 +46,8 @@ const DESCRIPTOR_KEYS = [
   'login',
   'isolation',
   'seedFiles',
+  'shared',
+  'hookSources',
   'quirks',
   'models',
   'capabilities',
@@ -391,6 +396,143 @@ function checkSeedFiles(value: unknown, file: string): Record<string, string> {
   return out;
 }
 
+/** A path under some directory: relative, no `..`, written with `/`. */
+function checkRelative(value: unknown, file: string, field: string, within: string): string {
+  const path = asString(value, file, field);
+  if (path.startsWith('/') || path.startsWith('\\') || /^[a-zA-Z]:/.test(path)) {
+    reject(file, field, `a relative path inside ${within}`, `${field} must be relative: ${path}`);
+  }
+  for (const segment of path.split(/[\\/]/)) {
+    if (segment !== '..' && segment !== '.' && segment !== '') continue;
+    reject(file, field, 'a path with no "..", "." or empty segment', `${field} is not a plain path under ${within}: ${path}`);
+  }
+  return path.split('\\').join('/');
+}
+
+/**
+ * Where an isolation variable points under `{isolationDir}` on each OS profile
+ * that sets it, `''` for the directory itself. Null when no profile sets it.
+ */
+function isolationPrefixes(profiles: ProviderDescriptor['profiles'], variable: string): string[] | null {
+  const prefixes: string[] = [];
+  let found = false;
+  for (const profile of Object.values(profiles)) {
+    const template = profile?.isolation[variable];
+    if (template === undefined) continue;
+    found = true;
+    if (!template.startsWith('{isolationDir}')) continue;
+    prefixes.push(template.slice('{isolationDir}'.length).split('\\').join('/').replace(/^\/+|\/+$/g, ''));
+  }
+  return found ? prefixes : null;
+}
+
+function overlaps(a: string, b: string): boolean {
+  const left = a.toLowerCase();
+  const right = b.toLowerCase();
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+/**
+ * What an isolated account takes from the provider's own profile. A path that
+ * is, holds or sits in a login file or a seed file is refused: sharing it would
+ * hand every account the user's own login, or fight the seed for the file.
+ */
+function checkShared(
+  value: unknown,
+  file: string,
+  profiles: ProviderDescriptor['profiles'],
+  guarded: string[],
+): ProviderShare[] {
+  return asArray(value, file, 'shared').map((entry, index) => {
+    const field = `shared[${index}]`;
+    const obj = asObject(entry, file, field);
+    checkKeys(obj, ['variable', 'paths', 'retarget'], file, field);
+    const variable = asString(obj['variable'], file, `${field}.variable`);
+    const prefixes = isolationPrefixes(profiles, variable);
+    if (prefixes === null) {
+      reject(file, `${field}.variable`, 'an isolation variable of one of the profiles', `${field}.variable names ${variable}, which no profile isolates`);
+    }
+    // A profile that points the variable elsewhere would get the share outside
+    // the account's directory, where no login or seed file is checked.
+    for (const [os, profile] of Object.entries(profiles)) {
+      const template = profile?.isolation[variable];
+      if (template === undefined || template.startsWith('{isolationDir}')) continue;
+      reject(
+        file,
+        `${field}.variable`,
+        `a variable every profile sets under {isolationDir}`,
+        `${field}.variable names ${variable}, which the ${os} profile sets to ${template}, outside the account directory`,
+      );
+    }
+    const paths = asArray(obj['paths'], file, `${field}.paths`).map((raw, at) => {
+      const path = checkRelative(raw, file, `${field}.paths[${at}]`, variable);
+      for (const prefix of prefixes) {
+        const full = prefix.length === 0 ? path : `${prefix}/${path}`;
+        const hit = guarded.find((other) => overlaps(full, other));
+        if (hit !== undefined) {
+          reject(
+            file,
+            `${field}.paths[${at}]`,
+            'a path apart from every login and seed file',
+            `${field}.paths[${at}] (${path}) overlaps ${hit}, which each account keeps to itself`,
+          );
+        }
+      }
+      return path;
+    });
+    if (paths.length === 0) reject(file, `${field}.paths`, 'at least one path', `${field}.paths must list at least one path`);
+    const share: ProviderShare = { variable, paths };
+    if (obj['retarget'] !== undefined) {
+      const retarget: Record<string, string[]> = {};
+      for (const [name, names] of Object.entries(asObject(obj['retarget'], file, `${field}.retarget`))) {
+        const at = `${field}.retarget.${name}`;
+        if (!paths.includes(name)) reject(file, at, `one of: ${paths.join(', ')}`, `${at} is not one of the shared paths`);
+        retarget[name] = asArray(names, file, at).map((other, k) => {
+          const path = asString(other, file, `${at}[${k}]`);
+          if (!paths.includes(path)) reject(file, `${at}[${k}]`, `one of: ${paths.join(', ')}`, `${at}[${k}] is not one of the shared paths`);
+          return path;
+        });
+      }
+      share.retarget = retarget;
+    }
+    return share;
+  });
+}
+
+/** Where the user's own hooks live, for a provider that runs them. */
+function checkHookSources(
+  value: unknown,
+  file: string,
+  profiles: ProviderDescriptor['profiles'],
+  runsHooks: boolean,
+): ProviderHookSource[] {
+  if (!runsHooks) {
+    reject(file, 'hookSources', 'capabilities.hooks set to true', 'hookSources needs capabilities.hooks: an agent that runs no hooks has none to count');
+  }
+  return asArray(value, file, 'hookSources').map((entry, index) => {
+    const field = `hookSources[${index}]`;
+    const obj = asObject(entry, file, field);
+    checkKeys(obj, ['variable', 'path', 'format'], file, field);
+    const format = asString(obj['format'], file, `${field}.format`);
+    if (!HOOK_FORMATS.includes(format as ProviderHookSource['format'])) {
+      reject(file, `${field}.format`, `one of: ${HOOK_FORMATS.join(', ')}`, `unknown hook source format ${format}`);
+    }
+    if (obj['variable'] === undefined) {
+      const path = asString(obj['path'], file, `${field}.path`);
+      if (!path.startsWith('~/')) {
+        reject(file, `${field}.path`, 'a path starting with ~/', `${field}.path needs a variable or a path under ~/: ${path}`);
+      }
+      checkRelative(path.slice(2), file, `${field}.path`, 'the home directory');
+      return { path, format: format as ProviderHookSource['format'] };
+    }
+    const variable = asString(obj['variable'], file, `${field}.variable`);
+    if (isolationPrefixes(profiles, variable) === null) {
+      reject(file, `${field}.variable`, 'an isolation variable of one of the profiles', `${field}.variable names ${variable}, which no profile isolates`);
+    }
+    return { variable, path: checkRelative(obj['path'], file, `${field}.path`, variable), format: format as ProviderHookSource['format'] };
+  });
+}
+
 /** Dialect fixes, each one a name the core knows how to apply. */
 function checkQuirks(value: unknown, file: string): ProviderQuirk[] {
   return asArray(value, file, 'quirks').map((entry, index) => {
@@ -520,6 +662,16 @@ export function validateDescriptor(
     reject(file, 'profiles', 'at least one of: windows, linux, macos', 'profiles must describe at least one OS');
   }
 
+  const auth = checkAuth(obj['auth'], file);
+  const seedFiles = obj['seedFiles'] === undefined ? undefined : checkSeedFiles(obj['seedFiles'], file);
+  const capabilities = checkCapabilities(obj['capabilities'], file);
+  // What each account keeps to itself, relative to its isolation directory.
+  const guarded = [
+    ...(auth.session ?? []),
+    ...Object.values(profiles).flatMap((profile) => profile?.session ?? []),
+    ...Object.keys(seedFiles ?? {}),
+  ].map((path) => path.split('\\').join('/'));
+
   return expandDescriptor(
     {
       id,
@@ -529,13 +681,15 @@ export function validateDescriptor(
       protocol: protocol as Protocol,
       roots: checkRoots(obj['roots'], file),
       profiles,
-      auth: checkAuth(obj['auth'], file),
+      auth,
       ...(obj['login'] === undefined ? {} : { login: checkLogin(obj['login'], file) }),
       ...(obj['isolation'] === undefined ? {} : { isolation: checkIsolation(obj['isolation'], file) }),
-      ...(obj['seedFiles'] === undefined ? {} : { seedFiles: checkSeedFiles(obj['seedFiles'], file) }),
+      ...(seedFiles === undefined ? {} : { seedFiles }),
+      ...(obj['shared'] === undefined ? {} : { shared: checkShared(obj['shared'], file, profiles, guarded) }),
+      ...(obj['hookSources'] === undefined ? {} : { hookSources: checkHookSources(obj['hookSources'], file, profiles, capabilities.hooks) }),
       ...(obj['quirks'] === undefined ? {} : { quirks: checkQuirks(obj['quirks'], file) }),
       models: checkModels(obj['models'], file),
-      capabilities: checkCapabilities(obj['capabilities'], file),
+      capabilities,
     },
     dataDir,
   );

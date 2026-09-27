@@ -78,6 +78,8 @@ failing checks; report any blocker that needs the user's decision.
 - [Architecture](docs/architecture.md): ownership, persistence and protocols.
 - [Providers](docs/providers.md) and [accounts](docs/accounts.md): descriptors,
   executable detection, isolation and login.
+- [Hooks](docs/hooks.md): the user's hooks on isolated accounts, what each
+  driver reports and the Settings view.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
 - [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.

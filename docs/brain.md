@@ -34,6 +34,10 @@ manager still owns that operation. This catalog is separate from Boite's
 native extensions in Settings > Plugins. It does not inventory other agent
 profiles elsewhere on the machine.
 
+Hooks have a card of their own on this page: each agent's hook sources, whether
+its isolated accounts have them, and the runs that blocked or failed since the
+core started ([hooks.md](hooks.md)).
+
 ## Instructions in conversations
 
 When sharing is enabled, the core prepends the contents of the two `AGENTS.md`
