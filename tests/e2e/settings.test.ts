@@ -21,22 +21,17 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('provider settings show login controls and quota monitoring', async () => {
+test('provider settings show login controls, and quota monitoring lives on the Limits page', async () => {
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
   await page.waitFor(`document.querySelectorAll('${id('provider-settings')}').length > 1`);
   // The page opens as a checklist: one row and at most one next step per provider.
   expect(await page.evaluate(`[...document.querySelectorAll('${id('provider-settings')}')].every(row => row.querySelectorAll('.act .primary').length <= 1)`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('account-row')}') === null`)).toBe(true);
   await capture('providers.png');
-  // Accounts, quotas and the uninstall sit behind each row's chevron.
+  // Accounts, the default model and the uninstall sit behind each row's chevron; limits do not.
   await page.evaluate(`document.querySelectorAll('${id('provider-details-toggle')}').forEach(button => button.click())`);
-  await page.waitFor(`document.querySelector('${id('quota-monitor')}')`);
-  await page.click(id('quota-monitor'));
-  await page.waitFor(`!document.querySelector('${id('quota-monitor')}').checked`);
-  // The switch says monitoring is off; no line under it repeats that.
-  expect(await page.evaluate(`document.querySelector('${id('quota-monitor')}').closest('.quota').querySelector('${id('quota-account')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`)).not.toContain('Quota monitoring is off');
-  await page.click(id('quota-monitor'));
+  await page.waitFor(`document.querySelector('${id('account-row')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('accounts-page')}').querySelector('${id('quota-monitor')}, [role=meter], progress') === null`)).toBe(true);
   await capture('providers-details.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 760, height: 900, deviceScaleFactor: 1, mobile: false });
   await capture('providers-details-narrow.png');
@@ -108,6 +103,48 @@ test('Grain is visible above solid and acrylic surfaces and the settings fit a p
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
 }, 30_000);
 
+test('the Limits page turns the monitoring of each account on and off', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings')); await page.click(id('settings-tab-limits'));
+  await page.waitFor(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}')`);
+  const opencode = `${id('limits-tracked')} [data-account-id="a-opencode"]`;
+  expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
+  // The Antigravity CLI's own reading starts off, and the only switch that turns it on is here.
+  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} [data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
+  await page.click(opencode);
+  await page.waitFor(`!document.querySelector('${opencode}').checked && !document.querySelector('${id('usage-limits')} [data-provider="opencode"]')`);
+  await capture('limits-tracked.png');
+  await page.click(opencode);
+  await page.waitFor(`document.querySelector('${id('usage-limits')} [data-provider="opencode"]')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.evaluate(`document.querySelector('${id('limits-tracked')}').scrollIntoView()`);
+  await capture('limits-tracked-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+}, 30_000);
+
+test('the Agents page waits behind its experiment', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('nav-agents')}') === null`)).toBe(true);
+  await page.click(id('nav-settings')); await page.click(id('settings-tab-experiments'));
+  await page.click(id('experiment-resident-agents'));
+  await page.click(id('settings-back'));
+  await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
+  await page.click(id('nav-agents'));
+  await page.waitFor(`document.querySelector('${id('agents-page')}')`);
+  // Switched off while it is open, the page closes with it.
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', false))`);
+  await page.waitFor(`!document.querySelector('${id('agents-page')}') && document.querySelector('${id('nav-settings')}') && !document.querySelector('${id('nav-agents')}')`);
+  // Switched on again, the chat stays where it is: nobody navigated to the page.
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', true))`);
+  await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('agents-page')}') === null`)).toBe(true);
+}, 30_000);
+
 test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
@@ -155,6 +192,20 @@ test('machines list each execution host and disconnect only the selected host', 
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
+  // A copy goes from the machine the settings speak for to another one, after a confirmation.
+  expect(await page.evaluate(`document.querySelectorAll('${id('machine-sync')}').length`)).toBe(1);
+  await page.click(id('machine-sync'));
+  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
+  await page.click(id('confirm-ok'));
+  await page.waitFor(`document.querySelector('${id('machine-sync-report')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}').closest('${id('machine-card')}').querySelector('${id('machine-rename')}').value`)).toBe('Builder');
+  await capture('machines-sync.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  // The phone layout draws the page anew; the report stays.
+  await page.waitFor(`document.querySelector('${id('machine-sync-report')}')`);
+  await capture('machines-sync-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.click(id('machine-remove'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await page.click(id('confirm-ok'));

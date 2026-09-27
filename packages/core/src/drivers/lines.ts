@@ -110,6 +110,32 @@ export class LineSplitter {
  * at `max` and the rest of it is dropped, so one runaway line cannot grow the
  * buffer. What is left when the stream ends is the last line.
  */
+/**
+ * How long an exited child's stderr may take to end before its last line is
+ * given up on. Under the ACP driver's exit grace, so a drained exit still wins
+ * over the connection error it caused.
+ */
+export const STDERR_DRAIN_MS = 200;
+
+/**
+ * Resolves once `stream` has ended, so a child's last stderr line is read, or
+ * after `ms`: a descendant that inherited the pipe keeps it open past the
+ * child's exit, and must not hold the caller with it.
+ */
+export function stderrDrained(stream: Readable, ms = STDERR_DRAIN_MS): Promise<void> {
+  if (stream.readableEnded || stream.destroyed) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    stream.once('end', done);
+    stream.once('close', done);
+  });
+}
+
 export function stderrLines(stream: Readable, onLine: (line: string) => void, max = STDERR_LINE_MAX): void {
   const lines = new LineSplitter((line) => {
     onLine(line.trim().slice(0, max));

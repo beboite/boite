@@ -11,6 +11,12 @@ An agent with an updater and no way to name its newest release, the Antigravity
 CLI being one, announces nothing: its version on the Providers row reads
 `Checks by itself` on hover and the row carries `Run its updater`, which runs
 the updater on request and reads the version again.
+An updater that exits cleanly with no newer release known has just named the
+newest release it found, so the core records that version as the newest until
+the next check. The row then reads `Up to date` instead of offering the updater
+again, even when nothing changed. When a newer release was known and the
+version did not move, the run counts as failed, as does one that exits with an
+error: the row keeps the button and shows the failure.
 The automatic switch leaves it alone, such an agent updates itself.
 
 ## What the user sees
@@ -113,8 +119,9 @@ notice at once, without waiting for the next check.
 - Versions compare by their numbers; a pre-release is older than its release.
   The self route offers only a newer version. The managed route offers whatever
   the descriptor pins, since a Boite release may pin an older, working one.
-- An updater that exits with zero and leaves the version unchanged is reported
-  as failed, with the version it still reports.
+- An updater that exits with zero and leaves the version unchanged while a
+  newer release is known is reported as failed, with the version it still
+  reports. With no newer release known, the same run reads `Up to date`.
 - Skips live in `<dataDir>/harness-updates.json`. An unreadable file skips
   nothing and says so in the core log.
 - The methods are owner-only. A paired phone neither sees nor starts an update.

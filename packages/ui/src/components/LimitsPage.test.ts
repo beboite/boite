@@ -53,7 +53,10 @@ test('the last reading stays up while the next one loads, and only signed-in acc
   answer!(rows);
   await settle();
   expect(document.querySelectorAll('[data-testid="usage-limit-account"]')).toHaveLength(1);
-  expect(document.body.textContent).not.toContain('Antigravity');
+  expect(document.querySelector('[data-testid="usage-limits"]')!.textContent).not.toContain('Antigravity');
+  // The switches: the signed-in account on, the CLI source off, nothing for a signed-out account or a provider with no limits.
+  const switches = [...document.querySelectorAll<HTMLInputElement>('[data-testid="quota-monitor"]')];
+  expect(switches.map((input) => [input.dataset.accountId, input.checked])).toEqual([['signed-in', true], ['quota:antigravity-cli', false]]);
   await unmount(mounted);
 
   // Opened again, the page draws the reading it had while a new one is on its way.

@@ -458,9 +458,13 @@ export class HarnessUpdates {
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
+      // An updater that checks by itself and exits cleanly has just named its
+      // newest release: the one it now reports, moved or not. Without this the
+      // row would offer the same run again, as if nothing had happened.
+      const confirmed = target.route === 'self' && read.latest === null ? { ...read, latest: read.current } : read;
       this.entries.set(id, {
         route: target.route,
-        ...read,
+        ...confirmed,
         state: stuck ? 'failed' : 'idle',
         message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}` : null,
         checkedAt: Date.now(),

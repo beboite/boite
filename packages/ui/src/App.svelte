@@ -19,6 +19,7 @@
   import { onNotificationOpen } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
+  import { experimentOn } from './lib/experiments.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
@@ -87,9 +88,15 @@
   let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
   let agentsLoadError = $state('');
   $effect(() => {
-    if (store.page !== 'agents' || AgentsPage) return;
+    if (store.page !== 'agents' || !experimentOn('resident-agents') || AgentsPage) return;
     void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
       .catch(() => { agentsLoadError = strings.agents.offline; });
+  });
+  // Switched off with the page open: every machine goes back to its chat, so
+  // switching it on again does not reopen a page nobody navigated to.
+  $effect(() => {
+    if (experimentOn('resident-agents')) return;
+    for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
   });
   let settingsLoadError = $state('');
   $effect(() => {
@@ -435,7 +442,7 @@
       {#if store.page === 'settings'}
         {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
       {/if}
-    {:else if store.page === 'agents'}
+    {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}

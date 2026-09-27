@@ -255,8 +255,9 @@ The tray Usage window and Settings, Limits list only the providers with a
 signed-in account whose limits are monitored. Each tray row shows the lowest
 remaining limit across those accounts and the next reported reset; opening it
 shows each window's own bar and reset time, by account when there are several.
-Monitoring switches live on each account in Settings, Providers, not in the
-tray or on Limits. With nothing
+Monitoring switches live under Tracked accounts on Settings, Limits: one per
+signed-in account with limits to read, the Antigravity CLI source included.
+Settings, Providers shows no usage, and the tray has no switch. With nothing
 signed in, both offer to connect a provider. The last reading stays on screen
 while the next one loads, from this browser's storage after a restart.
 
@@ -283,8 +284,8 @@ OpenCode Go reads the `opencode-go` API login in the account's
 usage API. It never substitutes another provider's login or local token totals.
 
 Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
-or later and sign in once, then open the Antigravity row in Settings, Providers
-and turn on monitoring under Antigravity CLI. Boite reads `agy -p /usage --output-format json` in a temporary directory,
+or later and sign in once, then turn on `agy command-line login` under Tracked
+accounts in Settings, Limits. Boite reads `agy -p /usage --output-format json` in a temporary directory,
 with a version check, output limit and timeout. It does not send a model prompt.
 The report belongs to the CLI login on the core's computer, not an isolated ACP
 account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring

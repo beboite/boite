@@ -226,7 +226,7 @@
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
     <!-- The palette's only pointer and touch door: its chord is the tooltip. -->
     <button class="ghost icon" aria-label={strings.keyboard.commands.palette} title={`${strings.keyboard.commands.palette}${store.keyHint('palette')}`} data-testid="nav-palette" onclick={() => (store.paletteOpen = true)}><Command size={16} /></button>
-    <button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>
+    {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}

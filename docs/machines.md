@@ -66,6 +66,28 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
+## Copying settings
+
+Each card of another machine carries Copy settings from, naming the machine
+the settings pages speak for. Both machines must be connected with full
+control. After a confirmation the client copies, with calls both cores already
+answer:
+
+- the limits, process guards, agent updates and question mode of Settings;
+- the keybindings file, one entry at a time where the two differ, an unbound
+  command included. A refused entry makes the client try to put back every
+  entry already changed; a restore the target refuses too leaves that entry
+  as copied;
+- the brain's Use with agents, instructions and guide switches, when both
+  machines have a brain folder. The folder itself stays the target's own.
+
+Network access, the public URL, browser origins and every provider sign-in stay
+on the machine they belong to. A login never crosses machines: the report under
+the card names the providers signed in on the source and not on the target,
+with a button to that machine's Providers page. An older core that lacks a
+method is skipped for that part, not failed. A copy that fails elsewhere stops
+there and names the part it stopped at; the parts before it stay copied.
+
 ## Browser and phone connections
 
 The desktop shell is an allowed origin on every core. A browser or phone has

@@ -8,6 +8,7 @@ import {
   writeNotifications,
   type NotifyKind
 } from '../notify';
+import { experimentOn } from '../experiments.svelte';
 import { clampSidebar, SIDEBAR_DEFAULT, writeLayout } from '../prefs';
 import { rightPanel, type BoundPanel } from '../right-panel.svelte';
 import { strings } from '../strings';
@@ -77,7 +78,9 @@ export class Layout {
     this.page = 'chat';
   }
 
+  /** The Agents page is an experiment: with it off, nothing leads there. */
   showAgents(): void {
+    if (!experimentOn('resident-agents')) return;
     this.page = 'agents';
     this.sidebarOpen = false;
   }

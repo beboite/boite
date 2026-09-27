@@ -3,6 +3,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
+  import { experimentOn } from '../lib/experiments.svelte';
   import { projectName } from '../lib/format';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
@@ -109,7 +110,7 @@
 {/if}
 
 <nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
-  <button class="ghost" class:active={store.page === 'agents'} aria-current={store.page === 'agents' ? 'page' : undefined} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /><span>{strings.agents.heading}</span></button>
+  {#if experimentOn('resident-agents')}<button class="ghost" class:active={store.page === 'agents'} aria-current={store.page === 'agents' ? 'page' : undefined} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /><span>{strings.agents.heading}</span></button>{/if}
   <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} data-testid="mobile-conversations" onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
   <button class="ghost" class:active={store.page === 'chat' && screen === 'activity'} aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} data-testid="mobile-activity" onclick={() => show('activity')}><span class="activity-icon"><Activity size={20} />{#if waiting.length}<span class="badge">{waiting.length}</span>{/if}</span><span>{strings.mobile.activity}</span></button>
   <button class="ghost" class:active={store.page === 'settings'} aria-current={store.page === 'settings' ? 'page' : undefined} data-testid="mobile-settings" onclick={() => store.showSettings()}><Settings size={20} /><span>{strings.settings.heading}</span></button>

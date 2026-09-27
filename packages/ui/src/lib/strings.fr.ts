@@ -250,6 +250,17 @@ export const fr: Translation = {
     agentLinks: 'Liens entre agents', agentLinksHint: 'Permettre aux agents de deux machines connectées en propriétaire de se trouver. Chaque cœur échange son adresse et sa clé publique de signature. Aucun jeton propriétaire ni clé privée ne sont partagés.',
     agentLinksRefresh: 'Actualiser les liens', linkAgents: 'Relier les agents', linkedAgents: "Cœurs d'agents reliés", availableAgentLinks: 'Connexions disponibles',
     noAgentLinks: "Aucune autre machine connectée en propriétaire n'est disponible.", unlinkAgent: 'Révoquer sur cette machine',
+    syncFrom: 'Copier les réglages de {source}', syncing: 'Copie des réglages',
+    syncTitle: 'Copier les réglages de {source} vers {target} ?',
+    syncBody: "Les limites, les protections des processus, les mises à jour des agents, les raccourcis clavier et les options du brain de {target} prennent les valeurs de {source}. Son accès réseau, son dossier brain et ses connexions aux fournisseurs restent tels quels.",
+    syncConfirm: 'Copier les réglages',
+    synced: 'Réglages copiés depuis {source}.',
+    syncBrainAbsent: 'Connectez un dossier brain sur cette machine pour copier aussi ses options.',
+    syncKeysAbsent: "L’une des deux machines a un Boite sans raccourcis clavier : ils sont restés tels quels.",
+    syncStopped: 'La copie s’est arrêtée sur {stage} : {error}. Ce qui précède reste copié.',
+    syncStages: { settings: 'les réglages', keybindings: 'les raccourcis clavier', brain: 'les options du brain' },
+    syncProviders: "À connecter sur cette machine : {providers}. Une connexion ne quitte jamais la machine où elle a été faite.",
+    syncOpenProviders: 'Ouvrir ses fournisseurs',
     reciprocalLink: 'Confiance mutuelle', oneSidedLink: 'Confiance sur cette machine seulement', publicIdentityHint: "Définissez l'adresse HTTPS publique de chaque cœur dans les réglages généraux avant de relier des PC distincts. Les deux cœurs doivent pouvoir se joindre. Le HTTP local ne fonctionne que sur le même PC.",
   },
   app: {
@@ -1370,6 +1381,10 @@ export const fr: Translation = {
     promptCache: {
       title: 'Minuteur du cache de prompt',
       hint: 'Une horloge à côté de la jauge de contexte, qui décompte le temps pendant lequel le provider garde la conversation en cache'
+    },
+    residentAgents: {
+      title: 'Agents',
+      hint: 'Des agents résidents avec leur propre brain, leurs missions et leurs routines, depuis la barre latérale. Les agents déjà créés continuent de tourner quand ceci est désactivé'
     }
   },
 
@@ -1380,8 +1395,7 @@ export const fr: Translation = {
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Désactivé',
     noReading: 'Indisponible',
-    cliSource: 'Compte du CLI Antigravity',
-    cliHint: "Utilise le compte connecté via agy sur cet ordinateur. Installez le CLI Antigravity 1.1.11 ou plus récent, connectez-vous une fois, puis activez le suivi ci-dessous. C'est indépendant des comptes Antigravity isolés de Boite.",
+    cliSource: 'connexion en ligne de commande agy',
     connect: 'Connecter un compte',
     noReset: 'Heure de réinitialisation non communiquée',
     heading: 'Quotas des fournisseurs',
@@ -1398,7 +1412,8 @@ export const fr: Translation = {
     unsupported: "Ce fournisseur n'expose pas ses quotas d'abonnement ici.",
     disabled: 'Le suivi des quotas est désactivé pour ce compte.',
     loading: 'Lecture des limites du fournisseur',
-    monitor: "Suivre les quotas d'abonnement",
+    tracked: 'Comptes suivis',
+    trackedHint: "Boite lit les limites des comptes activés ici. Un compte désactivé n'est jamais interrogé.",
     providers: 'Gérer les fournisseurs',
     unavailable: 'Aucune lecture de quota disponible.',
     refresh: 'Actualiser les quotas',

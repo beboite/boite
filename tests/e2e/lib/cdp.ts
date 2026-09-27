@@ -88,6 +88,8 @@ export interface BrowserOptions {
   windowSize?: { width: number; height: number };
   /** Leaves the profile as a device that never saw the tour, which opens on boot. */
   showTour?: boolean;
+  /** Experiments switched on before the first boot, as Settings, Experiments stores them. */
+  experiments?: string[];
 }
 
 /** Every page `launch` opened and nobody closed yet, for `closeAllBrowsers`. */
@@ -195,6 +197,10 @@ export class BrowserPage {
       await page.send('Runtime.enable', {});
       await page.send('Network.enable', {});
       if (options.showTour !== true) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: SEEN_TOUR });
+      if (options.experiments !== undefined) {
+        const stored = JSON.stringify(JSON.stringify(options.experiments));
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('boite.experiments', ${stored}); } catch {}` });
+      }
       // Windows may clamp the headless window. Pin the CSS viewport before startup.
       await page.send('Emulation.setDeviceMetricsOverride', {
         width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false,

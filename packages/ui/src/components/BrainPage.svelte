@@ -63,6 +63,26 @@
     finally { if (current === revision) busy = false; }
   }
 
+  /**
+   * The system's own folder dialog when this window sits on the machine that
+   * holds the brain. A browser, a phone or a remote machine cannot reach that
+   * disk through it, so they walk the folders the core lists instead.
+   */
+  async function choose() {
+    if (!store.pickerAvailable) return browse(path || undefined);
+    // The dialog stays open as long as the user likes: a folder picked for a
+    // core this page no longer shows must not be saved to the one it shows now.
+    const current = revision;
+    const client = store.client;
+    const stale = () => current !== revision || client !== store.client;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({ directory: true, multiple: false, defaultPath: path.trim() || undefined });
+      if (stale()) return;
+      if (typeof picked === 'string' && picked.length > 0) path = picked;
+    } catch (cause) { if (!stale()) error = failure(cause); }
+  }
+
   async function browse(target?: string) {
     const client = store.client;
     if (!client || busy) return;
@@ -136,7 +156,7 @@
     <form class="folder-form" id={status.config.path ? undefined : 'settings-brain-folder'} onsubmit={event => { event.preventDefault(); void run('save'); }}>
       {#if !status.config.path}<Brain size={32} strokeWidth={1.5} /><h2>{t.empty}</h2><p>{t.emptyHint}</p>{/if}
       <label for="brain-path">{t.folder}</label>
-      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} onclick={() => void browse(path || undefined)}><Folder size={15} />{t.browse}</button></div>
+      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} data-testid="brain-browse" onclick={() => void choose()}><Folder size={15} />{t.browse}</button></div>
       {#if folders}
         <div class="folders" data-testid="brain-folders">
           <code>{folders.path}</code>

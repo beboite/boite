@@ -31,9 +31,11 @@ function ids(): string[] {
 }
 
 test('the list carries every app command, the thread ones only while one is open', async () => {
-  // The import row rides behind its experiment, off until the switch is on.
+  // The import and Agents rows ride behind their experiments, off until the switch is on.
   expect(ids()).not.toContain('import-session');
+  expect(ids()).not.toContain('agents');
   setExperiment('session-import', true);
+  setExperiment('resident-agents', true);
   expect(ids()).toEqual([
     'new-thread',
     'add-project',
@@ -120,6 +122,9 @@ test('the trace is offered only with the developer switch on, and Agents opens i
   work.setDeveloper(true);
   expect(ids()).toContain('trace');
 
+  runCommand(store, 'agents', false);
+  expect(store.page).toBe('chat');
+  setExperiment('resident-agents', true);
   runCommand(store, 'agents', false);
   expect(store.page).toBe('agents');
 });

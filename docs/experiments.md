@@ -1,4 +1,4 @@
-# Chat and preview experiments
+# Experiments
 
 Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
@@ -27,6 +27,15 @@ owning machine. Links outside its working directory are refused. Published
 PDFs, images, audio and video have inline previews. Other files remain downloadable.
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
+
+## Resident agents
+
+The Agents page ([agents](agents.md)) and every button that leads there: the
+sidebar icon, the phone tab, the command palette row and the link from an agent's
+own thread. Turning
+the switch off closes the page if it is open. It hides the page only: agents
+already made keep their routines and missions on the core, which knows nothing
+of a client's experiments.
 
 ## Preview comments
 

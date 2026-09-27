@@ -1,6 +1,7 @@
 # Persistent agents
 
-Agents is a page beside chat. An identity keeps its instructions, memberships
+Agents is a page beside chat, behind the Resident agents switch in Settings >
+Experiments ([experiments](experiments.md)). An identity keeps its instructions, memberships
 and scoped memory when its provider, account or model changes. Pausing or
 archiving an identity stops its current execution and prevents new work; the
 stopped work item says the agent was paused or archived.

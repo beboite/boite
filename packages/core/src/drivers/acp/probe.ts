@@ -5,7 +5,7 @@ import type { AccountId, ModelInfo, ProviderId } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { agentEnv, launchPrefix, profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import { stderrLines } from '../lines.ts';
+import { stderrDrained, stderrLines } from '../lines.ts';
 import type { ProbeContext, ProbeResult } from '../types.ts';
 import { agentModelsOf, categoryOption, effortFrom, modelsFrom, selectValues, type AgentModels } from './models.ts';
 import { CLIENT_NAME, isGrok, preferExit, STDERR_MAX, type AcpDeps, type Timer } from './protocol.ts';
@@ -51,11 +51,15 @@ export async function readModels(ctx: ProbeContext, deps: AcpDeps, noteOptions: 
   let timer: Timer | null = null;
   try {
     const died = new Promise<never>((_resolve, reject) => {
+      // The exit can land before the last stderr line is read: the refusal
+      // waits a moment for the pipe so it carries what the agent printed.
       child.once('exit', (code) => {
-        reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), {
-          providerId: ctx.provider.id,
-          accountId: ctx.accountId,
-        }));
+        void stderrDrained(child.stderr).then(() => {
+          reject(unavailable(say(`the ${ctx.provider.id} agent exited with code ${code ?? 'unknown'}`), {
+            providerId: ctx.provider.id,
+            accountId: ctx.accountId,
+          }));
+        });
       });
       child.once('error', (error) => {
         reject(unavailable(say(`the ${ctx.provider.id} agent did not start: ${messageOf(error)}`), {

@@ -1,7 +1,9 @@
 # Agent brain
 
 Settings > Brain connects an existing folder on the selected core's
-machine. Browse folders or enter its absolute path, then select Connect folder.
+machine. Browse opens the system folder dialog in the desktop app with a local
+core, and Boite's folder list elsewhere; the path can also be typed. Then select
+Connect folder.
 Each core stores its own path, so the
 same repository can live at different locations on different computers.
 

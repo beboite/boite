@@ -112,6 +112,13 @@ test('default models can be changed on each provider row in Providers', async ()
   expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('high');
   const row = '[data-default-provider="claude"]';
   await page.click(`${row} ${id('composer-picker')}`);
+  // A provider's default is one of its own models: the picker opens on them, with no other provider to switch to.
+  await page.waitFor(`document.querySelector('${id('composer-picker-menu')} [data-model]')`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-picker-menu')} .rail') === null`)).toBe(true);
+  expect(await page.evaluate(`[...document.querySelectorAll('${id('composer-picker-menu')} [data-model]')].every(entry => entry.dataset.model.startsWith('claude-'))`)).toBe(true);
+  // With no composer around it, the menu opens under its own button.
+  expect(await page.evaluate(`document.querySelector('${id('composer-picker-menu')}').getBoundingClientRect().top >= document.querySelector('${row} ${id('composer-picker')}').getBoundingClientRect().bottom`)).toBe(true);
+  await capture('model-default-single');
   await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
   await page.waitFor(`document.querySelector('${row} ${id('composer-picker')}').textContent.includes('Sonnet 5')`);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-defaults:v1')).claude.model`)).toBe('claude-sonnet-5');

@@ -8,7 +8,8 @@ let server: { close(): Promise<void> };
 beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
-  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
+  // The Agents page is an experiment; the rest of this file drives it.
+  page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1`, experiments: ['resident-agents'] });
   await page.waitFor(`document.querySelector('[data-testid="nav-agents"]')`);
 }, 60000);
 
