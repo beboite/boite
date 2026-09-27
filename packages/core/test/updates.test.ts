@@ -117,8 +117,20 @@ describe('harness updates', () => {
 
     const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
     expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
-    expect(only(await changed)).toMatchObject({ current: '1.2.0', latest: null, pending: false, message: null });
+    // What the updater installed is its newest release until the next check reads again.
+    expect(only(await changed)).toMatchObject({ current: '1.2.0', latest: '1.2.0', pending: false, message: null });
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+    expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ current: '1.2.0', latest: null });
+  });
+
+  test('an updater that finds nothing newer leaves the agent reading as current, not failed', async () => {
+    const { client } = await start('none', 'update-current');
+
+    only(await client.call('providers.updates', { refresh: true }));
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.latest !== null, 20000);
+    expect((await client.call('providers.update', { providerId: 'update-fake' })).state).toBe('updating');
+    expect(only(await changed)).toMatchObject({ current: '1.0.0', latest: '1.0.0', pending: false, state: 'idle', message: null });
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 

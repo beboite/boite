@@ -79,7 +79,8 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
-  items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
+  // The Agents page is an experiment: off, the row would lead nowhere.
+  if (experimentOn('resident-agents')) items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material'));
   // The one way back to an archived thread: no chord, so written like the tour.

@@ -210,6 +210,14 @@ export const strings = {
     agentLinks: 'Agent links', agentLinksHint: 'Let agents on two connected owner machines find each other. Each core exchanges its public signing key and address. No owner token or private key is shared.',
     agentLinksRefresh: 'Refresh agent links', linkAgents: 'Link agents', linkedAgents: 'Linked agent cores', availableAgentLinks: 'Available connections',
     noAgentLinks: 'No other connected owner machine is available.', unlinkAgent: 'Revoke on this machine',
+    syncFrom: 'Copy settings from {source}', syncing: 'Copying settings',
+    syncTitle: 'Copy the settings of {source} to {target}?',
+    syncBody: 'Limits, process guards, agent updates, keybindings and brain switches on {target} take the values of {source}. Its network access, its brain folder and its provider sign-ins stay as they are.',
+    syncConfirm: 'Copy settings',
+    synced: 'Settings copied from {source}.',
+    syncBrainAbsent: 'Connect a brain folder on this machine to copy its switches too.',
+    syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
+    syncOpenProviders: 'Open its providers',
     reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
   },
   app: {
@@ -1362,6 +1370,10 @@ export const strings = {
     promptCache: {
       title: 'Prompt cache timer',
       hint: 'A clock beside the context meter counting down how long the provider keeps the conversation cached'
+    },
+    residentAgents: {
+      title: 'Agents',
+      hint: 'Resident agents with their own brain, missions and routines, from the sidebar. Agents you already made keep running while this is off'
     }
   },
 
@@ -1373,8 +1385,7 @@ export const strings = {
     names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Off',
     noReading: 'Unavailable',
-    cliSource: 'Antigravity CLI account',
-    cliHint: 'Uses the account signed in through agy on this computer. Install Antigravity CLI 1.1.11 or later and sign in once, then enable monitoring below. Separate from Boite’s isolated Antigravity accounts.',
+    cliSource: 'agy command-line login',
     connect: 'Connect account',
     noReset: 'Reset time not reported',
     heading: 'Provider quotas',
@@ -1392,7 +1403,8 @@ export const strings = {
     unsupported: 'This provider does not expose subscription quotas here.',
     disabled: 'Quota monitoring is off for this account.',
     loading: 'Reading provider limits',
-    monitor: 'Monitor subscription quotas',
+    tracked: 'Tracked accounts',
+    trackedHint: 'Boite reads the limits of the accounts switched on here. An account switched off is never asked.',
     providers: 'Manage providers',
     unavailable: 'No quota reading available.',
     refresh: 'Refresh quotas',

@@ -45,6 +45,8 @@ function updateHarness(ctx: FakeContext, providerId: string): RpcResult<'provide
   setTimeout(() => {
     update.state = 'idle';
     update.current = update.latest ?? update.current;
+    // An updater that checks by itself names its newest release by running: the one it reports now.
+    if (update.route === 'self') update.latest = update.current;
     update.checkedAt = Date.now();
     ctx.emit('providers.updatesChanged', structuredClone(ctx.harnessUpdates));
   }, 1200);

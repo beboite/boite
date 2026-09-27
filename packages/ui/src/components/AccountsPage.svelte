@@ -3,8 +3,7 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
-  import type { Account, AccountQuota, HarnessUpdate, ProviderSummary } from '@boite/contracts';
-  import QuotaList from './QuotaList.svelte';
+  import type { Account, HarnessUpdate, ProviderSummary } from '@boite/contracts';
   import ProviderVersion, { updatable } from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
   import ModelPicker from './ModelPicker.svelte';
@@ -14,14 +13,13 @@
   import { providerGroups, type ProviderRow } from '../lib/provider-family';
   import { connected, nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { strings } from '../lib/strings';
-  import { quotaReader } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
    * in when nothing is signed in, otherwise its version and the update when one
    * is out. Connected providers come first; the rest wait below as the ways to
-   * add one. Accounts, quotas, the default model and the uninstall sit behind
+   * add one. Accounts, the default model and the uninstall sit behind
    * the row's chevron. A family (Antigravity and its CLI) is one row, each way
    * in its own block inside it.
    */
@@ -30,10 +28,6 @@
 
   /** One pending code per account, so two logins never share a field. */
   let codes = $state<Record<string, string>>({});
-  // The limits under each account come from the reading the Limits page and the tray share, so they never blank while a new one loads.
-  let quotaState = $derived(quotaReader(store.endpointUrl ?? 'here'));
-  let quotas = $derived(quotaState.rows ?? []);
-  let quotaBusy = $derived(quotaState.loading);
   let open = $state<Record<string, boolean>>({});
   /** Providers whose install was asked for from a row: sign-in follows the download. */
   let chained = $state<Record<string, boolean>>({});
@@ -157,13 +151,6 @@
     return accounts.find((account) => account.status === 'ok') ?? null;
   }
 
-  /** A limits source that is not an account, such as the Antigravity CLI's own reading. */
-  const sourceOf = (provider: ProviderSummary): AccountQuota | undefined =>
-    quotas.find((row) => row.accountId === `quota:${provider.id}` && row.status !== 'unsupported');
-
-  const quotaOf = (account: Account): AccountQuota | undefined =>
-    quotas.find((row) => row.accountId === account.id && row.status !== 'unsupported');
-
   async function signIn(provider: ProviderSummary, another = false) {
     if (busy !== null) return;
     busy = provider.id;
@@ -218,18 +205,6 @@
     finally { detecting = false; }
   }
 
-  async function readQuotas(refresh = false) {
-    if (!store.client || quotaBusy) return;
-    try { await quotaState.read(store.client, refresh); }
-    catch (error) { store.error = String(error); }
-  }
-
-  async function monitor(accountId: string, enabled: boolean) {
-    if (!store.client) return;
-    try { await quotaState.configure(store.client, accountId, enabled); }
-    catch (error) { store.error = String(error); }
-  }
-
   /** The session file, then the agent itself: how many models it answers with. */
   async function verify(account: Account) {
     if (!store.client) return;
@@ -264,11 +239,9 @@
   }
 
   onMount(() => {
-    void readQuotas();
     // The core answers from its last reading and never runs the agents for a
     // plain list: opening this page on a core that has not read them yet is the moment to.
     if (store.client !== null && store.owner && store.harnessUpdates.length === 0 && !updatesBusy) void checkUpdates();
-    const offQuotas = store.client?.on('quotas.updated', (rows) => quotaState.accept(rows));
     // The download the row asked for is on disk. The core made the default
     // account before it said so, which means an existing command-line login already
     // reads as ready here and only a provider nobody is signed into goes on.
@@ -297,7 +270,7 @@
       }
     };
     window.addEventListener('focus', onFocus);
-    return () => { offQuotas?.(); offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
+    return () => { offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
   });
 </script>
 
@@ -416,23 +389,19 @@
   {/if}
 {/snippet}
 
-<!-- Everything behind the chevron for one descriptor: accounts and their limits,
-     the model new threads start on, and where the agent runs from. -->
+<!-- Everything behind the chevron for one descriptor: its accounts, the model
+     new threads start on, and where the agent runs from. Limits live on the
+     Limits page, not here. -->
 {#snippet memberBody(provider: ProviderSummary)}
   {@const accounts = store.accountsOf(provider.id)}
   {@const install = store.installOf(provider.id)}
-  {@const source = provider.available || sourceOf(provider)?.enabled ? sourceOf(provider) : undefined}
   {@const account = modelAccount(provider)}
-  {#if accounts.length > 0 || source}
+  {#if accounts.length > 0}
     <div class="section-head">
       <span class="section-label">{strings.providerSettings.accounts}</span>
-      {#if source || accounts.some((entry) => quotaOf(entry))}
-        <button class="quiet small" disabled={quotaBusy} onclick={() => void readQuotas(true)}><RefreshCw size={13} />{strings.quotas.refresh}</button>
-      {/if}
     </div>
   {/if}
   {#each accounts as entry (entry.id)}
-    {@const quota = quotaOf(entry)}
     <div class="account" data-testid="account-row" data-account-id={entry.id}>
       <div class="account-line">
         <div class="who">
@@ -456,29 +425,8 @@
         </div>
       </div>
       {#if verified[entry.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[entry.id]))}</p>{/if}
-      {#if quota}
-        <div class="quota">
-          <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" class="switch-sm" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(entry.id, event.currentTarget.checked)} /></label>
-          {#if quota.status !== 'disabled'}<QuotaList rows={[quota]} bare />{/if}
-        </div>
-      {/if}
     </div>
   {/each}
-
-  {#if source}
-    <div class="account" data-testid="quota-source" data-account-id={source.accountId}>
-      <div class="account-line">
-        <div class="who titled">
-          <h3>{strings.quotas.cliSource}</h3>
-          <InfoTip topic={strings.quotas.cliSource} text={strings.quotas.cliHint} />
-        </div>
-      </div>
-      <div class="quota">
-        <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" class="switch-sm" data-testid="quota-cli-monitor" checked={source.enabled} onchange={(event) => void monitor(source.accountId, event.currentTarget.checked)} /></label>
-        {#if source.status !== 'disabled'}<QuotaList rows={[source]} bare />{/if}
-      </div>
-    </div>
-  {/if}
 
   {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
     <div class="more">
@@ -505,8 +453,11 @@
         {store}
         choice={{ providerId: provider.id, accountId: account.id, model, effort, permissionMode: 'default' }}
         locked
+        single
         onpick={(patch) => {
-          if (patch.model) store.setModelDefault(provider.id, account.id, patch.model, store.defaultEffortOf(provider.id, account.id, patch.model));
+          // A model belongs to its provider: a default is only ever one of this row's own.
+          if (!patch.model || (patch.providerId !== undefined && patch.providerId !== provider.id)) return;
+          store.setModelDefault(provider.id, account.id, patch.model, store.defaultEffortOf(provider.id, account.id, patch.model));
         }}
       />
       {#if info?.effort?.levels.length}
@@ -698,7 +649,6 @@
   .line, .account-line, .member-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .who { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; }
   .name { font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
-  .who.titled { display: flex; align-items: center; }
   h3 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* The name side is the fold's button: a large target, the chevron in front of it. */
@@ -785,7 +735,6 @@
   .section-label { display: inline-flex; align-items: center; gap: 2px; }
   .account { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .kind { color: var(--color-muted-foreground); }
-  .quota { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); }
   .more { display: flex; gap: 6px; flex-wrap: wrap; }
   .facts { display: grid; gap: 6px; margin: 0; }
   .fact { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: baseline; font-size: var(--text-sm); }
@@ -803,8 +752,6 @@
   /* The composer's own picker and effort chip, locked to the provider of this row. */
   .default-model { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .pending-effort { color: var(--color-muted-foreground); font-size: var(--text-sm); text-transform: capitalize; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
-
-  .monitor { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
 
   /* The page's update controls, small enough to sit beside the title, under it in a narrow window. */
   header { flex-wrap: wrap; }

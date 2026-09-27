@@ -20,7 +20,7 @@
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
 - [Keyboard shortcuts](keybindings.md): defaults and customization.
 - [The right panel](panel.md): browser, changes, files, tasks, workflows and trace beside the chat.
-- [Chat and preview experiments](experiments.md): file delivery and browser comments.
+- [Experiments](experiments.md): file delivery, browser comments and resident agents.
 - [The thread terminal](terminal.md): the shell under the chat, and sign-ins that need one.
 - [The `boite` CLI](cli.md): what an agent runs to reach its thread and its panel.
 - [Titles](titles.md): automatic and manual conversation titles.

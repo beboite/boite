@@ -11,6 +11,10 @@ An agent with an updater and no way to name its newest release, the Antigravity
 CLI being one, announces nothing: its version on the Providers row reads
 `Checks by itself` on hover and the row carries `Run its updater`, which runs
 the updater on request and reads the version again.
+An updater that exits cleanly has just named the newest release it found, so
+the core records that version as the newest until the next check. The row then
+reads `Up to date` instead of offering the updater again, even when nothing
+changed. A failed run keeps the button and shows the failure.
 The automatic switch leaves it alone, such an agent updates itself.
 
 ## What the user sees

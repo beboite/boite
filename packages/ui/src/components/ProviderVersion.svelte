@@ -39,6 +39,14 @@
 
   let update = $derived(store.harnessUpdates.find((entry) => entry.providerId === provider.id));
   let install = $derived(store.installOf(provider.id));
+  /** The agent's own updater ran from here: its answer, even "nothing newer", is shown once it lands. */
+  let asked = $state(false);
+  let answered = $derived(asked && update?.state === 'idle' && update.latest !== null && update.latest === update.current);
+
+  function runUpdater(providerId: string) {
+    asked = true;
+    void store.updateHarness(providerId);
+  }
 
   /** What the version says on hover: whose install it is and where it stands. */
   function versionTitle(update: HarnessUpdate): string {
@@ -59,6 +67,8 @@
       <span class="note-inline live" role="status">{update.state === 'updating' ? strings.providerSettings.updating : strings.harnessUpdates.checking}</span>
     {:else if skippedNow(update) && update.latest !== null}
       <span class="note-inline">{strings.harnessUpdates.skipped(update.latest)}</span>
+    {:else if answered}
+      <span class="note-inline" role="status" data-testid="harness-update-current">{strings.harnessUpdates.upToDate}</span>
     {/if}
     {#if skippedNow(update)}
       <button type="button" class="quiet small" data-testid="harness-update-unskip" onclick={() => void store.skipHarnessUpdate(update.providerId, null)}>{strings.harnessUpdates.unskip}</button>
@@ -67,7 +77,7 @@
         {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
       </button>
     {:else if update.route === 'self' && update.latest === null && update.current !== null && update.state !== 'updating'}
-      <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => void store.updateHarness(update.providerId)}>{strings.harnessUpdates.runUpdater}</button>
+      <button type="button" class="quiet small" data-testid="harness-update-row-blind" onclick={() => runUpdater(update.providerId)}>{strings.harnessUpdates.runUpdater}</button>
     {/if}
   </span>
 {:else if provider.available && install?.state === 'installed' && !installing}

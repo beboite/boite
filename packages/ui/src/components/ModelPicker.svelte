@@ -23,6 +23,7 @@
     store,
     choice,
     locked = false,
+    single = false,
     disabled = false,
     onpick
   }: {
@@ -30,6 +31,8 @@
     choice: Choice | null;
     /** Optional restriction for callers that intentionally keep one account. */
     locked?: boolean;
+    /** The choice's provider alone: no provider rail and no favorites, its models straight away. */
+    single?: boolean;
     disabled?: boolean;
     onpick: (patch: PickPatch) => void;
   } = $props();
@@ -194,7 +197,7 @@
     popover.toggle();
     if (popover.open) {
       shownProviderId = choice?.providerId ?? null;
-      favoritesOpen = favorites.length > 0;
+      favoritesOpen = !single && favorites.length > 0;
       legacy.hide();
       modelQuery = '';
       expandedFor = null;
@@ -299,12 +302,13 @@
     <div
       class="popover"
       class:closing={popover.closing}
+      class:single
       role="menu"
       tabindex="-1"
       aria-label={strings.composer.picker}
         data-testid="composer-picker-menu"
       bind:this={menu}
-      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? null, dismiss: () => popover.hide() }}
+      use:floating={{ anchor: () => root?.closest<HTMLElement>("[data-testid=composer]") ?? root ?? null, dismiss: () => popover.hide() }}
       use:popover.attach
       onanimationend={popover.end}
       {onkeydown}
@@ -312,9 +316,11 @@
       {#if store.owner}
         <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {/if}
-      <div class="column rail">
-        <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
-      </div>
+      {#if !single}
+        <div class="column rail">
+          <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
+        </div>
+      {/if}
 
       <div class="column models main-models">
         {#snippet modelRow(model: ModelInfo)}
@@ -535,6 +541,12 @@
   .main-models .head { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
   .model-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 6px; }
   .rail { grid-area: 1 / 1; }
+  /* One provider: its model list is the whole popover, the refresh sits in the list's head. */
+  /* No provider to switch to, so no height to hold steady: it is as tall as its models. */
+  .popover.single { grid-template-columns: minmax(0, 1fr); width: min(320px, calc(100vw - 32px)); height: auto; }
+  .single .main-models { grid-area: 1 / 1 / 3 / 2; border-left: none; }
+  .single .main-models .head { padding-right: 44px; }
+  .single .refresh { position: absolute; top: 6px; right: 6px; margin: 0; width: var(--control-sm); height: var(--control-sm); border: none; background: transparent; }
   .refresh { grid-area: 2 / 1; align-self: end; justify-self: center; margin: 6px; position: relative; z-index: 3; display: grid; place-items: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-muted-foreground); }
   .refresh:hover:not(:disabled) { background: linear-gradient(var(--color-hover) 0 0), var(--color-surface); color: var(--color-foreground); }
   .head {
@@ -682,5 +694,9 @@
       width: var(--touch-target);
       height: var(--touch-target);
     }
+    .popover.single { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+    .single .main-models { grid-area: 1 / 1 / 2 / 2; }
+    .single .main-models .head { padding-right: calc(var(--touch-target) + 8px); }
+    .single .refresh { top: 0; right: 0; }
   }
 </style>

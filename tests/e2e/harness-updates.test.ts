@@ -82,6 +82,11 @@ test('Settings, Providers shows every agent version on its row, offers a skipped
   expect(await page.evaluate(`document.querySelector('${cli} .version').title`)).toContain('Checks by itself');
   expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') !== null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${cli}').closest('${id('provider-settings')}').dataset.providerId`)).toBe('antigravity');
+  // Its updater ran and exited clean: the row says so instead of offering it again.
+  await page.click(`${cli} ${id('harness-update-row-blind')}`);
+  await page.waitFor(`document.querySelector('${cli} ${id('harness-update-current')}')`);
+  expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') === null`)).toBe(true);
+  await capture('harness-update-blind-current.png');
 
   await page.click(id('setting-auto-update-harnesses'));
   await page.waitFor(`document.querySelector('${id('setting-auto-update-harnesses')}').checked`);
