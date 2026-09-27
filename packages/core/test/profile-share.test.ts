@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OsProfile, ProviderShare } from '@boite/contracts';
@@ -122,5 +122,25 @@ describe('profile sharing', () => {
     writeFileSync(join(source, 'nested', 'hooks.json'), '{}');
     const failed = shareProfile(account, profile, [{ variable: 'CODEX_HOME', paths: ['nested/hooks.json'] }]);
     expect(failed.map((problem) => problem.path)).toEqual(['nested/hooks.json']);
+  });
+
+  test('a link on the way to a shared path stops it, and the account\'s own link at the path is set aside', () => {
+    const outside = join(root, 'outside');
+    mkdirSync(outside);
+    mkdirSync(join(source, 'linked'));
+    writeFileSync(join(source, 'linked', 'hooks.json'), '{}');
+    symlinkSync(outside, join(account, 'linked'), 'junction');
+    const problems = shareProfile(account, profile, [{ variable: 'CODEX_HOME', paths: ['linked/hooks.json'] }]);
+    expect(problems.map((problem) => problem.path)).toEqual(['linked/hooks.json']);
+    expect(problems[0]?.message).toContain('is a link');
+    expect(readdirSync(outside)).toEqual([]);
+
+    // Boite never makes a link where a file goes: one there is the account's.
+    symlinkSync(outside, join(account, 'hooks.json'), 'junction');
+    expect(shareProfile(account, profile, shares)).toEqual([]);
+    expect(lstatSync(join(account, 'hooks.json')).isSymbolicLink()).toBe(false);
+    const aside = readdirSync(account).find((name) => name.startsWith('hooks.json.own-'));
+    expect(lstatSync(join(account, aside!)).isSymbolicLink()).toBe(true);
+    expect(readdirSync(outside)).toEqual([]);
   });
 });

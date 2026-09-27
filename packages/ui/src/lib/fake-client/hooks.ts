@@ -60,10 +60,13 @@ export function recordHookRun(ctx: FakeContext, run: HookRun): void {
   ctx.hooks.recent = [run, ...ctx.hooks.recent].slice(0, 50);
   const row = ctx.hooks.providers.find(entry => entry.providerId === run.providerId);
   if (row) {
-    row.runs += 1;
-    if (run.outcome === 'blocked') row.blocked += 1;
-    else if (run.outcome === 'failed') row.failed += 1;
-    else if (run.outcome === 'skipped') row.skipped += 1;
+    if (run.outcome === 'skipped') {
+      row.skipped += 1;
+    } else {
+      row.runs += 1;
+      if (run.outcome === 'failed') row.failed += 1;
+      else if (run.outcome === 'blocked' || run.outcome === 'stopped') row.blocked += 1;
+    }
   }
   ctx.emit('hooks.changed', { at: run.at });
 }

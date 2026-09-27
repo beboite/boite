@@ -60,6 +60,8 @@ before every spawn (`packages/core/src/profile-share.ts`):
   `<name>.own-<date>`, never deleted. A file or directory the user removed from
   their own directory goes from the account too, as long as it is still what
   Boite put there.
+- A path with a link between it and the account directory is not shared, since
+  whatever went through the link would land outside the account.
 - `.boite-shared.json` in the account directory records the links and the hash
   of each copy, which is how Boite tells its own work from the account's.
 

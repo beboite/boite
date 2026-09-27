@@ -92,6 +92,11 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
       }
       const retarget = (share.retarget?.[path] ?? []).map((name): [string, string] => [join(from, name), join(to, name)]);
       try {
+        const link = linkedParent(isolationDir, key);
+        if (link !== null) {
+          problems.push({ path, message: `${link} is a link, so ${target} would be written outside the account directory` });
+          continue;
+        }
         syncPath(join(from, path), target, key, retarget, marker);
       } catch (error) {
         problems.push({ path, message: messageOf(error) });
@@ -110,6 +115,7 @@ export function shareProfile(isolationDir: string, profile: OsProfile, shares: r
 export function unshareProfile(isolationDir: string): void {
   for (const key of readMarker(isolationDir).links) {
     const target = join(isolationDir, key);
+    if (linkedParent(isolationDir, key) !== null) continue;
     if (statEntry(target)?.isSymbolicLink() === true) unlinkSync(target);
   }
 }
@@ -161,7 +167,10 @@ function copyFile(
   const wanted = digest(content);
   if (current?.isSymbolicLink() === true) {
     // Never written through: the copy may differ from the file a link reaches.
-    unlinkSync(target);
+    // Boite's own link, from when the source was a directory, is replaced;
+    // anyone else's is set aside like a file would be.
+    if (marker.links.includes(key)) unlinkSync(target);
+    else renameSync(target, aside(target));
   } else if (current?.isDirectory() === true) {
     renameSync(target, aside(target));
   } else if (current !== undefined) {
@@ -228,6 +237,23 @@ function readMarker(isolationDir: string): Marker {
   } catch {
     return { links: [], files: {} };
   }
+}
+
+/**
+ * The first directory between the account's directory and a shared path that
+ * is a link, or null. Whatever went through it would land outside the account,
+ * and a later cleanup could delete a file there: the account's own link, or
+ * Boite's for a directory another share path sits in.
+ */
+function linkedParent(isolationDir: string, key: string): string | null {
+  let at = isolationDir;
+  for (const segment of key.split('/').slice(0, -1)) {
+    at = join(at, segment);
+    const found = statEntry(at);
+    if (found === undefined) return null;
+    if (found.isSymbolicLink()) return at;
+  }
+  return null;
 }
 
 /**

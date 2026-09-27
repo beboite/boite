@@ -452,6 +452,18 @@ function checkShared(
     if (prefixes === null) {
       reject(file, `${field}.variable`, 'an isolation variable of one of the profiles', `${field}.variable names ${variable}, which no profile isolates`);
     }
+    // A profile that points the variable elsewhere would get the share outside
+    // the account's directory, where no login or seed file is checked.
+    for (const [os, profile] of Object.entries(profiles)) {
+      const template = profile?.isolation[variable];
+      if (template === undefined || template.startsWith('{isolationDir}')) continue;
+      reject(
+        file,
+        `${field}.variable`,
+        `a variable every profile sets under {isolationDir}`,
+        `${field}.variable names ${variable}, which the ${os} profile sets to ${template}, outside the account directory`,
+      );
+    }
     const paths = asArray(obj['paths'], file, `${field}.paths`).map((raw, at) => {
       const path = checkRelative(raw, file, `${field}.paths[${at}]`, variable);
       for (const prefix of prefixes) {

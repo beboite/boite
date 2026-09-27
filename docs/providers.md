@@ -185,7 +185,8 @@ Codex's:
   `hooks` block, or `modules`, a directory of plugin scripts.
 
 A share or a source is refused at load when a path is absolute or has a `..`,
-`.` or empty segment, when no profile isolates its variable, when a `retarget`
+`.` or empty segment, when no profile isolates its variable, when a share's
+variable is set outside `{isolationDir}` by any profile, when a `retarget`
 entry names something outside `paths`, or when a shared path covers or sits
 inside a file the account keeps to itself: `auth.session`, a profile's
 `session` or a `seedFiles` entry. That is why OpenCode, whose config and data

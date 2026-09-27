@@ -62,6 +62,15 @@ describe('hook descriptors', () => {
     expect(refusal(descriptor({ hookSources: [{ variable: 'MINE_HOME', path: 'hooks', format: 'yaml' }] }))).toMatchObject({ field: 'hookSources[0].format' });
   });
 
+  test('a share whose variable one profile sets outside the account directory is refused', () => {
+    const raw = descriptor({ shared: [{ variable: 'MINE_HOME', paths: ['settings.json'] }] });
+    const profiles = raw.profiles as Record<string, { isolation: Record<string, string> }>;
+    raw.profiles = { ...profiles, linux: { ...profiles.linux, isolation: { ...profiles.linux!.isolation, MINE_HOME: '~/.mine' } } };
+    const rejected = refusal(raw);
+    expect(rejected).toMatchObject({ field: 'shared[0].variable', expected: 'a variable every profile sets under {isolationDir}' });
+    expect(rejected.message).toContain('linux profile sets to ~/.mine');
+  });
+
   test('hook sources need an agent that runs hooks', () => {
     expect(refusal(descriptor({ hookSources: [{ variable: 'MINE_HOME', path: 'hooks', format: 'events' }] }, false)))
       .toMatchObject({ field: 'hookSources', expected: 'capabilities.hooks set to true' });
