@@ -119,8 +119,9 @@ notice at once, without waiting for the next check.
 - Versions compare by their numbers; a pre-release is older than its release.
   The self route offers only a newer version. The managed route offers whatever
   the descriptor pins, since a Boite release may pin an older, working one.
-- An updater that exits with zero and leaves the version unchanged is reported
-  as failed, with the version it still reports.
+- An updater that exits with zero and leaves the version unchanged while a
+  newer release is known is reported as failed, with the version it still
+  reports. With no newer release known, the same run reads `Up to date`.
 - Skips live in `<dataDir>/harness-updates.json`. An unreadable file skips
   nothing and says so in the core log.
 - The methods are owner-only. A paired phone neither sees nor starts an update.

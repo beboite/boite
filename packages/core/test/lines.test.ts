@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { LineSplitter } from '../src/drivers/lines.ts';
+import { PassThrough } from 'node:stream';
+import { LineSplitter, stderrDrained, stderrLines } from '../src/drivers/lines.ts';
 
 const CHUNK = 64 * 1024;
 
@@ -88,5 +89,26 @@ describe('LineSplitter', () => {
     expect(lines[0]?.length).toBe(huge.length);
     // The old rescan took about 690 ms here on a Ryzen 9800X3D, this one about 10.
     expect(elapsed).toBeLessThan(300);
+  });
+});
+
+describe('stderrDrained', () => {
+  test('waits for the last line of a pipe that ends after the exit', async () => {
+    const stream = new PassThrough();
+    const lines: string[] = [];
+    stderrLines(stream, (line) => lines.push(line));
+    const drained = stderrDrained(stream, 5_000);
+    stream.end('not signed in');
+    await drained;
+    expect(lines).toEqual(['not signed in']);
+  });
+
+  test('gives up on a pipe a descendant keeps open', async () => {
+    const stream = new PassThrough();
+    const started = performance.now();
+    await stderrDrained(stream, 50);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(stream.readableEnded).toBe(false);
+    stream.destroy();
   });
 });

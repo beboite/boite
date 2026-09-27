@@ -75,7 +75,9 @@ answer:
 
 - the limits, process guards, agent updates and question mode of Settings;
 - the keybindings file, one entry at a time where the two differ, an unbound
-  command included. A refused entry puts back every entry already changed;
+  command included. A refused entry makes the client try to put back every
+  entry already changed; a restore the target refuses too leaves that entry
+  as copied;
 - the brain's Use with agents, instructions and guide switches, when both
   machines have a brain folder. The folder itself stays the target's own.
 

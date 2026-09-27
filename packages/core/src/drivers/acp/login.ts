@@ -4,7 +4,7 @@ import type { ClientConnection } from '@agentclientprotocol/sdk';
 import pkg from '../../../package.json';
 import { messageOf } from '../../errors.ts';
 import type { SpawnedChild, SpawnOptions } from '../../procs.ts';
-import { stderrLines } from '../lines.ts';
+import { stderrDrained, stderrLines } from '../lines.ts';
 import { CLIENT_NAME, MINUTE_MS, preferExit, STDERR_MAX, type Timer } from './protocol.ts';
 import { jsonLinesOnly } from './stdout.ts';
 
@@ -53,10 +53,12 @@ export function runAcpLogin(input: AcpLoginInput): AcpLoginRun {
   // Listened for before the SDK loads: an agent that exits at once would
   // otherwise be gone before anyone heard it.
   const died = new Promise<never>((_resolve, reject) => {
-    // `close` and not `exit`: stderr is flushed by then.
-    child.once('close', (code) => {
-      const head = `the agent exited with code ${code ?? 'unknown'} before it authenticated`;
-      reject(new Error(lastStderr.length === 0 ? head : `${head}: ${lastStderr}`));
+    // The exit can land before the last stderr line is read: wait a moment for the pipe.
+    child.once('exit', (code) => {
+      void stderrDrained(child.stderr).then(() => {
+        const head = `the agent exited with code ${code ?? 'unknown'} before it authenticated`;
+        reject(new Error(lastStderr.length === 0 ? head : `${head}: ${lastStderr}`));
+      });
     });
     child.once('error', (error) => {
       reject(new Error(`the agent did not start: ${messageOf(error)}`));
