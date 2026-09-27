@@ -52,6 +52,8 @@ export class SpeechServer {
   readyMs = 120_000;
   private current: Running | null = null;
   private idle: ReturnType<typeof setTimeout> | undefined;
+  /** Inference requests still waiting for their answer. */
+  private inflight = 0;
 
   constructor(private readonly core: Core, private readonly cwd: string) {}
 
@@ -74,13 +76,20 @@ export class SpeechServer {
       if (this.current === running) this.current = null;
       throw error;
     }
+    // The idle wait counts from the loaded model, not from the start of a load.
+    this.touch();
     return running.base;
   }
 
   /** Keeps a loaded model for another `idleMs`. */
   touch(): void {
     clearTimeout(this.idle);
-    this.idle = setTimeout(() => { void this.stop(); }, this.idleMs);
+    this.idle = setTimeout(() => {
+      // A model still loading is bounded by `readyMs`, a request by its own
+      // signal: each starts the wait again when it ends.
+      if (this.inflight > 0 || (this.current?.alive && !this.current.loaded)) return;
+      void this.stop();
+    }, this.idleMs);
     if (typeof this.idle.unref === 'function') this.idle.unref();
   }
 
@@ -106,15 +115,21 @@ export class SpeechServer {
     form.set('language', options.language);
     if (options.audioCtx > 0) form.set('audio_ctx', String(options.audioCtx));
     let response: Response;
-    try {
-      // Closing the connection is what makes whisper-server abort the decode.
-      response = await fetch(`${base}/inference`, { method: 'POST', body: form, signal: options.signal });
-    } catch (error) {
-      options.signal.throwIfAborted();
-      throw refused(`speech: whisper-server stopped answering${this.current ? '' : '; it will start again on the next dictation'} (${error instanceof Error ? error.message : String(error)})`);
-    } finally { this.touch(); }
     let body: unknown;
-    try { body = await response.json(); } catch { body = null; }
+    this.inflight += 1;
+    try {
+      try {
+        // Closing the connection is what makes whisper-server abort the decode.
+        response = await fetch(`${base}/inference`, { method: 'POST', body: form, signal: options.signal });
+      } catch (error) {
+        options.signal.throwIfAborted();
+        throw refused(`speech: whisper-server stopped answering${this.current ? '' : '; it will start again on the next dictation'} (${error instanceof Error ? error.message : String(error)})`);
+      }
+      try { body = await response.json(); } catch { body = null; }
+    } finally {
+      this.inflight -= 1;
+      this.touch();
+    }
     if (!response.ok) throw refused(`speech: whisper-server answered HTTP ${response.status}; check the model in Voice settings`);
     if (!body || typeof body !== 'object' || typeof (body as { text?: unknown }).text !== 'string') throw refused('speech: whisper-server returned an invalid transcript');
     const result = body as { text: string; language?: unknown };
