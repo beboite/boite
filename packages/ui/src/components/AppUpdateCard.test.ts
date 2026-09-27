@@ -49,6 +49,57 @@ test('shows channel mismatch, versions, safe release notes and the ready action'
   stop();
 });
 
+test('the check button stays on the card, disabled, while a check runs', async () => {
+  const current: UpdateSnapshot = {
+    phase: 'current',
+    currentVersion: '2.0.0-nightly.7',
+    currentChannel: 'nightly',
+    channel: 'nightly',
+    version: null,
+    notes: null,
+    publishedAt: null,
+    received: 0,
+    total: null,
+    error: null,
+    supported: true
+  };
+  let publish!: (snapshot: UpdateSnapshot) => void;
+  let finish!: (snapshot: UpdateSnapshot) => void;
+  const native: AppUpdateBackend = {
+    status: vi.fn(async () => current),
+    // The shell announces the check before it answers, as the native command does.
+    check: vi.fn(() => {
+      publish({ ...current, phase: 'checking' });
+      return new Promise<UpdateSnapshot>((resolve) => { finish = resolve; });
+    }),
+    download: vi.fn(async () => current),
+    install: vi.fn(async () => undefined),
+    listen: vi.fn(async (handler) => {
+      publish = handler;
+      return () => undefined;
+    })
+  };
+  const updater = new AppUpdater(native, undefined, () => true);
+  const stop = updater.start();
+  await updater.settled();
+  mounted = mount(AppUpdateCard, { target: document.body, props: { updater } });
+  const button = () => document.querySelector<HTMLButtonElement>('[data-testid=app-update-check]');
+
+  expect(button()?.disabled).toBe(false);
+  button()!.click();
+  flushSync();
+  expect(button()?.disabled).toBe(true);
+  expect(button()?.getAttribute('aria-busy')).toBe('true');
+  expect(button()?.textContent).toContain('Checking');
+
+  finish({ ...current, phase: 'current' });
+  await updater.settled();
+  flushSync();
+  expect(button()?.disabled).toBe(false);
+  expect(native.check).toHaveBeenCalledOnce();
+  stop();
+});
+
 test('prevents duplicate install dialogs and refuses a stale confirmed selection', async () => {
   const ready: UpdateSnapshot = {
     phase: 'ready',

@@ -300,6 +300,7 @@ export const fr: Translation = {
     notes: 'Notes de version',
     retained: 'Changer de canal conserve vos conversations et vos réglages.',
     check: 'Rechercher des mises à jour',
+    checkingAction: 'Recherche en cours',
     retry: 'Réessayer',
     download: 'Télécharger',
     install: 'Installer et redémarrer',
