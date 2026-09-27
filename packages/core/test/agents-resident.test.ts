@@ -85,6 +85,21 @@ test('missed routine creates one durable work item, never overlaps or catches up
  expect((await client.call('agents.snapshot',{})).work).toHaveLength(1);
 });
 
+test('a once routine that ran stays done: resuming it fires nothing, a new date re-arms it',async()=>{
+ const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Tomorrow',prompt:'Look once',schedule:{kind:'once',at:Date.now()+86400000},enabled:true,nextAt:null,lastWorkId:null,lastScheduledAt:null}});
+ const work=await client.call('agents.routine.run',{routineId:routine.id,requestId:'once-now'});
+ unpause();
+ await waitFor(()=>h.core.workforce.records.get('work',work.id).status==='done');
+ const ran=h.core.workforce.records.get('routine',routine.id);
+ expect([ran.enabled,ran.nextAt]).toEqual([false,null]);
+ const resumed=await client.call('agents.routine.save',{id:ran.id,expectedRevision:ran.revision,value:{...ran,enabled:true}});
+ expect(resumed.nextAt).toBeNull();
+ h.core.workforce.routines.tick();
+ expect(h.core.workforce.records.list('work')).toHaveLength(1);
+ const at=Date.now()+3600000;
+ expect((await client.call('agents.routine.save',{id:resumed.id,expectedRevision:resumed.revision,value:{...resumed,schedule:{kind:'once',at}}})).nextAt).toBe(at);
+});
+
 test('routine results appear once in the identity conversation', async () => {
  const routine=await client.call('agents.routine.save',{value:{agentId:agent.id,name:'Proposal',prompt:'A private puzzle prototype proposal',schedule:{kind:'interval',everyMinutes:60},enabled:false,nextAt:null,lastWorkId:null,lastScheduledAt:null}});
  const request={routineId:routine.id,requestId:'routine-result-001'};
@@ -160,6 +175,15 @@ test('revoking an account stops active work and holds queued work until explicit
  expect(h.core.workforce.records.list('run')).toHaveLength(1);
  agent=await client.call('agents.profile.save',{id:agent.id,expectedRevision:agent.revision,value:{...agent,status:'paused'}});
  expect(agent.status).toBe('paused');
+});
+
+test('pausing an agent pauses its running work and says so, not that access was withdrawn', async () => {
+ unpause();
+ await client.call('agents.message.send',{scope:{kind:'agent',id:agent.id},recipientIds:[],text:'[sleep:60000]',requestId:'pause-running-001'});
+ await waitFor(()=>h.core.workforce.records.list('run').some(r=>r.status==='running'));
+ agent=await client.call('agents.profile.save',{id:agent.id,expectedRevision:agent.revision,value:{...agent,status:'paused'}});
+ await waitFor(()=>h.core.workforce.records.list('work').every(w=>w.status==='paused'));
+ expect(h.core.workforce.records.list('work').map(w=>w.error)).toEqual(['The agent was paused. Resume it to continue.']);
 });
 
 test('automatic compaction keeps the pending request and starts it in a fresh context', async () => {

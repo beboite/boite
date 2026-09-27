@@ -16,7 +16,10 @@
     if (saved) { name = ''; prompt = ''; adding = false; }
   }
   async function toggle(routine: AgentRoutine) { await view.call('agents.routine.save', { id: routine.id, expectedRevision: routine.revision, value: { ...routine, enabled: !routine.enabled } }); }
+  /** A once routine that ran has nothing left to pause or resume: the core never fires it again at its past date. */
+  const spent = (routine: AgentRoutine) => routine.schedule.kind === 'once' && routine.lastScheduledAt !== null && routine.nextAt === null;
   function when(routine: AgentRoutine): string {
+    if (spent(routine)) return labels.done;
     if (!routine.enabled) return labels.paused;
     return routine.nextAt ? new Date(routine.nextAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : labels.done;
   }
@@ -33,7 +36,7 @@
           {#if view.store.owner}
             <span class="agent-form-actions">
               <button type="button" class="small" disabled={view.pending} onclick={() => void view.call('agents.routine.run', { routineId: routine.id, requestId: crypto.randomUUID() })}>{labels.runNow}</button>
-              <button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle(routine)}>{routine.enabled ? labels.pause : labels.resume}</button>
+              {#if !spent(routine)}<button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle(routine)}>{routine.enabled ? labels.pause : labels.resume}</button>{/if}
             </span>
           {/if}
         </article>

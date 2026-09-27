@@ -35,7 +35,9 @@ export class AgentRoutines {
     if(previous&&previous.agentId!==agent.id)throw refused('agentId: a routine cannot change owner');
     const schedule=checkSchedule(v.schedule),enabled=boolean(v.enabled,'enabled');
     const changed=JSON.stringify(previous?.schedule)!==JSON.stringify(schedule);
-    const nextAt=!enabled?null:previous?.enabled&&!changed?previous.nextAt:schedule.kind==='once'?schedule.at:nextOccurrence(schedule,Date.now());
+    // A once routine that already ran is done: resuming it must not fire it again at its past date. A new date re-arms it.
+    const spent=schedule.kind==='once'&&!changed&&previous?.lastScheduledAt!=null;
+    const nextAt=!enabled||spent?null:previous?.enabled&&!changed?previous.nextAt:schedule.kind==='once'?schedule.at:nextOccurrence(schedule,Date.now());
     const value={agentId:agent.id,name:text(v.name,'name',120),prompt:text(v.prompt,'prompt',16000),schedule,enabled,nextAt,lastWorkId:previous?.lastWorkId??null,lastScheduledAt:previous?.lastScheduledAt??null};
     const result=params.id?this.r.update('routine',params.id,params.expectedRevision!,value):this.r.create('routine',value);
     this.core.workforce.changed();return result;
@@ -46,7 +48,7 @@ export class AgentRoutines {
       if(agent.status!=='active')throw refused('routine: agent is paused or archived');
       if(routine.lastWorkId&&!['done','cancelled'].includes(this.r.get('work',routine.lastWorkId).status))throw refused('routine: previous work is unfinished');
       const work=this.core.workforce.resident.enqueue(agent.id,routine.prompt);
-      this.r.update('routine',routine.id,routine.revision,{...routine,lastWorkId:work.id,lastScheduledAt:Date.now(),nextAt:routine.enabled?nextOccurrence(routine.schedule,Date.now()):null,enabled:routine.enabled&&routine.schedule.kind!=='once'});
+      this.r.update('routine',routine.id,routine.revision,{...routine,lastWorkId:work.id,lastScheduledAt:Date.now(),nextAt:routine.enabled&&routine.schedule.kind!=='once'?nextOccurrence(routine.schedule,Date.now()):null,enabled:routine.enabled&&routine.schedule.kind!=='once'});
       this.core.workforce.changed();return work;
     });
   }

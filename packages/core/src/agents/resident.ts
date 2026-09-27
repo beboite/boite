@@ -83,9 +83,12 @@ export class ResidentAgents {
   }
   enforce():void {
     for(const run of this.records.withStatus('run',['accepted','running'])) {
-      if(this.records.get('profile',run.agentId).status==='active'&&this.allowed(run.agentId,run.execution))continue;
+      const status=this.records.get('profile',run.agentId).status;
+      if(status==='active'&&this.allowed(run.agentId,run.execution))continue;
+      // The card says what the owner did: a paused or archived agent is not a withdrawn route.
+      const error=status==='paused'?'The agent was paused. Resume it to continue.':status==='archived'?'The agent was archived.':'Model or account access withdrawn. Review before resuming.';
       const work=this.records.get('work',run.workId);
-      if(work.status==='running')this.records.update('work',work.id,work.revision,{...work,status:'paused',error:'Model or account access withdrawn. Review before resuming.'});
+      if(work.status==='running')this.records.update('work',work.id,work.revision,{...work,status:'paused',error});
       this.core.threads.stopTurn(run.threadId);
     }
     for(const thread of this.core.journal.listThreads()){
