@@ -66,13 +66,13 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('the draft sentence follows worktree, permissions, model and effort on desktop and phone', async () => {
   await page.click(id('new-thread'));
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Claude Opus 5')`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Opus 5')`);
   await page.click(id('composer-worktree'));
   await page.click(id('composer-mode'));
   await page.click(`${id('composer-mode-menu')} [data-value="bypassPermissions"]`);
   await page.click(id('composer-picker'));
   await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Claude Sonnet 5')`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Sonnet 5')`);
   await page.waitFor(`!document.querySelector('${id('composer-picker-menu')}')`);
   await page.click(id('composer-picker'));
   await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
@@ -86,7 +86,7 @@ test('the draft sentence follows worktree, permissions, model and effort on desk
   const sentence = await page.evaluate<string>(`document.querySelector('${id('draft-sentence')}').textContent`);
   expect(sentence).toContain('in a worktree');
   expect(sentence).toContain('with all permissions');
-  expect(sentence).toContain('Claude Opus 5');
+  expect(sentence).toContain('Opus 5');
   expect(sentence).toContain('High effort');
   await capture('composer-draft-desktop');
   await size(true);

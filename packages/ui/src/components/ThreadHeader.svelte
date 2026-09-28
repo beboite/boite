@@ -11,7 +11,6 @@
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import Menu from './Menu.svelte';
-  import StatusMark from './StatusMark.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
@@ -114,9 +113,8 @@
 
 </script>
 
-<div class="thread-header" data-testid="thread-header">
+<div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
       {#if thread}
-        <StatusMark status={thread.status} testid="thread-status" />
         {#if renaming}
           <input
             class="rename"

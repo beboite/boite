@@ -444,15 +444,18 @@
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
       <Sidebar {store} />
-      <div class="notice">
-        <h1>{strings.app.noEndpointTitle}</h1>
-        <p class="muted">{strings.app.noEndpointBody}</p>
-        <button type="button" class="primary" onclick={() => store.showSettings()}>
-          {strings.app.openSettings}
-        </button>
-      </div>
+      <!-- The notice gives way to Settings: the two cards side by side left
+           Settings too narrow for its nav and its page. -->
       {#if store.page === 'settings'}
         {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+      {:else}
+        <div class="notice framed">
+          <h1>{strings.app.noEndpointTitle}</h1>
+          <p class="muted">{strings.app.noEndpointBody}</p>
+          <button type="button" class="primary" onclick={() => store.showSettings()}>
+            {strings.app.openSettings}
+          </button>
+        </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
@@ -471,7 +474,7 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
-      <main>
+      <main class="framed">
         {#key store}
           <ChatView {store} />
         {/key}
@@ -569,11 +572,29 @@
     flex-direction: column;
   }
 
-  /* Maximized, the panel takes the room and the chat column keeps none. */
+  /* The frame: the cards keep `--frame-gap` from the window's right and bottom
+     edges and from each other. The rails on the left stand on the frame, so
+     only a folded sidebar leaves the chat card a left gap to keep itself. */
+  @media (min-width: 721px) {
+    .body {
+      gap: var(--frame-gap);
+      padding: 0 var(--frame-gap) var(--frame-gap) 0;
+    }
+
+    .body:has(> :global(.sidebar.collapsed)) {
+      padding-left: var(--frame-gap);
+    }
+  }
+
+  /* Maximized, the panel takes the room and the chat column keeps none, not
+     even its edge or the gap beside it. */
   .body.panel-maximized main {
     flex: none;
     width: 0;
     overflow: hidden;
+    border: none;
+    box-shadow: none;
+    margin-right: calc(-1 * var(--frame-gap));
   }
 
   .boot {
@@ -581,12 +602,14 @@
   }
 
   .notice {
-    margin: auto;
+    flex: 1;
+    min-width: 0;
     padding: 40px;
     text-align: center;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 8px;
   }
 

@@ -1,10 +1,10 @@
 /** The turn engine: start, stream and stop a turn, the way the echo driver answers. */
-import { previewPrompt, RpcErrorCode, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type Usage } from '@boite/contracts';
+import { previewPrompt, RpcErrorCode, type AgentLetter, type Attachment, type Message, type MessagePart, type PreviewReference, type Thread, type ThreadId, type Turn, type TurnInFlightData, type Usage } from '@boite/contracts';
 import { decodedBytes } from '../attachments';
 import { RpcFailure } from '../client';
 import { DIFF_NEW, DIFF_OLD, DIFF_PATH, DOC_TEXT, DOC_TITLE, IMAGE_BASE64, ASYNC_QUESTION_OPTIONS, ASYNC_QUESTION_TEXT, SPAWN_MARKER } from './conversation';
 import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from './providers';
-import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT } from './shared';
+import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
 import { askPermission, askQuestion, askAsync } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
@@ -40,7 +40,8 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
   }
   if ((!queuedTurn && ['queued', 'running', 'waiting'].includes(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || ctx.inFlight.has(threadId)) {
-    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data: { threadId } });
+    const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: structuredClone(toSummary(thread)) };
+    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data });
   }
   // The agent names what it takes on its first turn, the way the echo driver
   // does: the list is the agent's, so it only exists once one has run.

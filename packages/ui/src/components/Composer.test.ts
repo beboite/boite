@@ -1,6 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
+import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
@@ -314,7 +316,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -399,7 +401,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
-  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  // Haiku 4.5 is the one legacy model the descriptor gives no levels.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
@@ -408,7 +410,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Haiku 4.5');
 });
 
 test('a first run shows the reasoning, mode and worktree chips at their defaults, with nothing to pin', async () => {
@@ -416,7 +418,7 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   work.load();
   await mountOnFake();
   store.startDraft('p-boite');
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
   // The calm preset hides nothing from the bar: every chip is there at the model's default.
   await waitFor(() => effortChip() !== null);
   query('[data-testid=composer-mode]');
@@ -1034,6 +1036,47 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
     .slice(-3)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
   expect(sent).toEqual(['P1', 'P2', 'P3']);
+});
+
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  // The core has just opened a turn by itself (held answers to an asynchronous
+  // question) and this client has not heard of it yet: it still shows idle.
+  let refusals = 2;
+  const rpc = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start' && refusals-- > 0) {
+      const thread = { ...store.threads.find((row) => row.id === 't-trace')!, status: 'running' as const };
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+        data: { threadId: 't-trace', reason: 'turn-in-flight', thread } }));
+    }
+    return call(method, params);
+  });
+
+  // Sent straight from the box: refused as early, so it waits in the queue.
+  await type('sent into a busy thread');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(input().value).toBe('');
+  expect(store.busy).toBe(true);
+  expect(store.error).toBeNull();
+
+  // That turn ends, the queue drains, and a second turn the core opened in
+  // between refuses it once more: it goes back at the head, still no error.
+  store.openThread!.status = 'idle';
+  await waitFor(() => refusals === 0 && store.busy);
+  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['sent into a busy thread']);
+  expect(store.composerStates['t-trace']!.paused).toBe(false);
+  expect(store.error).toBeNull();
+
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && store.openThread!.messages.some((m) => m.role === 'user'
+    && m.parts.some((p) => p.type === 'text' && p.text === 'sent into a busy thread')));
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(3);
+  expect(store.error).toBeNull();
 });
 
 test('the mention menu never opens on the project the composer just left', async () => {

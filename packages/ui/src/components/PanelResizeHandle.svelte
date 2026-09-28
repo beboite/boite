@@ -68,7 +68,8 @@
     border: none;
     border-radius: 0;
     background: transparent;
-    left: -4px;
+    /* Centred in the frame's gap, outside the card's 1 px edge. */
+    left: calc(var(--frame-gap) / -2 - 5px);
     top: 0;
     bottom: 0;
     width: 8px;

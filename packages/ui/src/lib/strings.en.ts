@@ -217,7 +217,7 @@ export const strings = {
     settingsPhone: 'App & notifications',
     settingsBack: 'Back to settings',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activity', project: 'Choose project',
-    search: 'Find a conversation', unread: 'Unread', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
+    search: 'Find a conversation', noActivity: 'No agents need your attention.', noThreads: 'No matching conversations.'
   },
   machines: {
     heading: 'Machines', local: 'This PC', projects: 'Projects', recent: 'Recent',
@@ -417,6 +417,15 @@ export const strings = {
     rename: 'Rename',
     retitle: 'Regenerate title',
     retitling: 'Writing a title',
+    /** What a row shows in place of its time while the agent works or has news. */
+    state: {
+      working: 'Working',
+      workingFor: 'Working for {elapsed}',
+      waiting: 'Needs you',
+      error: 'Failed',
+      done: 'Done',
+      queued: 'Queued'
+    },
     pin: 'Pin',
     unpin: 'Unpin',
     pinned: 'Pinned',
@@ -1346,6 +1355,11 @@ export const strings = {
     reapOrphansHint: 'Ten seconds after a turn, a process whose parent has exited is stopped, the way an interrupted command leaves them. Windows only.',
     asyncQuestions: 'Let agents ask without stopping',
     asyncQuestionsHint: 'Agents with no asynchronous questions of their own learn the boite ask command when a session starts. Codex asks this way natively.',
+    titleModel: 'Title model',
+    titleModelHint: "The model that names a thread after its first answer. Automatic uses the thread's own agent on its small model. A pick writes every title with that model, on its first signed-in account.",
+    titleModelAuto: 'Automatic',
+    titleModelAutoHint: "The thread's agent, small model",
+    titleModelSmall: 'small',
     numberRange: 'A whole number from {min} to {max}.',
     save: 'Save',
     saved: 'Saved',
@@ -1731,7 +1745,7 @@ export const strings = {
     agents: {
       title: 'A conversation that follows your work',
       body: 'Switch agents, dictate a message, inspect the result. Stay in the same thread.',
-      demoModel: 'Claude Sonnet 5',
+      demoModel: 'Sonnet 5',
       demoEffort: 'High',
       demoMode: 'Ask'
     },

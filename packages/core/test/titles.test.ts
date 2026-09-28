@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { defaultTitleModel } from '@boite/contracts';
 import type { RpcEvents } from '@boite/contracts';
-import { echoTitle } from '../src/drivers/echo.ts';
+import { echoDriver, echoTitle } from '../src/drivers/echo.ts';
+import { setDriver } from '../src/drivers/index.ts';
 import { cleanAgentTitle, titleFromPrompt, titleRequest } from '../src/titles.ts';
-import { echoThread, startTestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const EVENT_TIMEOUT_MS = 5_000;
@@ -21,7 +23,7 @@ describe('title rules', () => {
     expect(cleanAgentTitle('Title: **Caps per account**\nmore')).toBe('Caps per account');
     expect(cleanAgentTitle('\n  \n')).toBeNull();
     expect(cleanAgentTitle('""')).toBeNull();
-    expect(cleanAgentTitle(`${'word '.repeat(30)}end`)).toHaveLength(79);
+    expect(cleanAgentTitle(`${'word '.repeat(30)}end`)).toHaveLength(59);
   });
 
   test('the request carries both sides, cut, and one instruction', () => {
@@ -29,6 +31,17 @@ describe('title rules', () => {
     expect(request).toContain('<user>\nhello\n</user>');
     expect(request).toContain('(no text)');
     expect(titleRequest('x'.repeat(3000), 'y')).toContain('[cut]');
+  });
+
+  test('each provider writes titles on its small model, a dated id standing for its name', () => {
+    const claude = { id: 'claude', protocol: 'claude-sdk' as const };
+    expect(defaultTitleModel(claude, [{ id: 'claude-opus-5' }])).toBe('claude-haiku-4-5');
+    expect(defaultTitleModel(claude, [{ id: 'claude-haiku-4-5-20251001' }])).toBe('claude-haiku-4-5-20251001');
+    const codex = { id: 'codex', protocol: 'codex-appserver' as const };
+    expect(defaultTitleModel(codex, [{ id: 'gpt-5.6-luna' }, { id: 'gpt-5.4-mini' }])).toBe('gpt-5.6-luna');
+    // A second descriptor on Codex's protocol takes Codex's picks.
+    expect(defaultTitleModel({ id: 'codex-work', protocol: 'codex-appserver' }, [])).toBe('gpt-6-luna');
+    expect(defaultTitleModel({ id: 'echo', protocol: 'echo' }, [{ id: 'echo' }])).toBeNull();
   });
 
   test('the echo agent names the first five words and skips its directives', () => {
@@ -121,5 +134,83 @@ describe('thread titles', () => {
     await client.call('threads.update', { threadId, title: 'renamed' });
     const back = await client.call('threads.retitle', { threadId });
     expect(back).toMatchObject({ title: '[tool]', titleSource: 'prompt' });
+  });
+
+  test('a title model names a provider that writes titles, or none', async () => {
+    const client = await harness.connect();
+    await expect(client.call('settings.set', { titleModel: { providerId: 'nobody', model: 'x' } })).rejects.toThrow(
+      'not a loaded provider that writes titles',
+    );
+    // OpenCode speaks ACP, whose driver writes no title.
+    await expect(client.call('settings.set', { titleModel: { providerId: 'opencode', model: 'x' } })).rejects.toThrow(
+      'not a loaded provider that writes titles',
+    );
+    await expect(client.call('settings.set', { titleModel: { providerId: 'echo', model: ' ' } })).rejects.toThrow(
+      'titleModel must be null',
+    );
+    const set = await client.call('settings.set', { titleModel: { providerId: ' echo ', model: ' echo-small ' } });
+    expect(set.titleModel).toEqual({ providerId: 'echo', model: 'echo-small' });
+    expect((await client.call('settings.set', { titleModel: null })).titleModel).toBeNull();
+  });
+
+  test('the model Settings names writes the title; without one the agent keeps its own', async () => {
+    const asked: string[] = [];
+    const restore = setDriver('echo', {
+      ...echoDriver,
+      title: async (ctx) => {
+        asked.push(`${ctx.provider.id}:${ctx.account.providerId}:${ctx.model ?? 'own'}`);
+        return `Named on ${ctx.model ?? 'its own'}`;
+      },
+    });
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client, 'boxes');
+      await client.call('threads.subscribe', { threadId });
+      const retitled = client.next(
+        'thread.updated',
+        (thread) => thread.id === threadId && thread.titleSource === 'agent',
+        EVENT_TIMEOUT_MS,
+      );
+      await client.call('turns.start', { threadId, prompt: 'write something about boxes' });
+      // Echo has no small model on record: the driver is asked with none.
+      expect((await retitled).title).toBe('Named on its own');
+      expect(asked).toEqual(['echo:echo:own']);
+
+      await client.call('settings.set', { titleModel: { providerId: 'echo', model: 'echo-small' } });
+      const again = await client.call('threads.retitle', { threadId });
+      expect(again).toMatchObject({ title: 'Named on echo-small', titleSource: 'agent' });
+      await waitFor(() => asked.length === 2);
+      expect(asked[1]).toBe('echo:echo:echo-small');
+    } finally {
+      restore();
+    }
+  });
+
+  test('a thread whose account signed out keeps the title from its prompt, no agent asked', async () => {
+    const asked: string[] = [];
+    const restore = setDriver('echo', {
+      ...echoDriver,
+      title: async (ctx) => {
+        asked.push(ctx.account.id);
+        return 'Named anyway';
+      },
+    });
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client, 'crates');
+      await client.call('threads.subscribe', { threadId });
+      const retitled = client.next('thread.updated', (thread) => thread.id === threadId && thread.titleSource === 'agent', EVENT_TIMEOUT_MS);
+      await client.call('turns.start', { threadId, prompt: 'stack the crates' });
+      await retitled;
+      expect(asked).toHaveLength(1);
+
+      const account = harness.core.journal.getAccount((await client.call('threads.get', { threadId })).accountId)!;
+      harness.core.journal.putAccount({ ...account, status: 'unauthenticated' });
+      const back = await client.call('threads.retitle', { threadId });
+      expect(back).toMatchObject({ title: 'stack the crates', titleSource: 'prompt' });
+      expect(asked).toHaveLength(1);
+    } finally {
+      restore();
+    }
   });
 });

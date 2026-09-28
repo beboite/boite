@@ -610,7 +610,7 @@ shellTest(
     // The echo agent's own title, written right after its first turn.
     await page?.waitFor(`${textOf('thread-title')} === 'Echo: shell turn'`, 30_000);
     await page?.waitFor(
-      `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,
+      `document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`,
       30_000,
     );
 

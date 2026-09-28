@@ -155,7 +155,10 @@
 
 :root {
   --color-background: #101013;
-  --color-titlebar: #0d0d10;
+  /* The window's frame: title bar and rails on one grey, the work
+     inset in cards of the page colour with an edge that reads. */
+  --color-frame: #1a1a1d;
+  --color-frame-edge: rgba(255, 255, 255, 0.11);
   --color-surface: #151518;
   --color-surface-2: #1b1b1f;
   --color-surface-3: #232327;
@@ -207,10 +210,14 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* A framed card's corner, and the frame between two cards and the window edge. */
+  --radius-frame: 10px;
+  --frame-gap: 8px;
 
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.05);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.05);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-frame: 0 3px 8px rgb(0 0 0 / 0.24);
 
   --font-fallback: ui-sans-serif, system-ui, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
   --font-mono-fallback: 'Cascadia Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
@@ -282,7 +289,8 @@
 /* Light, stamped by `lib/theme.ts` and by the boot script of `index.html`; dark stamps nothing. */
 [data-theme='light'] {
   --color-background: #f3f3f6;
-  --color-titlebar: #eeeef2;
+  --color-frame: #e7e7ec;
+  --color-frame-edge: rgba(0, 0, 0, 0.12);
   --color-surface: #fafafb;
   --color-surface-2: #ffffff;
   --color-surface-3: #ebebef;
@@ -312,6 +320,7 @@
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
+  --shadow-frame: 0 2px 6px rgb(0 0 0 / 0.07);
   color-scheme: light;
 }
 
@@ -950,6 +959,33 @@ tr:last-child td {
 }
 
 /* ------------------------------------------------------------------------- */
+/* The frame                                                                  */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Since 2026-09-28 the window is a frame around its work: the title bar and the
+ * rails (sidebar, settings nav, agents rail) stand on one grey with no line
+ * between them, and each working surface (the chat, the right panel, a
+ * settings page, an agent) is a card of the page colour inset `--frame-gap`
+ * from the window edge and from its neighbour, rounded, its 1 px edge strong
+ * enough to read as the outline. The phone keeps a flat page: 8 px of frame
+ * around a 375 px screen is room taken from the text.
+ */
+@media (min-width: 721px) {
+  .app {
+    background: var(--color-frame);
+  }
+
+  .framed {
+    background: var(--color-background);
+    border: 1px solid var(--color-frame-edge);
+    border-radius: var(--radius-frame);
+    box-shadow: var(--shadow-frame);
+    overflow: clip;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
 /* The Grain theme, behind the `theme-grain` experiment                       */
 /* ------------------------------------------------------------------------- */
 
@@ -1033,20 +1069,34 @@ html[data-theme='grain'] body::after {
  * fade, the lightest the chrome ever stands on: `--color-foreground` reads at
  * 7.6:1 on the title bar, 7.0:1 on the sidebar and 7.4:1 on the chat.
  */
-html[data-theme='grain'] .titlebar {
-  background: color-mix(in oklab, var(--color-titlebar) 70%, transparent);
+/* Framed, the frame is one slab and every card another: the rails paint nothing
+   of their own, so the fade is laid under two layers at most. */
+@media (min-width: 721px) {
+  html[data-theme='grain'] .app {
+    background: color-mix(in oklab, var(--color-frame) 70%, transparent);
+  }
+
+  html[data-theme='grain'] .framed {
+    background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  }
 }
 
-html[data-theme='grain'] .sidebar,
-html[data-theme='grain'] .panel,
-html[data-theme='grain'] .settings nav {
-  background: color-mix(in oklab, var(--color-surface) 70%, transparent);
-}
+@media (max-width: 720px) {
+  html[data-theme='grain'] .titlebar {
+    background: color-mix(in oklab, var(--color-frame) 70%, transparent);
+  }
 
-html[data-theme='grain'] .chat,
-html[data-theme='grain'] .settings > section,
-html[data-theme='grain'] .first-run {
-  background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  html[data-theme='grain'] .sidebar,
+  html[data-theme='grain'] .panel,
+  html[data-theme='grain'] .settings nav {
+    background: color-mix(in oklab, var(--color-surface) 70%, transparent);
+  }
+
+  html[data-theme='grain'] .chat,
+  html[data-theme='grain'] .settings > section,
+  html[data-theme='grain'] .first-run {
+    background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  }
 }
 
 html[data-theme='grain'] .composer {
@@ -1076,19 +1126,31 @@ html[data-glass] #app {
   background: transparent;
 }
 
-html[data-glass] .titlebar {
-  background: color-mix(in oklab, var(--color-titlebar) 80%, transparent);
+@media (min-width: 721px) {
+  html[data-glass] .app {
+    background: color-mix(in oklab, var(--color-frame) 80%, transparent);
+  }
+
+  html[data-glass] .framed {
+    background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  }
 }
 
-html[data-glass] .sidebar,
-html[data-glass] .panel,
-html[data-glass] .settings nav {
-  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
-}
+@media (max-width: 720px) {
+  html[data-glass] .titlebar {
+    background: color-mix(in oklab, var(--color-frame) 80%, transparent);
+  }
 
-html[data-glass] .chat,
-html[data-glass] .first-run {
-  background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  html[data-glass] .sidebar,
+  html[data-glass] .panel,
+  html[data-glass] .settings nav {
+    background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+  }
+
+  html[data-glass] .chat,
+  html[data-glass] .first-run {
+    background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  }
 }
 
 html[data-glass] .composer {

@@ -36,7 +36,7 @@ function ratio(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-const GROUNDS = ['--color-background', '--color-surface', '--color-surface-2', '--color-surface-3'];
+const GROUNDS = ['--color-background', '--color-frame', '--color-surface', '--color-surface-2', '--color-surface-3'];
 
 describe.each([
   ['dark', ':root'],

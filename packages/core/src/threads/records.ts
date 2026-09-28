@@ -20,5 +20,6 @@ export function saveThread(core: Core, thread: ThreadSummary, eventType: string)
 }
 
 export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
-  return { ...thread, load: core.procs.loadOf(thread.id) };
+  const busy = thread.status === 'running' || thread.status === 'waiting';
+  return { ...thread, load: core.procs.loadOf(thread.id), runningSince: busy ? core.journal.runningSince(thread.id) : null };
 }

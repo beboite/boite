@@ -22,6 +22,7 @@ import type {
   ThreadSummary,
   Turn,
   TurnId,
+  TurnInFlightData,
 } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { threadTerminalId } from './terminals.ts';
@@ -494,7 +495,8 @@ export class ThreadStore {
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {
-      throw refused('this thread already has an in-flight turn', { threadId });
+      const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
+      throw refused('this thread already has an in-flight turn', data);
     }
     const provider = this.core.providers.require(thread.providerId);
     if (this.core.updates.updating(thread.providerId)) {
