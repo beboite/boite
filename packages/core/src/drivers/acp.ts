@@ -139,6 +139,8 @@ export function createAcpDriver(deps: AcpDeps): Driver {
         stop: (): void => {
           running.stopTurn(turn);
         },
+        // Plain ACP has no input while a prompt runs; Grok adds one.
+        ...(isGrok(ctx.provider) ? { steer: (text: string) => running.steer(turn, text) } : {}),
       };
     },
 
