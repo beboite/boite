@@ -197,6 +197,8 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
 export function registerAgentMethods(core: Core): void {
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
+  // The access check already held the call to the token's own thread.
+  core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));
   core.router.register('panel.open', (params) => {
     const thread = core.threads.require(params.threadId);
     const surface = checkSurface(thread.cwd, params.surface);

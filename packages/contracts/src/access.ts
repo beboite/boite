@@ -65,6 +65,10 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.rewind',
   'threads.fork',
   'threads.archive',
+  // Moving a thread from the sidebar or its menu. The device names a project it
+  // already lists, never a path: the core picks the folder or makes the
+  // worktree, as it does for `threads.create` and `threads.fork`.
+  'threads.move',
   'threads.pin',
   'threads.markRead',
   'threads.subscribe',

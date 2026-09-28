@@ -729,6 +729,29 @@ describe('codex driver', () => {
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
   });
 
+  test('a moved thread resumes its codex session in the new folder, told where it went', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, 'first');
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+
+    const path = join(harness!.dataDir, 'elsewhere');
+    mkdirSync(path, { recursive: true });
+    const target = await client.call('projects.add', { path, name: 'elsewhere' });
+    const moved = await client.call('threads.move', { threadId, projectId: target.id });
+    expect(moved).toMatchObject({ cwd: path, sessionId });
+
+    await runTurn(client, threadId, 'second');
+    // The warm process was started in the old folder: a new one resumes the same thread with the new cwd.
+    await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
+    expect(fakeLog()).toContain(`cwd=${path}`);
+    expect(countLines('initialize')).toBe(2);
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+    const prompt = harness!.core.threads.get(threadId).messages.filter((message) => message.role === 'user').at(-1)?.parts[0];
+    expect(prompt?.type === 'text' ? prompt.moved?.to.cwd : null).toBe(path);
+  });
+
   test('a thread whose rollout is gone starts over with the history instead of failing for good', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);

@@ -843,8 +843,34 @@ export interface PreviewReference {
 
 export { PREVIEW_REFERENCES_PER_TURN, previewReferencesError, previewPrompt } from './preview';
 
+/** One end of a thread move: the project and the folder the agent works in. */
+export interface MoveEnd {
+  projectId: ProjectId;
+  /** The project's display name when the move happened. */
+  name: string;
+  cwd: string;
+}
+
+/**
+ * Carried by the first user message after `threads.move`: where the thread
+ * came from and where it works now. `note` is the plain sentence the core
+ * put before the prompt for the agent; the UI shows a marker line instead.
+ * Several moves before that message keep the first `from` and the last `to`.
+ * With `by: 'agent'` it rides on a system message instead: the agent moved
+ * its own thread (`agent.move`), nothing was put before a prompt, and `note`
+ * is only what a fresh session's history says about it.
+ */
+export interface MoveNotice {
+  from: MoveEnd;
+  to: MoveEnd;
+  note: string;
+  by?: 'agent';
+  /** Epoch milliseconds of the last move. */
+  at: number;
+}
+
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number } }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -1423,6 +1449,25 @@ export interface AgentWhere {
   model: string;
 }
 
+/** What `agent.move` answers: where the thread goes, and when. */
+export interface AgentMove {
+  threadId: ThreadId;
+  projectId: ProjectId;
+  /** The target project's name. */
+  project: string;
+  /** The target project's folder. */
+  projectPath: string;
+  /**
+   * The folder the next turn starts in: known now for a plain project folder,
+   * null while a turn runs and the move will make a worktree or a draft folder.
+   */
+  cwd: string | null;
+  /** `turn-end`: a turn runs and the move waits for it to end. `done`: the thread moved on the spot. */
+  when: 'turn-end' | 'done';
+  /** Background work the agent left running stops when the move happens. */
+  stopsBackground: boolean;
+}
+
 /**
  * What the right panel shows on request. `file` opens the file at the line;
  * `diff` opens the changes, on one file when a path is given; `browser` opens
@@ -1940,6 +1985,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Where the calling thread is. */
   'agent.where': { params: { threadId: ThreadId }; result: AgentWhere };
   /**
+   * The agent moves its own thread to another project, named by id, name or
+   * folder. A process cannot change folder in the middle of a turn, so while
+   * one runs the move waits for it to end (`when: 'turn-end'`), then goes
+   * through what `threads.move` does; an idle thread moves on the spot. The
+   * agent asked, so its next message carries no `MoveNotice` note: the thread
+   * records a system message whose text part has `moved` with `by: 'agent'`.
+   * Background work stops at the move. Refused for an unknown project, the
+   * thread's own project, and every refusal of `threads.move` that already
+   * holds when asked; one that only appears at the end of the turn is a system
+   * message saying the move did not happen. A core restart before the turn
+   * ends drops a waiting move.
+   */
+  'agent.move': { params: { threadId: ThreadId; project: string }; result: AgentMove };
+  /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
    * checks a path exists inside the working directory and a url is http(s),
@@ -2237,6 +2296,23 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * persistent agent session.
    */
   'threads.fork': { params: { threadId: ThreadId; messageId: MessageId; worktree?: boolean }; result: ThreadSummary };
+  /**
+   * Move a thread to another project of the same core. Its folder becomes the
+   * target's: the project folder, a new git worktree of the target when the
+   * thread had a worktree of its own and the target is a repository, or a new
+   * draft folder when the target is the drafts project. The old folder or
+   * worktree stays on disk untouched. The agent never works in the old folder
+   * again: its warm process is dropped, and the next user message tells it the
+   * thread moved (`MoveNotice` on that message's text part). Sub-threads follow
+   * their parent. A target project put away comes back. Refused for an unknown
+   * thread or project, the same project, an archived thread, a sub-thread, a
+   * persistent agent session, a missing target folder, a turn running or
+   * queued on the thread or one of its sub-threads (`reason: 'turn-in-flight'`),
+   * and background work without `stopBackground` (true stops it, false leaves
+   * it running in the old folder until the agent's next turn). Every client
+   * gets `thread.updated` with the new `projectId`, `cwd` and `branch`.
+   */
+  'threads.move': { params: { threadId: ThreadId; projectId: ProjectId; stopBackground?: boolean }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
