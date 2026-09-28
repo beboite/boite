@@ -21,6 +21,43 @@ export interface TurnFile {
   change: 'created' | 'changed' | 'deleted';
 }
 
+export type TurnFileNode =
+  | { kind: 'file'; key: string; name: string; file: TurnFile }
+  | { kind: 'folder'; key: string; name: string; count: number; children: TurnFileNode[] };
+
+/** Collapse single-folder chains so deep paths take one row. Keep outside paths absolute. */
+export function turnFileTree(files: readonly TurnFile[]): TurnFileNode[] {
+  const roots: TurnFileNode[] = [];
+  for (const file of files) {
+    let children = roots;
+    let key = file.relative === null ? 'outside:' : 'inside:';
+    const folders = file.relative === null ? [file.folder] : file.folder.split('/');
+    for (const name of folders.filter(Boolean)) {
+      key += `${name}/`;
+      let folder = children.find((node) => node.kind === 'folder' && node.key === key);
+      if (!folder || folder.kind !== 'folder') {
+        folder = { kind: 'folder', key, name, count: 0, children: [] };
+        children.push(folder);
+      }
+      folder.count++;
+      children = folder.children;
+    }
+    children.push({ kind: 'file', key: file.path, name: file.name, file });
+  }
+  function compact(nodes: TurnFileNode[]): TurnFileNode[] {
+    return nodes.map((node): TurnFileNode => {
+      if (node.kind === 'file') return node;
+      let folder = node;
+      while (folder.children.length === 1 && folder.children[0]?.kind === 'folder') {
+        const child = folder.children[0];
+        folder = { ...child, name: `${folder.name}/${child.name}` };
+      }
+      return { ...folder, children: compact(folder.children) };
+    }).sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'folder' ? -1 : 1);
+  }
+  return compact(roots);
+}
+
 function isAbsolute(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('/') || path.startsWith('\\\\');
 }
