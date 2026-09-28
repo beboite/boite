@@ -8,8 +8,6 @@
   import { modeHint, modeIcon, modeLabel, modesFor, shownMode } from '../lib/permission-modes';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
-  import { work } from '../lib/work-prefs.svelte';
-  import { contextMenu } from '../lib/context-menu.svelte';
   import EffortSlider from './EffortSlider.svelte';
   import Menu from './Menu.svelte';
   import ModelPicker from './ModelPicker.svelte';
@@ -86,13 +84,6 @@
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
   let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
-  // A chip stays in the bar when this device pinned it, or when it holds
-  // something other than the default: a choice nobody can see is a trap.
-  let effortChip = $derived(
-    (effortLevels.length > 0 || speeds.length > 0) &&
-      (work.current.pins.effort || activeEffort !== (store.modelOf(choice)?.effort?.default ?? null) || Boolean(choice?.speed))
-  );
-  let worktreeChip = $derived(Boolean(store.draft && draftRepository && (work.current.pins.worktree || store.draft.worktree)));
 
   /** A null effort runs at the model's own default, not at a preset the client configured. */
   function cacheKey(selection: Choice): CacheKey {
@@ -169,12 +160,6 @@
     else store.remember(choice);
   }
 
-  /** The worktree chip has no popover, so its pin rides its right click. */
-  function worktreeMenu(event: MouseEvent) {
-    const pinned = work.current.pins.worktree;
-    contextMenu.open(event, [{ id: 'pin', label: fill(pinned ? strings.composer.unpinOption : strings.composer.pin, { option: strings.composer.worktree }) }], () => work.pin('worktree', !pinned));
-  }
-
   function onchoose(event: Event) {
     const field = event.currentTarget as HTMLInputElement;
     const files = Array.from(field.files ?? []);
@@ -188,8 +173,6 @@
     await tick();
     const composer = bar?.closest('[data-testid="composer"]');
     if (window.matchMedia('(max-width: 720px)').matches && testid !== 'composer-picker') testid = 'composer-options';
-    // An unpinned effort lives in the Options menu.
-    else if (testid === 'composer-effort' && !effortChip) testid = 'composer-more';
     composer?.querySelector<HTMLElement>(`[data-testid="${testid}"]`)?.click();
   }
 </script>
@@ -205,8 +188,8 @@
     {/if}
 
     <div class="desktop-options">
-    {#if effortChip}
-      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} pinned={work.current.pins.effort} onpin={(on) => work.pin('effort', on)} />
+    {#if effortLevels.length > 0 || speeds.length > 0}
+      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
     {/if}
 
     {#if modes.length > 0}
@@ -218,7 +201,7 @@
     {/if}
 
     <!-- A thread keeps its directory, so the switch exists on a draft alone. -->
-    {#if store.draft && worktreeChip}
+    {#if store.draft && draftRepository}
       <button
         type="button"
         class="chip worktree"
@@ -228,16 +211,11 @@
         aria-label={strings.composer.worktree}
         aria-pressed={store.draft.worktree}
         onclick={() => store.setDraftWorktree(!store.draft?.worktree)}
-        oncontextmenu={worktreeMenu}
       >
         <GitBranch size={14} strokeWidth={1.75} />
         {strings.composer.worktree}
       </button>
     {/if}
-
-    {#key `${key}:${store.draft?.projectId ?? ''}`}
-      <ComposerOptions variant="desktop" busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} pins={work.current.pins} inBar={{ effort: effortChip, worktree: worktreeChip }} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} onpin={(id, on) => work.pin(id, on)} />
-    {/key}
     </div>
   </div>
 
@@ -328,7 +306,7 @@
   }
   .desktop-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 
-  .chips :global(.trigger), .chips :global(.speed), .chips .worktree {
+  .chips :global(.trigger), .chips .worktree {
     height: var(--control);
     padding: 0 10px;
     gap: 7px;

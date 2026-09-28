@@ -112,7 +112,7 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
-  // The device's pins are module state: the next test starts with no record.
+  // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
 });
@@ -355,7 +355,7 @@ test('the reasoning chip remembers the level a draft picks', async () => {
     model: 'claude-opus-5',
     effort: 'xhigh'
   });
-  await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
+  await waitFor(() => effortChip()?.textContent?.trim() === 'Xhigh');
 });
 
 test('the reasoning slider draws one dot per level and the arrows move it', async () => {
@@ -411,70 +411,31 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
 });
 
-test('an install that already has conversations keeps every chip in the bar', async () => {
-  await mountOnFake();
-  // No record on this device, and the core has threads: the chips stay where they were.
-  expect(work.current.pins).toEqual({ effort: true, worktree: true });
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toMatchObject({ pins: { effort: true, worktree: true }, panel: 'launcher' });
-  await openDraft();
-  await waitFor(() => effortChip() !== null);
-  query('[data-testid=composer-worktree]');
-  expect(input().placeholder).toBe('What do you want to do?');
-
-  // Both are chips, so Options would only say them twice: it steps aside.
-  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
-  // The pin went with the chip: the effort popover carries it, pressed.
-  effortChip()!.click();
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
-  expect(query('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('true');
-  press('Escape');
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
-
-  // Unpinned there, effort goes back to Options, which comes back with it.
-  effortChip()!.click();
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
-  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').click();
-  await waitFor(() => effortChip() === null);
-  query<HTMLButtonElement>('[data-testid=composer-more]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
-  expect(query('[data-testid=composer-more-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
-  // The worktree chip is still in the bar, so Options does not list it.
-  expect(document.querySelector('[data-testid=composer-options-worktree]')).toBeNull();
-  press('Escape');
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') === null);
-
-  // A chip with no popover of its own takes its pin on a right-click.
-  query('[data-testid=composer-worktree]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=pin]') !== null);
-  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=pin]').click();
-  await waitFor(() => work.current.pins.worktree === false);
-});
-
-test('a first run keeps effort and worktree in Options until pinned, and a worktree turned on stays in view', async () => {
+test('a first run shows the reasoning, mode and worktree chips at their defaults, with nothing to pin', async () => {
   window.localStorage.setItem(WORK_STORAGE_KEY, JSON.stringify(freshWork()));
   work.load();
   await mountOnFake();
-  // The record on the device wins over the threads the core holds.
-  expect(work.current.pins).toEqual({ effort: false, worktree: false });
   store.startDraft('p-boite');
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
-  expect(effortChip()).toBeNull();
-  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
-  // The permission mode is never hidden.
-  query('[data-testid=composer-mode]');
-
-  query<HTMLButtonElement>('[data-testid=composer-more]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
-  expect(query('[data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
-
-  // A worktree turned on is a choice away from the default: its chip shows, unpinned.
-  query<HTMLButtonElement>('[data-testid=composer-options-worktree]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
-  expect(work.current.pins.worktree).toBe(false);
-
-  query<HTMLButtonElement>('[data-testid=composer-pin-effort]').click();
+  // The calm preset hides nothing from the bar: every chip is there at the model's default.
   await waitFor(() => effortChip() !== null);
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null').pins).toEqual({ effort: true, worktree: false });
+  query('[data-testid=composer-mode]');
+  expect(query('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('false');
+  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
+
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(document.querySelector('[data-testid=composer-pin-effort]')).toBeNull();
+  // Opus 5 has a fast mode: its switch sits in the popover's heading, before the level.
+  const heading = query('[data-testid=composer-effort-menu] .heading');
+  expect(heading.firstElementChild?.getAttribute('data-testid')).toBe('effort-speed');
+  expect(document.querySelector('[data-testid=effort-fast-mark]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast');
+  // Switched on, the chip carries a bolt, so the choice shows with the popover shut.
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
+  query('[data-testid=effort-fast-mark]');
 });
 
 test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
