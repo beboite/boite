@@ -1177,6 +1177,23 @@ export const fr: Translation = {
     failed: 'Lecture de la consommation impossible : {error}',
   },
 
+  controls: {
+    heading: 'Boutons',
+    headingHint: "Masquez les boutons qui ne vous servent pas. Ce qu'un bouton ouvre reste à portée : la palette de commandes et les raccourcis clavier y mènent toujours, et rien de ce qui est ouvert ne se ferme.",
+    preset: 'Préréglage',
+    everyday: "L'essentiel",
+    developer: 'Tout',
+    header: 'En-tête de la conversation',
+    sidebar: 'Barre latérale',
+    panel: 'Menu du panneau latéral',
+    project: 'Nom du projet',
+    branch: 'Branche',
+    context: 'Jauge de contexte',
+    hide: 'Masquer ce bouton',
+    customize: 'Choisir les boutons',
+    allHidden: 'Toutes les cartes sont masquées sur cet appareil.'
+  },
+
   settings: {
     heading: 'Réglages',
     modelDefaults: 'Modèles par défaut',
@@ -1206,8 +1223,6 @@ export const fr: Translation = {
     connectProvider: 'Connecter un fournisseur',
     conversations: 'Conversations',
     app: 'Application',
-    developer: 'Outils de développeur',
-    developerHint: 'Affiche le terminal et la trace des processus dans les conversations.',
     tourReplay: 'Revoir la présentation',
     execution: 'Exécution des agents',
     maxConcurrentTurnsHint: 'Nombre de tours exécutés en même temps, toutes conversations confondues. Les suivants attendent leur tour.',
@@ -1652,7 +1667,7 @@ export const fr: Translation = {
       everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, et l'agent demande avant d'agir.",
       developer: 'Je suis dev, mettez-moi la totale.',
       developerHint: "L'appli s'ouvre sur votre dernier projet, les conversations montrent le terminal et la trace des processus, le panneau s'ouvre sur les modifications.",
-      later: "Rien n'est retiré, dans un cas comme dans l'autre. Les réglages changent tout ça."
+      later: "Rien n'est retiré, dans un cas comme dans l'autre. Réglages, Apparence affiche ou masque chaque bouton, un par un."
     },
 
     welcome: {

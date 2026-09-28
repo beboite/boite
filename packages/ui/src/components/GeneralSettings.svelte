@@ -8,7 +8,6 @@
   import ArchivedThreads from './ArchivedThreads.svelte';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
-  import { work } from '../lib/work-prefs.svelte';
   import type { Store } from '../lib/store.svelte';
 
   /**
@@ -60,13 +59,6 @@
   <section class="card" id="settings-app">
     <h2>{strings.settings.app}</h2>
     {#if inShell}<ShellSettings />{/if}
-    <label for="{uid}-developer" class="switch-row">
-      <span class="text">
-        <span id="{uid}-developer-name">{strings.settings.developer}</span><InfoTip topic={strings.settings.developer} text={strings.settings.developerHint} />
-      </span>
-      <input id="{uid}-developer" aria-labelledby="{uid}-developer-name" type="checkbox" role="switch" data-testid="setting-developer"
-        checked={work.current.developer} onchange={(event) => work.setDeveloper(event.currentTarget.checked)} />
-    </label>
     <div class="switch-row">
       <span class="text">
         <span>{strings.onboarding.label}</span><InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} />

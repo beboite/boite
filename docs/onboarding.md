@@ -74,6 +74,7 @@ answer itself:
 |---|---|---|
 | The app opens on | the drafts, `Documents/Boite` | the last project |
 | An empty side panel opens on | Files | Changes |
+| Buttons | Essentials: no terminal button, no Trace card | Everything |
 | Permission mode | Ask, set once | left as it is |
 
 `lib/work-prefs.svelte.ts` holds these per device, in `boite.work`. Picking an
@@ -88,7 +89,22 @@ conversation waits until it has a folder, not the only folder a non-developer
 gets.
 
 Each piece changes on its own afterwards. Settings, Appearance, Workspace holds
-the starting point and the panel's first surface. The answer never hides a
+the starting point and the panel's first surface.
+
+Settings, Appearance, Buttons lists every optional button by where it sits:
+the thread header (project name, branch, context gauge, Agents, terminal), the
+sidebar (limits, Add a project) and the side panel's cards. Each has a switch,
+and the Essentials and Everything presets set them all at once; a device whose
+buttons match neither lights neither. A button's right click offers Hide this
+button and Choose the buttons, which opens that card. Hiding a button takes it
+off the screen and nothing else: the palette and the chords still reach what it
+opens, an open tab stays, and a hidden context gauge comes back by itself once
+the context is 90 percent full. The list is `hidden` in `boite.work`, so a
+button added later shows until someone hides it, and a record from before it
+had one reads its old developer switch: off hides the terminal and the Trace
+card. A paired device has no terminal or Add a project to hide.
+
+The answer never hides a
 composer chip: on a computer the reasoning, the permission mode and, on a draft
 in a git project, the worktree are always in the bar, and the model's fast mode
 sits at the top left of the reasoning slider.
