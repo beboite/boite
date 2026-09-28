@@ -173,10 +173,11 @@ card per question) holds the turn in `waiting` until it is answered. An
 asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
 agent) is answered with the same controls without stopping anything: it waits
 in the overlay above the composer, and the timeline keeps a line where it was
-asked. The core answers it by steering the running turn, or by sending
-`> question` and the answer as the next prompt once the thread is idle. The
-core stamps `startedAt` and `finishedAt` on every tool part, so a tool's line
-shows how long a command has run.
+asked. The core answers it by steering the running turn (Claude takes it at
+the main agent's next PostToolUse hook), or by sending `> question` and the
+answer as the next prompt once the thread is idle. The core stamps `startedAt`
+and `finishedAt` on every tool part, so a tool's line shows how long a command
+has run.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when

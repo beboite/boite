@@ -68,6 +68,18 @@ export class DeferredInput {
     }
   }
 
+  /**
+   * The held answers for the running turn to read at a tool boundary. A driver
+   * with no steer (Claude) pulls them from its PostToolUse hook, so an answer
+   * given mid-turn does not wait for the turn to end.
+   */
+  takeForRunningTurn(threadId: ThreadId): string | null {
+    const held = this.deferredAnswers.get(threadId);
+    if (held === undefined) return null;
+    this.deferredAnswers.delete(threadId);
+    return `The user answered while you were working:\n\n${held.join('\n\n')}`;
+  }
+
   /** What was held and never sent: it goes in front of the next prompt. */
   takeDeferred(threadId: ThreadId): string {
     const held = this.deferredAnswers.get(threadId);
