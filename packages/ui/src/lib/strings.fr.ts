@@ -851,9 +851,6 @@ export const fr: Translation = {
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
     placeholderNew: 'Que voulez-vous faire ?',
-    moreOptions: 'Options',
-    pin: 'Garder {option} dans la barre',
-    unpinOption: 'Retirer {option} de la barre',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé à la fin du tour en cours',
@@ -1417,6 +1414,8 @@ export const fr: Translation = {
     providers: 'Gérer les fournisseurs',
     unavailable: 'Aucune lecture de quota disponible.',
     refresh: 'Actualiser les quotas',
+    glance: 'Limites des comptes',
+    allLimits: 'Page des limites',
     quit: 'Quitter Boite',
   },
   harnessUpdates: {
@@ -1568,7 +1567,7 @@ export const fr: Translation = {
     low: 'Faible',
     medium: 'Moyen',
     high: 'Élevé',
-    xhigh: 'Très élevé',
+    xhigh: 'Xhigh',
     max: 'Max',
     ultra: 'Ultra',
     ultrathink: 'Ultrathink',
@@ -1635,9 +1634,9 @@ export const fr: Translation = {
     profile: {
       title: "D'abord, lequel êtes-vous ?",
       everyday: "Je ne suis pas dev ! Ne m'embrouillez pas avec du code et des commandes !",
-      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, la barre reste simple et l'agent demande avant d'agir.",
+      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, et l'agent demande avant d'agir.",
       developer: 'Je suis dev, mettez-moi la totale.',
-      developerHint: "L'appli s'ouvre sur votre dernier projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
+      developerHint: "L'appli s'ouvre sur votre dernier projet, les conversations montrent le terminal et la trace des processus, le panneau s'ouvre sur les modifications.",
       later: "Rien n'est retiré, dans un cas comme dans l'autre. Le menu Options du champ de message et les réglages changent tout ça."
     },
 

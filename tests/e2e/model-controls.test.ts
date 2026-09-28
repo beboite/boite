@@ -162,8 +162,9 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
   await page.click('[data-model=claude-opus-5]');
-  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Opus')`);
   await page.click('[data-testid=composer-effort]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
   await page.click('[data-value=low]');
   const low = await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`);
   await page.click('[data-value=max]');
@@ -171,9 +172,10 @@ test('the accent persists and colours the effort track continuously to the thumb
   expect(await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`)).not.toBe(low);
   const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
   expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading').textContent.trim()`)).toBe('Max');
-  // The chip's pin is the menu's one icon.
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=composer-pin-effort]'))`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading .level').textContent.trim()`)).toBe('Max');
+  // The fast switch is the menu's one icon, at the top left of the slider.
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=effort-speed]'))`)).toBe(true);
+  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && Math.abs(s.left - t.left) < 8; })()`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
   const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });

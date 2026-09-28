@@ -72,7 +72,6 @@ answer itself:
 
 | | Not a developer | Developer |
 |---|---|---|
-| Composer chips pinned in the bar | none | effort and worktree |
 | The app opens on | the drafts, `Documents/Boite` | the last project |
 | An empty side panel opens on | Files | Changes |
 | Permission mode | Ask, set once | left as it is |
@@ -88,20 +87,17 @@ project menu lists every project and "Open a folder". The drafts are where a
 conversation waits until it has a folder, not the only folder a non-developer
 gets.
 
-Each piece changes on its own afterwards. On a computer the composer's Options
-menu lists effort, speed and worktree with a pin beside each; a pinned option
-gets its chip back in the bar. The permission mode never leaves the bar. An
-option set away from its default (a worktree turned on, a non-default effort
-or a speed) keeps its chip while it is set, pinned or not: a choice nobody can
-see is a trap. Settings, Appearance, Workspace holds the starting point and
-the panel's first surface.
+Each piece changes on its own afterwards. Settings, Appearance, Workspace holds
+the starting point and the panel's first surface. The answer never hides a
+composer chip: on a computer the reasoning, the permission mode and, on a draft
+in a git project, the worktree are always in the bar, and the model's fast mode
+sits at the top left of the reasoning slider.
 
 A device with no record gets one the first time a core answers. A core that
 already holds conversations, or a device that has already seen the tour, is an
-install from before the question: everything stays pinned, the app keeps
-opening on the last project, and the panel keeps its launcher. Anything else starts with the
-calm bar and the drafts, the not-a-developer preset without its permission
-change.
+install from before the question: the app keeps opening on the last project,
+and the panel keeps its launcher. Anything else starts with the drafts, the
+not-a-developer preset without its permission change.
 
 ## Once per device
 
