@@ -114,6 +114,7 @@ export class TurnRunner {
       finishedAt: Date.now(),
       usage: result.usage,
       error: result.error ?? null,
+      ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
     this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
       this.core.journal.putTurn(finished);
@@ -130,9 +131,14 @@ export class TurnRunner {
     if (current.archived || !sameSession) releaseThread(threadId);
     // A lost session was already forgotten by `dropLostSession` above, which
     // moved the generation on: nothing here bumps it a second time.
+    const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
     const next: ThreadSummary = {
       ...current,
-      sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
+      sessionId,
+      // A cut stays armed only while the thread still names the session it
+      // cuts: once the agent answered on its fork, or the session changed in
+      // any other way, resuming at that entry would drop real work.
+      sessionResumeAt: current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
       status: result.status === 'error' ? 'error' : 'idle',
       unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
       promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
@@ -169,8 +175,8 @@ export class TurnRunner {
     if ((current.sessionGeneration ?? 0) !== (thread.sessionGeneration ?? 0) || current.sessionId !== thread.sessionId) return null;
     const generation = (current.sessionGeneration ?? 0) + 1;
     this.core.log('info', `thread ${thread.id}: the agent has no session ${thread.sessionId} any more (${result.error ?? 'no reason given'}); starting a fresh one with the thread's history`);
-    saveThread(this.core, { ...current, sessionId: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
-    return { ...thread, sessionId: null, sessionGeneration: generation, context: null, promptCache: null };
+    saveThread(this.core, { ...current, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null }, 'thread.updated');
+    return { ...thread, sessionId: null, sessionResumeAt: null, sessionGeneration: generation, context: null, promptCache: null };
   }
 
   stopRunning(threadId: ThreadId): boolean {

@@ -18,6 +18,7 @@ import type {
   RpcParams,
   Thread,
   ThreadId,
+  ThreadRewind,
   ThreadStatus,
   ThreadSummary,
   Turn,
@@ -30,6 +31,7 @@ import { notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
 import { AgentState } from './threads/agent-state.ts';
+import { ThreadBranching } from './threads/branching.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
@@ -75,6 +77,8 @@ export class ThreadStore {
   /** Commands, background tasks and context the agent reported. */
   readonly agentState: AgentState;
   readonly titles: ThreadTitles;
+  /** `threads.rewind` and `threads.fork`. */
+  readonly branching: ThreadBranching;
   private readonly recovery: ThreadRecovery;
 
   constructor(private readonly core: Core) {
@@ -84,6 +88,7 @@ export class ThreadStore {
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
+    this.branching = new ThreadBranching(core, this);
     this.recovery = new ThreadRecovery(core);
   }
 
@@ -379,6 +384,7 @@ export class ThreadStore {
       next.effort = null;
       next.speed = null;
       next.sessionId = null;
+      next.sessionResumeAt = null;
       next.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       next.context = null;
     }
@@ -470,6 +476,16 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
+  /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
+  rewind(threadId: ThreadId, messageId: MessageId): ThreadRewind {
+    return this.branching.rewind(threadId, messageId);
+  }
+
+  /** A new thread with the history up to and including a message (`threads/branching.ts`). */
+  fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
+    return this.branching.fork(threadId, messageId, worktree);
+  }
+
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
@@ -525,6 +541,7 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
       },

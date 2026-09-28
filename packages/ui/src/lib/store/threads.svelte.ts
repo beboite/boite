@@ -6,12 +6,22 @@ import type {
   ProviderId,
   Thread,
   ThreadId,
+  ThreadRewind,
   ThreadSummary
 } from '@boite/contracts';
 import { fitsReadingCache } from '../reading-cache';
 import { rightPanel } from '../right-panel.svelte';
 import { lastIndexById, mergeResumed, patchRow, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
+
+/** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
+export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
+
+/** The row part of a thread, without what only an open thread carries. */
+function summaryOf(thread: Thread): ThreadSummary {
+  const { messages: _messages, turns: _turns, commands: _commands, background: _background, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
+  return summary;
+}
 
 /** The thread list, the open thread and its subscription, and what one thread's lifecycle asks of the core. */
 export class Threads {
@@ -66,6 +76,97 @@ export class Threads {
     if (!thread || !this.ctx.client) return;
     try { await this.ctx.client.call('threads.compact', { threadId: thread.id, expectedSelectionVersion: thread.selectionVersion ?? 0 }); }
     catch (error) { this.ctx.fail(error); }
+  }
+
+  /**
+   * Edit a sent message: it and everything after it leave the thread, on the
+   * core and on screen, and what it held comes back for the composer to fill
+   * itself with. The thread must be idle: the caller stops a running turn
+   * first, and a refusal is shown like any other and answers null. `threadId`
+   * defaults to the open thread.
+   */
+  async rewind(messageId: MessageId, threadId: ThreadId | undefined = this.openThread?.id): Promise<RewoundMessage | null> {
+    const client = this.ctx.client;
+    if (!client || !threadId) return null;
+    try {
+      const { thread, ...rewound } = await client.call('threads.rewind', { threadId, messageId });
+      this.applyRewound(thread);
+      return rewound;
+    } catch (error) {
+      this.ctx.fail(error);
+      return null;
+    }
+  }
+
+  /**
+   * A new thread holding this one's history up to and including `messageId`,
+   * opened once the core made it. `worktree` puts it in a git worktree of its
+   * own, as a new thread's worktree switch does. `threadId` defaults to the
+   * open thread. Answers null on a refusal, which is shown.
+   */
+  async fork(messageId: MessageId, options: { worktree?: boolean } = {}, threadId: ThreadId | undefined = this.openThread?.id): Promise<ThreadSummary | null> {
+    const client = this.ctx.client;
+    if (!client || !threadId) return null;
+    try {
+      const summary = await client.call('threads.fork', { threadId, messageId, worktree: options.worktree === true });
+      this.upsertThread(summary);
+      await this.ctx.store.open(summary.id);
+      return summary;
+    } catch (error) {
+      this.ctx.fail(error);
+      return null;
+    }
+  }
+
+  /** The thread as `threads.rewind` left it, over every copy this client holds. */
+  applyRewound(thread: Thread): void {
+    this.upsertThread(summaryOf(thread));
+    // A cached visit holds the removed messages: the next open reads the thread again.
+    this.readingThreads.delete(thread.id);
+    for (const held of this.threadSnapshots(thread.id)) {
+      delete held.messagesFrom;
+      Object.assign(held, structuredClone(thread));
+    }
+  }
+
+  /**
+   * `message.truncated`: `messageId` and what follows it left the thread,
+   * whichever client asked. A copy that holds the message drops it and the
+   * rest; one whose window starts after it can vouch for nothing it holds and
+   * reads the thread again. A copy that already applied the rewind holds none
+   * of it and has nothing to do.
+   */
+  truncate(threadId: ThreadId, messageId: MessageId): void {
+    this.readingThreads.delete(threadId);
+    let stale = false;
+    for (const thread of this.threadSnapshots(threadId)) {
+      const index = lastIndexById(thread.messages, messageId);
+      if (index < 0) {
+        if (thread.messagesBefore !== null) stale = true;
+        continue;
+      }
+      const gone = new Set(thread.messages.slice(index).map((message) => message.turnId));
+      thread.messages.splice(index);
+      const kept = new Set(thread.messages.map((message) => message.turnId));
+      thread.turns = thread.turns.filter((turn) => kept.has(turn.id) || !gone.has(turn.id));
+    }
+    if (stale) void this.reload(threadId);
+  }
+
+  /** The last page of a thread again, over the copies held, when what they hold cannot be patched. */
+  async reload(threadId: ThreadId): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    try {
+      const fresh = await client.call('threads.get', { threadId });
+      for (const held of this.threadSnapshots(threadId)) {
+        held.messages = fresh.messages;
+        held.turns = fresh.turns;
+        held.messagesBefore = fresh.messagesBefore;
+      }
+    } catch (error) {
+      this.ctx.fail(error);
+    }
   }
 
   /**

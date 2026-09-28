@@ -32,6 +32,7 @@ export interface ThreadRow {
   session_id: string | null;
   session_generation: number;
   selection_version: number;
+  session_resume_at?: string | null;
   context: string | null;
   prompt_cache: string | null;
   created_at: number;
@@ -48,6 +49,7 @@ export interface TurnRow {
   usage: string | null;
   error: string | null;
   execution: string | null;
+  checkpoint?: string | null;
 }
 
 export interface MessageRow {
@@ -118,6 +120,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     archived: row.archived !== 0,
     pinned: row.pinned !== 0,
     sessionId: row.session_id,
+    ...(row.session_resume_at ? { sessionResumeAt: row.session_resume_at } : {}),
     sessionGeneration: row.session_generation,
     selectionVersion: row.selection_version,
     load: null,
@@ -139,6 +142,7 @@ export function toTurn(row: TurnRow): Turn {
     usage: row.usage === null ? null : parseJson<Usage>(row.usage, `turns.usage row ${row.id}`),
     error: row.error,
     ...(row.execution === null ? {} : { execution: parseJson<NonNullable<Turn['execution']>>(row.execution, `turns.execution of ${row.id}`) }),
+    ...(row.checkpoint ? { checkpoint: parseJson<NonNullable<Turn['checkpoint']>>(row.checkpoint, `turns.checkpoint of ${row.id}`) } : {}),
   };
 }
 

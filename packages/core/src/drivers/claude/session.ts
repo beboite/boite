@@ -496,6 +496,9 @@ export class ClaudeSession {
     const setup = liveSetup(ctx.thread);
     return {
       resume: ctx.sessionId ?? undefined,
+      // A rewind or a fork: the transcript up to that entry, under a new
+      // session id, so the original session is never cut.
+      ...(ctx.sessionId !== null && ctx.resumeAt ? { resumeSessionAt: ctx.resumeAt, forkSession: true } : {}),
       cwd: ctx.thread.cwd,
       model: setup.model ?? undefined,
       // A level the CLI knows goes in the options; `ultrathink` goes in the prompt.
