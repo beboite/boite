@@ -5,14 +5,18 @@ import type { Store } from './store.svelte';
 /** One input's state in the store: its text, attachments and the prompts queued behind a running turn. */
 export type ComposerState = NonNullable<Store['composerStates'][string]>;
 
-/** Sends the next queued prompt of a thread; a refusal pauses the queue. */
+/**
+ * Sends the next queued prompt of a thread; a refusal pauses the queue. The
+ * prompt leaves the queue while it is on the wire: a turn the core was already
+ * running puts it back at the head, to go out once that turn is over.
+ */
 export async function drainQueue(store: Store, threadId: string, state: ComposerState): Promise<void> {
-  const entry = state.queued[0];
+  const entry = state.queued.shift();
   if (entry === undefined) return;
   state.sending = true;
   const accepted = await store.send(entry.text, threadId, entry.attachments, entry.previewReferences ?? []);
-  if (accepted) state.queued.shift();
-  else {
+  if (!accepted) {
+    state.queued.unshift(entry);
     // Pause after a refusal. The prompt goes back in the box for an explicit
     // retry only when it is the whole queue: taking it out from under the
     // ones behind it would send them in the order they were not typed in.

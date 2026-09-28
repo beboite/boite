@@ -187,6 +187,14 @@ confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
 Escape is needed to stop. A failed send preserves the queue for an explicit retry.
 
+The core can open a turn by itself as the previous one ends: answers to an
+asynchronous question that could not be steered in, or an agent resuming on its
+own. A prompt that reaches the core in that moment, sent from the box or from
+the queue, is refused with `reason: 'turn-in-flight'` and the thread's row
+(`TurnInFlightData`). That is not a failure: the composer applies the row, puts
+the prompt back at the head of the queue without pausing it or showing an error,
+and sends it once that turn is over.
+
 `/goal <objective>` starts work toward an objective. `/loop 2 <prompt>` runs two
 consecutive iterations and stops. Counts range from 1 to 1000. A count written
 as "2 iterations" or "2 itérations" in the prompt is also recognized.
