@@ -4,6 +4,29 @@ import { startTestCore, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 
+test('a blocked provider does not delay another provider or its progress event', async () => {
+  harness = await startTestCore();
+  const slow = harness.core.accounts.add({ providerId: 'claude', label: 'Slow' });
+  const fast = harness.core.accounts.add({ providerId: 'codex', label: 'Fast' });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const reported: string[] = [];
+  const off = harness.core.bus.onAny((name, payload) => {
+    const event = payload as { requestId: string; quota: { accountId: string } };
+    if (name === 'quotas.progress' && event.requestId === 'progress-test') reported.push(event.quota.accountId);
+  });
+  const store = new QuotaStore(harness.core, async (account) => {
+    if (account.providerId === 'claude') await blocked;
+    return [{ id: 'session', label: 'Session', usedPercent: 20, resetsAt: null }];
+  });
+  const reading = store.list(true, 'progress-test');
+  try {
+    await Bun.sleep(30);
+    expect(reported).toContain(fast.id);
+    expect(reported).not.toContain(slow.id);
+  } finally { release(); await reading; off(); }
+});
+
 test('Codex selects the account bucket and respects monthly plans and reset seconds', () => {
   const result = codexQuotaWindows({ rateLimits: { limitId: 'spark', primary: { usedPercent: 99 } }, rateLimitsByLimitId: {
     codex: { planType: 'free', primary: { usedPercent: 31, resetsAt: 1900000000 }, secondary: null },
