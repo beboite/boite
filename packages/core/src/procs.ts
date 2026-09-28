@@ -717,7 +717,7 @@ export class ProcRegistry {
       if (entry?.root) return false;
       if (this.capability().os === 'windows') return entry !== undefined && this.platform.terminateProcess(victim.threadId, victim.pid);
       try {
-        if (entry === undefined) return process.kill(victim.pid, 'SIGKILL');
+        if (entry === undefined) return this.platform.terminateProcess(victim.threadId, victim.pid);
         const stop = entry.kill();
         if (stop !== undefined) this.trackStop(stop);
         return true;

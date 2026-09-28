@@ -83,7 +83,7 @@ function pidsIn(text: string): number[] {
     .filter(pid => Number.isSafeInteger(pid) && pid > 0);
 }
 
-/** Older kernels omit task children files. Scan parent pids once per sample. */
+/** Every pid by its parent, from each process's stat line. */
 function procChildren(read: ProcRead): Map<number, number[]> {
   const children = new Map<number, number[]>();
   for (const pid of pidsIn(read('/proc') ?? '')) {
@@ -101,12 +101,49 @@ export class LinuxLoad {
   readonly #pids = new Map<string, Set<number>>();
   /** The thread's CPU ticks at its previous sample, per pid, and when that was. */
   readonly #last = new Map<string, { ticks: Map<number, number>; at: number }>();
+  /** One parent scan serves every thread sampled in the same tick. */
+  #scan: { at: number; children: Map<number, number[]> } | null = null;
 
   constructor(
     private readonly logicalCpus: number,
     private readonly read: ProcRead = readProc,
     private readonly now: () => number = Date.now,
+    private readonly signal: (pid: number) => void = (pid) => { process.kill(pid, 'SIGKILL'); },
   ) {}
+
+  /**
+   * A task's children file may miss a child that another exit raced with, as
+   * proc_tid_children(5) warns, so the parent scan always adds what it saw.
+   */
+  #children(pid: number, fresh = false): number[] {
+    const at = this.now();
+    if (fresh || this.#scan === null || at - this.#scan.at >= 500) this.#scan = { at, children: procChildren(this.read) };
+    const found = new Set(this.#scan.children.get(pid) ?? []);
+    for (const tid of pidsIn(this.read(`/proc/${pid}/task`) ?? String(pid))) {
+      for (const child of pidsIn(this.read(`/proc/${pid}/task/${tid}/children`) ?? '')) found.add(child);
+    }
+    return [...found];
+  }
+
+  /**
+   * Stop one process and everything under it. Its children would be reparented
+   * away from the thread's roots and drop out of the next sample while still
+   * holding their memory. False when the process itself could not be signalled.
+   */
+  killTree(pid: number): boolean {
+    const tree = new Set([pid]);
+    for (const member of tree) for (const child of this.#children(member, member === pid)) tree.add(child);
+    let stopped = false;
+    for (const member of tree) {
+      try {
+        this.signal(member);
+        if (member === pid) stopped = true;
+      } catch {
+        // Already gone, or not ours to signal.
+      }
+    }
+    return stopped;
+  }
 
   add(threadId: string, pid: number): void {
     if (!Number.isInteger(pid) || pid <= 0) return;
@@ -140,7 +177,6 @@ export class LinuxLoad {
     const workingSets: NonNullable<ProcessSample['workingSets']> = [];
     let processes = 0;
     const pending = new Set(pids);
-    let fallback: Map<number, number[]> | undefined;
     for (const pid of pending) {
       const stat = this.read(`/proc/${pid}/stat`);
       const used = stat === null ? null : cpuTicks(stat);
@@ -152,16 +188,7 @@ export class LinuxLoad {
       const exe = this.read(`/proc/${pid}/comm`)?.trim();
       if (bytes !== null) workingSets.push({ pid, bytes, ...(exe ? { exe } : {}) });
       memoryBytes += bytes ?? 0;
-      const tasks = pidsIn(this.read(`/proc/${pid}/task`) ?? String(pid));
-      for (const tid of tasks) {
-        const children = this.read(`/proc/${pid}/task/${tid}/children`);
-        if (children === null) {
-          fallback ??= procChildren(this.read);
-          for (const child of fallback.get(pid) ?? []) pending.add(child);
-        } else {
-          for (const child of pidsIn(children)) pending.add(child);
-        }
-      }
+      for (const child of this.#children(pid)) pending.add(child);
     }
     if (processes === 0) return null;
 

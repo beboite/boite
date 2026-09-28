@@ -9,7 +9,7 @@ import type { ProcessPlatform } from './types.ts';
  */
 export function createPosixPlatform(
   os: 'linux' | 'macos',
-  load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
+  load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> & Partial<Pick<LinuxLoad, 'killTree'>> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
 ): ProcessPlatform {
   return {
     retain() {},
@@ -18,7 +18,7 @@ export function createPosixPlatform(
     applySettings() {},
     attach: () => false,
     terminate: () => false,
-    terminateProcess: () => false,
+    terminateProcess: (_threadId, pid) => load?.killTree?.(pid) ?? false,
     terminateUnassigned() {},
     sample: (threadId) => load?.sample(threadId) ?? null,
     // macOS `freemem()` leaves out inactive and purgeable pages, far below what the system can hand out.

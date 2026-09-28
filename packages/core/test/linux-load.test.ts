@@ -139,6 +139,38 @@ describe('a thread load on Linux', () => {
     expect(load.sample('thr')?.workingSets).toContainEqual({ pid: 102, bytes: 3000 * 1024, exe: 'cargo' });
   });
 
+  test('a child missing from a readable children file still counts through the parent scan', () => {
+    const proc = new FakeProc();
+    proc.set(100, 10, 0, 1000);
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'cc', 100));
+    proc.files.set('/proc/101/status', status(2000));
+    proc.files.set('/proc/102/stat', stat(102, 10, 0, 'rustc', 100));
+    proc.files.set('/proc/102/status', status(5000));
+    proc.files.set('/proc', '100 101 102 self');
+    proc.files.set('/proc/100/task/100/children', '101');
+    const load = new LinuxLoad(2, proc.read, proc.now);
+    load.add('thr', 100);
+
+    expect(load.sample('thr')).toMatchObject({ processes: 3, memoryBytes: 8000 * 1024 });
+  });
+
+  test('stopping a descendant signals its own children too, and fails only when it cannot be signalled', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc/42/stat', stat(42, 10, 0, 'cargo', 100));
+    proc.files.set('/proc/43/stat', stat(43, 10, 0, 'rustc', 42));
+    proc.files.set('/proc/44/stat', stat(44, 10, 0, 'cc', 43));
+    proc.files.set('/proc', '42 43 44');
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => {
+      if (pid === 7) throw new Error('ESRCH');
+      signalled.push(pid);
+    });
+
+    expect(load.killTree(42)).toBe(true);
+    expect(signalled.sort()).toEqual([42, 43, 44]);
+    expect(load.killTree(7)).toBe(false);
+  });
+
   test('CPU is the ticks spent since the previous sample over the whole machine, memory is summed', () => {
     const proc = new FakeProc();
     const load = new LinuxLoad(4, proc.read, proc.now);
