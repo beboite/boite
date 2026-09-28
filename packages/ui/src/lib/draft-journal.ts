@@ -46,8 +46,9 @@ export async function writeDraftJournal(key: string, value: unknown): Promise<vo
   const db = await open();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite', { durability: 'strict' });
+    const timer = setTimeout(() => transaction.abort(), 3000);
     transaction.objectStore('drafts').put(value, key);
-    transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error);
+    transaction.oncomplete = () => { clearTimeout(timer); resolve(); };
+    transaction.onabort = () => { clearTimeout(timer); reject(transaction.error ?? new Error('Draft journal write aborted or timed out')); };
   });
 }

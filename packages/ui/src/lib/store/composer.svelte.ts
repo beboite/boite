@@ -9,6 +9,7 @@ import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
+import { unresolvedAssetId } from '../draft-attachments';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -142,6 +143,7 @@ export class Composer {
 
   async submit(prompt: string, choice: Choice, attachments: Attachment[] = [], previewReferences: PreviewReference[] = []): Promise<boolean> {
     const s = this.ctx.store;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     if ((prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return false;
     try {
       if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
@@ -216,6 +218,7 @@ export class Composer {
   ): Promise<boolean> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     const client = this.ctx.client;
     if (!client || !threadId || s.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;

@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
+  import { unresolvedAssetId } from '../lib/draft-attachments';
   import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
@@ -138,6 +139,7 @@
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
       readingFiles === 0 &&
+      !attachments.some(unresolvedAssetId) &&
       choice !== null &&
       store.connection === 'ready' &&
       !picking &&
@@ -356,6 +358,7 @@
   }
 
   async function submit(nextDraft = false) {
+    if (attachments.some(unresolvedAssetId)) { store.error = strings.errors.draftAttachment; return; }
     const prompt = text;
     const images = attachments;
     const references = previewReferences;

@@ -5,6 +5,7 @@ import type { Composer } from './composer.svelte';
 import type { StoreContext } from './context';
 import { strings } from '../strings';
 import { readDraftJournal, writeDraftJournal } from '../draft-journal';
+import { unresolvedAssetId, type DraftAttachment } from '../draft-attachments';
 
 type Input = Composer['composerStates'][string];
 type SavedDraft = { draft: Draft; choice: Choice | null; input: Input };
@@ -174,7 +175,8 @@ export class Drafts {
 }
 
 function savedInput(input: Input, assetId: (bytes: string) => string) {
-  const file = (item: Attachment) => ({ ...item, assetId: assetId(item.data) });
+  const file = (item: Attachment) => ({ kind: item.kind, mimeType: item.mimeType, name: item.name,
+    assetId: unresolvedAssetId(item) ?? assetId(item.data), ...(unresolvedAssetId(item) ? {} : { data: item.data }) });
   return { text: input.text, editing: input.editing ?? null, attachments: input.attachments.map(file),
     previewReferences: $state.snapshot(input.previewReferences),
     queued: input.queued.map(item => ({ text: item.text, attachments: item.attachments.map(file), previewReferences: $state.snapshot(item.previewReferences) })) };
@@ -199,7 +201,12 @@ function attachments(value: unknown, assets: Map<string, string>): Attachment[] 
   return value.flatMap(item => {
     if (!item || !['image', 'file'].includes(item.kind) || typeof item.mimeType !== 'string') return [];
     const data = typeof item.data === 'string' ? item.data : assets.get(item.assetId);
-    return data === undefined ? [] : [{ kind: item.kind, mimeType: item.mimeType, data, name: typeof item.name === 'string' ? item.name : null }];
+    if (data === undefined && typeof item.assetId !== 'string') return [];
+    // Keep unresolved IDs in the authoritative attachment list. Removing a
+    // placeholder removes its ID too, so recovery cannot resurrect that file.
+    const attachment: DraftAttachment = { kind: item.kind, mimeType: item.mimeType, data: data ?? '', name: typeof item.name === 'string' ? item.name : null,
+      ...(data === undefined ? { pendingDraftAsset: item.assetId } : {}) };
+    return [attachment];
   });
 }
 

@@ -21,15 +21,13 @@ export function grokQuotaWindows(raw: unknown): QuotaWindow[] {
   const periodEnd = obj(config['currentPeriod'])['end'];
   let percent = config['creditUsagePercent'];
   if (percent === undefined) {
-    // The credits endpoint uses proto3 JSON: zero scalars can be omitted.
-    // A dated credits period distinguishes that zero from an absent report.
-    if (typeof periodEnd === 'string' && Number.isFinite(Date.parse(periodEnd))) percent = 0;
-    else {
-      const budget = obj(config['monthlyLimit'])['val'];
-      const used = config['used'];
-      const amount = used !== null && typeof used === 'object' && !Array.isArray(used) ? obj(used)['val'] ?? 0 : undefined;
-      if (typeof budget === 'number' && Number.isFinite(budget) && budget > 0 && typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) percent = amount / budget * 100;
-    }
+    const budget = obj(config['monthlyLimit'])['val'];
+    const used = config['used'];
+    const amount = used !== null && typeof used === 'object' && !Array.isArray(used) ? obj(used)['val'] ?? 0 : undefined;
+    if (typeof budget === 'number' && Number.isFinite(budget) && budget > 0 && typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) percent = amount / budget * 100;
+    // The credits endpoint omits proto3 zero scalars, but reported legacy
+    // amounts take precedence over that default when both field sets coexist.
+    else if (typeof periodEnd === 'string' && Number.isFinite(Date.parse(periodEnd))) percent = 0;
   }
   return limit('credits', 'Credits', percent, periodEnd ?? config['billingPeriodEnd']);
 }

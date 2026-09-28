@@ -13,6 +13,60 @@ async function escape(page: BrowserPage) {
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
 }
 
+test('height-capped desktop popovers can scroll to their last action', async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width: 1100, height: 760 } });
+    await page.waitFor('document.querySelector("[data-testid=composer-mode]")');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 220, deviceScaleFactor: 1, mobile: false });
+    for (const [trigger, popup] of [['composer-mode', 'composer-mode-menu'], ['context-trigger', 'context-popup']]) {
+      await page.click(`[data-testid="${trigger}"]`);
+      await page.waitFor(`document.querySelector('[data-testid="${popup}"]')`);
+      await settle(page);
+      const result = await page.evaluate<{ overflow: string; scroll: number; visible: boolean }>(`(() => { const el = document.querySelector('[data-testid="${popup}"]'); el.scrollTop = el.scrollHeight; const action = el.querySelector('button:last-of-type'); const r = action.getBoundingClientRect(); return { overflow: getComputedStyle(el).overflowY, scroll: el.scrollTop, visible: r.top >= 0 && r.bottom <= innerHeight }; })()`);
+      expect(result.overflow).toBe('auto');
+      expect(result.scroll).toBeGreaterThan(0);
+      expect(result.visible).toBe(true);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `${popup}-short.png`));
+      await escape(page);
+      await page.waitFor(`!document.querySelector('[data-testid="${popup}"]')`);
+    }
+  } finally { await page?.close(); await server.close(); }
+}, 60_000);
+
+test('unread attachments survive text edits and explicit removals during storage failure', async () => {
+  const port = await freePort();
+  const server = await startUi(port);
+  let page: BrowserPage | undefined;
+  try {
+    page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1` });
+    await page.type('[data-testid=composer-input]', 'Keep one attachment');
+    await page.evaluate(`(() => { const data = new DataTransfer(); for (const name of ['remove.txt', 'keep.txt']) data.items.add(new File([name], name, {type:'text/plain'})); document.querySelector('[data-testid=composer-input]').dispatchEvent(new ClipboardEvent('paste', {clipboardData:data,bubbles:true})); })()`);
+    await page.waitFor('document.querySelectorAll("[data-testid=composer-attachment]").length === 2');
+    expect(await page.evaluate('globalThis.__boiteTest.workspace.active.flushDrafts()')).toBe(true);
+    const script = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: 'IDBFactory.prototype.open = function() { return {}; };' }) as { identifier: string };
+    await page.reload();
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")');
+    expect(await page.evaluate('document.querySelectorAll("[data-testid=composer-attachment]").length')).toBe(2);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-send]").disabled')).toBe(true);
+    await page.click('[data-testid=composer-attachment-remove]');
+    await page.type('[data-testid=composer-input]', 'Edited while storage was unavailable');
+    await settle(page);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-unavailable-attachment.png'));
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await settle(page);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'draft-unavailable-attachment-phone.png'));
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: script.identifier });
+    await page.reload();
+    await page.waitFor('document.querySelector("[data-testid=composer-input]")?.value === "Edited while storage was unavailable"');
+    expect(await page.evaluate('document.querySelectorAll("[data-testid=composer-attachment]").length')).toBe(1);
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachment]").textContent')).toContain('keep.txt');
+    expect(await page.evaluate('globalThis.__boiteTest.workspace.active.composerStates.draft.attachments.map(a => atob(a.data))')).toEqual(['keep.txt']);
+  } finally { await page?.close(); await server.close(); }
+}, 60_000);
+
 test('a blocked journal does not block startup or overwrite unread drafts', async () => {
   const port = await freePort();
   const server = await startUi(port);

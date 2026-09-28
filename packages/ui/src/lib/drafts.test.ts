@@ -44,6 +44,18 @@ test('storage failures keep the text in memory and explain that it could not be 
   } finally { write.mockRestore(); }
 });
 
+test('unresolved attachment placeholders cannot reach a turn or create a thread', async () => {
+  const store = await ready();
+  const attachment = { kind: 'file' as const, mimeType: 'text/plain', name: 'unread.txt', data: '', pendingDraftAsset: 'fixture-asset' };
+  store.startDraft(store.projects[0]!.id);
+  const count = store.threads.length;
+  expect(await store.submit('Keep the file', store.defaultChoice()!, [attachment])).toBe(false);
+  expect(store.threads).toHaveLength(count);
+  expect(store.error).toBe(strings.errors.draftAttachment);
+  expect(await store.send('Keep the file', 't-trace', [attachment])).toBe(false);
+  expect(store.error).toBe(strings.errors.draftAttachment);
+});
+
 test('moving a draft cannot overwrite another project draft', async () => {
   const store = await ready();
   const [a, b] = store.projects;

@@ -685,9 +685,12 @@ opening another thread. Existing conversations keep their own unsent reply.
 Queued messages are restored paused, so reopening the app does not send them.
 The durable journal includes attachments and page references.
 Storage failures show an error while retaining the text in memory.
-Opening or reading the journal has a three-second deadline, so blocked storage
+Opening, reading or writing the journal has a three-second deadline, so blocked storage
 cannot hold startup indefinitely. A failed read never replaces unread durable
 drafts; its text backup is merged with them when storage becomes readable again.
+Unavailable attachment bytes leave removable placeholders; their IDs survive
+text edits, and removed IDs stay absent when storage recovers. Sending waits
+until the remaining attachments are readable or explicitly removed.
 
 `bun test tests/e2e/drafts-overlays.test.ts` checks reloads, forced browser exits,
 menu stacking, panel exits and reduced motion, and writes desktop and phone

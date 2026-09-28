@@ -997,6 +997,7 @@ export const fr: Translation = {
     attachReadError: '{name} est illisible.',
     attachRemove: 'Retirer {name}',
     attachAlt: 'Image jointe',
+    attachPending: 'Recharger pour récupérer',
     attachUnnamed: "l'image collée",
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
     attachTooLarge: '{name} est trop lourde : une image pèse {max} au maximum.',
@@ -1701,6 +1702,7 @@ export const fr: Translation = {
 
   errors: {
     draftStorage: "Cet appareil n'a pas pu enregistrer votre brouillon. Gardez cette fenêtre ouverte et copiez votre texte avant de la fermer.",
+    draftAttachment: "Une pièce jointe n'a pas pu être lue depuis le stockage. Rechargez pour la récupérer, ou retirez-la avant l'envoi.",
     draftExists: 'Ce projet contient déjà un brouillon. Ouvrez-le ou envoyez-le avant de déplacer un autre brouillon ici.',
     prefix: 'Erreur',
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
