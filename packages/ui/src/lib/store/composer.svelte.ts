@@ -1,5 +1,5 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
-import type { Attachment } from '@boite/contracts';
+import type { Attachment, ThreadSummary, TurnInFlightData } from '@boite/contracts';
 import { activityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasDropped } from '../client';
 import { titleFrom } from '../format';
@@ -9,6 +9,16 @@ import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
+
+/** A prompt waiting behind a running turn, with what it was written with. */
+type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[] };
+
+/** The refusal `turns.start` answers while the thread already runs a turn, or null for any other error. */
+function turnInFlight(error: unknown): TurnInFlightData | null {
+  if (!(error instanceof RpcFailure) || error.code !== RpcErrorCode.Refused) return null;
+  const data = error.data as Partial<TurnInFlightData> | null | undefined;
+  return data?.reason === 'turn-in-flight' && data.thread ? data as TurnInFlightData : null;
+}
 
 /** The unsent prompt of each thread, and the send path that turns one into a turn. */
 export class Composer {
@@ -23,7 +33,7 @@ export class Composer {
     previewReferences?: PreviewReference[];
     selection?: { start: number; end: number };
     mentionInsertion?: number;
-    queued: { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[] }[];
+    queued: QueuedPrompt[];
     sending: boolean;
     paused: boolean;
   }>>({});
@@ -223,9 +233,32 @@ export class Composer {
       this.pendingSends.delete(threadId);
       return true;
     } catch (error) {
+      const early = turnInFlight(error);
+      if (early) {
+        this.holdBehind(early, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
+        return true;
+      }
       this.ctx.fail(error);
       return false;
     }
+  }
+
+  /**
+   * The core was already running a turn this client had not seen yet: answers
+   * held for an asynchronous question going out on their own, or the agent
+   * resuming by itself, opened as the previous turn ended. The prompt is not
+   * wrong, only early. It goes back at the head of the thread's queue, and the
+   * row the core sent keeps the composer waiting until that turn is over.
+   */
+  private holdBehind({ thread }: TurnInFlightData, entry: QueuedPrompt): void {
+    const s = this.ctx.store;
+    // The core refused because a turn is in flight, even when its row has not
+    // moved off idle yet: waiting is what the composer must do.
+    const row: ThreadSummary = ['queued', 'running', 'waiting'].includes(thread.status) ? thread : { ...thread, status: 'running' };
+    this.ctx.threads.upsertThread(row);
+    if (s.openThread?.id === row.id) Object.assign(s.openThread, row);
+    this.composerStates[row.id] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    this.composerStates[row.id]!.queued.unshift(entry);
   }
 
   async stop(): Promise<void> {

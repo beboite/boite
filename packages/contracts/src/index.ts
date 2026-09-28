@@ -2346,6 +2346,19 @@ export const RpcErrorCode = {
   Unavailable: -32011,
 } as const;
 
+/**
+ * The `data` of the Refused error `turns.start` answers while the thread
+ * already has a turn queued or running, often one the core opened by itself
+ * (held answers to asynchronous questions, an agent resuming on its own). The
+ * prompt is not wrong, only early: `thread` is the row as the core has it, and
+ * a client keeps the prompt until that turn is over.
+ */
+export interface TurnInFlightData {
+  threadId: ThreadId;
+  reason: 'turn-in-flight';
+  thread: ThreadSummary;
+}
+
 /** WebSocket close codes the core uses. */
 export const RpcCloseCode = {
   Unauthorized: 4001,
