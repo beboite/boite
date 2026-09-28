@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
@@ -133,8 +133,12 @@ describe('a thread in its own worktree', () => {
     await client.call('settings.set', { worktreeStorage: { mode: 'project', directory } });
     const back = await create(first.id, 'Back');
     expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', 'back'));
-    expect((await client.call('worktrees.list', { projectId: first.id })).map(w => realpathSync(w.path)))
-      .toContain(realpathSync(a.cwd));
+    const listed = (await client.call('worktrees.list', { projectId: first.id })).find(w => w.branch === a.branch);
+    if (!listed) throw new Error(`shared worktree ${a.branch} was not listed`);
+    // Bun's realpath preserves Windows 8.3 aliases; compare the directory identity.
+    const actual = statSync(listed.path, { bigint: true });
+    const expected = statSync(a.cwd, { bigint: true });
+    expect([actual.dev, actual.ino]).toEqual([expected.dev, expected.ino]);
     expect(harness.core.journal.getSetting('settings')).toMatchObject({ worktreeStorage: { mode: 'project', directory } });
   });
 
