@@ -207,7 +207,25 @@ stopped work does not resume. The General page reads the list only on its
 button. The palette's Archived threads command and each project's `...` menu
 open the same card with the list already read, and the phone's page reads it
 when it opens. A restored row keeps its place with Open, which goes to the
-thread.
+thread. Under its rows, a project with archived threads shows a folded
+"N archived" line; opened, it reads that project's archived threads and
+restores one in a click. The fold is not remembered between sessions.
+
+Settings > General > Worktrees (owner only, also in each git project's `...`
+menu) lists every project's worktrees with what each would lose. "Remove the
+clean ones" takes those that are neither dirty nor unmerged and hold no live
+thread, without `force`. Removing a dirty or unmerged one asks first, then
+passes `force`. A worktree a live thread stands in cannot be removed.
+
+`projects.archive { projectId, archived? }` flags a project archived (the
+default) or brings it back, and `project.updated` tells every client. It moves
+nothing else: the project's threads keep running and its worktrees stay. The
+sidebar lists it under "Archived projects" with Restore, the landing and the
+project pickers skip it, and a thread started in it brings it back. The drafts
+project is refused. Each project also carries `archivedThreads`, the count of
+its archived top-level threads, announced again with `project.updated` when a
+thread is archived or restored. A paired device may archive a project: it is a
+flag the owner undoes in one click.
 
 ## Pending prompts, goals and loops
 

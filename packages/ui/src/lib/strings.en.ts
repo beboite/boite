@@ -1412,6 +1412,24 @@ export const strings = {
       restore: 'Restore',
       open: 'Open'
     },
+    /** The worktrees a thread leaves on disk, and their removal by hand. */
+    worktrees: {
+      heading: 'Worktrees',
+      intro: 'A thread started in a git project works in a worktree of its own, on a boite/ branch. It stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
+      show: 'Show worktrees',
+      noProject: 'No git project on this machine.',
+      empty: 'No worktree left.',
+      sweep: 'Remove the clean ones ({count})',
+      remove: 'Remove',
+      dirty: 'uncommitted changes',
+      unmerged: 'commits on no other branch',
+      missing: 'folder gone',
+      heldBy: 'used by "{title}"',
+      archivedThread: 'thread archived: "{title}"',
+      heldHint: 'A thread works here: archive it first',
+      forceTitle: 'Remove {name} anyway?',
+      forceBody: 'It has {reasons}. Removing it deletes the folder and its branch, and that work is lost.'
+    },
     pairing: {
       heading: 'Phones and other devices',
       intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',

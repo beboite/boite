@@ -72,6 +72,7 @@
         ...(owner.owner
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
+              ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
               separator(),
               { id: 'remove', label: strings.sidebar.removeProject, danger: true }
             ]
@@ -88,6 +89,10 @@
           undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
             await owner.archiveProject(project.id, false);
           });
+        if (action === 'worktrees') {
+          if (workspace.active !== owner) await workspace.select(owner);
+          owner.showSettings('general', 'worktrees');
+        }
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);

@@ -1371,6 +1371,23 @@ export const fr: Translation = {
       restore: 'Restaurer',
       open: 'Ouvrir'
     },
+    worktrees: {
+      heading: 'Worktrees',
+      intro: 'Une conversation lancée dans un projet git travaille dans son propre worktree, sur une branche boite/. Il reste sur le disque une fois la conversation archivée. Supprimez ceux dont vous n’avez plus besoin : le dossier et sa branche partent.',
+      show: 'Afficher les worktrees',
+      noProject: 'Aucun projet git sur cette machine.',
+      empty: 'Plus aucun worktree.',
+      sweep: 'Supprimer les propres ({count})',
+      remove: 'Supprimer',
+      dirty: 'modifications non commitées',
+      unmerged: 'commits sur aucune autre branche',
+      missing: 'dossier disparu',
+      heldBy: 'utilisé par « {title} »',
+      archivedThread: 'conversation archivée : « {title} »',
+      heldHint: 'Une conversation travaille ici : archivez-la d’abord',
+      forceTitle: 'Supprimer {name} quand même ?',
+      forceBody: 'Il contient des {reasons}. Le supprimer efface le dossier et sa branche, et ce travail est perdu.'
+    },
     pairing: {
       heading: 'Téléphones et appareils',
       intro: "Un lien d'appairage ouvre Boite sur un autre appareil avec une clé à lui. Il sert une fois et tient dix minutes.",
