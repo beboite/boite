@@ -750,6 +750,12 @@ export const strings = {
     copy: 'Copy',
     copied: 'Copied',
     /** Under a message, on hover: the whole message rather than one code block. */
+    /** The card an agent's proposed plan is read in, before it starts editing. */
+    plan: 'Plan',
+    planDownload: 'Download .md',
+    planSave: 'Save to folder',
+    planSaveHint: "Write the plan as a markdown file at the root of this thread's folder",
+    planSaved: 'Saved as {name}',
     copyMessage: 'Copy message',
     editMessage: 'Edit and send again from here',
     retry: 'Retry this answer',

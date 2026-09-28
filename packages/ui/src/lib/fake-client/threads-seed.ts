@@ -99,6 +99,17 @@ export function seedThreads() {
           {
             type: 'text',
             text: 'Both events carry the pid, the exe, the CPU time and the peak memory, so the table can be filled without a second call.'
+          },
+          {
+            // The plan a plan-mode turn hands over, read in its own card.
+            type: 'tool',
+            toolId: 'tool-seed-plan',
+            name: 'ExitPlanMode',
+            input: {
+              plan: '# Trace tab\n\n1. Read `trace.get` once when the tab opens.\n2. Keep the rows live from `process.started` and `process.exited`.\n3. Show the `TraceCapability` note above the table on Linux and macOS.\n\nNo new RPC: both events already carry the pid, the exe, the CPU time and the peak memory.'
+            },
+            output: null,
+            status: 'done'
           }
         ],
         state: 'complete',
