@@ -11,9 +11,18 @@ test('a blocked provider does not delay another provider or its progress event',
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const reported: string[] = [];
+  let fastReported!: () => void;
+  let deadline!: ReturnType<typeof setTimeout>;
+  const fastReady = new Promise<void>((resolve, reject) => {
+    fastReported = resolve;
+    deadline = setTimeout(() => reject(new Error('Codex quota progress did not arrive while Claude was blocked')), 2_000);
+  });
   const off = harness.core.bus.onAny((name, payload) => {
     const event = payload as { requestId: string; quota: { accountId: string } };
-    if (name === 'quotas.progress' && event.requestId === 'progress-test') reported.push(event.quota.accountId);
+    if (name === 'quotas.progress' && event.requestId === 'progress-test') {
+      reported.push(event.quota.accountId);
+      if (event.quota.accountId === fast.id) fastReported();
+    }
   });
   const store = new QuotaStore(harness.core, async (account) => {
     if (account.providerId === 'claude') await blocked;
@@ -21,10 +30,10 @@ test('a blocked provider does not delay another provider or its progress event',
   });
   const reading = store.list(true, 'progress-test');
   try {
-    await Bun.sleep(30);
+    await fastReady;
     expect(reported).toContain(fast.id);
     expect(reported).not.toContain(slow.id);
-  } finally { release(); await reading; off(); }
+  } finally { clearTimeout(deadline); release(); await reading; off(); }
 });
 
 test('Codex selects the account bucket and respects monthly plans and reset seconds', () => {
