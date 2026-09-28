@@ -593,6 +593,11 @@ export class MuseSession {
         preTokens: typeof item.tokensBefore === 'number' ? item.tokensBefore : (turn.ctx.thread.context?.tokens ?? null),
         postTokens: typeof item.tokensAfter === 'number' ? item.tokensAfter : null,
       });
+      // The item already names the new size: the meter moves with the part
+      // instead of waiting for a contextUsage that may land after the turn ended.
+      if (typeof item.tokensAfter === 'number') {
+        turn.ctx.context({ tokens: item.tokensAfter, window: turn.ctx.thread.context?.window ?? null });
+      }
       if (turn.compacting) turn.finish('completed', null);
       return;
     }

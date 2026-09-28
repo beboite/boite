@@ -58,8 +58,12 @@ function halfThen(end: 'drop' | 'stall'): Response {
     async start(controller) {
       controller.enqueue(BIG_RELEASE.slice(0, HALF));
       if (end === 'stall') return;
-      await Bun.sleep(50);
-      controller.error(new Error('the test server drops the connection'));
+      // The drop waits for the half on disk: a body that errors discards what
+      // its reader has not taken yet, and a slow runner would resume from less.
+      await waitFor(() => sizeOf(agentDir('downloads', '1.0.0.zip.part')) >= HALF).catch(() => {});
+      // No reason: the socket drops all the same, and Bun has nothing to log,
+      // where an Error is printed and CI turns each print into an annotation.
+      controller.error(undefined);
     },
   });
   return new Response(body, { headers: { 'content-length': String(BIG_RELEASE.byteLength), etag: ETAG, 'accept-ranges': 'bytes' } });
@@ -164,6 +168,10 @@ async function loadDescriptor(install: Record<string, unknown>): Promise<void> {
 
 function agentDir(...parts: string[]): string {
   return join(harness.dataDir, 'agents', 'managed', ...parts);
+}
+
+function sizeOf(path: string): number {
+  return existsSync(path) ? statSync(path).size : 0;
 }
 
 beforeEach(async () => {

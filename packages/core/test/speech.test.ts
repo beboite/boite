@@ -172,8 +172,11 @@ describe('a local speech download on a bad connection', () => {
             async start(controller) {
               controller.enqueue(body.slice(0, half));
               if (end === 'stall') return;
-              await Bun.sleep(50);
-              controller.error(new Error('the test server drops the connection'));
+              // The drop waits for the half on disk: a body that errors discards
+              // what its reader has not taken yet, and a slow runner would keep less.
+              await waitFor(() => existsSync(part) && statSync(part).size >= half).catch(() => {});
+              // No reason: the socket drops all the same, with nothing for Bun to log.
+              controller.error(undefined);
             },
           }), { headers: { 'content-length': String(body.byteLength), etag: '"model-1"' } });
         }
@@ -189,7 +192,11 @@ describe('a local speech download on a bad connection', () => {
   });
   afterEach(() => { server.stop(true); });
 
-  const download = (target: string) => harness.core.speech.local['download'](spec, target, new AbortController().signal);
+  let part = '';
+  const download = (target: string) => {
+    part = `${target}.part`;
+    return harness.core.speech.local['download'](spec, target, new AbortController().signal);
+  };
 
   test('a dropped connection keeps what it got, and the next download resumes from there', async () => {
     const target = join(harness.dataDir, 'model.bin');

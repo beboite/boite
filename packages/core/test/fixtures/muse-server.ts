@@ -442,7 +442,8 @@ function handle(method: string, raw: unknown): unknown {
             tokensAfter: 32000,
           },
         });
-        notify('session/contextUsage', { usedTokens: 32000, windowTokens: 200000 });
+        // Well after the item, as a busy host may send it: the meter must not wait for it.
+        setTimeout(() => notify('session/contextUsage', { usedTokens: 32000, windowTokens: 200000 }), 150);
       }, 0);
       return { status: 'accepted' };
     }
