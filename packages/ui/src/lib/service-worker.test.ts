@@ -99,7 +99,7 @@ test('installation caches entry scripts, styles and fonts before taking control'
   sw.fetch.mockResolvedValue(new Response('<script src="/assets/index-ab.js"></script><link href="/assets/index-cd.css"><script src="/assets/index-ab.js"></script>'));
   await sw.emit('install');
   expect(sw.cache.addAll).toHaveBeenCalledExactlyOnceWith([
-    '/assets/index-ab.js', '/assets/index-cd.css', '/manifest.webmanifest', '/icons/icon-192.png', '/fonts/Geist-Variable.woff2', '/fonts/GeistMono-Variable.woff2'
+    '/assets/index-ab.js', '/assets/index-cd.css', '/manifest.webmanifest', '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2'
   ]);
   expect(sw.put).toHaveBeenCalledWith('/', expect.any(Response));
 });

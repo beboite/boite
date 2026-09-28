@@ -18,6 +18,7 @@
  */
 import type { BrowserBridge, BrowserEvent, SurfaceRect } from './browser-bridge';
 import type { PreviewReference } from '@boite/contracts';
+import { currentZoom } from './zoom';
 
 /** The one event the shell emits for every surface. `src/browser.rs` sends it. */
 const EVENT = 'browser://event';
@@ -28,6 +29,12 @@ function reasonOf(error: unknown): string {
   if (typeof error === 'string') return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** CSS pixels to the window's logical pixels, under an interface zoom of `factor`. */
+export function scaleRect(rect: SurfaceRect | null, factor: number): SurfaceRect | null {
+  if (!rect || factor === 1) return rect;
+  return { x: rect.x * factor, y: rect.y * factor, width: rect.width * factor, height: rect.height * factor };
 }
 
 /** The key a repeated `setBounds` is skipped on. */
@@ -71,16 +78,18 @@ export class TauriBridge implements BrowserBridge {
   }
 
   /**
-   * The rectangle goes over as it comes off `getBoundingClientRect`: the window
-   * and the page share one scale factor, so CSS pixels are the logical pixels
-   * `LogicalPosition` and `LogicalSize` want, and nothing is converted.
+   * The rectangle comes off `getBoundingClientRect` in CSS pixels. At 100 % the
+   * window and the page share one scale factor, so those are the logical pixels
+   * `LogicalPosition` and `LogicalSize` want; the interface zoom (`lib/zoom.ts`)
+   * makes one CSS pixel that many logical ones, so the rectangle is scaled by it.
    */
   setBounds(id: string, rect: SurfaceRect | null): void {
     if (!this.#live.has(id)) return;
-    const key = boundsKey(rect);
+    const scaled = scaleRect(rect, currentZoom());
+    const key = boundsKey(scaled);
     if (this.#bounds.get(id) === key) return;
     this.#bounds.set(id, key);
-    this.#run(id, 'browser_set_bounds', { rect });
+    this.#run(id, 'browser_set_bounds', { rect: scaled });
   }
 
   setZoom(id: string, factor: number): void {

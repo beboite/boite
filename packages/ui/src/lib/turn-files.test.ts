@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { relativeTo, turnFiles } from './turn-files';
+import { relativeTo, turnFiles, turnFileTree } from './turn-files';
 
 function tool(name: string, input: unknown, extra: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): MessagePart {
   return { type: 'tool', toolId: `${name}-${Math.random()}`, name, input, output: null, status: 'done', ...extra };
@@ -69,5 +69,25 @@ describe('relativeTo', () => {
     expect(relativeTo('C:\\Work', 'C:\\Workshop\\a.ts')).toBeNull();
     expect(relativeTo('/work', '../etc/passwd')).toBeNull();
     expect(relativeTo('/work', './a/b.ts')).toBe('a/b.ts');
+  });
+});
+
+describe('turnFileTree', () => {
+  it('keeps duplicate names in their own folders, compacts chains and preserves outside paths', () => {
+    const files = turnFiles([
+      tool('Write', { file_path: 'src/ui/components/view.ts' }),
+      tool('Write', { file_path: 'src/core/view.ts' }),
+      tool('Write', { file_path: 'README.md' }),
+      tool('Write', { file_path: 'D:\\outside\\view.ts' })
+    ], CWD);
+    const tree = turnFileTree(files);
+    const src = tree.find((node) => node.name === 'src');
+    expect(src).toMatchObject({ kind: 'folder', count: 2 });
+    if (src?.kind !== 'folder') throw new Error('missing src folder');
+    expect(src.children.map((node) => node.name)).toEqual(['core', 'ui/components']);
+    expect(src.children[1]).toMatchObject({ children: [{ file: files[0] }] });
+    expect(tree.find((node) => node.name === 'D:\\outside')).toMatchObject({ count: 1, children: [{ file: files[3] }] });
+    expect(tree.at(-1)).toMatchObject({ kind: 'file', file: files[2] });
+    expect(turnFileTree([])).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
-  import { appName, appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
+  import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
   import { appUpdateInstall } from '../lib/app-update-install.svelte';
 
   let { store }: { store: Store } = $props();
@@ -91,12 +91,13 @@
     await (await windowOf()).close();
   }
 
-  /** What the bar reads when no thread header takes its place. */
-  let heading = $derived(store.page === 'settings' ? strings.settings.heading : (store.openProject ? projectName(store.openProject) : null) ?? appName());
+  /**
+   * What the bar reads when no thread header takes its place. Never the app's
+   * own name: the window title and the taskbar carry it, and in the bar it only
+   * took room from the project or the thread.
+   */
+  let heading = $derived(store.page === 'settings' ? strings.settings.heading : store.openProject ? projectName(store.openProject) : '');
   let threadHeader = $derived(store.page === 'chat' && (store.openThread || store.draft));
-  /** The nightly chip, unless the bar already reads "boite (de nuit)". */
-  let nightly = $derived(showAppUpdateUi() && appUpdater.snapshot.supported && appUpdater.snapshot.currentChannel === 'nightly'
-    && (threadHeader || heading !== appName()));
   /** The dev install runs beside the stable one, so the bar has to say which is open. */
   let dev = $derived(store.core?.channel === 'dev');
 
@@ -122,9 +123,6 @@
   {/if}
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
-  {/if}
-  {#if nightly}
-    <span class="channel" title={strings.appUpdate.nightlyTitle} data-testid="titlebar-update-channel">{strings.app.nightlyName}</span>
   {/if}
   {#if showAppUpdateUi() && appUpdater.ready}
     <button
