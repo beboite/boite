@@ -338,6 +338,26 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 266) * ESTIMATE}px`);
 });
 
+test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()).toBeNull();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 4_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(jumpButton()).not.toBeNull();
+
+  jumpButton()!.click();
+  await settle();
+  expect(timeline.scrollTop).toBe(messages.length * ESTIMATE);
+  expect(jumpButton()).toBeNull();
+});
+
 test('a short thread renders whole, with no spacer at all', async () => {
   const messages = thread(30);
   stubLayout(messages.length * ESTIMATE);

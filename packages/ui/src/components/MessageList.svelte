@@ -341,7 +341,8 @@
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
     void tick().then(rememberAnchor);
-    if (pinned) behind = false;
+    // Away from the bottom, the way back shows, whether or not anything new came in.
+    behind = !pinned;
     pullOlder(box);
   }
 
