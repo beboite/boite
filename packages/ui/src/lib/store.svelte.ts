@@ -124,6 +124,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.drafts.stop();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;
     this.coordinationDirectory = null;
@@ -433,6 +434,8 @@ export class Store {
   // -------------------------------------------------------------------------
 
   get composerStates() { return this.#ctx.composer.composerStates; }
+  get draftEntries() { return this.#ctx.drafts.entries; }
+  flushDrafts() { return this.#ctx.drafts.flush(); }
   set composerStates(value) { this.#ctx.composer.composerStates = value; }
 
   registerComposerInsertion(...args: Parameters<Composer['registerComposerInsertion']>) { return this.#ctx.composer.registerComposerInsertion(...args); }

@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserSurface from '../components/BrowserSurface.svelte';
 import { browserBridge, FakeBridge, type BrowserEvent } from './browser-bridge';
@@ -12,6 +12,7 @@ import { FakeClient } from './fake-client';
 import { editPreviewMentions, insertPreviewMention, restorePreviewMentions } from './preview-mentions';
 
 afterEach(() => { document.body.innerHTML = ''; });
+beforeEach(() => { localStorage.clear(); });
 
 test('picking a page element captures context, prevents navigation, and removes its listeners', () => {
   document.body.innerHTML = '<main><a href="/elsewhere">Change this label</a></main>';

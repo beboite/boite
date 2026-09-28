@@ -22,6 +22,7 @@
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
+  import DraftRow from './DraftRow.svelte';
   import MachineIcon from './MachineIcon.svelte';
   import ProjectTile from './ProjectTile.svelte';
   let { store }: { store: Store } = $props();
@@ -220,16 +221,21 @@
   <div class="scroll">
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
-      {#if store.draft}<button
-          class="ghost draft"
-          data-testid="draft-row"
-          onclick={() => store.startDraft(store.draft?.projectId)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
-        >{/if}
+      {#each visible as machine (machine.id)}
+        {#each machine.store.draftEntries as entry (entry.projectId)}
+          <DraftRow owner={machine.store} {entry} />
+        {/each}
+      {/each}
       {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} showProject={groups.length > 1} showMachine={multi} />{/each}
       {#if groups.length > 0 && recent.length === 0}<p class="none">
           {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
         </p>{/if}
     {:else}
+      {#each visible as machine (machine.id)}
+        {#each machine.store.draftEntries.filter(entry => entry.projectId === null) as entry (entry.projectId)}
+          <DraftRow owner={machine.store} {entry} />
+        {/each}
+      {/each}
       {#each groups as { machine, project } (`${machine.id}:${project.id}`)}
         {@const owner = machine.store}
         {@const threads = owner
@@ -238,7 +244,7 @@
           .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
-        {@const draftHere = store === owner && owner.draft?.projectId === project.id}
+        {@const draftHere = owner.draftEntries.find(entry => entry.projectId === project.id)}
         {@const dropKey = `${machine.id}:${project.id}`}
         <section
           class="project"
@@ -278,11 +284,7 @@
           </div>
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
             <div class="rows">
-              {#if draftHere}<button
-                  class="ghost draft"
-                  data-testid="draft-row"
-                  onclick={() => owner.startDraft(project.id)}><span class="draft-mark" aria-hidden="true"></span>{strings.sidebar.draft}</button
-                >{/if}
+              {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
               {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={multi} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
@@ -487,22 +489,6 @@
     min-height: 0;
     overflow: hidden;
   }
-  /* Laid out like a thread row: the same mark column, the title on the same line. */
-  .draft {
-    width: 100%;
-    min-height: calc(var(--row) + 14px);
-    justify-content: flex-start;
-    gap: 8px;
-    padding: 0 10px;
-    background: var(--color-active);
-  }
-  .draft-mark {
-    width: 8px;
-    height: 8px;
-    flex: none;
-    border-radius: 50%;
-    border: 1.5px dashed var(--color-muted-foreground);
-  }
   .none {
     padding: 4px 10px;
     color: var(--color-subtle);
@@ -554,9 +540,16 @@
     background: var(--color-edge);
   }
   @media (min-width: 721px) {
+    .sidebar {
+      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), display var(--dur-3) allow-discrete;
+    }
     .sidebar.collapsed {
       display: none;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
     }
+    @starting-style { .sidebar:not(.collapsed) { opacity: 0; transform: translateY(4px); } }
   }
   @media (max-width: 720px) {
     .sidebar {
@@ -566,11 +559,17 @@
       inset: var(--titlebar) auto 0 0;
       z-index: 30;
       width: min(340px, 90vw);
-      transform: translateX(-100%);
-      transition: transform var(--dur-3) var(--ease-out-quint);
+      visibility: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity var(--dur-3) var(--ease-out-quint), transform var(--dur-3) var(--ease-out-quint), visibility var(--dur-3);
       box-shadow: var(--shadow-e3);
     }
     .sidebar.open {
+      visibility: visible;
+      pointer-events: auto;
+      opacity: 1;
       transform: none;
     }
     .project-actions {

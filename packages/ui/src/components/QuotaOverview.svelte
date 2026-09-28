@@ -47,6 +47,9 @@
         </span>
         {#if windows.length}<ChevronDown size={13} />{/if}
       </button>
+      {#each group.rows.filter((row) => row.error) as row (row.accountId)}
+        <p class="error" role="status">{group.rows.length > 1 ? `${row.label}: ` : ''}{row.error}</p>
+      {/each}
       {#if expanded === group.providerId}
         <div class="details" id={`usage-${group.providerId}`}>
           {#each group.rows as row (row.accountId)}
@@ -82,6 +85,7 @@
   .amount { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); }
   .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
+  .error { margin: 0; padding: 0 4px 12px 40px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .meters { display: flex; gap: 4px; }
   .meters.stale { opacity: 0.45; }
   .track { flex: 1; width: 0; min-width: 0; height: 4px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }

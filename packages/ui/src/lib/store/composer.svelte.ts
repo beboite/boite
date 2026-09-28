@@ -58,7 +58,7 @@ export class Composer {
     const draft = this.composerStates[key]!;
     const historyKey = this.ctx.store.threadKey(key);
     const previous = this.previewUndo.get(historyKey);
-    if (!previous && !draft.previewReferences?.length) { draft.text = value; return; }
+    if (!previous && !draft.previewReferences?.length) { draft.text = value; this.ctx.drafts.persist(); return; }
     const history = previous ?? [];
     const restored = undo ? history.findLast(entry => entry.text === value) : undefined;
     history.push({ text: draft.text, references: draft.previewReferences ?? [] });
@@ -66,6 +66,7 @@ export class Composer {
     this.previewUndo.set(historyKey, history);
     draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
     draft.text = value;
+    this.ctx.drafts.persist();
   }
 
   /**
@@ -174,6 +175,7 @@ export class Composer {
       ...(draft.worktree ? { worktree: {} } : {})
     });
     if (!created) return false;
+    this.ctx.drafts.forget(draft.projectId);
     if (composer) {
       this.composerStates[created.id] = composer;
       delete this.composerStates[DRAFT_STASH_KEY];

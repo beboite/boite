@@ -47,3 +47,13 @@ test('a failed refresh keeps the rows already read on screen under the error', a
   expect(document.querySelector('[data-testid="limits-glance-error"]')!.textContent).toContain('timed out');
   expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
 });
+
+test('an individual quota failure shows its reason beside the provider', async () => {
+  const row = { ...quota, providerId: 'grok', providerName: 'Grok', windows: [], status: 'unavailable', error: 'Grok login is missing or expired. Run grok login, then refresh.' };
+  const store = { client: { call: async () => [row], on: () => () => {} }, owner: true, endpointUrl: 'glance-grok-error', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  const provider = document.querySelector('[data-testid="quota-provider"][data-provider="grok"]')!;
+  expect(provider.querySelector('[role="status"]')?.textContent).toContain(row.error);
+});

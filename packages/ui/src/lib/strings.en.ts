@@ -1771,6 +1771,8 @@ export const strings = {
   },
 
   errors: {
+    draftStorage: 'This device could not save your draft. Keep this window open and copy your text before closing it.',
+    draftExists: 'This project already has a draft. Open or send it before moving another draft here.',
     prefix: 'Error',
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',

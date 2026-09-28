@@ -666,6 +666,33 @@ edit really lives before editing it.
 
 ## UI spacing and motion
 
+Composer menus use the browser's top layer through `lib/floating.ts`, including
+effort, permissions and the slash and mention lists. Their position follows the
+trigger and the available viewport, so the sidebar and glass composer cannot
+cover them. Phone pickers share the bottom sheet; typing suggestions stay by
+the composer.
+
+The sidebar, right panel and terminal use the same short fade and vertical
+movement. The terminal and right panel stay mounted through their exit, and
+archive drawers use the shared grid fold. All durations honor reduced motion.
+
+Unsent messages are saved in IndexedDB with strict transaction durability,
+separately for each core and data directory. A small synchronous text backup
+covers typing while a transaction is pending. A local core changing its port
+keeps the same drafts.
+New conversations keep one draft per project, visible in the sidebar after
+opening another thread. Existing conversations keep their own unsent reply.
+Queued messages are restored paused, so reopening the app does not send them.
+The durable journal includes attachments and page references.
+Storage failures show an error while retaining the text in memory.
+Opening or reading the journal has a three-second deadline, so blocked storage
+cannot hold startup indefinitely. A failed read never replaces unread durable
+drafts; its text backup is merged with them when storage becomes readable again.
+
+`bun test tests/e2e/drafts-overlays.test.ts` checks reloads, forced browser exits,
+menu stacking, panel exits and reduced motion, and writes desktop and phone
+captures under `tests/e2e/.artifacts/`.
+
 Settings pages share their width and card padding through `--settings-width`
 and `--settings-padding` in `app.css`. A page that wraps its cards for a loading
 state uses `settings-stack` on that wrapper. This keeps its cards on the same

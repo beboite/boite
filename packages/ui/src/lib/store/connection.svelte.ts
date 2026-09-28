@@ -334,7 +334,7 @@ export class Connection {
       this.connection = client.state;
       this.principal = client.principal;
       s.error = null;
-      await s.reload();
+      await Promise.all([this.ctx.drafts.start(), s.reload()]);
     } catch (error) {
       this.connection = client.state;
       this.ctx.fail(error);

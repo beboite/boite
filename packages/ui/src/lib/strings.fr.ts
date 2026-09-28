@@ -1700,6 +1700,8 @@ export const fr: Translation = {
   },
 
   errors: {
+    draftStorage: "Cet appareil n'a pas pu enregistrer votre brouillon. Gardez cette fenêtre ouverte et copiez votre texte avant de la fermer.",
+    draftExists: 'Ce projet contient déjà un brouillon. Ouvrez-le ou envoyez-le avant de déplacer un autre brouillon ici.',
     prefix: 'Erreur',
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",
