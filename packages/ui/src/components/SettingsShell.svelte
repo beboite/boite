@@ -272,7 +272,7 @@
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
   {#key tab}
-    <section onscrollcapture={spy}>
+    <section class="framed" onscrollcapture={spy}>
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
@@ -340,8 +340,6 @@
     gap: 2px;
     padding: 20px 14px;
     overflow-y: auto;
-    border-right: 1px solid var(--color-border);
-    background: var(--color-surface);
   }
 
   .back {
@@ -389,7 +387,7 @@
       overflow-y: hidden;
       padding: 8px 12px;
       align-items: flex-start;
-      border-right: none;
+      background: var(--color-surface);
       border-bottom: 1px solid var(--color-border);
     }
 

@@ -3,10 +3,10 @@
  * conversation at a time beside it. Its cards, hints and rows speak the
  * settings grammar of app.css, scoped to this page.
  */
-.agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--color-background); animation: rise var(--dur-3) var(--ease-out-quint); }
+.agents-page { flex: 1; min-width: 0; min-height: 0; display: flex; animation: rise var(--dur-3) var(--ease-out-quint); }
 
-/* The chat list. */
-.agents-rail { --ring: var(--color-surface); width: var(--sidebar); flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--color-border); background: var(--color-surface); }
+/* The chat list, standing on the app's frame beside the framed conversation. */
+.agents-rail { --ring: var(--color-frame); width: var(--sidebar); flex: none; display: flex; flex-direction: column; min-height: 0; }
 .agents-rail > header { display: flex; align-items: center; gap: 2px; padding: 12px 8px 8px 12px; min-height: 52px; box-sizing: border-box; }
 .agents-rail h1 { font-size: var(--text-md); font-weight: 600; padding-left: 4px; }
 .agents-leave + h1 { padding-left: 2px; }

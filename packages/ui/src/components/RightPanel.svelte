@@ -245,7 +245,7 @@
 ></button>
 
 <aside
-  class="panel"
+  class="panel framed"
   class:maximized={rightPanel.maximized}
   class:dragging
   class:closing
@@ -412,8 +412,9 @@
     flex-direction: column;
     min-height: 0;
     min-width: 0;
-    border-left: 1px solid var(--color-border);
-    background: var(--color-surface);
+    /* A framed card whose resize handle hangs out into the gap beside it, so
+       the card itself does not clip: its body rounds the bottom corners. */
+    overflow: visible;
     /* Only the first open travels: a drag and a maximize are instant. */
     animation: panel-in var(--dur-3) var(--ease-out-quint);
   }
@@ -569,6 +570,13 @@
     flex-direction: column;
   }
 
+  @media (min-width: 721px) {
+    .body {
+      overflow: clip;
+      border-radius: 0 0 calc(var(--radius-frame) - 1px) calc(var(--radius-frame) - 1px);
+    }
+  }
+
   .sheet-scrim {
     display: none;
   }
@@ -578,9 +586,9 @@
     .panel,
     .panel.maximized {
       position: absolute;
-      right: 0;
+      right: var(--frame-gap);
       top: 0;
-      bottom: 0;
+      bottom: var(--frame-gap);
       z-index: 30;
       width: min(42vw, 448px);
       min-width: 320px;
@@ -608,7 +616,7 @@
       inset: 0;
       width: auto;
       min-width: 0;
-      border-left: none;
+      background: var(--color-surface);
       box-shadow: none;
       /* The sheet covers the whole screen, the status bar and the home indicator included. */
       box-sizing: border-box;
