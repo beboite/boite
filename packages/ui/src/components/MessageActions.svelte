@@ -123,7 +123,9 @@
     color: var(--color-foreground);
   }
 
+  /* A finger takes the full target, as every other phone control does. */
   @media (pointer: coarse) {
-    .act { width: 34px; height: 34px; }
+    .message-actions { gap: 0; }
+    .act { width: var(--touch-target); height: var(--touch-target); }
   }
 </style>

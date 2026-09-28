@@ -243,7 +243,7 @@ test('a phone pins and archives a thread without a right-click, from the header 
   expect(await page.evaluate(`['agents-toggle', 'terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'archive']);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'find', 'move', 'archive']);
   // No team on this thread: the entry offers to start one, as the desktop title menu does.
   expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Hand work to other agents');
   await capture('mobile-thread-menu.png');
@@ -333,8 +333,10 @@ test('Back returns from a conversation to the list and closes the context popup,
 
 // A control takes a finger when a tap 19 px off its centre, on either axis, still lands on it.
 // A control inside a label is skipped: the whole label row is its target.
+// The bottom tab bar is the screen's edge for what scrolls under it, as the viewport's edge is.
 const smallTargets = `(() => {
   const small = [];
+  const tabs = document.querySelector('[data-testid=mobile-tabs]');
   for (const el of document.querySelectorAll('button, summary, [role=button]')) {
     if (el.closest('label')) continue;
     const r = el.getBoundingClientRect();
@@ -342,7 +344,8 @@ const smallTargets = `(() => {
     if (!r.width || !r.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
     const at = (px, py) => { const hit = document.elementFromPoint(px, py); return !!hit && (hit === el || el.contains(hit)); };
     if (!at(x, y)) continue;
-    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight);
+    const underTabs = (px, py) => !!tabs && !tabs.contains(el) && tabs.contains(document.elementFromPoint(px, py));
+    const reach = [[x - 19, y], [x + 19, y], [x, y - 19], [x, y + 19]].filter(([px, py]) => px >= 0 && py >= 0 && px < innerWidth && py < innerHeight && !underTabs(px, py));
     if (reach.every(([px, py]) => at(px, py))) continue;
     small.push((el.dataset.testid || el.getAttribute('aria-label') || el.className || el.tagName) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
   }
@@ -357,6 +360,7 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
     await page.waitFor(`document.querySelector('[data-testid=message-marker]')`);
     expect(await page.evaluate(`matchMedia('(pointer: coarse)').matches`)).toBe(true);
+    await capture('mobile-message-actions-touch.png');
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=panel-toggle]');
     await page.waitFor(`document.querySelector('[data-testid=panel-launcher]')`);
