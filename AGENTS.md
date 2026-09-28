@@ -66,11 +66,32 @@ with the command and date. Live-provider tests spend tokens and stay opt-in.
 
 ## Follow through on pull requests
 
-Opening a PR triggers automated code reviews by agents. Keep monitoring the PR
-until those reviews and CI checks finish. Read every finding, fix valid issues,
-and explain any finding you reject. After each push, check the new reviews and
-CI results again. Do not leave the PR unattended with unresolved feedback or
-failing checks; report any blocker that needs the user's decision.
+Opening a PR triggers automated reviews. Read every finding and the failures
+from every applicable CI job before changing code. Verify findings against the
+current head, fix valid issues and explain rejected suggestions. Group related
+fixes into one verified push. Integrate the base branch when a conflict or a
+dependency requires it, not merely because another PR merged.
+
+Reply with the fix commit and evidence, then resolve addressed threads. A bot's
+acknowledgement is not a new finding or a prerequisite for completion. Mention
+a bot only when a question needs its answer; do not request another review of
+a head it is already reviewing. Diagnose a failed job before retrying it and
+rerun only the failed jobs when the head is unchanged.
+
+Check CI and new review findings after a push. Track CI and reviews together;
+do not wait for one to finish before inspecting the other. A paused,
+quota-limited or delayed review is an explicit status to report.
+Finish when required checks pass, automatic reviews of the current head have
+finished and actionable findings are addressed. If work
+remains, report the current head, failing checks, unresolved finding links and
+the next action. Never describe an unchecked head or a confirmed unresolved bug
+as ready to merge.
+
+Add a regression test for a distinct failure that existing coverage cannot
+detect. Extend an existing scenario when it exercises the same behavior. Do not
+multiply tests for private helpers, implementation details or equivalent inputs
+without naming the additional failure they catch. Preserve meaningful coverage
+and assertions when making the suite faster.
 
 ## Documentation map
 
