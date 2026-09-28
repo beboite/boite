@@ -56,6 +56,7 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
+import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
 export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
@@ -103,6 +104,10 @@ export class FakeContext {
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   projects: Project[] = [];
+  /** What `git worktree list` would report for each project (`worktrees.ts`). */
+  worktrees: FakeWorktree[] = [];
+  /** The `pathKey` of each worktree `worktrees.remove` took, so a thread left in one is refused a turn. */
+  readonly removedWorktrees = new Set<string>();
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
   importable: (ImportableSession & { projectId: string })[] = [];
   providers: ProviderSummary[] = [];

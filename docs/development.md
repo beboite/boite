@@ -163,7 +163,40 @@ repository, a missing git, a branch that already exists: each is refused by
 name and no thread is written. The git calls run under the thread's id, so
 they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
-person's call, `git worktree remove` from the project.
+person's call, made through `worktrees.remove`.
+
+`worktrees.list { projectId }` reads `git worktree list` for the project's
+repository and returns every linked worktree, the core's own under
+`.boite-worktrees` and any made by hand, but never the main checkout or the
+project's own folder. Each entry says:
+
+- `dirty`: `git status --untracked-files=normal` lists something, untracked
+  files included.
+- `unmerged`: HEAD is on no local branch or remote-tracking ref other than the
+  worktree's own branch (`git for-each-ref --contains`), so removing the branch
+  would lose those commits. A branch with no commit of its own is not unmerged,
+  and a commit that also sits on another local branch is not either.
+- `missing`: git still lists the worktree but the directory is gone.
+- `threadId`, `threadTitle`, `threadArchived`: the thread whose `cwd` is that
+  folder or inside it, without case on Windows, a live thread before an
+  archived one.
+
+`worktrees.remove { projectId, path, force? }` refuses, naming the field: a path
+git does not list for the project, the main checkout, a worktree a thread that
+is not archived stands in (even with `force`), and, without `force`, a dirty or
+unmerged worktree ("This worktree has uncommitted changes.", "This worktree has
+commits on no other branch.", or both). It then runs `git worktree remove`
+(`--force` only when asked, since git refuses a dirty tree), `git branch -d` on
+the branch (`-D` with `force`) and `git worktree prune --expire 1.hour.ago`,
+never a bare prune: a folder in the middle of a rename would lose its
+registration. A missing directory only loses its registration. `branchDeleted`
+is false when git kept the branch, for example when its commits sit on a branch
+not merged into HEAD. Both methods are owner only and run git under the trace id
+`worktrees:<projectId>`.
+
+An archived thread whose worktree was removed keeps its `cwd`. Restored, its
+next `turns.start` or `threads.compact` is refused with the missing folder in
+the message and `field: 'cwd'`; nothing recreates the worktree.
 
 Archiving stops the thread's running turn, its pending questions and its child
 agents, so the sidebar menu, the header and the palette ask first when the thread

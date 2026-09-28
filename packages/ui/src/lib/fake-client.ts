@@ -33,6 +33,7 @@ import { terminalMethods } from './fake-client/terminals';
 import { threadMethods } from './fake-client/threads';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
+import { worktreeMethods } from './fake-client/worktrees';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -277,6 +278,7 @@ export class FakeClient implements ObservableClient {
       ...coordinationMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
+      ...worktreeMethods(ctx),
     };
   }
 }

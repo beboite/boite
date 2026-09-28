@@ -8,11 +8,13 @@ import { closeTerminal } from './terminals';
 import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
+import { registerFakeWorktree, requireFakeCwd } from './worktrees';
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
   const project = ctx.projects.find(p => p.id === mission?.projectId);
   const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`) : null;
+  if (project && placed) registerFakeWorktree(ctx, project.id, placed);
   const now = Date.now();
   const thread: Thread = { id: `t-${++ctx.seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
     title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
@@ -114,6 +116,7 @@ export function threadMethods(ctx: FakeContext) {
       // worktree beside the repository. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      if (placed) registerFakeWorktree(ctx, project.id, placed);
       // The core makes a dated folder per draft; the fake only names it.
       const draftFolder = project.kind === 'drafts' && !params.cwd
         ? fakeDraftFolder(project.path, title, new Date(at), new Set([...ctx.threads.values()].map((thread) => thread.cwd)))
@@ -281,6 +284,7 @@ export function threadMethods(ctx: FakeContext) {
     },
     'turns.start': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
+      requireFakeCwd(ctx, ctx.thread(params.threadId));
       const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
@@ -319,6 +323,7 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.compact': async (params) => {
       const thread = ctx.thread(params.threadId);
+      requireFakeCwd(ctx, thread);
       if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
       if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
       if (ctx.providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
@@ -372,6 +377,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.worktree === true && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id, field: 'worktree', expected: false } });
       const title = `${source.title} (fork)`;
       const placed = params.worktree === true ? fakeWorktree(project.path, title) : null;
+      if (placed) registerFakeWorktree(ctx, project.id, placed);
       const now = ctx.now();
       const id = `t-${++ctx.seq}`;
       const turnIds = new Map<string, string>();
