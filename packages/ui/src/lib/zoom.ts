@@ -89,6 +89,7 @@ async function drain(): Promise<void> {
       const factor = wanted;
       await apply(factor);
       current = factor;
+      keep(factor);
       for (const listener of listeners) listener(factor);
     }
   } catch (error) {
@@ -99,20 +100,29 @@ async function drain(): Promise<void> {
   }
 }
 
-function want(factor: number): Promise<void> {
-  wanted = factor;
-  if (!applying && wanted !== current) applying = drain();
-  return applying ?? Promise.resolve();
-}
-
-/** Zooms the shell's webview and keeps the factor. Outside the shell it does nothing. */
-export async function setZoom(factor: number): Promise<void> {
-  if (!inShell() || !ZOOM_STEPS.includes(factor)) return;
+/** Stored once worn, so a factor the webview refused is not tried again at the next launch. */
+function keep(factor: number): void {
   try {
     localStorage.setItem(ZOOM_KEY, String(factor));
   } catch {
     // Storage refused: the zoom holds until the window closes.
   }
+}
+
+function want(factor: number): Promise<void> {
+  wanted = factor;
+  if (applying) return applying;
+  if (wanted === current) {
+    keep(factor);
+    return Promise.resolve();
+  }
+  applying = drain();
+  return applying;
+}
+
+/** Zooms the shell's webview and keeps the factor. Outside the shell it does nothing. */
+export async function setZoom(factor: number): Promise<void> {
+  if (!inShell() || !ZOOM_STEPS.includes(factor)) return;
   await want(factor);
 }
 

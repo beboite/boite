@@ -4,7 +4,7 @@
   import { elapsed, json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { familyOf, toolLine, type ToolPart } from '../lib/tool-groups';
-  import { describeTool } from '../lib/tool-summary';
+  import { describeTool, fileName } from '../lib/tool-summary';
   import { diffCounts, diffRows } from '../lib/diff';
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
@@ -90,10 +90,12 @@
   /**
    * What a file change did, as a diff: the ones the driver attached, else the
    * one the edit's own input spells out (an agent whose driver attaches none).
+   * A failed or refused edit spells out what it meant to do, not what it did,
+   * so nothing is inferred from it.
    */
   let diffs = $derived.by<Diff[]>(() => {
     const attached = documents.filter((doc): doc is Diff => doc.kind === 'diff');
-    if (attached.length > 0 || streaming) return attached;
+    if (attached.length > 0 || streaming || failed) return attached;
     const change = describeTool(name, input).change;
     return change ? [{ kind: 'diff', ...change }] : [];
   });
@@ -102,8 +104,11 @@
     const one = diffCounts(diffRows(doc.oldText, doc.newText));
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
   }, { added: 0, removed: 0 }));
-  /** One file needs no heading of its own: the line already names it. */
-  let oneFile = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1);
+  /**
+   * One file needs no heading of its own when the line already names it. A
+   * command's line is the command, which may not.
+   */
+  let headless = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1 && line.text.includes(fileName(diffs[0]?.path ?? '')));
 
   // The body opens itself while the input is being typed: that is the whole point
   // of the stream. It folds back to the one line once the parsed input lands. A
@@ -173,7 +178,7 @@
             {/if}
             <div class="diffs">
               {#each diffs as doc, index (index)}
-                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} headless={oneFile} /></div>
+                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} {headless} /></div>
               {/each}
             </div>
             {#if others.length > 0}

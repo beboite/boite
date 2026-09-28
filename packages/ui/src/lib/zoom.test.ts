@@ -66,6 +66,18 @@ test('a reset pressed while a step is on its way lands after it', async () => {
   expect(localStorage.getItem(ZOOM_KEY)).toBe(String(ZOOM_DEFAULT));
 });
 
+test('a factor the webview refuses is neither kept nor stepped from', async () => {
+  vi.resetModules();
+  const zoom = await import('./zoom');
+  (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  localStorage.setItem(ZOOM_KEY, '1');
+  webview.setZoom = () => Promise.reject(new Error('webview.set_webview_zoom not allowed'));
+  await expect(zoom.setZoom(1.1)).rejects.toThrow('not allowed');
+  expect(localStorage.getItem(ZOOM_KEY)).toBe('1');
+  expect(zoom.wantedZoom()).toBe(ZOOM_DEFAULT);
+  expect(zoom.currentZoom()).toBe(ZOOM_DEFAULT);
+});
+
 test('two quick steps walk two rungs', async () => {
   vi.resetModules();
   const zoom = await import('./zoom');

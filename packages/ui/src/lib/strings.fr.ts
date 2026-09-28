@@ -1251,6 +1251,7 @@ export const fr: Translation = {
     zoomOut: 'Plus petit',
     zoomIn: 'Plus grand',
     zoomReset: 'Revenir à 100 %',
+    zoomFailed: "Le zoom n'a pas changé : {error}",
     experiments: {
       intro: "Ce n'est pas fini. Ça peut changer de forme ou disparaître dans une version suivante."
     },

@@ -1285,6 +1285,7 @@ export const strings = {
     zoomOut: 'Smaller',
     zoomIn: 'Larger',
     zoomReset: 'Back to 100%',
+    zoomFailed: 'The zoom did not change: {error}',
     experiments: {
       intro: 'These are unfinished. They may change shape or leave in a later build.'
     },

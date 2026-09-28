@@ -65,3 +65,18 @@ test('calls fold into runs that text, a question or a produced document breaks',
     { kind: 'tools', indices: [7] }
   ]);
 });
+
+test('an edit whose input spells out its change stands alone, unless it failed', () => {
+  const parts: MessagePart[] = [
+    tool('Read', { file_path: 'x' }),
+    tool('Edit', { file_path: 'x', old_string: 'a', new_string: 'b' }),
+    tool('Read', { file_path: 'y' }),
+    tool('Edit', { file_path: 'y', old_string: 'a', new_string: 'b' }, { status: 'error' }),
+    tool('Read', { file_path: 'z' })
+  ];
+  expect(partRuns(parts)).toEqual([
+    { kind: 'tools', indices: [0] },
+    { kind: 'tools', indices: [1] },
+    { kind: 'tools', indices: [2, 3, 4] }
+  ]);
+});

@@ -165,7 +165,7 @@ const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command';
  * repository: wrapped commands, a read, a search and one command that fails.
  * The timeline folds it under one sentence.
  */
-export async function toolBurst(ctx: FakeContext, thread: Thread, message: Message): Promise<void> {
+export async function toolBurst(ctx: FakeContext, thread: Thread, message: Message, record: { cancelled: boolean }): Promise<void> {
   const calls: { name: string; input: unknown; output: string; status: 'done' | 'error' }[] = [
     { name: 'Bash', input: { command: `${PWSH} 'git status --short'`, description: 'Show the working tree' }, output: ' M packages/ui/src/app.css', status: 'done' },
     { name: 'Bash', input: { command: `${PWSH} 'Get-ChildItem packages/ui/src/components | Select-Object -First 5'` }, output: 'AppearancePage.svelte\nAssistantMessage.svelte', status: 'done' },
@@ -175,6 +175,8 @@ export async function toolBurst(ctx: FakeContext, thread: Thread, message: Messa
     { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: '0 errors', status: 'done' }
   ];
   for (const call of calls) {
+    // Stopped mid-run: the call on its way finishes, no other starts.
+    if (record.cancelled) break;
     const partIndex = message.parts.length;
     const toolId = `tool-${++ctx.seq}`;
     const startedAt = ctx.now();

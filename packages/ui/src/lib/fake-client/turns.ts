@@ -205,7 +205,7 @@ async function stream(
     await runTool(ctx, thread, message);
   }
   if (!record.cancelled && prompt.includes('[tools]')) {
-    await toolBurst(ctx, thread, message);
+    await toolBurst(ctx, thread, message, record);
   }
   if (!record.cancelled && prompt.includes('[diff]')) {
     // The edit lands in the working tree, so the file it names opens.

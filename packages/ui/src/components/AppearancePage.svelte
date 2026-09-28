@@ -7,7 +7,7 @@
   import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, wantedZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
-  import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
+  import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { work, type PanelStart, type StartIn } from '../lib/work-prefs.svelte';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
@@ -41,6 +41,13 @@
   // The zoom is the shell webview's own; a browser tab has its own Ctrl+= already.
   const zoomable = inShell();
   let zoom = $state(currentZoom());
+  let zoomError = $state('');
+  function zoomTo(factor: number) {
+    zoomError = '';
+    setZoom(factor).catch((error: unknown) => {
+      zoomError = fill(strings.settings.zoomFailed, { error: error instanceof Error ? error.message : String(error) });
+    });
+  }
   const smallest = ZOOM_STEPS[0] ?? ZOOM_DEFAULT;
   const largest = ZOOM_STEPS[ZOOM_STEPS.length - 1] ?? ZOOM_DEFAULT;
 
@@ -210,11 +217,12 @@
       <div class="switch-row">
         <span class="text">{strings.settings.zoom}<InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
         <div class="segmented zoom" role="group" aria-label={strings.settings.zoom}>
-          <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => void setZoom(stepZoom(wantedZoom(), -1))}><Minus size={14} strokeWidth={2} /></button>
-          <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => void setZoom(ZOOM_DEFAULT)}>{percent(zoom * 100)}</button>
-          <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => void setZoom(stepZoom(wantedZoom(), 1))}><Plus size={14} strokeWidth={2} /></button>
+          <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => zoomTo(stepZoom(wantedZoom(), -1))}><Minus size={14} strokeWidth={2} /></button>
+          <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => zoomTo(ZOOM_DEFAULT)}>{percent(zoom * 100)}</button>
+          <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => zoomTo(stepZoom(wantedZoom(), 1))}><Plus size={14} strokeWidth={2} /></button>
         </div>
       </div>
+      {#if zoomError}<p class="zoom-error" role="alert" data-testid="zoom-error">{zoomError}</p>{/if}
     {/if}
   </section>
 
@@ -265,6 +273,7 @@
   .face-name { font-size: var(--text-sm); font-weight: 600; }
   .face-sample { font-size: var(--text-base); line-height: 1.45; color: var(--color-muted-foreground); }
   .zoom button { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; }
+  .zoom-error { margin: 0; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .zoom .zoom-value { min-width: 56px; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
   .accent-controls { display: grid; gap: 10px; min-width: 220px; }
   .swatches { display: flex; gap: 7px; }

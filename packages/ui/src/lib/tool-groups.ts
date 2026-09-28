@@ -14,9 +14,15 @@ export type ToolPart = Extract<MessagePart, { type: 'tool' }>;
 /** One entry of a message's parts as the timeline draws it: a part on its own, or a run of tool calls. */
 export type PartRun = { kind: 'part'; index: number } | { kind: 'tools'; indices: number[] };
 
-/** A call that produced a diff, a page or an image stands alone: what it made is the point. */
+/**
+ * A call that produced a diff, a page or an image stands alone: what it made is
+ * the point. So does an edit whose input spells out its change, the diff
+ * `ToolCard` draws when the driver attaches none, unless it failed.
+ */
 function standsAlone(part: ToolPart): boolean {
-  return (part.documents?.length ?? 0) > 0;
+  if ((part.documents?.length ?? 0) > 0) return true;
+  if (part.status === 'error' || part.status === 'denied' || typeof part.inputText === 'string') return false;
+  return describeTool(part.name, part.input).change !== null;
 }
 
 /**
