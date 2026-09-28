@@ -307,3 +307,79 @@ test('a folded project keeps saying what its hidden threads do, and the mark goe
   store.toggleProject(project.id);
   await waitFor(() => head().querySelector('[data-testid=project-rollup]') === null);
 });
+
+async function openIdleThread(): Promise<string> {
+  await mountOnFake();
+  await workspace.select(store, 't-descriptors');
+  await waitFor(() => store.openThread?.id === 't-descriptors' && !store.busy && document.querySelectorAll('[data-testid=message][data-role=user]').length > 0);
+  return 't-descriptors';
+}
+
+function userTexts(): string[] {
+  return (store.openThread?.messages ?? []).filter((m) => m.role === 'user').map((m) => m.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''));
+}
+
+test('Edit on a sent prompt fills the box in edit mode; sending replaces it and what followed', async () => {
+  await openIdleThread();
+  const before = userTexts();
+  const first = query('[data-testid=message][data-role=user]');
+  query<HTMLButtonElement>('[data-testid=message][data-role=user] [data-testid=message-edit]').click();
+  flushSync();
+  const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  await waitFor(() => box.value === before[0]);
+  expect(first).toBeTruthy();
+  expect(query('[data-testid=composer-editing]').textContent).toContain('Editing a sent message');
+  box.value = 'Does an unknown field refuse the file, and say which?';
+  box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  press(box, 'Enter');
+  await waitFor(() => userTexts()[0] === 'Does an unknown field refuse the file, and say which?');
+  // The edited prompt took the place of the first one: nothing of the old thread follows it.
+  expect(userTexts().filter((text) => before.includes(text))).toEqual([]);
+  await waitFor(() => document.querySelector('[data-testid=composer-editing]') === null);
+});
+
+test('ArrowUp in an empty box of a thread at rest recalls the last prompt to edit, Escape leaves it untouched', async () => {
+  await openIdleThread();
+  const before = userTexts();
+  const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  box.focus();
+  press(box, 'ArrowUp');
+  flushSync();
+  await waitFor(() => document.querySelector('[data-testid=composer-editing]') !== null);
+  expect(box.value).toBe(before.at(-1));
+  press(box, 'Escape');
+  flushSync();
+  await waitFor(() => document.querySelector('[data-testid=composer-editing]') === null);
+  expect(box.value).toBe('');
+  expect(userTexts()).toEqual(before);
+});
+
+test('fork from an answer opens a new thread holding the history, the source untouched', async () => {
+  await openIdleThread();
+  const before = userTexts();
+  query<HTMLButtonElement>('[data-testid=turn-summary] [data-testid=message-fork]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=here]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=here]').click();
+  await waitFor(() => store.openThread !== null && store.openThread.id !== 't-descriptors');
+  expect(store.openThread!.title).toMatch(/\(fork\)$/);
+  expect(userTexts()).toEqual(before.slice(0, 1));
+  expect(store.threads.some((t) => t.id === 't-descriptors')).toBe(true);
+});
+
+test('retry sits on the last finished turn only and sends its prompt again in place of the answer', async () => {
+  await openIdleThread();
+  const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  box.value = 'And the roots entry outside the folder?';
+  box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  press(box, 'Enter');
+  await waitFor(() => document.querySelectorAll('[data-testid=turn-summary][data-status=done]').length >= 2 && !store.busy);
+  const before = userTexts();
+  const answered = store.openThread!.turns.at(-1)!.id;
+  const summaries = document.querySelectorAll('[data-testid=turn-summary]');
+  expect(summaries[0]!.querySelector('[data-testid=message-retry]')).toBeNull();
+  (summaries[summaries.length - 1]!.querySelector('[data-testid=message-retry]') as HTMLButtonElement).click();
+  // A new turn in place of the old one, on the same prompt.
+  await waitFor(() => store.openThread?.turns.at(-1)?.id !== answered && store.openThread?.turns.at(-1)?.status === 'done');
+  expect(userTexts()).toEqual(before);
+  expect(store.openThread!.turns.some((turn) => turn.id === answered)).toBe(false);
+});
