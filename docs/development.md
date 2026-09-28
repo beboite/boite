@@ -227,6 +227,75 @@ its archived top-level threads, announced again with `project.updated` when a
 thread is archived or restored. A paired device may archive a project: it is a
 flag the owner undoes in one click.
 
+### Moving a thread
+
+A thread changes project from its row menu or its title menu ("Move to
+project", which opens a picker of the machine's other projects, archived ones
+marked), and on a desktop by dragging its row onto another project's section,
+which takes the accent outline while the row is over it. The phone reaches the
+same picker from the title's sheet. Only another project of the row's machine
+takes a drop; the recent view has no project sections to drop on.
+
+`threads.move { threadId, projectId, stopBackground? }` (`threads/move.ts`)
+moves the thread and its sub-threads and answers the thread's new row;
+`thread.updated` tells every client. What the core does:
+
+- The working directory becomes the target's folder. A thread that had a
+  worktree of its own (`branch` set) gets a new one in a target that is a git
+  repository, placed and named as `threads.create` with `worktree: {}` does; a
+  target that is no repository gives it the project folder, and the drafts
+  project a new dated folder. The old folder, worktree or branch is never
+  touched, so uncommitted changes in it are not a reason to refuse.
+- The session follows only where the agent's resume takes a new folder: Codex
+  (`thread/resume` carries `cwd`). Every other driver drops it, as an account
+  switch does: the next turn starts a fresh session seeded with the journal's
+  history (`continuation.ts`). Warm processes are keyed by folder in every
+  driver, so none started in the old folder is reused.
+- The next message carries a note the agent reads before the prompt ("This
+  thread moved from project A (old folder) to project B (new folder). Your
+  working directory is now ..."). It is kept in the journal (`move-note:<id>`)
+  until that message, survives a restart, skips a slash command and a compact,
+  keeps the first origin over several moves, and goes when the thread returns to
+  where it started. The prompt shows the accent marker "Move explained to the
+  agent", which opens on the note.
+- A thread whose own turn runs, is queued or waits is not moved under the
+  running process. The call returns at once with the row still in place and
+  `pendingMove { projectId, project, by, at }` set, and the move happens when
+  the turn ends, whether it finished, stopped or failed, through the same code
+  path as the agent's own move (`ThreadMove.applyWaiting`, called by the turn
+  runner). A turn queued behind it then runs in the new folder. Everything that
+  can be refused is checked when the move is asked for; a refusal that only
+  appears by the turn's end (the project removed meanwhile) leaves a system line
+  in the thread saying why. The confirm says the move happens when the current
+  turn ends; the row shows "Moves to <project> after this turn" in the accent,
+  and so does the header (only the mark on a phone). A second move replaces the
+  waiting one, "Cancel move" in the same menus drops it
+  (`threads.moveCancel { threadId }`, refused naming `threadId` when nothing
+  waits), and archiving the thread drops it too. The waiting move lives in the
+  core's memory only: a core restart before the turn ends forgets it. The
+  row stays draggable.
+- A sub-thread with a turn in flight is still refused with
+  `reason: 'turn-in-flight'` and `busyThreadId`: the parent's turn end is no
+  moment to move a thread whose child still runs. The menu entry is off with
+  that reason and the row cannot be dragged.
+- Background work (a monitor, a shell the agent left running) needs
+  `stopBackground`: without it the move is refused naming the field. The UI asks
+  "Stop monitors" or "Keep them". `true` stops it; `false` leaves it running in
+  the old folder until the next turn starts the agent in the new one. For a
+  move that waits for the turn, the choice applies when the move does; a move
+  asked for while no background work ran keeps any that started meanwhile.
+- A target project that is archived comes back, as a thread started in it does.
+- Refused by field: an unknown thread or project, the thread's own project, an
+  archived thread, a sub-thread (it moves with its parent), a persistent agent's
+  session, and a target whose folder is gone.
+
+A paired device may move a thread and cancel a waiting move: it names a
+project it already lists, never a path, and the core picks the folder
+(`packages/contracts/src/access.ts`). An agent moves its own thread with
+`boite thread move <project>` ([CLI](cli.md)), applied when its turn ends in
+the same way; its move skips the note and the "Move explained to the agent"
+marker, since the agent knows.
+
 ## Pending prompts, goals and loops
 
 Enter during a running turn queues the message and its attachments. The composer

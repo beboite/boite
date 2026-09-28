@@ -32,6 +32,7 @@ import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { threadMethods } from './fake-client/threads';
+import { threadMoveMethods } from './fake-client/thread-move';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { worktreeMethods } from './fake-client/worktrees';
@@ -267,6 +268,7 @@ export class FakeClient implements ObservableClient {
       ...projectMethods(ctx),
       ...projectIconMethods(ctx),
       ...threadMethods(ctx),
+      ...threadMoveMethods(ctx),
       ...activityMethods(ctx),
       ...requestMethods(ctx),
       ...providerCatalogMethods(ctx),

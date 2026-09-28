@@ -30,8 +30,26 @@ class ContextMenuStore {
     }
     const opener = event.currentTarget;
     this.returnTo = opener instanceof HTMLButtonElement ? opener : focusedElement();
+    this.#last = { at: { x, y }, returnTo: this.returnTo };
     this.current = { x, y, items, onpick };
   }
+
+  /**
+   * Opens at a point with no event behind it: a second menu picked from a
+   * first one (the project picker of "Move to project"), placed where the
+   * first stood, handing the keyboard back to `returnTo` when it closes.
+   */
+  show(at: { x: number; y: number }, items: MenuItem[], onpick: (id: string) => void, returnTo: HTMLElement | null): void {
+    this.returnTo = returnTo;
+    this.current = { x: at.x, y: at.y, items, onpick };
+  }
+
+  /** A second menu where the last one opened, from a pick of that one; the keyboard goes back to the same opener. */
+  follow(items: MenuItem[], onpick: (id: string) => void): void {
+    this.show(this.#last.at, items, onpick, this.#last.returnTo);
+  }
+
+  #last: { at: { x: number; y: number }; returnTo: HTMLElement | null } = { at: { x: 0, y: 0 }, returnTo: null };
 
   close(): void {
     this.current = null;

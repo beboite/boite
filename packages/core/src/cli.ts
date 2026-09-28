@@ -30,6 +30,8 @@ export interface CliIo {
 export const USAGE = `usage: boite <command> [args] [--json]
 
   where                          this thread, project, cwd, branch
+  thread move <project>          move this thread to another project (name,
+                                 id or folder) when this turn ends
   attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
@@ -313,6 +315,22 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           `agent: ${where.providerId} ${where.model}`,
         ],
         where,
+      );
+      return;
+    }
+    case 'thread': {
+      const action = want(0, 'move');
+      if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);
+      const project = rest.slice(1).join(' ').trim();
+      if (project.length === 0) throw new Usage('thread move needs a project name, id or folder');
+      const moved = await client.call('agent.move', { threadId, project });
+      const where = moved.cwd ?? `a new folder of ${moved.projectPath}`;
+      const background = moved.stopsBackground ? ' Background work stops then.' : '';
+      print(
+        moved.when === 'turn-end'
+          ? [`Moves to ${moved.project} (${moved.projectPath}) when this turn ends; the next turn starts in ${where}.${background}`]
+          : [`Moved to ${moved.project} (${moved.projectPath}); the next turn starts in ${where}.${background}`],
+        moved,
       );
       return;
     }

@@ -9,6 +9,7 @@
   import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
   import MessageActions from './MessageActions.svelte';
+  import MoveMarker from './MoveMarker.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
@@ -43,8 +44,11 @@
 
   const images = $derived(imagesOf(message));
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
+  /** The move this prompt told the agent about, first thing the core put before its words. */
+  const moved = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.moved ? [part.moved] : []))[0]);
 </script>
 
+{#if moved}<MoveMarker notice={moved} />{/if}
 <div class="bubble">
   {#each message.parts as part, index (index)}
     {#if part.type === 'text'}

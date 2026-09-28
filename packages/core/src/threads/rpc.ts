@@ -42,7 +42,9 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),
   );
-  core.router.register('threads.pin', (params) => core.threads.pin(params.threadId, params.pinned !== false));
+  core.router.register('threads.move', (params) => core.threads.move(params.threadId, params.projectId, params.stopBackground));
+  core.router.register('threads.moveCancel', (params) => core.threads.moves.cancel(params.threadId));
+  core.router.register('threads.pin',(params) => core.threads.pin(params.threadId, params.pinned !== false));
   core.router.register('threads.markRead', (params) => {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;

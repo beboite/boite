@@ -105,6 +105,9 @@
         <button type="button" class="ghost" data-cancel data-testid="confirm-cancel" onclick={() => confirm.answer(false)}>
           {request.cancelLabel}
         </button>
+        {#if request.altLabel}
+          <button type="button" data-testid="confirm-alt" onclick={() => confirm.answer('alt')}>{request.altLabel}</button>
+        {/if}
         <button
           type="button"
           class:primary={!request.danger}

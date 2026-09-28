@@ -9,6 +9,7 @@ import { pauseActivity } from './activity';
 import { askPermission, askQuestion, askAsync } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
+import { applyWaitingMove } from './thread-move';
 import type { FakeContext } from './context';
 
 export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<boolean> {
@@ -54,6 +55,9 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   }
 
   const at = ctx.now();
+  // As the core: the first message after a move carries the note, unless it is a compact or a slash command.
+  const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? undefined : ctx.moveNotes.get(threadId);
+  if (moved) ctx.moveNotes.delete(threadId);
   const execution: NonNullable<Turn['execution']> = {
       providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
       effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
@@ -74,7 +78,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     role: 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}) },
+      { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
       ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
         type: 'image',
         mimeType: attachment.mimeType,
@@ -105,7 +109,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   pushScheduler(ctx, turn, 'running');
 
   const record = { cancelled: false, done: Promise.resolve() };
-  record.done = stream(ctx, thread, turn, prompt, record, attachments, previewPrompt(prompt, previewReferences));
+  record.done = stream(ctx, thread, turn, prompt, record, attachments, (moved?.note ?? '') + previewPrompt(prompt, previewReferences));
   ctx.inFlight.set(threadId, record);
 
   return structuredClone(turn);
@@ -268,6 +272,8 @@ async function stream(
   ctx.touch(thread);
   ctx.emit('turn.finished', structuredClone(turn));
   pushScheduler(ctx, turn, 'finished');
+  // A move the agent asked for during the turn happens now, as the core's turn runner does.
+  applyWaitingMove(ctx, thread.id);
   if (turn.execution?.operation === 'delegation' && thread.parentThreadId) {
     const root = thread.parentThreadId;
     const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);

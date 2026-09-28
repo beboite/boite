@@ -144,6 +144,9 @@ export class TurnRunner {
       promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
     };
     saveThread(this.core, next, 'thread.finished');
+    // A move the agent asked for during the turn happens now that no process
+    // works in the old folder, before any wake or held answer starts the next.
+    await this.threads.moves.applyWaiting(threadId);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
     const woke = this.threads.deferred.pendingWakes.get(threadId);

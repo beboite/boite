@@ -108,6 +108,11 @@ to another account: the receiving agent gets these excerpts, not what the old
 session held, and a compaction summary is not part of them. A model change
 inside one account keeps its session.
 
+Moving a thread to another project uses the same transfer on every driver but
+Codex, whose resume takes the new folder and keeps its session. The seeded
+prompt says the thread moved during the conversation and that the latest move
+note names the folder it works in now ([moving a thread](development.md#moving-a-thread)).
+
 Keeping the session does not keep the provider's prompt cache. Measured on
 2026-09-22 with a four-turn probe per provider: a model change on Claude sent
 the conversation again uncached; on Codex every effort change missed (`high`,

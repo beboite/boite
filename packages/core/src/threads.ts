@@ -12,6 +12,7 @@ import type {
   MessagePart,
   PermissionRequest,
   Project,
+  ProjectId,
   ProviderDescriptor,
   QuestionRequest,
   RequestId,
@@ -34,6 +35,7 @@ import { AgentState } from './threads/agent-state.ts';
 import { ThreadBranching } from './threads/branching.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { DeferredInput } from './threads/deferred.ts';
+import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
 import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -79,6 +81,8 @@ export class ThreadStore {
   readonly titles: ThreadTitles;
   /** `threads.rewind` and `threads.fork`. */
   readonly branching: ThreadBranching;
+  /** `threads.move`. */
+  readonly moves: ThreadMove;
   private readonly recovery: ThreadRecovery;
 
   constructor(private readonly core: Core) {
@@ -89,6 +93,7 @@ export class ThreadStore {
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
     this.branching = new ThreadBranching(core, this);
+    this.moves = new ThreadMove(core, this);
     this.recovery = new ThreadRecovery(core);
   }
 
@@ -427,6 +432,7 @@ export class ThreadStore {
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
+      this.moves.forget(threadId);
       this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
       this.releaseAgent(threadId);
@@ -491,6 +497,11 @@ export class ThreadStore {
     return this.branching.fork(threadId, messageId, worktree);
   }
 
+  /** Move a thread and its sub-threads to another project (`threads/move.ts`). */
+  move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
+    return this.moves.userMove(threadId, projectId, stopBackground);
+  }
+
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
@@ -534,6 +545,10 @@ export class ThreadStore {
     checkAttachments(attachments, provider);
 
     const now = Date.now();
+    // The first message after a move carries the note to the agent. A compact
+    // or a slash command goes to the agent as the command alone, so the note
+    // waits for the next real message.
+    const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? null : pendingMove(this.core, threadId);
     const turn: Turn = {
       id: newId('trn_'),
       threadId,
@@ -557,7 +572,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: systemOperation(operation) ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -573,6 +588,7 @@ export class ThreadStore {
       this.core.delegation.reserveTurn(threadId, operation);
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
+      if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
     // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
