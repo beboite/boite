@@ -703,6 +703,21 @@ shellTest('window controls draw maximize and restore without a second status ind
   }
 }, TIMEOUT);
 
+shellTest('Ctrl+= zooms the whole interface through the webview and Ctrl+0 puts it back', async () => {
+  const key = (value: string) => page?.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key:'${value}', ctrlKey:true, bubbles:true, cancelable:true }))`);
+  const width = Number(await page?.evaluate('window.innerWidth'));
+  try {
+    await key('=');
+    await page?.waitFor(`localStorage.getItem('boite.zoom') === '1.1'`);
+    // The webview's own zoom lays the page out on fewer CSS pixels: the capability let it through.
+    await page?.waitFor(`Math.abs(window.innerWidth - ${width} / 1.1) < 3`);
+    expect(await page?.evaluate('document.body.style.zoom')).toBe('');
+  } finally {
+    await key('0');
+    await page?.waitFor(`window.innerWidth === ${width} && localStorage.getItem('boite.zoom') === '1'`);
+  }
+}, TIMEOUT);
+
 shellTest('the machine picker opens a folder on the selected core and reports a lost connection', async () => {
   const remote = await startCore();
   const remoteClient = await connect(remote.url, remote.token);

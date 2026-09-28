@@ -132,7 +132,8 @@ export class TurnContexts {
         const fresh = prepareAttachments(this.core.dataDir, carry());
         return { prompt: compose(fresh.prompt, null), attachments: fresh.attachments };
       },
-      coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
+      coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id)
+        ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
       resumeAt: thread.sessionId === null ? null : thread.sessionResumeAt ?? null,

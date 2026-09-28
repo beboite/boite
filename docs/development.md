@@ -298,11 +298,13 @@ marker, since the agent knows.
 
 ## Pending prompts, goals and loops
 
-Enter during a running turn queues the message and its attachments. The composer
-shows each pending message. Up in an empty composer takes the newest pending
-message out of the queue for editing; clicking a pending message does the same.
-Escape stops the current turn. Pending messages then run in their original
-order. An Escape that closes something first (a popover, a menu, a
+Enter during a running turn queues the message and its attachments. Each pending
+message shows above the composer as a user bubble with a dashed outline. Up in
+an empty composer takes the newest pending message out of the queue for editing;
+clicking a pending message does the same. Enter again in the emptied composer,
+or Send now under the bubbles, stops the current turn and sends the oldest
+pending message next; the others wait for its turn. Escape stops the current
+turn too. Pending messages then run in their original order. An Escape that closes something first (a popover, a menu, a
 confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
 Escape is needed to stop. A failed send preserves the queue for an explicit retry.
@@ -324,7 +326,14 @@ after each finished turn. Intervals use `s`, `m` or `h`, from one second to
 Both commands belong to Boite and work with every driver. Goals and loops can
 coexist with the agent's task list above the composer. The compact overlay shows
 the current task and progress. Only a click expands it; updates and disclosure
-do not resize the timeline. Completed tasks and goals fade out on the next user
+do not resize the timeline. An asynchronous question (`boite ask`, or Codex's
+`delivery: "async"`) waits on top of that overlay with the same answer controls
+as a blocking one. Several stack behind a pager ("2 of 3"), each keeping what
+was picked while another shows, and a new one comes up open. The timeline keeps
+one line where it was asked, and a click on it brings that question up. While
+a question is open there, the timeline's bottom margin grows to the overlay's
+height so the last answer stays above it; `tests/e2e/composer-activity.test.ts`
+checks that at desktop and phone widths. Completed tasks and goals fade out on the next user
 prompt, and newly reported work brings the task list back. Loop details show
 the latest 50 iterations with their outcome and up to 4000 characters of result.
 
@@ -692,6 +701,38 @@ The reply has one spinner while running, paused when the document is hidden
 and disabled for reduced motion. Finished turns show a check and elapsed time;
 usage totals remain in Usage settings. Context details open separately from
 compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
+
+Tool calls read as a work log. A run of calls with
+nothing between them folds under one sentence ("Ran 4 commands, read 1 file and
+searched the code once"): one clause per kind, in the order the kinds first
+ran, with edits counted by file. While a call runs, the folded line says what
+runs ("Running git") with a light passing over it. Each call is a plain line: a
+command as the command it ran, with the pwsh, cmd or bash wrapper taken off
+(`lib/tool-groups.ts`), anything else as a short sentence ("Read app.css"). A
+call that produced a diff stands alone, shows its `+N -M` and opens on the
+diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
+in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
+edit with its diff.
+
+### Faces and zoom
+
+Settings, Appearance, Reading picks the text face and the code face for this
+device. Inter is the default text face; Geist, IBM Plex Sans, Atkinson
+Hyperlegible Next, Figtree, Source Sans 3, DM Sans and the system's own are the
+others, and the code face is Geist Mono, JetBrains Mono or the system's. The
+system choices use the fonts the OS has. Every other face is a bundled variable
+woff2 under the OFL, its licence beside it in `public/fonts`, cut by
+`unicode-range` so a face nobody picked is never downloaded. `lib/fonts.ts` stamps the pick on `<html>` as `data-font` and
+`data-mono`, whose rules in `app.css` swap `--font-sans` and `--font-mono`;
+the boot script of `index.html` stamps and preloads it before the first paint.
+The service worker precaches the default faces only.
+
+In the desktop shell, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` zoom the whole interface,
+from 50 % to 200 %, with a Zoom row on the same page (`lib/zoom.ts`). It is the
+webview's own zoom, so the layout and its media queries recompute at the new
+size. The factor is applied before the window shows. A browser surface in the
+panel keeps its own zoom. In a plain browser the page's `Ctrl+=` does the same
+and nothing of this runs.
 
 
 ### File attachments

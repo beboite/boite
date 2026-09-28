@@ -143,10 +143,11 @@ thread does not turn `waiting` and the card stays open after the turn ends.
 Each extra argument is an option label; with none the question takes free
 text, and `--multiple` lets the user pick several. The answer reaches the agent
 as a message that quotes the question, `> question` then the answer: steered
-into the running turn when the agent takes steering, otherwise sent as the next
-prompt once the thread is idle. A prompt the user queued meanwhile goes out
-after that turn, not in its place. Agents without asynchronous questions of their
-own are told about the command once per session, unless the "Asynchronous
+into the running turn when the agent takes steering (Codex, pi, Muse, Grok),
+handed to Claude at the main agent's next tool call through the PostToolUse
+hook, otherwise sent as the next prompt once the thread is idle. A prompt the
+user queued meanwhile goes out after that turn, not in its place. Agents
+without asynchronous questions of their own are told about the command once per session, unless the "Asynchronous
 questions" setting is off. Codex asks natively (`delivery: "async"`), and
 Boite draws those cards the same way.
 

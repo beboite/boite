@@ -173,10 +173,13 @@ nothing at start.
 Questions come in two kinds. A blocking one (Claude's `AskUserQuestion`, one
 card per question) holds the turn in `waiting` until it is answered. An
 asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
-agent) draws the same card without stopping anything; the core answers it by
-steering the running turn, or by sending `> question` and the answer as the
-next prompt once the thread is idle. The core stamps `startedAt` and
-`finishedAt` on every tool part, so a card shows how long a command has run.
+agent) is answered with the same controls without stopping anything: it waits
+in the overlay above the composer, and the timeline keeps a line where it was
+asked. The core answers it by steering the running turn (Claude takes it at
+the main agent's next PostToolUse hook), or by sending `> question` and the
+answer as the next prompt once the thread is idle. The core stamps `startedAt`
+and `finishedAt` on every tool part, so a tool's line shows how long a command
+has run.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when
@@ -272,7 +275,7 @@ visible machine streams. The rest of the list lives on `thread.updated`
 summaries. Inside a message, the markdown of a streaming part is rebuilt only
 for the paragraphs that have closed: the block still being typed is left out
 until a blank line ends it, so a token never re-renders the text before it, and
-a tool card opens on its own while
+a tool's line opens on its own while
 the model is still typing its input, then folds back once the parsed input lands.
 Past sixty messages the timeline renders a window: the slice that meets the
 viewport plus eight messages of overscan each way, two spacers carrying the

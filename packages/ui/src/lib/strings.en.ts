@@ -256,7 +256,7 @@ export const strings = {
   },
   app: {
     name: 'Boite',
-    /** What a nightly build calls itself: window title, tray and title bar. The settings name its track Boite Nightly. */
+    /** What a nightly build calls itself: window title and tray, never the title bar. The settings name its track Boite Nightly. */
     nightlyName: 'boite (de nuit)',
     /** The tag the title bar shows when the core is the dev install. */
     channelDev: 'Dev',
@@ -285,7 +285,6 @@ export const strings = {
     stable: 'Boite',
     nightly: 'Boite Nightly',
     nightlyHint: 'Nightly is experimental and may contain unfinished changes. You can return to Boite even when its version number is lower.',
-    nightlyTitle: 'This app follows experimental nightly releases',
     installedVersion: 'Installed version',
     installedChannel: 'Installed channel',
     targetVersion: 'Update version',
@@ -546,6 +545,13 @@ export const strings = {
 
   activity: {
     goal: 'Goal',
+    /** An agent's question it did not stop for (`boite ask`), docked above the composer like a goal. */
+    question: 'Question',
+    questionOf: '{index} of {total}',
+    questionPrev: 'Previous question',
+    questionNext: 'Next question',
+    questionFold: 'Fold the question',
+    questionUnfold: 'Open the question',
     loop: 'Loop',
     tasks: 'Tasks',
     taskCount: '{done}/{total} tasks',
@@ -689,7 +695,6 @@ export const strings = {
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
     /** A finished answer's run of tool calls, folded into one line. */
-    toolRun: '{count} tool calls',
     /** The jump button once something arrived below the reader. */
     newMessage: '1 new message',
     newMessages: '{count} new messages',
@@ -707,6 +712,21 @@ export const strings = {
     backgroundStop: 'Stop the agent and what it runs in the background',
     /** The chip on a tool card whose work went on in the background. */
     backgroundChip: 'in the background',
+    /** A call's line while it runs and once it ran; `{subject}` is a file name, a pattern, a host or a program. */
+    toolLive: { command: 'Running {subject}', read: 'Reading {subject}', edit: 'Editing {subject}', write: 'Writing {subject}', search: 'Searching {subject}', fetch: 'Fetching {subject}', web: 'Searching the web for {subject}', agent: 'Delegating {subject}', other: 'Running {subject}' },
+    toolDone: { command: 'Ran {subject}', read: 'Read {subject}', edit: 'Edited {subject}', write: 'Wrote {subject}', search: 'Searched {subject}', fetch: 'Fetched {subject}', web: 'Searched the web for {subject}', agent: 'Delegated {subject}', other: 'Used {subject}' },
+    /** The line of a call whose input names nothing to show. */
+    toolBare: { command: 'Ran a command', read: 'Read a file', edit: 'Edited a file', write: 'Wrote a file', search: 'Searched the code', fetch: 'Fetched a page', web: 'Searched the web', agent: 'Delegated a task', other: 'Used a tool' },
+    /** `Running {subject}` for a command whose program has no name. */
+    toolCommandWord: 'a command',
+    /** A folded run of calls: one clause per kind, joined into one sentence. */
+    toolRunOne: { command: 'Ran {count} command', read: 'Read {count} file', edit: 'Changed {count} file', search: 'Searched the code once', fetch: 'Fetched {count} page', web: 'Searched the web once', agent: 'Delegated {count} task', other: 'Used {count} tool' },
+    toolRunMany: { command: 'Ran {count} commands', read: 'Read {count} files', edit: 'Changed {count} files', search: 'Searched the code {count} times', fetch: 'Fetched {count} pages', web: 'Searched the web {count} times', agent: 'Delegated {count} tasks', other: 'Used {count} tools' },
+    toolRunJoin: ', ',
+    toolRunLast: ' and ',
+    toolRunShow: 'Show each call',
+    toolRunHide: 'Hide the calls',
+    toolFailed: 'Failed',
     you: 'You',
     assistant: 'Agent',
     system: 'System',
@@ -799,6 +819,9 @@ export const strings = {
     questionAnswer: 'Answer',
     questionAnswered: 'Answered',
     questionCancelled: 'The turn ended before this was answered',
+    /** The timeline's line for a question waiting in the dock above the composer. */
+    questionDocked: 'Waiting for your answer above the message box',
+    questionOpen: 'Answer it',
     streaming: 'writing',
     jumpToLatest: 'Jump to latest',
     /** The one line at the top of the timeline while an older page is being fetched. */
@@ -857,8 +880,10 @@ export const strings = {
     }
   },
   delegation: {
-    heading: 'Agents',
-    panelHint: "View agents",
+    heading: 'Team',
+    panelHint: 'The agents this conversation hands work to',
+    /** The title menu's way in while the conversation has no team yet. */
+    openTeam: 'Hand work to other agents',
     parent: 'Parent thread',
     activeAgents: 'Active agents',
     loading: 'Reading this team',
@@ -976,6 +1001,11 @@ export const strings = {
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
+    /** A refused send held the pending messages until the user sends again. */
+    queuedPaused: 'Held after a refused send',
+    sendNow: 'Send now',
+    sendNowHint: 'Stops the current turn and sends the oldest pending message. Enter in the empty composer does the same.',
+    retryQueuedHint: 'Sends the oldest pending message again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
     models: 'Models',
     searchModels: 'Search models',
@@ -1369,6 +1399,20 @@ export const strings = {
     themeDark: 'Dark',
     themeLight: 'Light',
     themeGrain: 'Grain',
+    reading: 'Reading',
+    font: 'Text font',
+    fontHint: 'Saved on this device. Each tile is drawn in its own face.',
+    fontSystem: 'System',
+    /** Drawn in every face of the picker: mixed case, digits, and the glyphs that get confused (Il1, O0, rn). */
+    fontSample: 'Rerun the 12 failing tests in Il1/O0/rn.ts',
+    monoFont: 'Code font',
+    monoSystem: 'System',
+    zoom: 'Interface size',
+    zoomHint: 'Ctrl+= and Ctrl+- anywhere in the app, Ctrl+0 back to 100%. Saved on this device.',
+    zoomOut: 'Smaller',
+    zoomIn: 'Larger',
+    zoomReset: 'Back to 100%',
+    zoomFailed: 'The zoom did not change: {error}',
     experiments: {
       intro: 'These are unfinished. They may change shape or leave in a later build.'
     },

@@ -4,7 +4,18 @@
   import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
 
-  let { path, oldText, newText }: { path: string; oldText: string; newText: string } = $props();
+  let {
+    path,
+    oldText,
+    newText,
+    headless = false
+  }: {
+    path: string;
+    oldText: string;
+    newText: string;
+    /** Under a line that already names the file and counts the lines: no heading of its own. */
+    headless?: boolean;
+  } = $props();
 
   /** Rows drawn before the show-all button: the box shows about fourteen. */
   const FIRST_ROWS = 300;
@@ -29,23 +40,25 @@
 </script>
 
 <div class="diff" data-testid="diff-view" data-path={path} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
-  <div class="head">
-    <span class="path mono" title={path}>{path}</span>
-    {#if counts.added > 0}
-      <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
-    {/if}
-    {#if counts.removed > 0}
-      <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
-    {/if}
-    <button type="button" class="ghost small icon toggle" data-testid="diff-whitespace" aria-pressed={diffPrefs.ignoreWhitespace}
-      title={strings.chat.diffIgnoreWhitespace} aria-label={strings.chat.diffIgnoreWhitespace}
-      onclick={() => setDiffPref('ignoreWhitespace', !diffPrefs.ignoreWhitespace)}><Space size={14} /></button>
-    {#if splittable}
-      <button type="button" class="ghost small icon toggle" data-testid="diff-split" aria-pressed={diffPrefs.split}
-        title={strings.chat.diffSideBySide} aria-label={strings.chat.diffSideBySide}
-        onclick={() => setDiffPref('split', !diffPrefs.split)}><Columns2 size={14} /></button>
-    {/if}
-  </div>
+  {#if !headless}
+    <div class="head">
+      <span class="path mono" title={path}>{path}</span>
+      {#if counts.added > 0}
+        <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
+      {/if}
+      {#if counts.removed > 0}
+        <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
+      {/if}
+      <button type="button" class="ghost small icon toggle" data-testid="diff-whitespace" aria-pressed={diffPrefs.ignoreWhitespace}
+        title={strings.chat.diffIgnoreWhitespace} aria-label={strings.chat.diffIgnoreWhitespace}
+        onclick={() => setDiffPref('ignoreWhitespace', !diffPrefs.ignoreWhitespace)}><Space size={14} /></button>
+      {#if splittable}
+        <button type="button" class="ghost small icon toggle" data-testid="diff-split" aria-pressed={diffPrefs.split}
+          title={strings.chat.diffSideBySide} aria-label={strings.chat.diffSideBySide}
+          onclick={() => setDiffPref('split', !diffPrefs.split)}><Columns2 size={14} /></button>
+      {/if}
+    </div>
+  {/if}
   <div class="rows mono">
     {#if rows.length === 0 && diffPrefs.ignoreWhitespace && oldText !== newText}
       <p class="same" data-testid="diff-whitespace-only">{strings.chat.diffWhitespaceOnly}</p>

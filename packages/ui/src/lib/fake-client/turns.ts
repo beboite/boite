@@ -7,7 +7,7 @@ import { FAKE_CONTEXT_FLOOR, FAKE_CONTEXT_PER_TURN, FAKE_CONTEXT_WINDOW } from '
 import { addUsage, chunkText, ECHO_COMMANDS, emptyUsage, SHOUT, toSummary } from './shared';
 import { pauseActivity } from './activity';
 import { askPermission, askQuestion, askAsync } from './requests';
-import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess } from './turn-tools';
+import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
 import { applyWaitingMove } from './thread-move';
 import type { FakeContext } from './context';
@@ -211,6 +211,9 @@ async function stream(
   }
   if (!record.cancelled && prompt.includes('[tool]')) {
     await runTool(ctx, thread, message);
+  }
+  if (!record.cancelled && prompt.includes('[tools]')) {
+    await toolBurst(ctx, thread, message, record);
   }
   if (!record.cancelled && prompt.includes('[diff]')) {
     // The edit lands in the working tree, so the file it names opens.

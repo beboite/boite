@@ -3,8 +3,8 @@
  * speaks Muse's session protocol as `muse schema generate-ts` writes it
  * (`initialize`, `model/list`, `session/start`, `session/resume`,
  * `session/setModel`, `session/setApprovalMode`, `turn/start`,
- * `turn/interrupt`, `approval/decide`, `userInput/answer`, `userInput/cancel`,
- * `session/compact`, and the `item/*`, `turn/*`, `approval/*`, `userInput/*`
+ * `turn/interrupt`, `turn/steer`, `approval/decide`, `userInput/answer`,
+ * `userInput/cancel`, `session/compact`, and the `item/*`, `turn/*`, `approval/*`, `userInput/*`
  * and `session/*` notifications) and obeys prompt directives, so the Muse
  * driver is proved without the real binary and without a login.
  *
@@ -17,7 +17,7 @@
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|crash|input|auth|server-request|close-idle)\]/g;
+  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -31,6 +31,7 @@ type Directive =
   | 'usage'
   | 'tasks'
   | 'slow'
+  | 'steer'
   | 'crash'
   | 'input'
   | 'auth'
@@ -54,6 +55,8 @@ const interrupted = new Set<string>();
 const waitingInterrupt = new Map<string, () => void>();
 const waitingApproval = new Map<string, (choiceId: string) => void>();
 const waitingInput = new Map<string, (answers: unknown[] | null) => void>();
+/** The `[steer]` turn waiting for a `turn/steer` that names it. */
+const waitingSteer = new Map<string, (text: string) => void>();
 
 function log(line: string): void {
   const file = process.env['MUSE_FAKE_LOG'];
@@ -284,6 +287,15 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         interrupted.delete(turnId);
         notify('turn/completed', { turnId, terminal: 'cancelled', reason: 'interrupted' });
         return;
+      case 'steer': {
+        const heard = await new Promise<string>((resolve) => {
+          waitingSteer.set(turnId, resolve);
+          log('steer waiting');
+        });
+        waitingSteer.delete(turnId);
+        say(turnId, `heard: ${heard}`);
+        break;
+      }
       case 'crash':
         process.stderr.write('boom\n');
         setTimeout(() => {
@@ -391,6 +403,19 @@ function handle(method: string, raw: unknown): unknown {
       if (waiter === undefined) interrupted.add(turnId);
       else waiter();
       return { accepted: true };
+    }
+    case 'turn/steer': {
+      const input = Array.isArray(params['input']) ? (params['input'] as Record<string, unknown>[]) : [];
+      const text = input.map((part) => textOf(part['text'])).join('');
+      const expected = textOf(params['expectedTurnId']);
+      log(`turn/steer ${JSON.stringify(text)} uuid=${UUID_V7.test(commandId)}`);
+      // The real host refuses a turn that is no longer active.
+      const waiter = waitingSteer.get(expected);
+      if (waiter === undefined) throw new Error(`turn ${expected} is not active`);
+      setTimeout(() => {
+        waiter(text);
+      }, 0);
+      return { turnId: expected };
     }
     case 'approval/decide': {
       const approvalId = textOf(params['approvalId']);

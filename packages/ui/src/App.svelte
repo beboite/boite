@@ -26,6 +26,7 @@
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
+  import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
@@ -349,6 +350,17 @@
     if (quitHold && isQuitChord(event)) {
       event.preventDefault();
       quitHold.press();
+      return;
+    }
+    // Ctrl+=, Ctrl+- and Ctrl+0 zoom the whole interface in the shell, except
+    // inside a browser surface's own chrome, whose page walks its own ladder.
+    // A browser tab keeps its native zoom.
+    const zoom = inShell ? zoomKey(event) : null;
+    if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
+      event.preventDefault();
+      void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
+        store.error = error instanceof Error ? error.message : String(error);
+      });
       return;
     }
     // A dialog waiting for an answer owns the keyboard: a chord under it moves

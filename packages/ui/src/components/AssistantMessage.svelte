@@ -1,21 +1,22 @@
 <script lang="ts">
-  import { ChevronRight, CircleAlert, FishingHook, Wrench } from '@lucide/svelte';
+  import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
+  import { showDockedQuestion } from '../lib/question-dock.svelte';
   import type { Account, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
-  import { planOf } from '../lib/plan';
-  import { partItems } from '../lib/tool-runs';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
+  import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
-  import ToolCard from './ToolCard.svelte';
+  import ToolGroup from './ToolGroup.svelte';
+  import { partRuns, runKey, type ToolPart } from '../lib/tool-groups';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -45,9 +46,8 @@
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const thought = $derived(progress.thought(message.turnId));
-  /** A finished answer's runs of tool calls, one line each until opened; open ones by their first part. */
-  const items = $derived(partItems(message.parts, message.state === 'streaming'));
-  let openRuns = $state<number[]>([]);
+  const runs = $derived(partRuns(message.parts));
+  const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
 </script>
 
 {#if message.role === 'assistant' && execution}
@@ -61,30 +61,14 @@
 {/if}
 {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
-  {#each items as item (item.kind === 'part' ? item.index : `run-${item.indices[0]}`)}
-    {#if item.kind === 'part'}
-      {@render partView(message.parts[item.index]!, item.index)}
-    {:else}
-      {@const open = openRuns.includes(item.indices[0]!)}
-      <div class="part run" data-kind="tools">
-        <button type="button" class="ghost small run-toggle" data-testid="tool-run" aria-expanded={open}
-          onclick={() => (openRuns = open ? openRuns.filter((i) => i !== item.indices[0]) : [...openRuns, item.indices[0]!])}>
-          <ChevronRight size={13} class={open ? 'chevron expanded' : 'chevron'} />
-          <Wrench size={13} strokeWidth={1.75} />
-          <span>{fill(strings.chat.toolRun, { count: String(item.indices.length) })}</span>
-          <span class="run-names">{item.names.map(([name, count]) => (count > 1 ? `${name} ${count}` : name)).join(', ')}</span>
-        </button>
-        {#if open}
-          <div class="run-parts">
-            {#each item.indices as index (index)}{@render partView(message.parts[index]!, index)}{/each}
-          </div>
-        {/if}
+  {#each runs as run (runKey(run))}
+    {#if run.kind === 'tools'}
+      <div class="part" data-kind="tool">
+        <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground} />
       </div>
-    {/if}
-  {/each}
-</div>
-
-{#snippet partView(part: Message['parts'][number], index: number)}
+    {:else if message.parts[run.index]}
+    {@const index = run.index}
+    {@const part = message.parts[run.index]!}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
@@ -96,18 +80,6 @@
         <ChatFile file={part} />
       {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}
         <PlanCard {store} {threadId} plan={planOf(part.name, part.input) ?? ''} />
-      {:else if part.type === 'tool'}
-        <ToolCard
-          name={part.name}
-          input={part.input}
-          inputText={part.inputText}
-          output={part.output}
-          status={part.status}
-          documents={part.documents ?? []}
-          startedAt={part.startedAt ?? null}
-          finishedAt={part.finishedAt ?? null}
-          background={store.openThread?.background?.some((task) => task.toolId === part.toolId) ?? false}
-        />
       {:else if part.type === 'permission'}
         <PermissionCard
           toolName={part.toolName}
@@ -115,6 +87,13 @@
           request={store.permissionRequests[part.requestId] ?? null}
           answer={(decision) => void store.answer(part.requestId, decision)}
         />
+      {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
+        <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
+        <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
+          <MessageCircleQuestionMark size={15} strokeWidth={1.75} />
+          <span class="docked-text">{part.text}</span>
+          <span class="docked-hint">{strings.chat.questionDocked}</span>
+        </button>
       {:else if part.type === 'question'}
         <QuestionCard
           text={part.text}
@@ -158,7 +137,9 @@
         </div>
       {/if}
     </div>
-{/snippet}
+    {/if}
+  {/each}
+</div>
 
 <style>
   /* On the same 4 px rest as the parts it names. */
@@ -177,27 +158,6 @@
   .part {
     min-width: 0;
   }
-
-  /* A folded run reads as one tool card; opened, its cards follow under it. */
-  .run-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    height: var(--row);
-    padding: 0 10px 0 6px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    color: var(--color-muted-foreground);
-    justify-content: flex-start;
-  }
-  .run-toggle :global(svg) { flex: none; color: var(--color-subtle); }
-  .run-toggle :global(.chevron) { transition: transform var(--dur-2) var(--ease-out-quint); }
-  .run-toggle :global(.expanded) { transform: rotate(90deg); }
-  .run-toggle > span:first-of-type { flex: none; font-weight: 600; color: var(--color-foreground); }
-  .run-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--text-xs); }
-  .run-parts { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; padding-left: 12px; border-left: 1px solid var(--color-border); }
 
   /* Consecutive cards stack as one block at the flex gap; text on either side
      of a card, or two text blocks in a row, get the full 12 px instead. */
@@ -258,6 +218,13 @@
   .compaction .label {
     flex: none;
   }
+
+  /* A question waiting in the dock: one line like a tool call, the live colour on its mark. */
+  .docked-question { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; height: auto; padding: 1px 4px 1px 4px; border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-muted-foreground); justify-content: flex-start; text-align: left; }
+  .docked-question:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-foreground); }
+  .docked-question :global(svg) { flex: none; color: var(--color-live); }
+  .docked-text { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-foreground); }
+  .docked-hint { flex: 0 10 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-xs); color: var(--color-subtle); }
 
   /* One muted line, the words wrapping under their own start, the event name last and quieter. */
   .hook {

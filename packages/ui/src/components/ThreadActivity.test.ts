@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { Thread, ThreadActivity } from '@boite/contracts';
+import type { QuestionRequest, Thread, ThreadActivity } from '@boite/contracts';
 import { Store } from '../lib/store.svelte';
 import ThreadActivityView from './ThreadActivity.svelte';
 
@@ -81,5 +81,19 @@ test('pause targets the owning store and disabled control prevents duplicate req
   await vi.waitFor(() => expect(document.querySelector('[aria-label=Resume]')).not.toBeNull());
 });
 
+test('another thread\'s question comes up open over one folded here, as many questions as before', () => {
+  const question = (id: string, threadId: string): QuestionRequest => ({
+    id, threadId, turnId: 'turn', text: `Which way for ${threadId}?`, options: [], allowText: true, multiple: false, async: true, createdAt: 1
+  });
+  const store = render({ goal: null, loop: null, tasks: [] });
+  flushSync(() => { store.pendingQuestions = [question('first', 'thread'), question('second', 'other')]; });
+  const fold = () => document.querySelector<HTMLButtonElement>('[data-testid=activity-question-toggle]')!;
+  fold().click();
+  flushSync();
+  expect(fold().getAttribute('aria-expanded')).toBe('false');
+  flushSync(() => { store.openThread = { id: 'other', activity: { goal: null, loop: null, tasks: [] } } as unknown as Thread; });
+  expect(fold().getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('[data-testid=activity-question]:not([hidden])')!.getAttribute('data-question')).toBe('second');
+});
 
 

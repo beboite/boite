@@ -103,6 +103,8 @@ export class AcpSession {
   /** Armed by a stop on a prompt in flight: an agent that ignores the cancel is closed. */
   private stopTimer: Timer | null = null;
   private queue: Promise<void> = Promise.resolve();
+  /** Grok answered `_x.ai/interject` with an error once: this process has no mid-turn input. */
+  private interjectRefused = false;
   private running = 0;
   private closing = false;
   private ended = false;
@@ -169,6 +171,28 @@ export class AcpSession {
       if (!turn.settled) this.drop();
     }, STOP_GRACE_MS);
     this.stopTimer.unref?.();
+  }
+
+  /**
+   * Grok's `_x.ai/interject`: the text joins the running prompt at the agent's
+   * next safe point, between two tool calls or two model calls. Only while this
+   * turn's prompt is in flight: on an idle session Grok runs the text as a turn
+   * of its own that no Boite turn would draw. An agent that answers with an
+   * error, an older Grok without the method, is not asked again.
+   */
+  async steer(turn: AcpTurn, text: string): Promise<boolean> {
+    const agent = this.agent;
+    const sessionId = this.sessionId;
+    if (this.interjectRefused || agent === null || sessionId === null || this.current !== turn || turn.isStopped) return false;
+    try {
+      await agent.request('_x.ai/interject', { sessionId, text });
+      return true;
+    } catch (error) {
+      if (!rpcRefusal(error)) throw error;
+      this.interjectRefused = true;
+      turn.ctx.log('warn', `acp: ${turn.ctx.provider.id} refused _x.ai/interject, answers wait for the turn's end: ${rpcReason(error)}`);
+      return false;
+    }
   }
 
   private cancel(): void {

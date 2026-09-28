@@ -74,13 +74,27 @@
   let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
 
   /**
+   * The Team button is for a conversation that has one: delegation switched on,
+   * a profile set up, an agent launched, or this thread being one of them. On
+   * every other thread it was a word with no referent, so the way in is the
+   * title's menu until then.
+   */
+  let hasTeam = $derived.by(() => {
+    if (agentsOn || thread?.parentThreadId) return true;
+    const team = store.delegation;
+    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0);
+  });
+
+  /**
    * A phone's header has room for the title or for every toggle, not both: the
    * Agents and Terminal toggles move into the title's sheet there, ticked when on.
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
     const toggles: MenuItem[] = [];
-    if (work.shows('header.agents')) toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
+    // Without a team, the same entry the desktop title menu offers to start one.
+    if (!hasTeam) toggles.push({ id: 'agents', label: strings.delegation.openTeam });
+    else if (work.shows('header.agents')) toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
     if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
     return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
   });
@@ -109,7 +123,9 @@
   }
 
   function openTitleMenu(event: MouseEvent) {
-    if (store.openThread) contextMenu.open(event, titleItems, titleAction);
+    if (!store.openThread) return;
+    const items = hasTeam ? titleItems : [{ id: 'agents', label: strings.delegation.openTeam }, separator('sep-team'), ...titleItems];
+    contextMenu.open(event, items, titleAction);
   }
 
 </script>
@@ -182,7 +198,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></span>
       {/if}
-      {#if thread && work.shows('header.agents')}
+      {#if thread && hasTeam && work.shows('header.agents')}
         <button
           type="button"
           class="ghost trace in-title-menu"

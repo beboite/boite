@@ -66,7 +66,7 @@
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
-    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
+    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
     keyboard: [
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
@@ -128,6 +128,9 @@
     ['appearance', 'theme', strings.settings.accent],
     ['appearance', 'theme', strings.settings.material],
     ['appearance', 'theme', strings.settings.language],
+    ['appearance', 'reading', strings.settings.font],
+    ['appearance', 'reading', strings.settings.monoFont],
+    ...(inShell ? [['appearance', 'reading', strings.settings.zoom] as [SettingsTab, string, string]] : []),
     ['appearance', 'workspace', strings.settings.startIn],
     ['appearance', 'workspace', strings.settings.panelStart],
     // The buttons people most often look for by name, the ones the old developer switch hid.

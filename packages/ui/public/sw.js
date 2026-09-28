@@ -32,7 +32,7 @@ self.addEventListener('install', (event) => {
       if (!shell.ok) throw new Error('the app shell could not be cached');
       const html = await shell.clone().text();
       const assets = [...new Set(html.match(/\/assets\/[^\s"'<>]+/g) ?? [])];
-      await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Geist-Variable.woff2', '/fonts/GeistMono-Variable.woff2']);
+      await cache.addAll([...assets, MANIFEST, '/icons/icon-192.png', '/fonts/Inter-latin.woff2', '/fonts/GeistMono-Variable.woff2']);
       await cache.put(SHELL, shell);
       await self.skipWaiting();
     })(),

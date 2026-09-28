@@ -10,6 +10,7 @@ import type { PanelSurface } from '@boite/contracts';
 import { SvelteSet } from 'svelte/reactivity';
 import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
+import { ZOOM_STEPS } from './zoom';
 
 export type SurfaceKind = 'agents' | 'workflow' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
@@ -82,17 +83,8 @@ export const WORKFLOW_SURFACE_ID = 'workflow';
 /** Past this the changes surface puts its diff beside the list rather than under it. */
 export const CHANGES_SPLIT_MIN = 900;
 
-/** The rungs `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk on a browser surface. */
-export const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
-export const ZOOM_DEFAULT = 1;
-
-/** The rung after this one in that direction, or the end of the ladder. */
-export function stepZoom(current: number, direction: -1 | 1): number {
-  const at = ZOOM_STEPS.findIndex((step) => Math.abs(step - current) < 0.001);
-  const from = at < 0 ? ZOOM_STEPS.indexOf(ZOOM_DEFAULT) : at;
-  const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, from + direction));
-  return ZOOM_STEPS[next] ?? ZOOM_DEFAULT;
-}
+/** A browser surface walks the interface zoom's own ladder (`lib/zoom.ts`). */
+export { ZOOM_DEFAULT, ZOOM_STEPS, stepZoom } from './zoom';
 
 interface Persisted {
   version: number;

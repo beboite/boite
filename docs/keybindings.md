@@ -103,6 +103,9 @@ tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
 always reach it.
 
 `Ctrl+Q` in the shell, the quit hold, is not in the table and cannot move.
+Neither can the shell's zoom, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` (`+` and `-` of
+the keypad and of any layout included), which follow the browser's own keys
+([development.md](development.md#faces-and-zoom)).
 
 ## What is refused
 

@@ -244,6 +244,8 @@ test('a phone pins and archives a thread without a right-click, from the header 
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'archive']);
+  // No team on this thread: the entry offers to start one, as the desktop title menu does.
+  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Hand work to other agents');
   await capture('mobile-thread-menu.png');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);

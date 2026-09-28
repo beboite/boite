@@ -938,7 +938,8 @@ test("a header button's right click hides it, and the Appearance page brings it 
   // The settings page scrolls to the card it was opened on; jsdom draws nothing to scroll.
   Element.prototype.scrollIntoView ??= vi.fn();
   work.showPreset('developer');
-  await mountOnFake();
+  // With a team on the thread, since Team shows only where there is one.
+  await mountOnFake('/?fake=1&team=1');
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') !== null);
@@ -950,6 +951,8 @@ test("a header button's right click hides it, and the Appearance page brings it 
   expect(work.current.hidden).toEqual(['header.terminal']);
 
   // The same button's menu, on another one, leads to the page that lists them all.
+  // Team shows once that team has loaded.
+  await waitFor(() => document.querySelector('[data-testid=agents-toggle]') !== null);
   query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
@@ -1454,6 +1457,52 @@ test.each([false, true])('a ctrl-click uses the opener only in the shell: %s', a
   }
 });
 
+async function sendPrompt(text: string): Promise<void> {
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+}
+
+test('an async question waits in the dock above the composer, stacked, and the timeline keeps a line to it', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+
+  await sendPrompt('[ask] one');
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 1);
+  await waitFor(() => store.openThread?.status === 'idle');
+  await sendPrompt('[ask] two');
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 2);
+
+  // The newest comes up, behind a pager; the timeline holds a line per question, no card.
+  expect(query('[data-testid=activity-question-index]').textContent).toBe('2 of 2');
+  expect(document.querySelectorAll('[data-testid=question-docked]').length).toBe(2);
+  expect(document.querySelector('[data-testid=timeline] [data-testid=question-card]')).toBeNull();
+  const visible = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=activity-question]')).filter((el) => !el.hidden);
+  expect(visible().length).toBe(1);
+  const newest = visible()[0]?.dataset.question;
+  query<HTMLButtonElement>('[data-testid=activity-question-prev]').click();
+  await waitFor(() => query('[data-testid=activity-question-index]').textContent === '1 of 2');
+  expect(visible()[0]?.dataset.question).not.toBe(newest);
+
+  // Answered from the dock, it leaves it and folds to its answer in the timeline.
+  const first = visible()[0]!;
+  first.querySelector<HTMLButtonElement>('[data-testid=question-option]')?.click();
+  await waitFor(() => !first.querySelector<HTMLButtonElement>('[data-testid=question-submit]')?.disabled);
+  first.querySelector<HTMLButtonElement>('[data-testid=question-submit]')?.click();
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 1);
+  expect(document.querySelector('[data-testid=activity-question-index]')).toBeNull();
+  await waitFor(() => document.querySelectorAll('[data-testid=question-docked]').length === 1);
+
+  // Folded, a click on its line in the timeline opens it again.
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'false');
+  query<HTMLButtonElement>('[data-testid=question-docked]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'true');
+});
+
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
 test('a tool card shows the input as the model types it, then switches to the parsed one', async () => {
@@ -1576,11 +1625,16 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
-  // Folded, each of the three cards says what it carries.
-  await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 3);
+  // The edit comes open on its diff and counts its lines on its own line; the
+  // other two are folded and say what they carry.
+  await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 2);
   expect(
     Array.from(document.querySelectorAll('[data-testid=tool-document-chip]')).map((el) => el.textContent)
-  ).toEqual(['1 diff', '1 doc', '1 doc']);
+  ).toEqual(['1 doc', '1 doc']);
+  expect(query('[data-testid=tool-diff-counts]').textContent?.replace(/\s+/g, ' ').trim()).toBe('+2 -1');
+  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('true');
+  // A diff says it all: no raw input under it.
+  expect(document.querySelector('[data-testid=tool-card][data-family=edit] [data-testid=tool-input]')).toBeNull();
 
   // Open every card that carries documents.
   for (const chip of Array.from(document.querySelectorAll('[data-testid=tool-document-chip]'))) {

@@ -457,6 +457,32 @@
     void submit(true);
   }
 
+  /** Nothing in the box and nothing on its way into it: what a second Enter needs. */
+  let boxEmpty = $derived(text.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0 &&
+    readingFiles === 0 && !dictating);
+
+  /**
+   * What Send now does to the queue: stop the turn it waits behind, resume it
+   * after a refusal held it, or nothing while a pending prompt is going out.
+   */
+  let sendNow = $derived<'stop' | 'resume' | null>(
+    !composer?.queued.length || composer.sending || store.connection !== 'ready' || !store.openThread ? null
+      : store.busy ? 'stop' : composer.paused ? 'resume' : null
+  );
+
+  /**
+   * Send now: the oldest pending prompt goes instead of waiting for the turn
+   * to end. The turn is stopped, the way Escape stops it, and the queue's own
+   * drain sends that prompt once the thread is idle; the ones behind it still
+   * wait for its turn. A queue a refusal held is resumed too.
+   */
+  function sendQueuedNow() {
+    const state = composer;
+    if (!state || sendNow === null) return;
+    state.paused = false;
+    if (sendNow === 'stop') void store.stop();
+  }
+
   /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */
   function older(): boolean {
     if (recall === null && (text.length > 0 || previewReferences.length > 0)) return false;
@@ -626,7 +652,8 @@
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      void submit();
+      if (boxEmpty && sendNow) sendQueuedNow();
+      else void submit();
     } else if (event.key === 'ArrowUp' && !event.shiftKey) {
       if (older()) event.preventDefault();
     } else if (event.key === 'ArrowDown' && !event.shiftKey) {
@@ -643,14 +670,16 @@
 
 <div class="composer-wrap" class:centered>
   <ThreadActivity {store} />
+  {#if composer && composer.queued.length > 0}
+    <ComposerQueue queued={composer.queued}
+      disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
+      paused={composer.paused}
+      {sendNow}
+      onrestore={restoreQueued}
+      onsendnow={sendQueuedNow} />
+  {/if}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
-    {#if composer && composer.queued.length > 0}
-      <ComposerQueue queued={composer.queued}
-        disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-        onrestore={restoreQueued} />
-    {/if}
-
     {#if composer?.editing}
       <div class="editing" data-testid="composer-editing">
         <Pencil size={13} />
