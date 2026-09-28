@@ -688,7 +688,7 @@ export class ProcRegistry {
     if (sample === null) return { processes, cpuPercent: 0, memoryBytes: 0 };
     for (const measured of sample.workingSets ?? []) {
       const entry = this.live.get(threadId)?.get(measured.pid);
-      if (entry !== undefined) memory?.push({ threadId, pid: measured.pid, exe: entry.record.exe, bytes: measured.bytes, root: entry.root });
+      if (entry !== undefined) memory?.push({ threadId, pid: measured.pid, exe: entry.record.exe, bytes: measured.committedBytes ?? measured.bytes, root: entry.root });
     }
     return { processes, cpuPercent: sample.cpuPercent, memoryBytes: sample.memoryBytes };
   }
@@ -696,11 +696,9 @@ export class ProcRegistry {
   private sampleLoad(): void {
     if (this.journal.isClosed()) return;
     const processes: MemoryProcess[] = [];
-    let agentBytes = 0;
     for (const [threadId, byPid] of this.live) {
       if (byPid.size === 0) continue;
       const load = this.measure(threadId, byPid.size, processes);
-      agentBytes += load.memoryBytes;
       this.lastLoad.set(threadId, load);
       if (!worthPushing(this.lastPushed.get(threadId), load)) continue;
       const thread = this.journal.getThread(threadId);
@@ -713,7 +711,7 @@ export class ProcRegistry {
       this.lastLoad.delete(threadId);
       this.lastPushed.delete(threadId);
     }
-    this.memory.sample(agentBytes, processes, (victim) => {
+    this.memory.sample(processes.reduce((sum, process) => sum + process.bytes, 0), processes, (victim) => {
       const entry = this.live.get(victim.threadId)?.get(victim.pid);
       if (entry === undefined || entry.root) return false;
       if (this.capability().os === 'windows') return this.platform.terminateProcess(victim.threadId, victim.pid);

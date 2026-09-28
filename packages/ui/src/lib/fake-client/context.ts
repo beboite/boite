@@ -134,7 +134,7 @@ export class FakeContext {
   readonly activityTurns = new Map<string, { kind: 'goal' | 'loop'; generation: number }>();
   readonly activityGenerations = new Map<string, number>();
   processes: ProcessRecord[] = [];
-  memoryState: MemoryState = 'tight';
+  memoryState: MemoryState = 'ok';
   readonly usage = new Map<ThreadId, Usage>();
   /** The note each moved thread's next message carries, as the core's `move-note:` setting (`thread-move.ts`). */
   readonly moveNotes = new Map<ThreadId, MoveNotice>();
@@ -241,7 +241,7 @@ export class FakeContext {
       warmProcessMinutes: 0,
       listenOnLan: false,
       agentCpuCapPercent: 75,
-      agentMemoryBudgetMb: 0,
+      agentMemoryBudgetPercent: 60,
       threadMemoryCapMb: 0,
       memoryReserveMb: 0,
       focusGuard: true,

@@ -8,7 +8,7 @@ let harness: TestCore;
 let threadId: string;
 let available = 16 * 1024 ** 3;
 let memory: ReturnType<typeof spyOn>;
-const event = (kind: MemoryEvent['kind'] = 'thread-cap'): MemoryEvent => ({ threadId, kind, state: 'critical', at: Date.now() });
+const event = (kind: MemoryEvent['kind'] = 'thread-cap'): MemoryEvent => ({ threadId, kind, reason: 'thread-quota', limitBytes: 1024 ** 3, state: 'critical', at: Date.now() });
 const textOf = (turnId: string): string => harness.core.journal.listMessages(threadId)
   .filter(message => message.turnId === turnId && message.role === 'assistant')
   .flatMap(message => message.parts).map(part => part.type === 'text' ? part.text : '').join('');
@@ -25,24 +25,21 @@ afterEach(async () => {
 });
 
 describe('memory events and admission', () => {
-  test('holds a new turn with reason memory, leaves running work alone and releases after two samples', async () => {
+  test('a queued turn starts under critical pressure when its concurrency slot opens', async () => {
     const core = harness.core;
+    core.settings.set({ maxConcurrentTurns: 1 });
     const running = core.threads.startTurn(threadId, '[sleep:60000]');
-    const second = await echoThread(harness, await harness.connect(), 'held');
-    available = 1500 * 1024 ** 2;
-    core.procs.memory.sample(0, [], () => false);
-    expect(core.procs.memory.state).toBe('tight');
-    const held = core.threads.startTurn(second.threadId, 'released');
-    expect(core.scheduler.state().queued).toMatchObject([{ turnId: held.id, reason: 'memory' }]);
-    expect(core.journal.getTurn(running.id)?.status).toBe('running');
+    const second = await echoThread(harness, await harness.connect(), 'queued');
+    const queued = core.threads.startTurn(second.threadId, 'started');
+    expect(core.scheduler.state().queued).toMatchObject([{ turnId: queued.id }]);
     available = 512 * 1024 ** 2;
     core.procs.memory.sample(0, [], () => false);
     expect(core.procs.memory.state).toBe('critical');
-    available = 16 * 1024 ** 3;
-    core.procs.memory.sample(0, [], () => false);
-    expect(core.scheduler.state().queued[0]?.reason).toBe('memory');
-    core.procs.memory.sample(0, [], () => false);
-    await waitFor(() => core.journal.getTurn(held.id)?.status === 'done');
+    expect(core.scheduler.state().queued[0]).not.toHaveProperty('reason');
+    expect(core.journal.getTurn(running.id)?.status).toBe('running');
+    await core.scheduler.stopAndWait(threadId);
+    await waitFor(() => core.journal.getTurn(queued.id)?.status === 'done');
+    expect(core.procs.memory.state).toBe('critical');
     expect(core.scheduler.state().queued).toEqual([]);
   });
 

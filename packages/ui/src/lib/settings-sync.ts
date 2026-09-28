@@ -31,6 +31,7 @@ export const PORTABLE_SETTINGS = [
   'perAccountConcurrency',
   'warmProcessMinutes',
   'agentCpuCapPercent',
+  'agentMemoryBudgetPercent',
   'threadMemoryCapMb',
   'focusGuard',
   'muteAgents',

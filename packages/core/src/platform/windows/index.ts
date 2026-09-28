@@ -35,7 +35,6 @@ export const platform: ProcessPlatform = {
   },
   sample: jobs.sampleThreadJob,
   machineMemory,
-  kernelMemoryBudget: jobs.kernelMemoryBudget,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
   warm() {

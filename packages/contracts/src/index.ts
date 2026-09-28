@@ -1178,27 +1178,33 @@ export interface SchedulerState {
   maxConcurrentTurns: number;
   perAccountConcurrency: number;
   running: { turnId: TurnId; threadId: ThreadId; startedAt: Timestamp }[];
-  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp; reason?: 'memory' }[];
+  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
 
-export type MemoryState = 'ok' | 'tight' | 'critical';
+export type MemoryState = 'ok' | 'critical';
 
 export interface MemoryStatus {
   state: MemoryState;
   agentBytes: number;
   availableBytes: number | null;
-  limits: Pick<Settings, 'agentMemoryBudgetMb' | 'threadMemoryCapMb' | 'memoryReserveMb'>;
+  limits: { budgetMb: number; threadMemoryCapMb: number; memoryReserveMb: number };
 }
 
-export interface MemoryEvent {
+interface MemoryEventBase {
   threadId: string | null;
-  kind: 'killed' | 'thread-cap' | 'budget' | 'pressure';
   pid?: number;
   exe?: string;
   bytes?: number;
   state: MemoryState;
   at: number;
 }
+
+export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
+
+export type MemoryEvent = MemoryEventBase & (
+  | { kind: 'killed'; reason: MemoryKillReason; limitBytes: number }
+  | { kind: 'thread-cap' | 'budget' | 'pressure' }
+);
 
 /** Per-core consent. Installation identifiers never cross RPC. */
 export interface TelemetryState {
@@ -1224,12 +1230,12 @@ export interface Settings {
    * CPU rate control, and other systems ignore it.
    */
   agentCpuCapPercent: number;
-  /** Total agent memory budget in MB. 0 uses 60% of physical RAM, rounded down to 256 MB. */
-  agentMemoryBudgetMb: number;
+  /** Share of physical RAM for all agents, an integer from 10 to 90. Default 60. */
+  agentMemoryBudgetPercent: number;
   /**
    * Memory ceiling for one thread's whole process tree, in megabytes. 0 means
    * half the effective budget, rounded down to 256 MB. An explicit cap cannot
-   * exceed the budget. Windows refuses allocations past the thread job's limit.
+   * exceed the budget. The kernel safety net sits 10% above this quota on Windows.
    */
   threadMemoryCapMb: number;
   /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */

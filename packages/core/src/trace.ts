@@ -5,9 +5,7 @@ const DEFAULT_TRACE_LIMIT = 200;
 
 
 export function registerTraceMethods(core: Core): void {
-  core.router.register('resources.memoryStatus', () => core.procs.memory.status(
-    core.procs.liveThreads().reduce((sum, id) => sum + (core.procs.loadOf(id)?.memoryBytes ?? 0), 0),
-  ));
+  core.router.register('resources.memoryStatus', () => core.procs.memory.status());
   core.router.register('trace.get', (params): ProcessRecord[] =>
     core.journal.listProcesses(params.threadId, params.limit ?? DEFAULT_TRACE_LIMIT),
   );

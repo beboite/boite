@@ -5,10 +5,10 @@
   let { state, stopped = false, machine }: { state: MemoryState | null; stopped?: boolean; machine?: string } = $props();
 </script>
 
-{#if state && state !== 'ok'}
+{#if state === 'critical'}
   <article class="memory-notice" data-testid="memory-banner" data-state={state} role="status">
     {#if machine}<span class="machine">{strings.resources.onMachine(machine)}</span>{/if}
-    <p>{state === 'tight' ? strings.resources.tight : stopped ? strings.resources.stopped : strings.resources.critical}</p>
+    <p>{stopped ? strings.resources.stopped : strings.resources.critical}</p>
   </article>
 {/if}
 

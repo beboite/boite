@@ -236,7 +236,7 @@ let nestingRefused = false;
 let sink: ProcessEventSink | null = null;
 let limits: ProcessLimits = {
   agentCpuCapPercent: 75,
-  ...resolveMemoryLimits({ agentMemoryBudgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 }, totalmem()),
+  ...resolveMemoryLimits({ agentMemoryBudgetPercent: 60, threadMemoryCapMb: 0, memoryReserveMb: 0 }, totalmem()),
 };
 let nextKey = GLOBAL_JOB_KEY + 1;
 
@@ -295,7 +295,7 @@ export function setProcessLimits(next: ProcessLimits): void {
   const api = native;
   if (api === null) return;
   if (globalJob !== 0) {
-    applyMemoryLimit(api, globalJob, limits.agentMemoryBudgetMb);
+    applyMemoryLimit(api, globalJob, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
     applyCpuCap(api, globalJob);
   }
   for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
@@ -344,11 +344,6 @@ export function jobsCapability(): TraceCapability {
     };
   }
   return { os, mode: 'events', note: `${EVENTS_NOTE}${suffix}` };
-}
-
-export function kernelMemoryBudget(): boolean {
-  const limit = memoryLimitOfJob(null);
-  return !nestingRefused && limit !== null && (limit.flags & JOB_OBJECT_LIMIT_JOB_MEMORY) !== 0 && limit.bytes > 0;
 }
 
 export function assignToThreadJob(threadId: string, pid: number): boolean {
@@ -455,13 +450,13 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   job.lastSampleAt = now;
 
   let memoryBytes = 0;
-  const workingSets: { pid: number; bytes: number }[] = [];
+  const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
   for (const [pid, entry] of tracked) {
     if (entry.threadId !== threadId) continue;
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
-    workingSets.push({ pid, bytes: memory.workingSet });
+    workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
 
@@ -506,7 +501,7 @@ function applyCpuCap(api: Native, job: number): void {
 }
 
 function applyThreadLimits(api: Native, job: number): void {
-  applyMemoryLimit(api, job, limits.threadMemoryCapMb, true);
+  applyMemoryLimit(api, job, limits.threadMemoryCapMb * 1.1, true);
 }
 
 function applyMemoryLimit(api: Native, job: number, mb: number, thread = false): void {
@@ -517,10 +512,10 @@ function applyMemoryLimit(api: Native, job: number, mb: number, thread = false):
     flags |= JOB_OBJECT_LIMIT_PRIORITY_CLASS;
     view.setUint32(OFF_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, true);
   }
-  // A zero limit would refuse every allocation; it only happens on a machine under 1 GB.
+  // Windows rounds down to pages. A zero limit would refuse every allocation.
   if (mb > 0) {
     flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
-    view.setBigUint64(OFF_JOB_MEMORY_LIMIT, BigInt(Math.round(mb * 1024 * 1024)), true);
+    view.setBigUint64(OFF_JOB_MEMORY_LIMIT, BigInt(Math.floor(mb * 1024 * 1024 / 4096) * 4096), true);
   }
   view.setUint32(OFF_LIMIT_FLAGS, flags, true);
   api.setJobInfo(job, CLASS_EXTENDED_LIMIT, buffer);
@@ -542,7 +537,7 @@ function ensureGlobalJob(api: Native): void {
   if (globalJob !== 0) return;
   const handle = api.createJob();
   if (handle === 0) return;
-  applyMemoryLimit(api, handle, limits.agentMemoryBudgetMb);
+  applyMemoryLimit(api, handle, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
   globalJob = handle;
   applyCpuCap(api, handle);
   associatePort(api, handle, GLOBAL_JOB_KEY);

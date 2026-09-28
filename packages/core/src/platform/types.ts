@@ -17,7 +17,8 @@ export interface ProcessSample {
   processes: number;
   cpuPercent: number;
   memoryBytes: number;
-  workingSets?: { pid: number; bytes: number }[];
+  /** Working set for the UI; private commit for the Windows governor. */
+  workingSets?: { pid: number; bytes: number; committedBytes?: number }[];
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -31,7 +32,7 @@ export interface ProcessEventSink {
 export interface ProcessLimits {
   agentCpuCapPercent: number;
   /** Effective MB limits, with auto settings already resolved against physical RAM. */
-  agentMemoryBudgetMb: number;
+  budgetMb: number;
   threadMemoryCapMb: number;
   memoryReserveMb: number;
 }
@@ -73,8 +74,6 @@ export interface ProcessPlatform {
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
   machineMemory(): { totalBytes: number; availableBytes: number } | null;
-  /** True only while the kernel enforces the shared budget across every thread job. */
-  kernelMemoryBudget?(): boolean;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */

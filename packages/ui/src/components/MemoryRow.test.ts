@@ -3,18 +3,19 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
+import { setLocaleSetting } from '../lib/i18n.svelte';
 import MemoryRow from './MemoryRow.svelte';
 import MessageList from './MessageList.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
-afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; localStorage.clear(); });
+afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; await setLocaleSetting('en'); document.body.innerHTML = ''; localStorage.clear(); });
 
-test.each(['killed', 'thread-cap', 'budget'] as const)('renders a %s system row with known process and size', kind => {
-  mounted = mount(MemoryRow, { target: document.body, props: { event: { threadId: 't', kind, state: 'critical', exe: 'C:\\bin\\cargo.exe', bytes: 2147483648, at: 1 } } });
+test.each([['en', 'thread-quota'], ['en', 'budget'], ['en', 'machine'], ['fr', 'thread-quota'], ['fr', 'budget'], ['fr', 'machine']] as const)('renders a %s %s kill with its process, size and crossed limit', async (locale, reason) => {
+  await setLocaleSetting(locale);
+  mounted = mount(MemoryRow, { target: document.body, props: { event: { threadId: 't', kind: 'killed', reason, limitBytes: 9728 * 1048576, state: 'critical', exe: 'C:\\bin\\cargo.exe', bytes: 2147483648, at: 1 } } });
   flushSync();
   const row = document.querySelector('[data-testid=memory-row]')!;
-  expect(row.textContent).toContain(strings.resources[kind === 'killed' ? 'killed' : kind === 'thread-cap' ? 'threadCap' : 'budget']);
-  expect(row.textContent).toContain('cargo.exe'); expect(row.textContent).toContain('2.0 GB');
+  expect(row.textContent).toContain(strings.resources.killed[reason]('cargo.exe', locale === 'fr' ? '2,0 Go' : '2.0 GB', locale === 'fr' ? '9,5 Go' : '9.5 GB'));
   expect(row.textContent).not.toContain('C:\\bin');
 });
 

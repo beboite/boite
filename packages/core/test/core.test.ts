@@ -74,7 +74,7 @@ describe('settings', () => {
       warmProcessMinutes: 0,
       listenOnLan: false,
       agentCpuCapPercent: 75,
-      agentMemoryBudgetMb: 0,
+      agentMemoryBudgetPercent: 60,
       threadMemoryCapMb: 0,
       memoryReserveMb: 0,
       focusGuard: true,

@@ -1,74 +1,65 @@
 import { describe, expect, test } from 'bun:test';
 import { decideMemory, initialMemoryPolicy, type MemorySample } from '../src/memory-guard-logic.ts';
-import { MemoryGuard } from '../src/memory-guard.ts';
+import { MemoryGuard, memoryNotice } from '../src/memory-guard.ts';
 import { Bus } from '../src/bus.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 
 const sample = (patch: Partial<MemorySample> = {}): MemorySample => ({
-  availableBytes: 1000, reserveBytes: 100, budgetBytes: 500,
-  agentBytes: 0, kernelBudget: true, processes: [], at: 0, ...patch,
+  availableBytes: 1000, reserveBytes: 100, budgetBytes: 5000, quotaBytes: 2000,
+  agentBytes: 0, processes: [], at: 0, ...patch,
 });
-const child = (pid: number, bytes: number, root = false) => ({ threadId: 'thread', pid, exe: 'child', bytes, root });
+const child = (pid: number, bytes: number, root = false, threadId = 'thread') => ({ threadId, pid, exe: 'child', bytes, root });
 
 describe('memory policy', () => {
-  test('enters tight and critical immediately at the reserve thresholds', () => {
-    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: 200 })).policy.state).toBe('tight');
-    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: 100 })).policy.state).toBe('critical');
-    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: 201 })).policy.state).toBe('ok');
+  test('kills the largest non-root of each thread over quota', () => {
+    const processes = [child(1, 2500, true), child(2, 400), child(3, 300), child(4, 900, false, 'other')];
+    const result = decideMemory(initialMemoryPolicy(), sample({ processes }));
+    expect(result.kills).toEqual([{ process: processes[1]!, reason: 'thread-quota', limitBytes: 2000 }]);
+    expect(result.policy.state).toBe('critical');
   });
-  test('recovery requires two consecutive samples above the current threshold', () => {
-    let policy = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 50 })).policy;
-    policy = decideMemory(policy, sample({ availableBytes: 150 })).policy;
-    expect(policy.state).toBe('critical');
-    policy = decideMemory(policy, sample({ availableBytes: 90 })).policy;
-    policy = decideMemory(policy, sample({ availableBytes: 150 })).policy;
-    expect(policy.state).toBe('critical');
-    policy = decideMemory(policy, sample({ availableBytes: 150 })).policy;
-    expect(policy.state).toBe('tight');
-    policy = decideMemory(policy, sample()).policy;
-    expect(policy.state).toBe('tight');
-    expect(decideMemory(policy, sample()).policy.state).toBe('ok');
+  test.each(['budget', 'machine'] as const)('%s chooses the heaviest thread, not the largest process elsewhere', reason => {
+    const processes = [child(1, 900, true), child(2, 400), child(3, 800, false, 'other')];
+    const result = decideMemory(initialMemoryPolicy(), sample({ processes,
+      ...(reason === 'budget' ? { agentBytes: 2100, budgetBytes: 2000 } : { availableBytes: 99 }),
+    }));
+    expect(result.kills).toEqual([{ process: processes[1]!, reason, limitBytes: reason === 'budget' ? 2000 : 100 }]);
   });
-  test('enforces the sampled budget only without a kernel budget', () => {
-    expect(decideMemory(initialMemoryPolicy(), sample({ agentBytes: 501 })).policy.state).toBe('ok');
-    expect(decideMemory(initialMemoryPolicy(), sample({ agentBytes: 501, kernelBudget: false })).policy.state).toBe('critical');
-    expect(decideMemory(initialMemoryPolicy(), sample({ agentBytes: 500, kernelBudget: false })).policy.state).toBe('ok');
-  });
-  test('chooses one largest working set across threads, excluding roots', () => {
-    const processes = [child(1, 900, true), child(2, 200), { ...child(3, 400), threadId: 'other' }];
-    const result = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 50, processes }));
-    expect(result.victim?.pid).toBe(3);
-    expect(result.policy).not.toBe(initialMemoryPolicy());
-  });
-  test('waits three seconds between victims, even across a recovery', () => {
-    const low = sample({ availableBytes: 50, processes: [child(2, 200)], at: 100 });
-    let policy = decideMemory(initialMemoryPolicy(), low).policy;
-    expect(decideMemory(policy, { ...low, at: 3099 }).victim).toBeNull();
-    policy = decideMemory(policy, sample({ at: 1000 })).policy;
-    policy = decideMemory(policy, sample({ at: 2000 })).policy;
-    expect(decideMemory(policy, { ...low, at: 3100 }).victim?.pid).toBe(2);
-  });
-  test('reports no killable process once per critical episode', () => {
-    const low = sample({ availableBytes: 50, processes: [child(1, 900, true)] });
+  test('one kill per thread and independent three-second cooldowns across recovery', () => {
+    const processes = [child(1, 2100), child(2, 2200, false, 'other')];
+    const low = sample({ processes, agentBytes: 4300, budgetBytes: 4000, availableBytes: 50, at: 100 });
     const first = decideMemory(initialMemoryPolicy(), low);
-    expect(first.victim).toBeNull();
-    expect(first.nothingKillable).toBe(true);
-    expect(decideMemory(first.policy, low).nothingKillable).toBe(false);
+    expect(first.kills.map(kill => kill.process.pid)).toEqual([1, 2]);
+    expect(decideMemory(first.policy, { ...low, at: 3099 }).kills).toEqual([]);
+    const third = decideMemory(first.policy, { ...low, processes: [...processes, child(3, 2300, false, 'third')], at: 200 });
+    expect(third.kills.map(kill => kill.process.pid)).toEqual([3]);
+    let policy = decideMemory(first.policy, sample({ at: 1000 })).policy;
+    policy = decideMemory(policy, sample({ at: 2000 })).policy;
+    expect(decideMemory(policy, { ...low, at: 3100 }).kills).toHaveLength(2);
+    expect(first.policy.nextKillAt.get('third')).toBeUndefined();
   });
-  test('never kills on a recovery sample while hysteresis still holds critical', () => {
-    const policy = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 50 })).policy;
-    expect(decideMemory(policy, sample({ processes: [child(1, 200)], at: 5000 })).victim).toBeNull();
+  test('spares roots without punishing a lighter thread and reports nothing killable once', () => {
+    const low = sample({ availableBytes: 50, processes: [child(1, 1900, true), child(2, 100, false, 'other')] });
+    const first = decideMemory(initialMemoryPolicy(), low);
+    expect(first.kills).toEqual([]);
+    expect(first.nothingKillable).toEqual(['thread']);
+    expect(decideMemory(first.policy, low).nothingKillable).toEqual([]);
+    let policy = decideMemory(first.policy, sample()).policy;
+    policy = decideMemory(policy, sample()).policy;
+    expect(decideMemory(policy, low).nothingKillable).toEqual(['thread']);
   });
-  test('a missing machine reading still enforces a fallback budget', () => {
-    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: null, agentBytes: 501, kernelBudget: false })).policy.state).toBe('critical');
-  });
-
-  test('a missing reading resets recovery and never releases a pressure hold', () => {
-    let policy = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 150 })).policy;
+  test('recovery takes two good readings, missing readings reset it and recovery never kills', () => {
+    let policy = decideMemory(initialMemoryPolicy(), sample({ availableBytes: 50 })).policy;
     policy = decideMemory(policy, sample()).policy;
     policy = decideMemory(policy, sample({ availableBytes: null })).policy;
-    expect(decideMemory(policy, sample()).policy.state).toBe('tight');
+    const recovering = decideMemory(policy, sample({ processes: [child(1, 200)] }));
+    expect(recovering.policy.state).toBe('critical');
+    expect(recovering.kills).toEqual([]);
+    expect(decideMemory(recovering.policy, sample()).policy.state).toBe('ok');
+  });
+  test('budget remains enforced with a missing machine reading', () => {
+    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: null, agentBytes: 5001 })).policy.state).toBe('critical');
+    expect(decideMemory(initialMemoryPolicy(), sample({ availableBytes: 100, agentBytes: 5000 })).policy.state).toBe('ok');
   });
 
   test('state changes emit once, an unsuccessful kill emits no kill event', () => {
@@ -94,4 +85,16 @@ describe('memory policy', () => {
     expect(events).toEqual(['pressure', 'pressure']);
     bus.dispose();
   });
+});
+
+
+test.each([
+  ['thread-quota', 'this conversation exceeded its memory quota'],
+  ['budget', 'the agents exceeded their shared memory budget'],
+  ['machine', 'available machine memory fell below the reserve'],
+] as const)('the %s notice gives the process, size, reason, limit and advice', (reason, cause) => {
+  const notice = memoryNotice({ threadId: 't', kind: 'killed', pid: 42, exe: 'C:\\bin\\cargo.exe', bytes: 2048 * 1048576, reason, limitBytes: 9728 * 1048576, state: 'critical', at: 0 });
+  expect(notice).toStartWith('[Boite memory guard] Stopped cargo.exe (pid 42, 2048 MB) because ' + cause + ' (9728 MB).');
+  expect(notice).toContain('Do not rerun it unchanged; lower parallelism');
+  expect(notice).toContain('cargo build -j 2');
 });

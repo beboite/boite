@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
 import { ProcRegistry } from '../src/procs.ts';
+import { setProcessLimits } from '../src/platform/windows/jobs.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import type { ProcessEventSink } from '../src/platform/types.ts';
 import type { MemoryEvent } from '@boite/contracts';
@@ -67,7 +68,7 @@ describeWindows('job memory notifications', () => {
         }, guards);
       },
     });
-    procs.applySettings({ ...DEFAULT_SETTINGS, agentMemoryBudgetMb: 768, threadMemoryCapMb: 256 });
+    procs.applySettings({ ...DEFAULT_SETTINGS, agentMemoryBudgetPercent: 60, threadMemoryCapMb: 256 });
   });
 
   afterEach(async () => {
@@ -98,7 +99,9 @@ describeWindows('job memory notifications', () => {
   });
 
   test('two threads share the global budget and report its reserved completion key', async () => {
-    procs.applySettings({ ...DEFAULT_SETTINGS, agentMemoryBudgetMb: 512, threadMemoryCapMb: 384 });
+    procs.applySettings({ ...DEFAULT_SETTINGS, threadMemoryCapMb: 384 });
+    // Keep the real kernel probe small without pretending the machine has less RAM.
+    setProcessLimits({ agentCpuCapPercent: 75, budgetMb: 512, threadMemoryCapMb: 384, memoryReserveMb: 512 });
     for (const id of ['first', 'second']) {
       const child = procs.spawnPiped(id, process.execPath, ['-e', ALLOCATOR], { cwd: directory });
       await waitFor(() => started.has(child.record.pid), 5000);

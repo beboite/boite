@@ -124,3 +124,14 @@ test('a keybinding the target refuses puts back what the copy changed and names 
   expect((failed as SyncFailure).message).toContain('does not parse');
   expect((await to.call('keybindings.get', {})).bindings).toEqual(before);
 });
+
+
+test('memory percentage travels between machines but the reserve stays local', async () => {
+  const from = await machine(); const to = await machine();
+  try {
+    await from.call('settings.set', { agentMemoryBudgetPercent: 35, memoryReserveMb: 4096 });
+    await to.call('settings.set', { memoryReserveMb: 512 });
+    await syncSettings(await end(from), await end(to));
+    expect(await to.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 35, memoryReserveMb: 512 });
+  } finally { from.close(); to.close(); }
+});

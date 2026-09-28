@@ -28,13 +28,13 @@ async function setup() {
 
 test('shows resolved automatic limits, live totals and largest conversations first', async () => {
   await setup();
-  expect(document.querySelector('[data-testid=memory-budget-auto]')?.textContent).toBe(strings.resources.auto(19456));
+  expect(document.querySelector('[data-testid=memory-budget-resolved]')?.textContent).toBe(strings.resources.resolved(19456));
   expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
   expect(document.querySelector('[data-testid=memory-reserve-auto]')?.textContent).toBe(strings.resources.auto(3276.8));
   const reading = document.querySelector('[data-testid=memory-status]')!.textContent;
   expect(reading).toContain(`${bytes(store.memory!.agentBytes)} / ${bytes(19456 * 1048576)}`);
-  expect(reading).toContain(`${bytes(5120 * 1048576)} / ${bytes(3276.8 * 1048576)}`);
-  expect(reading).toContain(strings.resources.states.tight);
+  expect(reading).toContain(`${bytes(16384 * 1048576)} / ${bytes(3276.8 * 1048576)}`);
+  expect(reading).toContain(strings.resources.states.ok);
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid=resource-row]')].map(row => row.dataset.threadId);
   expect(rows.length).toBeGreaterThan(0);
   expect(rows).toEqual([...store.resources].sort((a, b) => b.load.memoryBytes - a.load.memoryBytes).map(row => row.threadId));
@@ -47,22 +47,24 @@ test('shows resolved automatic limits, live totals and largest conversations fir
   expect([...document.querySelectorAll<HTMLElement>('[data-testid=resource-row]')].map(row => row.dataset.threadId)).toEqual(['large', 'small']);
 });
 
-test('saves all three memory settings and can return each one to auto', async () => {
+test('saves a percentage and can return the quota and reserve to auto', async () => {
   await setup();
+  const field = document.querySelector<HTMLInputElement>('[data-testid=memory-budget]')!;
+  expect([field.min, field.max, field.step, field.value]).toEqual(['10', '90', '1', '60']);
   const save = vi.spyOn(store, 'saveSettings');
   function input(name: string, value: number) {
     const field = document.querySelector<HTMLInputElement>(`[data-testid=memory-${name}]`)!;
     field.value = String(value); field.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  input('budget', 8192); input('cap', 4096); input('reserve', 3072);
+  input('budget', 25); input('cap', 4096); input('reserve', 3072);
   document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await settle();
-  expect(save).toHaveBeenLastCalledWith({ agentCpuCapPercent: 75, agentMemoryBudgetMb: 8192, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
-  expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetMb: 8192, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
-  expect(document.querySelector('[data-testid=memory-budget-auto]')).toBeNull();
-  input('budget', 0); input('cap', 0); input('reserve', 0);
+  expect(save).toHaveBeenLastCalledWith({ agentCpuCapPercent: 75, agentMemoryBudgetPercent: 25, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
+  expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 25, threadMemoryCapMb: 4096, memoryReserveMb: 3072 });
+  expect(document.querySelector('[data-testid=memory-budget-resolved]')?.textContent).toBe(strings.resources.resolved(8192));
+  input('budget', 60); input('cap', 0); input('reserve', 0);
   document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await settle();
-  expect(store.memory!.limits).toEqual({ agentMemoryBudgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8 });
+  expect(store.memory!.limits).toEqual({ budgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8 });
   expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
 });
