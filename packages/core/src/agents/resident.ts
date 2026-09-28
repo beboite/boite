@@ -8,6 +8,7 @@ import { refused } from '../errors.ts';
 import { checkEffort, checkModel } from '../threads/selection.ts';
 import { ids, integer, object, text } from './validation.ts';
 import { OPEN_WORK } from './repository.ts';
+import { withLoad } from '../threads/records.ts';
 
 export const sameRoute = (a: Pick<AgentSelection,'providerId'|'accountId'|'model'>, b: Pick<AgentSelection,'providerId'|'accountId'|'model'>) => a.providerId === b.providerId && a.accountId === b.accountId && a.model === b.model;
 
@@ -132,6 +133,6 @@ export class ResidentAgents {
     this.core.threads.releaseAgent(threadId);
     // The explicit checkpoint replaces history. Keep the journal for inspection, without replaying it.
     const next={...thread,sessionId:null,sessionGeneration:(thread.sessionGeneration ?? 0)+1,context:null,promptCache:null};
-    this.core.journal.putThread(next);this.core.bus.emit('thread.updated',next);
+    this.core.journal.putThread(next);this.core.bus.emit('thread.updated',withLoad(this.core,next));
   }
 }

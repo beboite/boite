@@ -71,13 +71,15 @@ export function fakeWorktree(projectPath: string, title: string, branch?: string
 }
 
 export function toSummary(thread: Thread): ThreadSummary {
-  const { messages: _messages, turns: _turns, ...rest } = thread;
+  const { messages: _messages, turns: _turns, background: _background, ...rest } = thread;
   const busy = thread.status === 'running' || thread.status === 'waiting';
   const started = thread.turns.filter(turn => turn.status === 'running' && turn.startedAt !== null).map(turn => turn.startedAt as number);
+  const tasks = thread.background ?? [];
   return {
     ...rest,
     lastUserMessageAt: thread.messages.filter(m => m.role === 'user').at(-1)?.createdAt ?? null,
-    runningSince: busy && started.length > 0 ? Math.min(...started) : null
+    runningSince: busy && started.length > 0 ? Math.min(...started) : null,
+    backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) }
   };
 }
 

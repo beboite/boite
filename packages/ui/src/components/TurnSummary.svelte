@@ -5,6 +5,7 @@
   import { formatTokens } from '../lib/tokens';
   import { fill, strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
+  import { backgroundLabel } from '../lib/background';
   let { turn, waiting = false, background = [], stop }: {
     turn: Turn;
     waiting?: boolean;
@@ -25,7 +26,7 @@
     fill(strings.chat.outputTokens, { count: formatTokens(usage.outputTokens) }),
     fill(strings.chat.cacheTokens, { read: formatTokens(usage.cacheReadTokens), write: formatTokens(usage.cacheWriteTokens) }),
   ].join('\n'));
-  const still = $derived(backgroundLabel(background));
+  const still = $derived(backgroundLabel(background.map((task) => task.kind)));
 
   // The clock only ticks while the turn runs and the page is on screen.
   $effect(() => {
@@ -34,15 +35,6 @@
     const timer = setInterval(() => { now = Date.now(); }, 1000);
     return () => clearInterval(timer);
   });
-
-  /** `1 shell still running`, `2 shells and 1 agent still running`. */
-  function backgroundLabel(tasks: BackgroundTask[]): string {
-    if (tasks.length === 0) return '';
-    const counts = new Map<BackgroundTask['kind'], number>();
-    for (const task of tasks) counts.set(task.kind, (counts.get(task.kind) ?? 0) + 1);
-    const pieces = [...counts].map(([kind, count]) => fill(count === 1 ? strings.chat.backgroundOne[kind] : strings.chat.backgroundMany[kind], { count: String(count) }));
-    return fill(strings.chat.backgroundRunning, { what: pieces.join(strings.chat.backgroundJoin) });
-  }
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />

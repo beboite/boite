@@ -324,6 +324,7 @@ export class FakeContext {
   setBackground(thread: Thread, tasks: BackgroundTask[]): void {
     thread.background = tasks;
     this.emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks) });
+    this.emit('thread.updated', structuredClone(toSummary(thread)));
   }
 
   publishActivity(thread: Thread): void {

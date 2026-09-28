@@ -425,7 +425,13 @@ export const strings = {
       waiting: 'Needs you',
       error: 'Failed',
       done: 'Done',
-      queued: 'Queued'
+      queued: 'Queued',
+      /** The turn ended, the agent still watches something: a monitor it left going. */
+      monitoring: 'Monitoring',
+      monitoringFor: 'Monitoring for {elapsed}',
+      /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
+      background: 'In background',
+      backgroundFor: 'In background for {elapsed}'
     },
     pin: 'Pin',
     unpin: 'Unpin',

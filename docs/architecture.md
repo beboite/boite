@@ -178,7 +178,12 @@ next prompt once the thread is idle. The core stamps `startedAt` and
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when
-it finishes opens a turn of its own, marked "Background work finished".
+it finishes opens a turn of its own, marked "Background work finished". The
+thread summary carries it too, as `backgroundWork` (the kind of each task and
+when the oldest started), so a sidebar or phone row whose turn ended reads
+"Monitoring" or "In background" with a running clock instead of "Done". Every
+`thread.updated` the core sends is built by `withLoad`, load ticks included,
+because a client replaces its row with the summary it receives.
 
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and

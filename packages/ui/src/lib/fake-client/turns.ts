@@ -199,6 +199,9 @@ async function stream(
   if (!record.cancelled && prompt.includes('[background]')) {
     await backgroundShell(ctx, thread, message);
   }
+  if (!record.cancelled && prompt.includes('[monitor]')) {
+    await backgroundShell(ctx, thread, message, 'monitor');
+  }
   if (!record.cancelled && prompt.includes('[tool-stream]')) {
     await streamToolInput(ctx, thread, message);
   }

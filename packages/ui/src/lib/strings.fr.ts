@@ -430,7 +430,11 @@ export const fr: Translation = {
       waiting: 'Vous attend',
       error: 'Échec',
       done: 'Terminé',
-      queued: 'En attente'
+      queued: 'En attente',
+      monitoring: 'Surveille',
+      monitoringFor: 'Surveille depuis {elapsed}',
+      background: 'En arrière-plan',
+      backgroundFor: 'En arrière-plan depuis {elapsed}'
     },
     pin: 'Épingler',
     unpin: 'Désépingler',

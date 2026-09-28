@@ -4,21 +4,24 @@ import { STREAMED_TOOL_INPUT } from './conversation';
 import { chunkText } from './shared';
 import type { FakeContext } from './context';
 
-/** A shell sent to the background: the call returns at once, the task stays listed. */
-export async function backgroundShell(ctx: FakeContext, thread: Thread, message: Message): Promise<void> {
+/**
+ * A shell sent to the background, or a monitor left watching: the call
+ * returns at once, the task stays listed.
+ */
+export async function backgroundShell(ctx: FakeContext, thread: Thread, message: Message, kind: 'shell' | 'monitor' = 'shell'): Promise<void> {
   const partIndex = message.parts.length;
   const toolId = `tool-${++ctx.seq}`;
-  const input = { command: 'bun run dev:ui', run_in_background: true };
+  const input = kind === 'shell' ? { command: 'bun run dev:ui', run_in_background: true } : { command: 'gh run watch', description: 'Watch CI' };
   const startedAt = ctx.now();
-  const running: MessagePart = { type: 'tool', toolId, name: 'Bash', input, output: null, status: 'running', startedAt };
+  const running: MessagePart = { type: 'tool', toolId, name: kind === 'shell' ? 'Bash' : 'Monitor', input, output: null, status: 'running', startedAt };
   message.parts.push(running);
   ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(running) });
   await ctx.pause();
-  const id = `bash-${ctx.seq}`;
+  const id = `${kind === 'shell' ? 'bash' : 'monitor'}-${ctx.seq}`;
   const done: MessagePart = { ...running, output: `Command running in background with ID: ${id}`, status: 'done', finishedAt: ctx.now() };
   message.parts[partIndex] = done;
   ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
-  ctx.setBackground(thread, [...(thread.background ?? []), { id, kind: 'shell', description: input.command, toolId, startedAt }]);
+  ctx.setBackground(thread, [...(thread.background ?? []), { id, kind, description: input.command, toolId, startedAt }]);
 }
 
 /**

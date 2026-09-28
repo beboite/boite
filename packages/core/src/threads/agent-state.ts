@@ -1,6 +1,6 @@
 import type { AgentCommand, BackgroundTask, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { saveThread } from './records.ts';
+import { saveThread, withLoad } from './records.ts';
 
 /**
  * What an agent reports about itself between messages: the commands it
@@ -25,6 +25,9 @@ export class AgentState {
     if (list.length === 0) this.background.delete(threadId);
     else this.background.set(threadId, list);
     this.core.bus.emit('thread.background', { threadId, tasks: list });
+    // Every client's sidebar hears it too: a row whose turn ended still says the agent is at work.
+    const thread = this.core.journal.getThread(threadId);
+    if (thread !== null) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
   }
 
   /**

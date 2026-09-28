@@ -18,6 +18,7 @@ import { registerModules } from './modules.ts';
 import { currentOs } from './paths.ts';
 import { lanAddress } from './server/lan.ts';
 import { ProcRegistry } from './procs.ts';
+import { withLoad } from './threads/records.ts';
 import { ProjectStore } from './projects.ts';
 import { ProviderRegistry } from './providers/loader.ts';
 import { Router } from './router.ts';
@@ -183,7 +184,7 @@ export class Core {
     this.providers = new ProviderRegistry(this.dataDir);
     this.accounts = new AccountStore(this);
     this.projects = new ProjectStore(this);
-    this.procs = new ProcRegistry(this.journal, this.bus);
+    this.procs = new ProcRegistry(this.journal, this.bus, undefined, { summarize: (thread) => withLoad(this, thread) });
     this.scheduler = new Scheduler(this);
     this.threads = new ThreadStore(this);
     this.quotas = new QuotaStore(this);

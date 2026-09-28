@@ -624,6 +624,13 @@ export interface ThreadSummary {
    * missing on older cores.
    */
   runningSince?: Timestamp | null;
+  /**
+   * What the agent still runs in the background, a monitor or a shell it left
+   * going past its turn: the kind of each task and when the oldest started,
+   * so a row can say the thread is not finished. The tasks themselves are
+   * `Thread.background`. Null when nothing runs; missing on older cores.
+   */
+  backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */

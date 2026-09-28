@@ -19,7 +19,14 @@ export function saveThread(core: Core, thread: ThreadSummary, eventType: string)
   return summary;
 }
 
+/** The row as a client sees it: the stored summary plus what only lives in memory. */
 export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const busy = thread.status === 'running' || thread.status === 'waiting';
-  return { ...thread, load: core.procs.loadOf(thread.id), runningSince: busy ? core.journal.runningSince(thread.id) : null };
+  const tasks = core.threads?.agentState.background.get(thread.id) ?? [];
+  return {
+    ...thread,
+    load: core.procs.loadOf(thread.id),
+    runningSince: busy ? core.journal.runningSince(thread.id) : null,
+    backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
+  };
 }
