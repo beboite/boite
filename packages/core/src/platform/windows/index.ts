@@ -1,4 +1,7 @@
 import type { ProcessPlatform } from '../types.ts';
+import { totalmem } from 'node:os';
+import { resolveMemoryLimits } from '../../memory-limits.ts';
+import { machineMemory } from './memory.ts';
 import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 
@@ -12,7 +15,7 @@ export const platform: ProcessPlatform = {
   },
   capability: jobs.jobsCapability,
   applySettings(settings) {
-    jobs.setProcessLimits(settings);
+    jobs.setProcessLimits({ ...settings, ...resolveMemoryLimits(settings, machineMemory()?.totalBytes ?? totalmem()) });
     guard.setGuardEnabled(settings.focusGuard);
     guard.setGuardMute(settings.muteAgents);
   },
@@ -31,6 +34,7 @@ export const platform: ProcessPlatform = {
     }
   },
   sample: jobs.sampleThreadJob,
+  machineMemory,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
   warm() {

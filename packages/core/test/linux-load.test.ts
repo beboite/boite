@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Bus } from '../src/bus.ts';
 import { Journal } from '../src/journal.ts';
-import { cpuTicks, LinuxLoad, linuxStartedAt, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
+import { cpuTicks, LinuxLoad, linuxMachineMemory, linuxStartedAt, residentBytes, USER_HZ } from '../src/platform/linux-load.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import { ProcRegistry } from '../src/procs.ts';
 import { waitFor } from './harness.ts';
@@ -39,6 +39,19 @@ class FakeProc {
 }
 
 describe('the procfs parsers', () => {
+  test('machine memory uses MemAvailable, which includes reclaimable pages', () => {
+    const read = (path: string) => path === '/proc/meminfo'
+      ? 'MemTotal:       8388608 kB\nMemFree:         131072 kB\nMemAvailable:  4194304 kB\n'
+      : null;
+    expect(linuxMachineMemory(read)).toEqual({ totalBytes: 8 * 1024 ** 3, availableBytes: 4 * 1024 ** 3 });
+  });
+
+  test('machine memory is unknown when procfs is missing or incomplete', () => {
+    expect(linuxMachineMemory(() => null)).toBeNull();
+    expect(linuxMachineMemory(() => 'MemTotal: 8388608 kB\nMemFree: 131072 kB\n')).toBeNull();
+    expect(linuxMachineMemory(() => 'MemAvailable: 4194304 kB\n')).toBeNull();
+  });
+
   test('CPU fields are counted from the last parenthesis, whatever the command name holds', () => {
     expect(cpuTicks(stat(7, 120, 30))).toBe(150);
     expect(cpuTicks(stat(7, 5, 6, 'a) b (c'))).toBe(11);

@@ -3,7 +3,9 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
-import { cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
+import { cpuRateOfGlobalJob, memoryLimitOfJob } from '../src/platform/windows/jobs.ts';
+import { resolveMemoryLimits } from '../src/memory-limits.ts';
+import { processPlatform } from '../src/platform/index.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -57,6 +59,25 @@ afterEach(async () => {
 });
 
 describeWindows('windows job objects', () => {
+  test('global and thread memory limits are resolved and updated on existing jobs', async () => {
+    const client = await harness.connect();
+    const child = harness.core.procs.spawn('memory-cap', 'ping', ['-n', '30', '127.0.0.1']);
+    const resolved = resolveMemoryLimits(harness.core.settings.get(), processPlatform.machineMemory()!.totalBytes);
+    expect(memoryLimitOfJob(null)).toEqual({ flags: 0x2200, bytes: resolved.agentMemoryBudgetMb * 1024 * 1024 });
+    expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, bytes: resolved.threadMemoryCapMb * 1024 * 1024 });
+    for (const [budget, cap, expected] of [[768, 0, 256], [512, 768, 512], [768, 300, 300]]) {
+      await client.call('settings.set', { agentMemoryBudgetMb: budget, threadMemoryCapMb: cap });
+      expect(memoryLimitOfJob(null)).toEqual({ flags: 0x2200, bytes: budget! * 1024 * 1024 });
+      expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, bytes: expected! * 1024 * 1024 });
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
+    await client.call('settings.set', { agentMemoryBudgetMb: 0, threadMemoryCapMb: 0 });
+    expect(memoryLimitOfJob(null)?.bytes).toBe(resolved.agentMemoryBudgetMb * 1024 * 1024);
+    expect(memoryLimitOfJob('memory-cap')?.bytes).toBe(resolved.threadMemoryCapMb * 1024 * 1024);
+    harness.core.procs.killTree('memory-cap');
+    await child.exited;
+  });
+
   test('the whole tree a turn launches is traced, measured and killed', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -192,6 +213,13 @@ describeWindows('windows job objects', () => {
 });
 
 describe('job settings', () => {
+  test('memory settings default to auto and persist explicit values', async () => {
+    const client = await harness.connect();
+    expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetMb: 0, memoryReserveMb: 0 });
+    await client.call('settings.set', { agentMemoryBudgetMb: 768, memoryReserveMb: 256 });
+    expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetMb: 768, memoryReserveMb: 256 });
+  });
+
   test('the CPU cap is a percentage and refuses anything past 100', async () => {
     const client = await harness.connect();
 

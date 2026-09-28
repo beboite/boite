@@ -139,6 +139,12 @@ export class ProcRegistry {
       note: (threadId, message) => {
         this.bus.emit('core.log', { level: 'warn', message: `thread ${threadId}: ${message}`, at: Date.now() });
       },
+      memoryLimit: (threadId, kind) => {
+        const message = kind === 'thread-cap'
+          ? `thread ${threadId}: the thread reached its memory cap`
+          : 'the agents reached their memory budget';
+        this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
+      },
     }, {
       pushed: (threadId, pid, title, restored) => {
         this.bus.emit('process.focusPushed', { threadId, pid, title, restored, at: Date.now() });

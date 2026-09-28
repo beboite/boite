@@ -1203,12 +1203,16 @@ export interface Settings {
    * CPU rate control, and other systems ignore it.
    */
   agentCpuCapPercent: number;
+  /** Total agent memory budget in MB. 0 uses 60% of physical RAM, rounded down to 256 MB. */
+  agentMemoryBudgetMb: number;
   /**
    * Memory ceiling for one thread's whole process tree, in megabytes. 0 means
-   * no cap. Windows only: it is the thread job's memory limit, and a tree that
-   * reaches it fails its next allocation.
+   * half the effective budget, rounded down to 256 MB. An explicit cap cannot
+   * exceed the budget. Windows refuses allocations past the thread job's limit.
    */
   threadMemoryCapMb: number;
+  /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
+  memoryReserveMb: number;
   /**
    * Windows of agent processes never keep the foreground: one that takes it is
    * sent to the bottom without activation and the window the user was on gets

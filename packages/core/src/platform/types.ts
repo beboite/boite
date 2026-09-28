@@ -24,11 +24,15 @@ export interface ProcessEventSink {
   started(threadId: string, pid: number, info: NativeProcessInfo): void;
   exited(threadId: string, pid: number, exit: NativeProcessExit): void;
   note(threadId: string, message: string): void;
+  memoryLimit(threadId: string | null, kind: 'thread-cap' | 'budget'): void;
 }
 
 export interface ProcessLimits {
   agentCpuCapPercent: number;
+  /** Effective MB limits, with auto settings already resolved against physical RAM. */
+  agentMemoryBudgetMb: number;
   threadMemoryCapMb: number;
+  memoryReserveMb: number;
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -67,6 +71,7 @@ export interface ProcessPlatform {
   terminateProcess(threadId: string, pid: number): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
+  machineMemory(): { totalBytes: number; availableBytes: number } | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */

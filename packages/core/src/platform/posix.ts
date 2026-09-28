@@ -1,5 +1,5 @@
-import { availableParallelism } from 'node:os';
-import { LinuxLoad, linuxStartedAt } from './linux-load.ts';
+import { availableParallelism, freemem, totalmem } from 'node:os';
+import { LinuxLoad, linuxMachineMemory, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
 
 /**
@@ -21,6 +21,7 @@ export function createPosixPlatform(
     terminateProcess: () => false,
     terminateUnassigned() {},
     sample: (threadId) => load?.sample(threadId) ?? null,
+    machineMemory: () => os === 'linux' ? linuxMachineMemory() : { totalBytes: totalmem(), availableBytes: freemem() },
     pidAdded: (threadId, pid) => {
       load?.add(threadId, pid);
     },

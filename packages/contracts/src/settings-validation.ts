@@ -9,7 +9,7 @@ export const BROWSER_ORIGINS_MAX = 32;
 /** A model id is a name, never a paragraph. */
 const TITLE_MODEL_MAX = 200;
 
-const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb'] as const;
+const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetMb', 'memoryReserveMb'] as const;
 const POSITIVE_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency'] as const;
 const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
@@ -82,6 +82,14 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
   for (const key of PERCENT_KEYS) {
     const value = patch[key];
     if (value !== undefined && value > 100) return { ok: false, field: key, message: `${key} must be between 0 and 100` };
+  }
+  // A 512 MB budget leaves at least one 256 MB block for an auto thread cap.
+  for (const key of ['agentMemoryBudgetMb', 'memoryReserveMb'] as const) {
+    const value = patch[key];
+    const minimum = key === 'agentMemoryBudgetMb' ? 512 : 256;
+    if (value !== undefined && (!Number.isInteger(value) || (value !== 0 && (value < minimum || value > 1048576)))) {
+      return { ok: false, field: key, message: `${key} must be 0 (auto) or an integer between ${minimum} and 1048576 MB` };
+    }
   }
   for (const key of BOOLEAN_KEYS) {
     const value = patch[key];

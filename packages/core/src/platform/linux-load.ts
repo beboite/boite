@@ -9,7 +9,7 @@
  * `test/linux-load.test.ts` runs every case on fake files, on any platform.
  */
 import { readFileSync } from 'node:fs';
-import type { ProcessSample } from './types.ts';
+import type { ProcessPlatform, ProcessSample } from './types.ts';
 
 /**
  * The unit of the stat file's CPU fields. The kernel fixes the value it exports
@@ -26,6 +26,15 @@ function readProc(path: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** MemAvailable includes reclaimable pages; MemFree alone understates what agents can use. */
+export function linuxMachineMemory(read: ProcRead = readProc): ReturnType<ProcessPlatform['machineMemory']> {
+  const info = read('/proc/meminfo') ?? '';
+  const total = /^MemTotal:\s+(\d+)\s+kB$/m.exec(info);
+  const available = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(info);
+  if (total === null || available === null) return null;
+  return { totalBytes: Number(total[1]) * 1024, availableBytes: Number(available[1]) * 1024 };
 }
 
 /**
