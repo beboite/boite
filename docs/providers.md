@@ -368,8 +368,13 @@ runs on. Four descriptor fields exist for it and are open to any provider:
 `quirks: ["antigravity"]` folds a tool call's command, working directory and
 output under one spelling and draws an `interaction_` permission request as the
 agent's own question; its modes are `default`, `auto_edit` and `yolo`, with no
-plan mode. `quirks: ["grok"]` says three things
-(`packages/core/src/drivers/grok.ts`). The probe reads each model's own effort
+plan mode. `quirks: ["grok"]` says four things
+(`packages/core/src/drivers/grok.ts`). Text sent while a prompt runs, an
+asynchronous answer or a coordination message, goes out as Grok's
+`_x.ai/interject { sessionId, text }`, which joins the running turn at its next
+tool or model gap. It is sent only while the prompt is in flight, since an
+idle Grok runs the text as a turn of its own; an agent that refuses the method,
+Grok before 1.0.41, keeps the text for the next turn. The probe reads each model's own effort
 scale out of its `_meta.reasoningEfforts`, which is where Grok writes a per-model
 scale. The thread's model and effort go out as one
 `session/set_model { sessionId, modelId, _meta: { reasoningEffort } }` right
@@ -628,6 +633,9 @@ process here goes through `procs.spawnChild`. The driver refuses a host whose
 - An item notification carries the whole item so far. Text already written from
   `item/delta` is remembered per item and field, and a snapshot only adds what
   lies past it, so an answer is drawn once whichever way it arrived.
+- Text sent while a turn runs, an asynchronous answer or a coordination
+  message, goes out as `turn/steer` naming that turn in `expectedTurnId`. A
+  host whose turn already ended refuses it, and the text waits for the next turn.
 - Approvals and questions arrive as `approval/requested` and
   `userInput/requested` notifications and are answered with `approval/decide`
   and `userInput/answer`. Allow sends the narrowest approving choice the host

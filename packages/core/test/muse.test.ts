@@ -333,6 +333,35 @@ describe('muse driver', () => {
     await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
   });
 
+  test('an async answer reaches the running turn through turn/steer, not at its end', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'working [steer]' });
+    await waitFor(() => fakeLog().includes('turn/start'));
+
+    harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
+    expect((await finished).status).toBe('done');
+    expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
+    expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+    expect(textsOf(await lastParts(client, threadId))).toEqual(['working heard: > Which database?\n\nSQLite']);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  test('a steer the host refuses keeps the answer for the turn after', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('turn/start'));
+
+    // `[slow]` waits for an interrupt, never a steer: the host refuses it.
+    harness?.core.threads.deferred.deliverAnswer(threadId, 'SQLite');
+    await waitFor(() => fakeLog().includes('turn/steer'));
+    await waitFor(() => harness?.core.threads.deferred.deferredAnswers.has(threadId) === true);
+    await client.call('turns.stop', { threadId });
+  });
+
   test('a stop while the host never answers initialize ends the turn stopped and closes the host', async () => {
     process.env['MUSE_FAKE_INIT'] = 'never';
     const client = await startCore({ warmProcessMinutes: 5 });

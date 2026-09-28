@@ -59,7 +59,8 @@ the body as data from another agent. It does not become a user request or grant
 permission to run a tool.
 
 Claude receives messages at its next PostToolUse hook. Codex uses `turn/steer`
-with the active turn ID. Pi uses its `steer` RPC. Providers without an interrupt
+with the active turn ID, and Muse its own `turn/steer` the same way. Pi uses
+its `steer` RPC, Grok its `_x.ai/interject`. Providers without an interrupt
 mechanism receive a new coordination turn once the current turn ends. An idle
 conversation can wake within its hourly budget. A permission or question prompt
 is never answered by coordination.
