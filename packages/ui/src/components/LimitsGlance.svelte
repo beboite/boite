@@ -96,7 +96,7 @@
         {#if rows === null}
           <p class="muted" role="status">{strings.quotas.loading}</p>
         {:else if !(failed && rows.length === 0)}
-          <QuotaOverview {rows} loading={reader.loading} connect={() => page('accounts')} />
+          <QuotaOverview {rows} loading={reader.loading} completed={reader.completed} connect={() => page('accounts')} />
         {/if}
       {/if}
     </div>

@@ -4,7 +4,7 @@
  */
 import { baseName, type Surface, type SurfaceKind } from './right-panel.svelte';
 import { strings } from './strings';
-import { work } from './work-prefs.svelte';
+import { work, type ControlId } from './work-prefs.svelte';
 
 /**
  * The launcher's cards, in the order they are drawn. Each carries the
@@ -20,15 +20,16 @@ export const CARDS: { kind: SurfaceKind; key: string }[] = [
   { kind: 'trace', key: 'T' }
 ];
 
-/** The trace is a developer's tool: it is offered only while this device shows them. */
-const DEVELOPER_KINDS: readonly SurfaceKind[] = ['trace'];
-
-/** Whether this device hides a kind: a developer's tool while their switch is off. */
+/**
+ * Whether this device put a kind's card away (Settings, Appearance). Only the
+ * launcher and the new-surface menu read it: the palette, the chords and an
+ * agent still open the surface, and an open tab stays.
+ */
 export function hiddenKind(kind: SurfaceKind): boolean {
-  return !work.current.developer && DEVELOPER_KINDS.includes(kind);
+  return CARDS.some((card) => card.kind === kind) && !work.shows(`panel.${kind}` as ControlId);
 }
 
-/** The cards this device offers, CARDS minus the developer's while their switch is off. */
+/** The cards this device offers: CARDS minus the ones it put away. */
 export function offeredCards(): { kind: SurfaceKind; key: string }[] {
   return CARDS.filter((card) => !hiddenKind(card.kind));
 }

@@ -27,7 +27,7 @@ test('a failed first read says so and offers a retry instead of asking to connec
   fail = false;
   document.querySelector<HTMLButtonElement>('[data-testid="limits-glance-retry"]')!.click();
   await settle();
-  expect(call).toHaveBeenLastCalledWith('quotas.list', { refresh: true });
+  expect(call).toHaveBeenLastCalledWith('quotas.list', { refresh: true, requestId: expect.any(String) });
   expect(document.querySelector('[data-testid="limits-glance-error"]')).toBeNull();
   expect(document.querySelectorAll('[data-testid="quota-provider"]')).toHaveLength(1);
 });

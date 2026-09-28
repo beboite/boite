@@ -41,7 +41,7 @@ export function registerModules(core: Core): void {
   registerPushMethods(core);
   core.router.register('threads.activity.set', (params) => core.activity.set(params));
   core.router.register('threads.activity.control', (params) => core.activity.control(params));
-  core.router.register('quotas.list', (params) => core.quotas.list(params.refresh));
+  core.router.register('quotas.list', (params) => core.quotas.list(params.refresh, params.requestId));
   core.router.register('quotas.configure', (params) => core.quotas.configure(params.accountId, params.enabled));
   core.router.register('plugins.list', () => core.plugins.list());
   core.router.register('plugins.inspect', (params) => core.plugins.inspect(params));

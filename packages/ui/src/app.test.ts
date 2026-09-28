@@ -911,16 +911,61 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.querySelector('.command')?.textContent).toContain('claude');
 });
 
-test('turning the developer switch off closes an open trace tab', async () => {
+test('hiding the trace card takes it off the launcher and leaves an open trace tab alone', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
   store.panel.open('trace');
   await waitFor(() => document.querySelector('[data-testid=trace-panel]') !== null);
-  work.setDeveloper(false);
-  await waitFor(() => document.querySelector('[data-testid=trace-panel]') === null);
-  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
+  work.show('panel.trace', false);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.querySelector('[data-testid=trace-panel]')).not.toBeNull();
+
+  store.panel.closeAll();
+  store.togglePanel();
+  await waitFor(() => document.querySelector('[data-testid=panel-launcher]') !== null);
+  expect(document.querySelector('[data-testid=launch-trace]')).toBeNull();
+  expect(document.querySelector('[data-testid=launch-files]')).not.toBeNull();
+  work.show('panel.trace', true);
+  await waitFor(() => document.querySelector('[data-testid=launch-trace]') !== null);
+});
+
+test("a header button's right click hides it, and the Appearance page brings it back", async () => {
+  // The settings page scrolls to the card it was opened on; jsdom draws nothing to scroll.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  work.showPreset('developer');
+  // With a team on the thread, since Team shows only where there is one.
+  await mountOnFake('/?fake=1&team=1');
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') !== null);
+
+  query('[data-testid=terminal-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=hide]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') === null);
+  expect(work.current.hidden).toEqual(['header.terminal']);
+
+  // The same button's menu, on another one, leads to the page that lists them all.
+  // Team shows once that team has loaded.
+  await waitFor(() => document.querySelector('[data-testid=agents-toggle]') !== null);
+  query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-buttons]') !== null);
+  expect(store.settingsTab).toBe('appearance');
+  const terminal = query<HTMLInputElement>('[data-testid="control-header.terminal"]');
+  expect(terminal.checked).toBe(false);
+  // Neither preset is lit once the buttons are the device's own.
+  expect(query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed')).toBe('false');
+  terminal.click();
+  expect(work.current.hidden).toEqual([]);
+  await waitFor(() => query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed') === 'true');
+  query<HTMLButtonElement>('[data-testid=controls-preset-everyday]').click();
+  expect(work.current.hidden).toEqual(['header.terminal', 'panel.trace']);
+  await waitFor(() => !query<HTMLInputElement>('[data-testid="control-header.terminal"]').checked);
 });
 
 test('the header button opens the panel on its launcher, which opens the changes surface', async () => {

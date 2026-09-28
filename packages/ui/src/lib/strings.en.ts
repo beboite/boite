@@ -1229,6 +1229,24 @@ export const strings = {
     failed: 'Could not read usage: {error}',
   },
 
+  /** The buttons a device shows or puts away, on the Appearance page and in a button's right click. */
+  controls: {
+    heading: 'Buttons',
+    headingHint: 'Hide the buttons you never use. What a button opens stays within reach: the command palette and the keyboard shortcuts still get there, and nothing already open closes.',
+    preset: 'Preset',
+    everyday: 'Essentials',
+    developer: 'Everything',
+    header: 'Conversation header',
+    sidebar: 'Sidebar',
+    panel: 'Side panel menu',
+    project: 'Project name',
+    branch: 'Branch',
+    context: 'Context gauge',
+    hide: 'Hide this button',
+    customize: 'Choose the buttons',
+    allHidden: 'Every card is hidden on this device.'
+  },
+
   settings: {
     heading: 'Settings',
     modelDefaults: 'Default models',
@@ -1258,8 +1276,6 @@ export const strings = {
     connectProvider: 'Connect a provider',
     conversations: 'Conversations',
     app: 'App',
-    developer: 'Developer tools',
-    developerHint: 'Shows the terminal and the process trace in conversations.',
     tourReplay: 'Replay the tour',
     execution: 'Agent execution',
     maxConcurrentTurnsHint: 'How many turns run at the same time across every thread. The next ones wait in line.',
@@ -1733,7 +1749,7 @@ export const strings = {
       everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, and the agent asks before it acts.',
       developer: "I'm a developer, give me the works.",
       developerHint: 'The app opens on your last project, conversations show the terminal and the process trace, and the panel opens on the changes.',
-      later: "Nothing is taken away either way. Settings change any of it."
+      later: 'Nothing is taken away either way. Settings, Appearance shows or hides any button, one by one.'
     },
 
     welcome: {

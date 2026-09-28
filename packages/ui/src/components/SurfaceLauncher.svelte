@@ -7,26 +7,40 @@
   /** The empty panel: one card per kind of surface, each with the letter that opens it. */
   let {
     available,
-    onlaunch
+    onlaunch,
+    onmenu,
+    oncustomize
   }: {
     available: (kind: SurfaceKind) => boolean;
     onlaunch: (kind: SurfaceKind) => void;
+    /** A card's right click, which offers to put it away. */
+    onmenu: (event: MouseEvent, kind: SurfaceKind) => void;
+    /** Where the cards come back from once every one is put away. */
+    oncustomize: () => void;
   } = $props();
+  let cards = $derived(offeredCards());
 </script>
 
 <div class="launcher" data-testid="panel-launcher">
   <p class="section-label">{strings.rightPanel.launcher}</p>
+  {#if cards.length === 0}
+    <div class="none" data-testid="launcher-none">
+      <p>{strings.controls.allHidden}</p>
+      <button type="button" data-testid="launcher-customize" onclick={oncustomize}>{strings.controls.customize}</button>
+    </div>
+  {/if}
   <div class="cards">
     <!-- A card that cannot open stays and says why: a page needs the
          desktop shell's webview, and the rest read what a paired device
          is refused. -->
-    {#each offeredCards() as card (card.kind)}
+    {#each cards as card (card.kind)}
       <button
         type="button"
         class="card"
         disabled={!available(card.kind)}
         data-testid="launch-{card.kind}"
         onclick={() => onlaunch(card.kind)}
+        oncontextmenu={(event) => onmenu(event, card.kind)}
       >
         <SurfaceIcon kind={card.kind} size={16} />
         <span class="card-name">{kindName(card.kind)}</span>
@@ -44,6 +58,15 @@
     flex-direction: column;
     gap: 10px;
     animation: rise var(--dur-3) var(--ease-out-quint);
+  }
+
+  .none {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
   }
 
   .cards {

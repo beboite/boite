@@ -9,8 +9,23 @@
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
-  import { work, type PanelStart, type StartIn } from '../lib/work-prefs.svelte';
+  import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
+  import { controlGroups } from '../lib/control-groups';
+  import type { Store } from '../lib/store.svelte';
+  import SurfaceIcon from './SurfaceIcon.svelte';
+
+  let { store }: { store: Store } = $props();
+  const uid = $props.id();
+
+  // The owner's buttons (the terminal, Add a project) are not a paired device's to hide.
+  let groups = $derived(controlGroups(store.owner));
+  let presets = $derived<{ id: Profile; label: string }[]>([
+    { id: 'everyday', label: strings.controls.everyday },
+    { id: 'developer', label: strings.controls.developer }
+  ]);
+  /** Lit while the buttons are exactly one preset's; a device that picked its own lights neither. */
+  let preset = $derived(matchingPreset(work.current.hidden));
 
   let accent = $state(untrack(() => readAccent()));
   function pickAccent(hue: number) { accent = hue; setAccent(hue); }
@@ -252,6 +267,41 @@
       </div>
     </div>
   </section>
+
+  <!-- Every optional button in one place, grouped by where it sits. A button's
+       own right click hides it and leads here; this is the only way back. -->
+  <section class="card" id="settings-buttons" data-testid="settings-buttons">
+    <div class="card-head">
+      <h2>{strings.controls.heading}<InfoTip topic={strings.controls.heading} text={strings.controls.headingHint} /></h2>
+      <div class="segmented" role="group" aria-label={strings.controls.preset}>
+        {#each presets as option (option.id)}
+          <button type="button" class:on={preset === option.id} aria-pressed={preset === option.id} data-testid="controls-preset-{option.id}" onclick={() => work.showPreset(option.id)}>{option.label}</button>
+        {/each}
+      </div>
+    </div>
+    {#each groups as group (group.id)}
+      <div class="control-group" role="group" aria-labelledby="{uid}-{group.id}">
+        <p class="section-label" id="{uid}-{group.id}">{group.label}</p>
+        <div class="toggles">
+          {#each group.entries as entry (entry.id)}
+            {@const shown = work.shows(entry.id)}
+            <label class="toggle" class:off={!shown}>
+              <span class="glyph" aria-hidden="true">
+                {#if entry.kind}
+                  <SurfaceIcon kind={entry.kind} size={15} />
+                {:else if entry.icon}
+                  {@const Icon = entry.icon}
+                  <Icon size={15} strokeWidth={1.75} />
+                {/if}
+              </span>
+              <span class="name">{entry.label}</span>
+              <input type="checkbox" role="switch" checked={shown} data-testid="control-{entry.id}" onchange={(event) => work.show(entry.id, event.currentTarget.checked)} />
+            </label>
+          {/each}
+        </div>
+      </div>
+    {/each}
+  </section>
 </div>
 
 <style>
@@ -281,6 +331,34 @@
   .zoom button { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; }
   .zoom-error { margin: 0; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .zoom .zoom-value { min-width: 56px; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+  /* The title on the left, the presets on the right, the groups under them. */
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .card-head h2 { margin-bottom: 0; }
+  .control-group + .control-group { margin-top: 20px; }
+  .control-group .section-label { margin-bottom: 8px; }
+  /* Each button as a tile that reads like the button itself: its icon and its
+     name, dimmed while it is hidden, with the switch that brings it back. */
+  .toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 10px 0 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    color: var(--color-foreground);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-2), border-color var(--dur-2);
+  }
+  .toggle:hover { border-color: var(--color-edge); background: var(--color-surface-3); }
+  .toggle .glyph { display: inline-flex; flex: none; color: var(--color-muted-foreground); transition: opacity var(--dur-2); }
+  .toggle .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: opacity var(--dur-2); }
+  .toggle.off .glyph, .toggle.off .name { opacity: 0.5; }
+  .toggle.off { background: transparent; border-style: dashed; }
   .accent-controls { display: grid; gap: 10px; min-width: 220px; }
   .swatches { display: flex; gap: 7px; }
   .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; background: var(--color-accent); border: 3px solid var(--color-surface-2); transition: transform var(--dur-2) var(--ease-out-quint); }
@@ -300,6 +378,7 @@
     .segmented button { flex: 1; min-width: 0; }
     /* A code face runs wide: each name takes the room it needs, a step smaller. */
     .monos button { flex: 1 1 auto; min-width: auto; padding: 0 6px; font-size: var(--text-xs); }
+    .card-head .segmented { flex: 1 1 100%; }
     /* A 26 px dot keeps its look and gets a finger-sized hit box. */
     .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: 0 -9px -9px; }
     .swatch { position: relative; }

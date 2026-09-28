@@ -120,9 +120,10 @@ whole UI's limit moved on 2026-09-28 to 10% above 3003 KB, once Settings,
 Appearance, Reading bundled seven more faces (about 600 KB of woff2 and their
 licences): a browser fetches a face's file only after it is picked, so the
 entry chunk and the first screen do not carry them. The entry chunk's limit
-moved the same day to 10% above 375 KB: folded tool rows, their diffs, the
-question dock and the zoom applied at boot all draw a thread's first screen,
-and added 13 KB to the 362 KB `main` built then. Raise
+moved the same day to 448 KB with the buttons chosen from Appearance. Folded
+tool rows, their diffs, the question dock and the zoom applied at boot also
+draw a thread's first screen: they added 13 KB to the 362 KB `main` of that
+morning, and the merge of both built 424 KB, under that limit. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.

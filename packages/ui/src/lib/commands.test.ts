@@ -113,14 +113,14 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   expect(store.page).toBe('chat');
 });
 
-test('the trace is offered only with the developer switch on, and Agents opens its page', async () => {
+test('a hidden trace card stays in the palette, and Agents opens its page', async () => {
   await store.open('t-descriptors');
-  work.setDeveloper(false);
-  expect(ids()).not.toContain('trace');
-  runCommand(store, 'trace', false);
-  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
-  work.setDeveloper(true);
+  // The palette is the way back to a button put away in Appearance.
+  work.show('panel.trace', false);
   expect(ids()).toContain('trace');
+  runCommand(store, 'trace', false);
+  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(true);
+  work.show('panel.trace', true);
 
   runCommand(store, 'agents', false);
   expect(store.page).toBe('chat');

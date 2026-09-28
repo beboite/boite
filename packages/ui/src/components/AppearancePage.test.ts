@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AppearancePage from './AppearancePage.svelte';
 import { FONT_KEY, MONO_KEY } from '../lib/fonts';
+import type { Store } from '../lib/store.svelte';
 
 let running: Record<string, unknown> | null = null;
 
@@ -17,7 +18,8 @@ function pressed(testid: string): string | null {
 }
 
 test('faces picked in another window move the selected buttons here', () => {
-  running = mount(AppearancePage, { target: document.body });
+  // The page reads only `owner` from the store, to list the owner's own buttons.
+  running = mount(AppearancePage, { target: document.body, props: { store: { owner: true } as unknown as Store } });
   flushSync();
   expect(pressed('font-inter')).toBe('true');
   expect(pressed('font-mono-geist')).toBe('true');
