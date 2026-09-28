@@ -1483,6 +1483,38 @@ export interface GitStatus {
   changes: GitChange[];
 }
 
+/**
+ * One linked worktree of a project's repository, as `worktrees.list` reads it
+ * from `git worktree list`: the core's own under `.boite-worktrees` and any the
+ * user added by hand, never the main checkout. What it says is what a removal
+ * would lose.
+ */
+export interface WorktreeEntry {
+  /** The directory, in the form of the machine running the core. */
+  path: string;
+  /** The branch checked out there without `refs/heads/`, null on a detached HEAD. */
+  branch: string | null;
+  /** `git status` lists something: a modified, staged or untracked file. False when `missing`. */
+  dirty: boolean;
+  /**
+   * HEAD is reachable from no local branch or remote-tracking ref other than
+   * the worktree's own branch: removing the worktree and its branch loses
+   * those commits. A branch with no commit of its own is not unmerged.
+   */
+  unmerged: boolean;
+  /** Git still lists the worktree but its directory is gone. */
+  missing: boolean;
+  /**
+   * The thread whose working directory is this worktree or a folder inside
+   * it, compared without case on Windows. A live thread wins over an archived
+   * one; null when no thread stands there.
+   */
+  threadId: ThreadId | null;
+  threadTitle: string | null;
+  /** That thread is archived: the worktree can be removed. False when `threadId` is null. */
+  threadArchived: boolean;
+}
+
 /** Both sides of one file, the working tree against `ref` (HEAD by default). */
 export interface GitDiff {
   path: string;
@@ -1982,6 +2014,26 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'projects.files': {
     params: { projectId: ProjectId; query: string; limit?: number };
     result: { files: string[]; total: number; capped: boolean };
+  };
+
+  /**
+   * The linked worktrees of the project's repository, main checkout and the
+   * project's own folder left out, each with what removing it would lose and
+   * the thread standing in it. Owner only: it names paths.
+   */
+  'worktrees.list': { params: { projectId: ProjectId }; result: WorktreeEntry[] };
+  /**
+   * `git worktree remove`, then `git branch -d` on its branch (`-D` with
+   * `force`), then `git worktree prune --expire 1.hour.ago`. Refused by name
+   * for a path git does not list for this project, the main checkout, and a
+   * worktree a thread that is not archived stands in; refused without `force`
+   * when it is dirty or unmerged. A missing directory only loses its
+   * registration. `branchDeleted` is false when git kept the branch (not
+   * merged, checked out elsewhere) or there was none. Owner only.
+   */
+  'worktrees.remove': {
+    params: { projectId: ProjectId; path: string; force?: boolean };
+    result: { ok: true; branchDeleted: boolean };
   };
 
   'providers.list': {
