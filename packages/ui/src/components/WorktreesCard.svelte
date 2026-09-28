@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Project, ProjectId, WorktreeEntry } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
+  import WorktreeStorageSetting from './WorktreeStorageSetting.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
@@ -99,6 +100,7 @@
 {#if store.owner}
   <section class="card" id="settings-worktrees" data-testid="worktrees-card">
     <h2>{s.heading}<InfoTip topic={s.heading} text={s.intro} /></h2>
+    <WorktreeStorageSetting {store} />
     {#if lists === null}
       <button type="button" data-testid="worktrees-show" disabled={busy || store.connection !== 'ready'} onclick={() => void load()}>{s.show}</button>
     {:else if projects.length === 0}

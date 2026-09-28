@@ -1187,6 +1187,8 @@ export interface TelemetryState {
 }
 
 export interface Settings {
+  /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
+  worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
   /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
@@ -1249,6 +1251,10 @@ export interface Settings {
    */
   titleModel?: TitleModel | null;
 }
+
+export type WorktreeStorage =
+  | { mode: 'project'; directory: string | null }
+  | { mode: 'shared'; directory: string };
 
 /** One provider's model, picked in Settings to write thread titles. */
 export interface TitleModel {
@@ -1584,7 +1590,7 @@ export interface GitStatus {
 
 /**
  * One linked worktree of a project's repository, as `worktrees.list` reads it
- * from `git worktree list`: the core's own under `.boite-worktrees` and any the
+ * from `git worktree list`: the core's own in its configured storage and any the
  * user added by hand, never the main checkout. What it says is what a removal
  * would lose.
  */

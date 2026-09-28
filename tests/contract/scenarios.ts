@@ -260,11 +260,31 @@ export const SCENARIOS: Record<string, Scenario> = {
       [{ focusGuard: 'yes' }, 'focusGuard'],
       [{ publicUrl: 'http://example.com' }, 'publicUrl'],
       [{ browserOrigins: ['ftp://example.com'] }, 'browserOrigins'],
+      [{ worktreeStorage: null }, 'worktreeStorage'],
+      [{ worktreeStorage: { mode: 'unknown', directory: null } }, 'worktreeStorage'],
+      [{ worktreeStorage: { mode: 'shared', directory: '' } }, 'worktreeStorage'],
+      [{ worktreeStorage: { mode: 'shared', directory: '../relative' } }, 'worktreeStorage'],
+      [{ worktreeStorage: { mode: 'shared', directory: 'C:relative' } }, 'worktreeStorage'],
+      [{ worktreeStorage: { mode: 'shared', directory: '/bad\u0000path' } }, 'worktreeStorage'],
     ];
     for (const [patch, field] of cases) {
       const data = await refusedWith(env.call('settings.set', patch as RpcParams<'settings.set'>), RpcErrorCode.InvalidParams, ['field']);
       same(data.field, field, `the field of ${JSON.stringify(patch)}`);
     }
+  },
+  'settings.set persists both worktree storage modes and announces changes': async (env) => {
+    const directory = await env.newFolder();
+    let announced: unknown;
+    const off = env.on('settings.updated', settings => { announced = settings.worktreeStorage; });
+    try {
+      const storage = { mode: 'shared' as const, directory };
+      const saved = await env.call('settings.set', { worktreeStorage: storage });
+      same(saved.worktreeStorage, storage, 'shared storage');
+      same((await env.call('settings.get', {})).worktreeStorage, storage, 'persisted storage');
+      same(announced, storage, 'announced storage');
+      const project = { mode: 'project' as const, directory: null };
+      same((await env.call('settings.set', { worktreeStorage: project })).worktreeStorage, project, 'project storage');
+    } finally { off(); }
   },
   'settings.set stores a pasted address and browser origins as bare origins': async (env) => {
     const saved = await env.call('settings.set', { publicUrl: 'https://boite.example/', browserOrigins: ['https://app.example/path', 'https://app.example'] });

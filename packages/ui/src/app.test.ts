@@ -228,7 +228,7 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
 
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('C:\\src\\.boite-worktrees\\notes\\fix-the-login');
+  expect(store.openThread?.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\fix-the-login');
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
   expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
   expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');

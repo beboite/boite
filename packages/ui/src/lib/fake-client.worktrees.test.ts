@@ -19,6 +19,19 @@ async function fake(options: ConstructorParameters<typeof FakeClient>[0] = {}): 
 
 const ROOT = 'C:\\src\\.boite-worktrees\\boite';
 
+test('new worktrees follow storage settings while existing ones keep their paths', async () => {
+  const client = await fake();
+  const create = (projectId: string, title: string) => client.call('threads.create', { projectId, title, providerId: 'echo', accountId: 'a-echo', worktree: {} });
+  const before = await create('p-boite', 'Before');
+  expect(before.cwd).toBe('C:\\src\\boite\\.boite\\worktrees\\before');
+  await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory: 'D:\\Worktrees' } });
+  const after = await create('p-boite', 'After');
+  expect(after.cwd).toBe('D:\\Worktrees\\boite-p-boite\\after');
+  expect((await client.call('threads.list', {})).find(t => t.id === before.id)?.cwd).toBe(before.cwd);
+  await client.call('settings.set', { worktreeStorage: { mode: 'project', directory: 'D:\\Worktrees' } });
+  expect((await create('p-notes', 'Back')).cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\back');
+});
+
 test('the seeded repository lists every kind of worktree, main checkout left out', async () => {
   const client = await fake();
   const entries = await client.call('worktrees.list', { projectId: 'p-boite' });
