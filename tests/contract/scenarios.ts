@@ -289,6 +289,14 @@ export const SCENARIOS: Record<string, Scenario> = {
     same([again.id, third.id], [first.id, first.id], 'the ids');
     same(added.events.filter((event) => (event.payload as { id: string }).id === first.id).length, 1, 'project.added for the folder');
   },
+  'projects.refreshIcon answers the project, and projects.icon refuses one with no image by field': async (env) => {
+    const project = await env.call('projects.add', { path: await env.newFolder() });
+    const refreshed = await env.call('projects.refreshIcon', { projectId: project.id });
+    same([refreshed.id, refreshed.icon], [project.id, undefined], 'an empty folder, refreshed');
+    const data = await refusedWith(env.call('projects.icon', { projectId: project.id }), RpcErrorCode.Refused, ['field']);
+    same(data['field'], 'projectId', 'the refused field');
+    await refusedWith(env.call('projects.refreshIcon', { projectId: 'prj_missing' }), RpcErrorCode.NotFound);
+  },
   'accounts.add names an unlabelled account and reads its session': async (env) => {
     const setup = await echo(env);
     const account = await env.call('accounts.add', { providerId: setup.provider.id, label: '', useDefaultLocation: true });

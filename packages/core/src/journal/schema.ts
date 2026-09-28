@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -335,6 +335,16 @@ export function migrate(db: Database, file: string): void {
   if (!db.query("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'archived'").get()) {
     db.exec('ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
     version = 21;
+  }
+  // A project's icon as detected from its folder: `image` with its bytes,
+  // `tech` with a stack id, or `none`. Derived from the disk and rebuilt by
+  // detecting again, so it is written without an event.
+  if (!db.query("SELECT 1 FROM sqlite_master WHERE name = 'project_icons'").get()) {
+    db.exec(`CREATE TABLE project_icons (
+      project_id TEXT PRIMARY KEY, kind TEXT NOT NULL, tech TEXT, mime TEXT, data BLOB,
+      version TEXT, source TEXT, checked_at INTEGER NOT NULL
+    )`);
+    version = 22;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

@@ -6,6 +6,7 @@ import { T0 } from './shared';
 import { longThread, seedThreads } from './threads-seed';
 import { settlePermission, settleQuestion } from './requests';
 import { seedArchivedThread, seedWorktrees } from './worktrees';
+import { seedProjectIcons } from './project-icons';
 import type { FakeContext } from './context';
 
 export function seed(ctx: FakeContext): void {
@@ -13,6 +14,7 @@ export function seed(ctx: FakeContext): void {
     { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0, repository: true },
     { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0, repository: true }
   ];
+  seedProjectIcons(ctx);
 
   // What Claude Code left under its projects folder for boite: one session
   // to import, one that is already the trace thread.

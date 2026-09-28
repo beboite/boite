@@ -20,6 +20,7 @@ import { coordinationMethods, registerCore, unregisterCore } from './fake-client
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
+import { projectIconMethods } from './fake-client/project-icons';
 import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
@@ -264,6 +265,7 @@ export class FakeClient implements ObservableClient {
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projectMethods(ctx),
+      ...projectIconMethods(ctx),
       ...threadMethods(ctx),
       ...activityMethods(ctx),
       ...requestMethods(ctx),

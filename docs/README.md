@@ -6,6 +6,7 @@
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Drafts](drafts.md): conversations with no project, a folder each in Documents/Boite.
+- [Project icons](project-icons.md): the logo or stack mark each project shows, and where it is found.
 - [Accounts](accounts.md): agent logins and isolated accounts.
 - [Agent updates](agent-updates.md): update notices, the automatic update and remote machines.
 - [Agent brain](brain.md): shared instructions, skill discovery and Git synchronization.

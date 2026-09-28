@@ -217,6 +217,50 @@ export class Projects {
     return true;
   }
 
+  /**
+   * Project images fetched from this Store's core, by project and version. A
+   * list names only the version; the bytes are asked for once, when a tile
+   * first draws it, and a new version is a new key.
+   */
+  iconUrls = $state<Record<string, string>>({});
+  #iconLoads = new Set<string>();
+
+  /** The image of a project whose icon is one, once fetched; null until then, or when it has none. */
+  projectIconUrl(project: Project): string | null {
+    const icon = project.icon;
+    return icon?.kind === 'image' ? (this.iconUrls[`${project.id}:${icon.version}`] ?? null) : null;
+  }
+
+  /** Fetches a project's image the first time a tile needs it. A failure leaves the initial. */
+  async loadProjectIcon(project: Project): Promise<void> {
+    const icon = project.icon;
+    const client = this.ctx.client;
+    if (icon?.kind !== 'image' || !client) return;
+    const key = `${project.id}:${icon.version}`;
+    if (this.iconUrls[key] !== undefined || this.#iconLoads.has(key)) return;
+    this.#iconLoads.add(key);
+    try {
+      const answer = await client.call('projects.icon', { projectId: project.id });
+      // Another machine took this Store meanwhile: project ids can collide between machines.
+      if (this.ctx.client !== client || !answer.dataUrl.startsWith('data:image/')) return;
+      this.iconUrls = { ...this.iconUrls, [`${project.id}:${answer.version}`]: answer.dataUrl };
+    } catch {
+      this.#iconLoads.delete(key);
+    }
+  }
+
+  /** Asks the core to read the project's folder for its icon again. */
+  async refreshProjectIcon(projectId: ProjectId): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    try {
+      const project = await client.call('projects.refreshIcon', { projectId });
+      if (this.ctx.client === client) this.upsertProject(project);
+    } catch (error) {
+      this.ctx.fail(error);
+    }
+  }
+
   /** A project as the core now answers it, from this client's call or another's `project.updated`. */
   upsertProject(project: Project): void {
     const index = this.projects.findIndex((p) => p.id === project.id);

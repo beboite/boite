@@ -22,6 +22,7 @@
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
+  import ProjectTile from './ProjectTile.svelte';
   let { store }: { store: Store } = $props();
   let projectButton = $state<HTMLButtonElement>();
   let now = $state(Date.now());
@@ -89,6 +90,8 @@
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
               ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
+              // Reads the folder again: a logo added or changed since the project was added.
+              ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon }]),
               separator(),
               { id: 'remove', label: strings.sidebar.removeProject, danger: true }
             ]
@@ -109,6 +112,7 @@
           if (workspace.active !== owner) await workspace.select(owner);
           owner.showSettings('general', 'worktrees');
         }
+        if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);
@@ -224,9 +228,8 @@
               title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
             >
-              <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
-                >{projectName(project).slice(0, 1).toUpperCase()}</span
-              ><span class="name">{projectName(project)}</span
+              <span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
+              /><span class="name">{projectName(project)}</span
               >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
                   >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
@@ -382,17 +385,6 @@
     padding: 0 4px;
     justify-content: flex-start;
     gap: 6px;
-  }
-  .tile {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    flex: none;
-    background: var(--color-surface-3);
-    border-radius: var(--radius-sm);
-    color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
   }
   .name {
     flex: 1;

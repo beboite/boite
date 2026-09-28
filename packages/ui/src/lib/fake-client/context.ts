@@ -104,6 +104,8 @@ export class FakeContext {
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   projects: Project[] = [];
+  /** The image of each project whose icon is one, as `projects.icon` answers it. */
+  projectImages = new Map<string, { version: string; dataUrl: string }>();
   /** What `git worktree list` would report for each project (`worktrees.ts`). */
   worktrees: FakeWorktree[] = [];
   /** The `pathKey` of each worktree `worktrees.remove` took, so a thread left in one is refused a turn. */
