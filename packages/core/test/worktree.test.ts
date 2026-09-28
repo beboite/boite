@@ -133,8 +133,8 @@ describe('a thread in its own worktree', () => {
     await client.call('settings.set', { worktreeStorage: { mode: 'project', directory } });
     const back = await create(first.id, 'Back');
     expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', 'back'));
-    expect((await client.call('worktrees.list', { projectId: first.id })).map(w => w.path.replaceAll('\\', '/')))
-      .toContain(a.cwd.replaceAll('\\', '/'));
+    expect((await client.call('worktrees.list', { projectId: first.id })).map(w => realpathSync(w.path)))
+      .toContain(realpathSync(a.cwd));
     expect(harness.core.journal.getSetting('settings')).toMatchObject({ worktreeStorage: { mode: 'project', directory } });
   });
 
