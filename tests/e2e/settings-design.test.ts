@@ -25,14 +25,20 @@ test("settings reveal sections and protection switches persist across navigation
       'document.querySelector("[data-testid=setting-focus-guard]")',
     );
     await settled();
+    // Only pages several screens long list their sections: Protection and General fit without them.
     expect(
       await page.evaluate(
         'document.querySelector("[data-testid=settings-tab-resources]").getAttribute("aria-expanded")',
       ),
-    ).toBe("true");
+    ).toBeNull();
     expect(
       await page.evaluate(
         'document.querySelector("[data-testid=settings-tab-general]").getAttribute("aria-expanded")',
+      ),
+    ).toBeNull();
+    expect(
+      await page.evaluate(
+        'document.querySelector("[data-testid=settings-tab-usage]").getAttribute("aria-expanded")',
       ),
     ).toBe("false");
     await page.screenshot("tests/e2e/.artifacts/protection-desktop.png");
