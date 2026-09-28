@@ -8,6 +8,7 @@
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
+  import MessageActions from './MessageActions.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
@@ -20,7 +21,8 @@
     turn,
     progress,
     expanded,
-    ontoggle
+    ontoggle,
+    edit
   }: {
     store: Store;
     message: Message;
@@ -28,6 +30,8 @@
     progress: TurnProgress;
     expanded: string[];
     ontoggle: (id: string) => void;
+    /** Rewinds the thread to before this prompt and puts it back in the composer. */
+    edit?: () => void;
   } = $props();
 
   type ImagePart = Extract<Message['parts'][number], { type: 'image' }>;
@@ -38,6 +42,7 @@
   }
 
   const images = $derived(imagesOf(message));
+  const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
 </script>
 
 <div class="bubble">
@@ -77,13 +82,14 @@
   {/if}
 </div>
 <div class="receipts" data-testid="message-receipts">
-  <span class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
-  <span class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
+  <MessageActions text={copyText} at={message.createdAt} {edit} />
+  <span class="tick" data-testid="receipt-accepted" class:received={!!turn} title={strings.chat.accepted} aria-label={strings.chat.accepted}><Check size={12} /></span>
+  <span class="tick" data-testid="receipt-responded" class:received={progress.responded(message.turnId)} title={strings.chat.responseStarted} aria-label={strings.chat.responseStarted}><Check size={12} /></span>
 </div>
 
 <style>
-  .receipts { display: flex; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
-  .receipts span { display: flex; opacity: .45; }
+  .receipts { display: flex; align-items: center; gap: 1px; margin: 4px 2px 0; color: var(--color-muted-foreground); }
+  .receipts .tick { display: flex; opacity: .45; }
   .receipts .received { color: var(--color-accent); opacity: 1; }
   .command { color: var(--color-accent); font-weight: 600; }
 

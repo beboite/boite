@@ -514,7 +514,7 @@ test('the second receipt waits for the first streamed character of the answer', 
   messages.push({ id: 'm-reply', threadId: 't-long', turnId: 'turn-ask', role: 'assistant', parts: [{ type: 'text', text: '' }], state: 'streaming', createdAt: Date.now() });
   running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
   await settle();
-  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=message-receipts] span:nth-child(2)');
+  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=receipt-responded]');
   expect(second()?.classList.contains('received')).toBe(false);
   const part = messages.at(-1)?.parts[0];
   if (part?.type !== 'text') throw new Error('the reply is a text part');

@@ -414,6 +414,8 @@ export const strings = {
     removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',
     remove: 'Remove',
     threadMenu: 'Thread actions',
+    /** A pencil on a thread's row: something typed in its box and not sent. */
+    unsentDraft: 'Unsent draft',
     open: 'Open',
     rename: 'Rename',
     retitle: 'Regenerate title',
@@ -433,11 +435,18 @@ export const strings = {
       background: 'In background',
       backgroundFor: 'In background for {elapsed}'
     },
+    /** A folded project's mark for the threads it hides: `2 threads: Needs you`. */
+    rollupOne: '1 thread: {state}',
+    rollupMany: '{count} threads: {state}',
     pin: 'Pin',
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
     archiveTitle: 'Archive this thread?',
+    /** The toast after an archive, with its way back: the button and Ctrl+Z. */
+    archivedToast: 'Archived "{title}"',
+    undo: 'Undo',
+    undoHint: 'Undo (Ctrl+Z)',
     archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
@@ -740,6 +749,15 @@ export const strings = {
     goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',
     copied: 'Copied',
+    /** Under a message, on hover: the whole message rather than one code block. */
+    copyMessage: 'Copy message',
+    editMessage: 'Edit and send again from here',
+    retry: 'Retry this answer',
+    fork: 'Fork from here',
+    forkHere: 'Fork into a new thread',
+    forkWorktree: 'Fork into a new worktree',
+    /** A prompt's exact time, under its bubble: `Sent Tue 28 Sep 2026, 10:31:05`. */
+    sentAt: 'Sent {time}',
     error: 'Error'
   },
 
@@ -1297,6 +1315,11 @@ export const strings = {
     materialAcrylic: 'Acrylic',
     materialMica: 'Mica',
     materialSolid: 'Solid',
+    chatWidth: 'Chat width',
+    chatWidthHint: 'How wide the conversation and the composer run on this device.',
+    chatWidthComfortable: 'Comfortable',
+    chatWidthWide: 'Wide',
+    chatWidthFull: 'Full',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
     coreAt: 'Connected to the core at {url}.',

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { Ellipsis, Folder, GitPullRequest, Pin } from '@lucide/svelte';
+  import { Ellipsis, Folder, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -11,6 +11,7 @@
   import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
   import { projectName } from '../lib/format';
+  import { hasUnsentDraft } from '../lib/composer-queue';
   import MachineIcon from './MachineIcon.svelte';
   import ThreadState from './ThreadState.svelte';
   let {
@@ -35,6 +36,8 @@
   } = $props();
   let owner = $derived(machine.store);
   let open = $derived(workspace.active === owner && owner.openThread?.id === thread.id);
+  /** Only on a row the user left: the open thread shows its box. */
+  let draft = $derived(!open && hasUnsentDraft(owner.composerStates[thread.id]));
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
@@ -136,6 +139,7 @@
     >
       <span class="headline">
         <span class="title">{thread.title}</span>
+        {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
         <ThreadState {thread} {now} />
       </span>
@@ -218,6 +222,12 @@
   }
   .unread .title {
     font-weight: 600;
+  }
+  /* A draft left in the box: the accent, so it reads as the user's own work waiting. */
+  .draft {
+    display: inline-flex;
+    flex: none;
+    color: var(--color-accent);
   }
   .metadata {
     display: flex;

@@ -6,13 +6,16 @@
   import { fill, strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
-  let { turn, waiting = false, background = [], stop }: {
+  import type { Snippet } from 'svelte';
+  let { turn, waiting = false, background = [], stop, actions }: {
     turn: Turn;
     waiting?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
     stop?: () => void;
+    /** The turn's own buttons (copy, retry, fork), at the end of the line. */
+    actions?: Snippet;
   } = $props();
   let hidden = $state(document.hidden);
   let now = $state(Date.now());
@@ -63,6 +66,7 @@
         </button>
       {/if}
     {/if}
+    {#if actions && !running}{@render actions()}{/if}
   </div>
 {/if}
 

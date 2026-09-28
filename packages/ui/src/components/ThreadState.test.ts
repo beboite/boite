@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { ThreadSummary } from '@boite/contracts';
 import ThreadState from './ThreadState.svelte';
-import { threadState } from '../lib/thread-state';
+import { projectRollup, threadState } from '../lib/thread-state';
 
 type Shown = Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>;
 
@@ -100,4 +100,14 @@ test('a thread at rest shows when it was last used', () => {
   expect(when.dataset['testid']).toBeUndefined();
   expect(when.classList.contains('when')).toBe(true);
   expect(when.textContent?.trim().length).toBeGreaterThan(0);
+});
+
+test('a folded project names its most urgent state and how many threads share it', () => {
+  const idle = { status: 'idle' as const, unread: false };
+  expect(projectRollup([idle, idle])).toBeNull();
+  expect(projectRollup([{ status: 'idle', unread: true }, idle])).toEqual({ kind: 'done', count: 1 });
+  expect(projectRollup([{ status: 'running', unread: false }, { status: 'running', unread: false }, { status: 'idle', unread: true }])).toEqual({ kind: 'working', count: 2 });
+  expect(projectRollup([{ status: 'running', unread: false }, { status: 'error', unread: false }])).toEqual({ kind: 'error', count: 1 });
+  expect(projectRollup([{ status: 'error', unread: false }, { status: 'waiting', unread: false }])).toEqual({ kind: 'waiting', count: 1 });
+  expect(projectRollup([{ status: 'idle', unread: true, backgroundWork: { kinds: ['monitor'], since: NOW } }, { status: 'idle', unread: true }])).toEqual({ kind: 'monitoring', count: 1 });
 });

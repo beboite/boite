@@ -126,6 +126,17 @@
   color-scheme: dark;
 }
 
+/* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big
+   screen, or the whole window. The reading column stamps nothing. */
+html[data-chat-width='wide'] {
+  --content: 1180px;
+  --prose: 1040px;
+}
+html[data-chat-width='full'] {
+  --content: 100%;
+  --prose: 100%;
+}
+
 /* Light, stamped by `lib/theme.ts` and by the boot script of `index.html`; dark stamps nothing. */
 [data-theme='light'] {
   --color-background: #f3f3f6;

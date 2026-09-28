@@ -43,3 +43,8 @@ export function sentPrompts(messages: Message[]): { text: string; previewReferen
     .filter((prompt) => prompt.text.length > 0 || prompt.previewReferences.length > 0)
     .reverse();
 }
+
+/** Words or files typed in a thread's box and not sent yet: what its row marks as a draft. */
+export function hasUnsentDraft(state: ComposerState | undefined): boolean {
+  return state !== undefined && (state.text.trim().length > 0 || state.attachments.length > 0);
+}

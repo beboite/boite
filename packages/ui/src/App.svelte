@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
@@ -522,6 +523,7 @@
       <NotificationCard title={strings.errors.prefix} message={toastText} dismiss={() => (store.error = null)} />
     </div>
   {/if}
+  <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
 </div>
 
 <ContextMenu />

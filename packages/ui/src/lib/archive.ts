@@ -2,7 +2,9 @@ import { tick } from 'svelte';
 import type { ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { focusComposer } from './focus';
-import { strings } from './strings';
+import { fill, strings } from './strings';
+import { undo } from './undo.svelte';
+import { workspace } from './workspace.svelte';
 import type { Store } from './store.svelte';
 
 const LIVE: ThreadStatus[] = ['running', 'queued', 'waiting'];
@@ -37,7 +39,17 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
     });
     if (!ok) return false;
   }
+  const title = (store.threads.find((t) => t.id === threadId) ?? store.openThread)?.title ?? '';
+  const wasOpen = store.openThread?.id === threadId;
   await store.archive(threadId);
+  // Refused, the row is still there and the banner says why: nothing to take back.
+  if (store.threads.some((t) => t.id === threadId)) return false;
+  // The way back for a few seconds; the archived list in Settings keeps it after.
+  undo.offer(fill(strings.sidebar.archivedToast, { title }), async () => {
+    await restoreThread(store, threadId);
+    // The thread that was on screen comes back on screen.
+    if (wasOpen) await workspace.select(store, threadId);
+  });
   await tick();
   focusComposer();
   return true;

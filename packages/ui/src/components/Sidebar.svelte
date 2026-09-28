@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, Folder, List, LoaderCircle, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -11,6 +11,7 @@
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
+  import { projectRollup } from '../lib/thread-state';
   import { controlMenu } from '../lib/controls';
   import { work } from '../lib/work-prefs.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
@@ -178,6 +179,7 @@
           .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
+        {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
         {@const draftHere = store === owner && owner.draft?.projectId === project.id}
         <section class="project" data-testid="project" data-project-id={project.id} data-machine-id={machine.id}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -193,7 +195,10 @@
               <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
                 >{projectName(project).slice(0, 1).toUpperCase()}</span
               ><span class="name">{projectName(project)}</span
-              >{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
+              >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
+                  class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
+                  >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
+                >{/if}{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
             <button
               class="ghost small icon project-actions"
@@ -364,6 +369,28 @@
     white-space: nowrap;
     font-weight: 600;
   }
+  /* A folded project still says what its threads do: the most urgent state, the count beside it. */
+  .rollup {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .rollup .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .rollup.working, .rollup.monitoring, .rollup.background { color: var(--color-accent); }
+  .rollup.waiting { color: var(--color-live); }
+  .rollup.error { color: var(--color-danger); }
+  .rollup.done { color: var(--color-success); }
+  .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
+  @keyframes rollup-spin { to { transform: rotate(360deg); } }
+  @keyframes rollup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
+  :global(html[data-motion='reduced']) .rollup .dot,
+  :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }
   .host,
   .caret {
     display: flex;

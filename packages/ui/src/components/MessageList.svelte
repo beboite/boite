@@ -12,6 +12,8 @@
   import DelegationActivity from './DelegationActivity.svelte';
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
+  import MessageActions from './MessageActions.svelte';
+  import { visibleAnswer } from '../lib/message-display';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
@@ -452,6 +454,15 @@
    */
   let expanded = $state<string[]>([]);
 
+  /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
+  function answerOf(turnId: string): string {
+    return messages
+      .filter((message) => message.turnId === turnId && message.role === 'assistant')
+      .flatMap((message) => message.parts.flatMap((part) => part.type === 'text' ? [visibleAnswer(part.text).trim()] : []))
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
   function toggleImage(id: string): void {
     expanded = expanded.includes(id) ? expanded.filter((entry) => entry !== id) : [...expanded, id];
   }
@@ -500,7 +511,11 @@
               waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
               background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
               stop={() => void store.stop()}
-            />
+            >
+              {#snippet actions()}
+                <MessageActions text={() => answerOf(turn.id)} />
+              {/snippet}
+            </TurnSummary>
           {/if}
         </article>
       {/each}
