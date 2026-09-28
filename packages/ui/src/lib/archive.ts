@@ -44,6 +44,7 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
   await store.archive(threadId);
   // Refused, the row is still there and the banner says why: nothing to take back.
   if (store.threads.some((t) => t.id === threadId)) return false;
+  closed.push({ store, threadId });
   // The way back for a few seconds; the archived list in Settings keeps it after.
   undo.offer(fill(strings.sidebar.archivedToast, { title }), async () => {
     await restoreThread(store, threadId);
@@ -52,6 +53,37 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
   });
   await tick();
   focusComposer();
+  return true;
+}
+
+/** The threads archived from this window, newest last: what Ctrl+Shift+T walks back through. */
+const closed: { store: Store; threadId: ThreadId }[] = [];
+
+/**
+ * Brings back the thread archived last and opens it, like a browser reopens
+ * the tab just closed. Those archived from this window come first, newest
+ * first, skipping one already restored elsewhere; past them, or after a
+ * reload, the machine's most recently archived thread. False when there is
+ * none.
+ */
+export async function reopenLastArchived(store: Store): Promise<boolean> {
+  let target: { store: Store; threadId: ThreadId } | undefined;
+  while ((target = closed.pop())) {
+    const summary = target.store.threads.find((t) => t.id === target!.threadId);
+    if (!summary || summary.archived) break;
+  }
+  if (!target) {
+    const [newest] = await archivedThreads(store);
+    if (!newest) return false;
+    target = { store, threadId: newest.id };
+  }
+  try {
+    await restoreThread(target.store, target.threadId);
+  } catch (error) {
+    target.store.error = error instanceof Error ? error.message : String(error);
+    return false;
+  }
+  await workspace.select(target.store, target.threadId);
   return true;
 }
 

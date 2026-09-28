@@ -1223,6 +1223,18 @@ export const KEYBINDING_COMMANDS = [
   'archive',
   'import-session',
   'terminal',
+  'reopen-thread',
+  'copy-answer',
+  'find',
+  'thread-1',
+  'thread-2',
+  'thread-3',
+  'thread-4',
+  'thread-5',
+  'thread-6',
+  'thread-7',
+  'thread-8',
+  'thread-9',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
 

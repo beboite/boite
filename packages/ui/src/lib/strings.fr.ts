@@ -648,6 +648,13 @@ export const fr: Translation = {
     workingFor: 'Travaille depuis {time}',
     workedFor: 'A travaillé {time}',
     toolRun: '{count} appels d’outils',
+    newMessage: '1 nouveau message',
+    newMessages: '{count} nouveaux messages',
+    findPlaceholder: 'Chercher dans la conversation',
+    findNone: 'Aucun résultat',
+    findCount: '{at} sur {total}',
+    findPrevious: 'Résultat précédent (Maj+Entrée)',
+    findNext: 'Résultat suivant (Entrée)',
     finishedAt: 'fini à {time}',
     backgroundRunning: '{what} encore en cours',
     backgroundJoin: ', ',
@@ -1418,7 +1425,7 @@ export const fr: Translation = {
     heading: 'Raccourcis',
     intro: "Cliquez sur un raccourci et appuyez sur les touches que vous voulez à la place. Le changement s'applique aussitôt, sur toutes les fenêtres de cette machine.",
     search: 'Filtrer les commandes',
-    groups: { general: 'Général', surfaces: 'Panneau latéral', thread: 'Conversation et message', theme: 'Thème' },
+    groups: { general: 'Général', surfaces: 'Panneau latéral', thread: 'Conversation et message', jump: 'Aller à une conversation', theme: 'Thème' },
     record: 'Appuyez sur les touches',
     change: 'Changer le raccourci',
     reset: 'Revenir au défaut',
@@ -1450,7 +1457,11 @@ export const fr: Translation = {
       closeSurface: 'Fermer la surface active',
       stash: 'Mettre le message de côté, ou le reprendre',
       sendAndDraft: 'Envoyer et ouvrir une nouvelle conversation',
-      pin: 'Épingler ou désépingler cette conversation'
+      pin: 'Épingler ou désépingler cette conversation',
+      reopenThread: 'Rouvrir la dernière conversation archivée',
+      copyAnswer: 'Copier la dernière réponse',
+      find: 'Chercher dans cette conversation',
+      thread: 'Aller à la conversation {n}'
     }
   },
 

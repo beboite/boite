@@ -660,6 +660,14 @@ export const strings = {
     workedFor: 'Worked for {time}',
     /** A finished answer's run of tool calls, folded into one line. */
     toolRun: '{count} tool calls',
+    /** The jump button once something arrived below the reader. */
+    newMessage: '1 new message',
+    newMessages: '{count} new messages',
+    findPlaceholder: 'Find in thread',
+    findNone: 'No match',
+    findCount: '{at} of {total}',
+    findPrevious: 'Previous match (Shift+Enter)',
+    findNext: 'Next match (Enter)',
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
@@ -1462,7 +1470,7 @@ export const strings = {
     heading: 'Shortcuts',
     intro: 'Click a shortcut and press the keys you want instead. The change applies at once, on every window of this machine.',
     search: 'Filter commands',
-    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', theme: 'Theme' },
+    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme' },
     record: 'Press the keys',
     change: 'Change the shortcut',
     reset: 'Back to the default',
@@ -1494,7 +1502,12 @@ export const strings = {
       closeSurface: 'Close the active surface',
       stash: 'Stash the composer text, or take it back',
       sendAndDraft: 'Send and open a new draft',
-      pin: 'Pin or unpin this thread'
+      pin: 'Pin or unpin this thread',
+      reopenThread: 'Reopen the thread archived last',
+      copyAnswer: 'Copy the last answer',
+      find: 'Find in this thread',
+      /** `Go to thread 3`: the third row of the sidebar, as drawn. */
+      thread: 'Go to thread {n}'
     }
   },
 

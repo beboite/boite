@@ -2,7 +2,7 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
   import type { AgentLetter, Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
@@ -13,7 +13,8 @@
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
   import MessageActions from './MessageActions.svelte';
-  import { visibleAnswer } from '../lib/message-display';
+  import { turnAnswer } from '../lib/message-display';
+  import FindBar from './FindBar.svelte';
   import { focusComposer } from '../lib/focus';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
@@ -84,6 +85,16 @@
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(savedReading?.pinned ?? true);
   let behind = $state(false);
+  /** The newest message the reader was at the bottom for; what came after it is what the button counts. */
+  let seenLast = $state<string | null>(null);
+  let unseen = $derived.by(() => {
+    if (!behind || seenLast === null) return 0;
+    const at = timeline.findIndex((message) => message.id === seenLast);
+    return at < 0 ? 0 : timeline.length - 1 - at;
+  });
+  function markSeen() {
+    seenLast = timeline.at(-1)?.id ?? null;
+  }
   let shown = savedReading ? untrack(() => threadId) : '';
 
   /** Measured slot heights by message id. What is not in here is worth ESTIMATE. */
@@ -343,6 +354,7 @@
     void tick().then(rememberAnchor);
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
+    if (pinned) markSeen();
     pullOlder(box);
   }
 
@@ -390,6 +402,7 @@
     navigationTarget = null;
     pinned = true;
     behind = false;
+    markSeen();
     box.scrollTop = box.scrollHeight;
     scrollTop = box.scrollTop;
   }
@@ -411,6 +424,7 @@
       scrollTop = box.scrollTop;
       pinned = true;
       behind = false;
+      untrack(markSeen);
     } else {
       behind = true;
     }
@@ -459,11 +473,7 @@
 
   /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
   function answerOf(turnId: string): string {
-    return messages
-      .filter((message) => message.turnId === turnId && message.role === 'assistant')
-      .flatMap((message) => message.parts.flatMap((part) => part.type === 'text' ? [visibleAnswer(part.text).trim()] : []))
-      .filter(Boolean)
-      .join('\n\n');
+    return turnAnswer(messages, turnId);
   }
 
   /**
@@ -497,6 +507,9 @@
 </script>
 
 <div class="timeline-wrap">
+  {#if store.findOpen}
+    <FindBar {messages} {viewport} request={store.findRequest} jump={(id) => jumpToMessage(id)} onclose={() => (store.findOpen = false)} />
+  {/if}
   <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
@@ -560,7 +573,7 @@
   {#if behind}
     <button type="button" class="small jump" onclick={jump} data-testid="jump-to-latest">
       <ArrowDown size={14} strokeWidth={2} />
-      {strings.chat.jumpToLatest}
+      {unseen > 0 ? fill(unseen === 1 ? strings.chat.newMessage : strings.chat.newMessages, { count: String(unseen) }) : strings.chat.jumpToLatest}
     </button>
   {/if}
 </div>

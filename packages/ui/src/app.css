@@ -232,6 +232,15 @@ body {
   background: var(--color-selection);
 }
 
+/* Ctrl+F in a thread: every match, and the one the arrows are on. */
+::highlight(boite-find) {
+  background: color-mix(in oklch, var(--color-live) 35%, transparent);
+}
+::highlight(boite-find-current) {
+  background: var(--color-live);
+  color: var(--color-accent-ink);
+}
+
 button,
 input,
 select,

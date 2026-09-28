@@ -181,6 +181,21 @@ test('the palette and the project menu reach the archive, its list already read'
   await waitFor(() => store.page === 'settings' && document.querySelector('[data-testid=archived-list]') !== null);
 });
 
+test('Ctrl+Shift+T brings back the threads archived here, newest first, and opens each', async () => {
+  await mountOnFake();
+  expect(await archiveThread(store, 't-trace')).toBe(true);
+  expect(await archiveThread(store, 't-descriptors')).toBe(true);
+  await waitFor(() => !store.threads.some((t) => (t.id === 't-trace' || t.id === 't-descriptors') && !t.archived));
+
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  await waitFor(() => store.openThread?.id === 't-descriptors');
+  expect(store.threads.find((t) => t.id === 't-descriptors')?.archived).toBe(false);
+
+  runCommand(store, 'reopen-thread', false);
+  await waitFor(() => store.openThread?.id === 't-trace');
+  expect(store.threads.find((t) => t.id === 't-trace')?.archived).toBe(false);
+});
+
 test('the scheduler never says Saved after a refused save, and refuses an out-of-range value itself', async () => {
   await mountOnFake();
   store.showSettings('advanced');

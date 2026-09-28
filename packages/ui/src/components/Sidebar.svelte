@@ -13,6 +13,7 @@
   import { compareThreads } from '../lib/thread-order';
   import { projectRollup } from '../lib/thread-state';
   import { controlMenu } from '../lib/controls';
+  import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { undo } from '../lib/undo.svelte';
   import { work } from '../lib/work-prefs.svelte';
   import ArchivedDrawer from './ArchivedDrawer.svelte';
@@ -52,6 +53,21 @@
   let newLabel = $derived(
     target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread
   );
+  // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
+  $effect(() => {
+    sidebarRows.list = (workspace.view === 'recent'
+      ? recent.map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id }))
+      : groups.flatMap(({ machine, project }) =>
+          machine.store.isCollapsed(project.id)
+            ? []
+            : machine.store
+                .threadsOf(project.id)
+                .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
+                .sort(compareThreads)
+                .map((thread) => ({ store: machine.store, threadId: thread.id }))
+        )
+    ).slice(0, 9);
+  });
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
     return () => clearInterval(timer);

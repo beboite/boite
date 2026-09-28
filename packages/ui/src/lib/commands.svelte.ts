@@ -6,11 +6,14 @@
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
-import { archiveThread } from './archive';
+import { archiveThread, reopenLastArchived } from './archive';
+import { lastAnswer } from './message-display';
+import { sidebarRows } from './sidebar-rows.svelte';
+import { workspace } from './workspace.svelte';
 import { experimentOn } from './experiments.svelte';
 import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
 import { setTheme } from './theme';
 
@@ -63,6 +66,8 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
+    items.push(row('find', strings.keyboard.commands.find, 'search text ctrl+f'));
+    items.push(row('copy-answer', strings.keyboard.commands.copyAnswer, 'clipboard reply response'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
     // Following a run is open to a paired device; starting one is the owner's, in the surface.
     items.push({ id: 'workflows', kind: 'command', label: strings.palette.workflows, keywords: 'workflow steps graph plan run' });
@@ -84,6 +89,7 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
   items.push(row('appearance', strings.palette.appearance, 'theme material buttons toolbar'));
   // The one way back to an archived thread: no chord, so written like the tour.
   items.push({ id: 'archived', kind: 'command', label: strings.settings.archived.heading, keywords: 'archive restore unarchive old hidden' });
+  items.push(row('reopen-thread', strings.keyboard.commands.reopenThread, 'undo closed restore unarchive last'));
   if (store.owner) {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
@@ -127,6 +133,10 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'archive': return strings.palette.archive;
     case 'import-session': return strings.palette.importSession;
     case 'terminal': return strings.palette.terminal;
+    case 'reopen-thread': return strings.keyboard.commands.reopenThread;
+    case 'copy-answer': return strings.keyboard.commands.copyAnswer;
+    case 'find': return strings.keyboard.commands.find;
+    default: return fill(strings.keyboard.commands.thread, { n: id.slice('thread-'.length) });
   }
 }
 
@@ -167,6 +177,15 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;
     case 'archive': if (open) void archiveThread(store, open.id); break;
+    case 'reopen-thread': void reopenLastArchived(store); break;
+    case 'copy-answer': if (open) { const text = lastAnswer(open.messages); if (text) void store.copy(text); } break;
+    case 'find': if (open) { store.showChat(); store.findOpen = true; store.findRequest += 1; } break;
+    case 'thread-1': case 'thread-2': case 'thread-3': case 'thread-4': case 'thread-5':
+    case 'thread-6': case 'thread-7': case 'thread-8': case 'thread-9': {
+      const target = sidebarRows.list[Number(id.slice('thread-'.length)) - 1];
+      if (target) { store.showChat(); void workspace.select(target.store, target.threadId); }
+      break;
+    }
     case 'import-session': {
       // The open thread's project, else the draft's, else the first one.
       const projectId = open?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;

@@ -24,6 +24,9 @@ export class Layout {
   paletteOpen = $state(false);
   /** Set by the palette's Rename: the chat header opens its title field and clears it. */
   renameRequested = $state(false);
+  /** The find bar over the open thread, and a count each ask bumps so a second Ctrl+F refocuses it. */
+  findOpen = $state(false);
+  findRequest = $state(0);
   page = $state<Page>('chat');
   settingsTab = $state<SettingsTab>('home');
   /** A settings card requested before its lazy page exists, with a fresh key for repeated asks. */
