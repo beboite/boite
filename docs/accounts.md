@@ -278,6 +278,12 @@ keeps it square.
 
 Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
 percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
+The [billing format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs)
+also carries legacy credit amounts. Boite accepts those amounts when no percentage
+is reported. An omitted proto3 percentage with a dated credits period means zero
+usage; a missing report or malformed percentage stays unavailable. The compact
+quota view shows each account's failure reason beneath its provider, including
+login and network failures.
 OpenCode Go reads the `opencode-go` API login in the account's
 `XDG_DATA_HOME/opencode/auth.json`; a default account can also use
 `OPENCODE_API_KEY`. It requests rolling, weekly and monthly limits from the Go

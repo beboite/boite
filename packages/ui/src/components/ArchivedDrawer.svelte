@@ -50,7 +50,8 @@
       <span class="caret" class:open><ChevronRight size={11} /></span>
       {count === 1 ? strings.sidebar.archivedThreadsOne : fill(strings.sidebar.archivedThreadsMany, { count: String(count) })}
     </button>
-    {#if open && threads}
+    <div class="motion-fold" class:expanded={open && threads !== null} inert={!open}><div>
+    {#if threads}
       <ul>
         {#each threads as thread (thread.id)}
           <li data-thread-id={thread.id}>
@@ -66,6 +67,7 @@
         {/each}
       </ul>
     {/if}
+    </div></div>
   </div>
 {/if}
 

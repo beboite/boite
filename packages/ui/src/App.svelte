@@ -178,6 +178,7 @@
   const toast = new Closing();
   const scrim = new Closing();
   const panelSlot = new Closing();
+  const terminalSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
 
@@ -217,6 +218,10 @@
   $effect(() => {
     if (store.panelOpen && store.openThread) panelSlot.show();
     else panelSlot.hide();
+  });
+  $effect(() => {
+    if (terminalShown) terminalSlot.show();
+    else terminalSlot.hide();
   });
 
   // On a phone the panel covers the chat: Back shuts it.
@@ -481,10 +486,11 @@
         {#key store}
           <ChatView {store} />
         {/key}
-        {#if terminalShown && store.openThread && deferred.TerminalDrawer}
+        {#if terminalSlot.shown && store.openThread && deferred.TerminalDrawer}
           {@const TerminalDrawer = deferred.TerminalDrawer}
           {#key `${store.endpointUrl}:${store.openThread.id}`}
-            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd} />
+            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
+              closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
           {/key}
         {/if}
       </main>

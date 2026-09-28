@@ -158,7 +158,7 @@
       aria-label={strings.composer.effortTitle}
       data-testid="composer-effort-menu"
       use:popover.attach
-      use:floating={{ anchor: () => trigger ?? null, mobileOnly: true, dismiss: () => popover.hide() }}
+      use:floating={{ anchor: () => trigger ?? null, placement: 'top', dismiss: () => popover.hide() }}
       onanimationend={popover.end}
       {onkeydown}
     >

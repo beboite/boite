@@ -251,7 +251,7 @@
 ></button>
 
 <aside
-  class="panel framed"
+  class="panel framed motion-panel"
   class:maximized={rightPanel.maximized}
   class:dragging
   class:closing
@@ -426,28 +426,11 @@
     /* A framed card whose resize handle hangs out into the gap beside it, so
        the card itself does not clip: its body rounds the bottom corners. */
     overflow: visible;
-    /* Only the first open travels: a drag and a maximize are instant. */
-    animation: panel-in var(--dur-3) var(--ease-out-quint);
   }
 
   .panel.maximized {
     width: auto;
     flex: 1;
-  }
-
-  /* The exit is opacity alone: the width would be horizontal travel on the way out. */
-  .panel.closing {
-    animation-name: fade-out;
-    pointer-events: none;
-  }
-
-  /* The column takes its width on the first frame, so the chat beside it
-     re-wraps once; a width animation re-laid the whole chat out every frame. */
-  @keyframes panel-in {
-    from {
-      transform: translateX(16px);
-      opacity: 0;
-    }
   }
 
   .strip {
