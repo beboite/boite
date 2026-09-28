@@ -1,6 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Prose from './Prose.svelte';
+import type { Store } from '../lib/store.svelte';
+import { writeExperiments } from '../lib/experiments';
 
 let running: Record<string, unknown> | null = null;
 
@@ -8,6 +10,52 @@ afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
+  writeExperiments([]);
+  delete window.__TAURI_INTERNALS__;
+});
+
+test('clicking a local executable opens the original file without downloading or previewing it', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], readFile: vi.fn() } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Launch game](target/release/game.exe)', store, threadId: 'game' } });
+  flushSync();
+  expect(invoke).not.toHaveBeenCalled();
+  query<HTMLAnchorElement>('a[data-file-path]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'target/release/game.exe' }, undefined));
+  expect(store.readFile).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid=chat-file]')).toBeNull();
+});
+
+test('a native open failure is shown and never falls back to downloading', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => { throw 'game.exe: file does not exist'; });
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }], error: null } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Launch game](game.exe)', store, threadId: 'game' } });
+  flushSync();
+  query<HTMLAnchorElement>('a[data-file-path]').click();
+  await vi.waitFor(() => expect(store.error).toBe('game.exe: file does not exist'));
+  expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
+});
+
+test('a local file can still open when its preview cannot be read', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = {
+    owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }],
+    readFile: vi.fn(async () => ({ ok: false, error: 'Preview could not be read' })),
+  } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Manual](manual.pdf)', store, threadId: 'game' } });
+  flushSync();
+  query<HTMLAnchorElement>('a[data-file-path]').click();
+  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe('Preview could not be read'));
+  expect(invoke).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=artifact-open]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'manual.pdf' }, undefined));
 });
 
 function query<T extends Element>(selector: string): T {

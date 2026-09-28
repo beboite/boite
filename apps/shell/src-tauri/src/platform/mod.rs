@@ -28,3 +28,8 @@ mod posix;
 pub(crate) use posix::{alert, notify, prepare_command};
 
 pub(crate) mod appbars;
+
+pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
+    tauri_plugin_opener::open_path(path, None::<&str>)
+        .map_err(|error| format!("path {}: {error}", path.display()))
+}

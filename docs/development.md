@@ -739,6 +739,16 @@ and nothing of this runs.
 
 ### File attachments
 
+In the desktop app connected to its own core, executable links in chat open
+the original file on click. Other local files keep their preview and offer
+Open to use the system's default application. The shell accepts existing files
+inside the thread directory, resolves symlinks before checking containment,
+and refuses commands from browsed webviews. Remote cores, browsers and phones
+keep the preview/download behavior; attachments remain downloadable copies.
+`bun test tests/e2e/local-files.test.ts` covers the UI and phone fallback.
+The native file opener case in `tests/e2e/shell.test.ts` runs an inert executable
+that writes a marker and exits without a window.
+
 Desktop and paired phones can pick, paste or drop files into the composer.
 A turn accepts eight attachments, each at most 5 MB and 10 MB together. The
 total keeps the `turns.start` frame, where they travel as base64, under the
