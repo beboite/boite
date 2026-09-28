@@ -23,6 +23,8 @@ reviews:
         boundaries and missing failure handling. Avoid cosmetic suggestions.
         Tests must isolate application data and never use real provider logins
         unless explicitly opted in. Do not suggest enabling live tests in CI.
+        Before requesting another test, identify the failure that existing tests
+        cannot detect; prefer extending an existing scenario over duplicating it.
     - path: '.github/**'
       instructions: >-
         Check fork pull requests, skipped and cancelled dependencies, least
@@ -38,4 +40,4 @@ reviews:
         Check desktop and phone behavior, real and in-memory clients, and
         routing through the Store belonging to the connected machine.
 chat:
-  auto_reply: false
+  auto_reply: true

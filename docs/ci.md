@@ -129,24 +129,37 @@ gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
-The Windows suite runs files sequentially: every file takes its own ports,
-data directory and browser profile. Two and three parallel workers produced
-repeated browser navigation and startup hook timeouts on 2026-09-24.
-Sequential execution keeps the same assertions and deadlines.
-`tests/e2e/lib/warm.ts` runs in a separate preparation step with a five-minute
-CI deadline. Each phase logs its start and elapsed time, with a two-minute
-deadline per phase and ten seconds for dev-server shutdown. Fetch deadlines
-cover the response body too. A preparation error fails the job before tests
-start; a stalled operation cannot leave the preparation process running until
-the desktop job's 35-minute deadline. Failure captures are also attempted when
-a step is cancelled.
+The native Windows shell suite runs against that installer in the desktop job.
+The remaining E2E files run on three independent Windows runners, starting
+alongside the installer build. Each runner builds the production UI from the
+same checkout and prepares its own Vite cache and fake-client bundle. Nightly
+version changes apply to these runners too. Bun's `--shard=N/3` partitions the
+complete list of E2E files except `shell.test.ts`, which the desktop job runs.
+New E2E files enter that list automatically.
+
+Files stay sequential within each shard: two and three parallel workers sharing
+a Windows runner produced navigation and startup hook timeouts on 2026-09-24.
+Every file still takes its own ports, data directory and browser profile.
+Assertions and test deadlines are unchanged. The matrix has `fail-fast: false`,
+so a failing shard does not prevent the others from reporting their failures.
+`CI required` also requires the E2E matrix; a failure, cancellation or unexpected
+skip blocks it. Retrying a failed browser shard does not rebuild the installer
+or rerun the other successful shards.
+
+`tests/e2e/lib/warm.ts` runs in a separate preparation step. Each phase logs its
+start, elapsed time and errors. It reads the optimized dependency's response
+body before closing Vite. The existing 35-minute job deadline remains; no
+shorter per-phase or per-test limit is introduced. Failure captures are also
+attempted when a step is cancelled.
 It optimizes Vite's dependencies once, since on a fresh checkout each dev
 server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that
 `BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
 than `test`, the one `bun test` sets, changes Vite's config hash and brings the
 race back. Every file that only drives the page serves that bundle through
-`startUi`. A file whose page imports `/src/...`, or blocks a module by its
+`startUi`. The preparation uses the same fixture plugin as `startDevUi`, since
+Vite also hashes the plugin configuration and otherwise optimizes again.
+A file whose page imports `/src/...`, or blocks a module by its
 source URL, needs a dev server: `startDevUi` transforms every module the page
 can load before its hook returns, and that hook allows 60 s. Before this, the
 cold transform ran inside the first browser launch: on 2026-09-24 it outran the
@@ -162,6 +175,44 @@ the smoke test and combines both digests into one multi-platform tag.
 
 These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
+
+### Measuring the E2E partition
+
+`bench/e2e.ts` runs every test in both modes and records per-group logs, elapsed
+time, assertions and test names. Its comparison refuses failures, skipped tests
+or a different list of test cases. The parallel measurement uses four local
+processes, including the native shell; CI uses separate runners for those
+groups. Build and stage the shell once, then run from the checkout root:
+
+```powershell
+bun run build:shell
+bun run apps/shell/scripts/stage-sidecar.ts
+$env:BOITE_E2E_PREBUILT_UI = '1'
+$env:BOITE_E2E_FAKE_UI = 'tests/e2e/.artifacts/fake-ui'
+bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
+bun bench/e2e.ts serial
+bun bench/e2e.ts sharded
+bun bench/e2e.ts compare tests/e2e/.artifacts/timings/serial/result.json tests/e2e/.artifacts/timings/sharded/result.json
+```
+
+Run serial and sharded measurements on the same machine and checkout. Report
+local test latency separately from hosted CI latency and bot review latency.
+More concurrent runners can reduce elapsed time while increasing total runner
+minutes; the comparison does not claim a reduction in compute cost.
+
+On 2026-09-28, the commands above on Windows with Bun 1.4.2 produced:
+
+| Local measurement | Serial | Sharded |
+| --- | ---: | ---: |
+| Elapsed E2E time | 252.66 s | 103.74 s |
+| Passing cases | 185 | 185 |
+| Assertions | 1,184 | 1,184 |
+| Failures or skipped tests | 0 | 0 |
+
+The comparison reported `Same test cases; elapsed time reduced by 58.9%`.
+Two earlier sharded runs took 123.48 s and 119.56 s against a 272.31 s serial
+reference, with the same 185 cases. These are local measurements with prepared
+builds, not hosted workflow or review-cycle measurements.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
 They disable background timer throttling and report page state, JavaScript
@@ -212,11 +263,13 @@ artifacts are excluded. Installing the GitHub App on this repository is a
 separate prerequisite. CodeRabbit controls free-plan eligibility and review
 limits; repository configuration does not override them.
 
-Automatic code reviews remain enabled. Chat replies require an explicit
-`@coderabbitai` mention, so a fix acknowledgement does not start another chat
-inspection. The [PR follow-up rules](../AGENTS.md#follow-through-on-pull-requests)
-group fixes before a push and bound bot waiting. CI checks must still pass, and
-unresolved bugs or missing reviews must be reported.
+Automatic code reviews and chat replies remain enabled. The
+[PR follow-up rules](../AGENTS.md#follow-through-on-pull-requests) group verified
+fixes before a push, inspect CI and reviews together, and avoid duplicate review
+requests. Acknowledgements need no further reply unless they contain a new
+finding. CI checks must still pass; unresolved bugs or missing reviews must be
+reported. Test requests must identify a failure that existing coverage cannot
+detect, rather than multiply equivalent cases.
 
 ## Security and labels
 
