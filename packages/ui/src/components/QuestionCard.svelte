@@ -9,6 +9,7 @@
     allowText,
     multiple,
     async = false,
+    docked = false,
     answer,
     pending,
     submit
@@ -19,6 +20,8 @@
     multiple: boolean;
     /** Asked with `boite ask`: the agent did not stop for it and the answer reaches it later. */
     async?: boolean;
+    /** Drawn inside the dock above the composer, whose own row names it: no frame, no heading. */
+    docked?: boolean;
     answer: QuestionAnswer | null;
     /** False on a card whose turn ended before anyone answered: nothing to press. */
     pending: boolean;
@@ -59,20 +62,23 @@
   class="question"
   class:resolved={answer !== null}
   class:async
+  class:docked
   data-testid="question-card"
   data-async={async ? 'true' : undefined}
   data-state={answer !== null ? 'answered' : pending ? 'pending' : 'cancelled'}
 >
-  <div class="head">
-    <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
-    <span class="muted">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
-    {#if answer !== null}
-      <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
-    {/if}
-  </div>
+  {#if !docked}
+    <div class="head">
+      <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
+      <span class="muted">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
+      {#if answer !== null}
+        <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
+      {/if}
+    </div>
+  {/if}
 
   <p class="prompt" data-testid="question-text">{text}</p>
-  {#if async && answer === null && pending}
+  {#if async && answer === null && pending && !docked}
     <p class="muted description" data-testid="question-async-hint">{strings.chat.questionAsyncHint}</p>
   {/if}
 
@@ -151,6 +157,14 @@
   /* Nobody waits on it: a dashed edge instead of the live one that says the agent is stopped. */
   .question.async {
     border-left-style: dashed;
+  }
+
+  /* In the dock the dock is the frame. */
+  .question.docked {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 2px 8px 8px 32px;
   }
 
   /* Answered, it drops to a collapsed tool card's weight: the question and what went back. */

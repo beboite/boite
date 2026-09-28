@@ -300,14 +300,11 @@ test(
   async () => {
     await page.type(testid('composer-input'), 'now [diff] please');
     await clickWhenEnabled(testid('composer-send'));
-    await page.waitFor(`document.querySelector('${testid('tool-document-chip')}')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('tool-diff-counts')}')`, 30_000);
     await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
-    // The folded card says what it carries, and only opening it draws the diff.
-    expect(await page.text(testid('tool-document-chip'))).toBe('1 diff');
-    await page.click(
-      `${testid('tool-card')}:has(${testid('tool-document-chip')}) ${testid('tool-toggle')}`,
-    );
+    // The edit's line counts what it changed, and its diff is drawn open under it.
+    expect((await page.text(testid('tool-diff-counts'))).replace(/\s+/g, ' ').trim()).toBe('+2 -1');
     await page.waitFor(`document.querySelector('${testid('tool-document')}[data-kind=diff]')`);
 
     const gutters = await page.evaluate<string[]>(

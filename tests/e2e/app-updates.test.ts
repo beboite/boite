@@ -126,20 +126,20 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
   // Selecting a track does not mislabel the version currently running.
 }, 30_000);
 
-test('an installed nightly calls itself boite (de nuit)', async () => {
+test('an installed nightly calls itself boite (de nuit) in the window title alone', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly`);
   await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
   await page.waitFor(`document.title.endsWith('boite (de nuit)')`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  // The bar says the name once, whether as its title or as the chip beside a project, thread or settings.
+  // The bar leaves the name to the window title: its room goes to the project, the thread or settings.
   const mentions = `document.querySelector('${id('titlebar')}').textContent.split('boite (de nuit)').length - 1`;
-  expect(await page.evaluate(mentions)).toBe(1);
+  expect(await page.evaluate(mentions)).toBe(0);
   await capture('nightly-desktop');
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
   await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
-  expect(await page.evaluate(mentions)).toBe(1);
+  expect(await page.evaluate(mentions)).toBe(0);
   // Settings keep the track's own name.
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).toContain('Boite Nightly');
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}').textContent`)).not.toContain('de nuit');

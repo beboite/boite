@@ -157,6 +157,39 @@ export async function runTool(ctx: FakeContext, thread: Thread, message: Message
   });
 }
 
+/** The pwsh an agent on Windows wraps its commands in, as Claude sends it. */
+const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command';
+
+/**
+ * A burst of calls with nothing between them, the way an agent explores a
+ * repository: wrapped commands, a read, a search and one command that fails.
+ * The timeline folds it under one sentence.
+ */
+export async function toolBurst(ctx: FakeContext, thread: Thread, message: Message, record: { cancelled: boolean }): Promise<void> {
+  const calls: { name: string; input: unknown; output: string; status: 'done' | 'error' }[] = [
+    { name: 'Bash', input: { command: `${PWSH} 'git status --short'`, description: 'Show the working tree' }, output: ' M packages/ui/src/app.css', status: 'done' },
+    { name: 'Bash', input: { command: `${PWSH} 'Get-ChildItem packages/ui/src/components | Select-Object -First 5'` }, output: 'AppearancePage.svelte\nAssistantMessage.svelte', status: 'done' },
+    { name: 'Read', input: { file_path: 'packages/ui/src/app.css' }, output: ':root { }', status: 'done' },
+    { name: 'Grep', input: { pattern: 'font-family', path: 'packages/ui/src' }, output: 'packages/ui/src/app.css:8', status: 'done' },
+    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: 'error TS2304: Cannot find name', status: 'error' },
+    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: '0 errors', status: 'done' }
+  ];
+  for (const call of calls) {
+    // Stopped mid-run: the call on its way finishes, no other starts.
+    if (record.cancelled) break;
+    const partIndex = message.parts.length;
+    const toolId = `tool-${++ctx.seq}`;
+    const startedAt = ctx.now();
+    const running: MessagePart = { type: 'tool', toolId, name: call.name, input: call.input, output: null, status: 'running', startedAt };
+    message.parts.push(running);
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(running) });
+    await ctx.pause();
+    const done: MessagePart = { ...running, output: call.output, status: call.status, finishedAt: ctx.now() };
+    message.parts[partIndex] = done;
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
+  }
+}
+
 export async function spawnProcess(ctx: FakeContext, thread: Thread, exe: string): Promise<void> {
   const pid = 10_000 + ++ctx.seq;
   const record: ProcessRecord = {

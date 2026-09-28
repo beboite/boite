@@ -94,6 +94,9 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `archive` | none | Archive the open thread |
 
 `Ctrl+Q` in the shell, the quit hold, is not in the table and cannot move.
+Neither can the shell's zoom, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` (`+` and `-` of
+the keypad and of any layout included), which follow the browser's own keys
+([development.md](development.md#faces-and-zoom)).
 
 ## What is refused
 

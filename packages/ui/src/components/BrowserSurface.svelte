@@ -5,7 +5,7 @@
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
   import { focusComposer } from '../lib/focus';
-  import { ZOOM_DEFAULT, stepZoom } from '../lib/right-panel.svelte';
+  import { ZOOM_DEFAULT, currentZoom, stepZoom, zoomKey } from '../lib/zoom';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -72,6 +72,7 @@
 
   let slot = $state<HTMLDivElement | undefined>(undefined);
   let field = $state<HTMLInputElement | undefined>(undefined);
+  let root = $state<HTMLDivElement | undefined>(undefined);
   let draft = $state<string | null>(null);
 
   let id = $derived(surface.id);
@@ -107,7 +108,11 @@
     let frame = 0;
     const report = (): void => {
       const rect = node.getBoundingClientRect();
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      // The interface zoom is in the key: the bridge scales the rectangle by
+      // it, and the page lays out at a new zoom a frame or more before the
+      // factor changes here (`lib/zoom.ts`), so the last new rectangle can go
+      // out scaled by the old one.
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${currentZoom()}`;
       if (key !== last) {
         last = key;
         browserBridge.setBounds(surfaceId, {
@@ -151,20 +156,20 @@
     if (!focusComposer()) field?.blur();
   }
 
-  /** `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while this surface is the one showing. */
+  /**
+   * `Ctrl+=`, `Ctrl+-` and `Ctrl+0` while the keyboard is in this surface's
+   * chrome (the address field, its buttons). Anywhere else the keys zoom the
+   * interface in the shell (`App.svelte`) and the tab in a browser.
+   */
   function onZoomKey(event: KeyboardEvent): void {
     if (event.key === 'Escape' && request) {
       event.preventDefault();
       cancelSelection();
       return;
     }
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-    const key = event.key;
-    let next: number | null = null;
-    if (key === '=' || key === '+') next = stepZoom(zoom, 1);
-    else if (key === '-' || key === '_') next = stepZoom(zoom, -1);
-    else if (key === '0') next = ZOOM_DEFAULT;
-    if (next === null) return;
+    const direction = zoomKey(event);
+    if (direction === null || !(event.target instanceof Node && root?.contains(event.target))) return;
+    const next = direction === 0 ? ZOOM_DEFAULT : stepZoom(zoom, direction);
     event.preventDefault();
     if (next === zoom) return;
     browserBridge.setZoom(id, next);
@@ -174,7 +179,7 @@
 
 <svelte:window onkeydown={onZoomKey} />
 
-<div class="browser-surface" data-testid="browser-surface" data-surface-id={id}>
+<div class="browser-surface" data-testid="browser-surface" data-surface-id={id} bind:this={root}>
   <div class="chrome">
     <button
       type="button"

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { CircleAlert, FishingHook } from '@lucide/svelte';
+  import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
+  import { showDockedQuestion } from '../lib/question-dock.svelte';
   import type { Account, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -12,7 +13,8 @@
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
-  import ToolCard from './ToolCard.svelte';
+  import ToolGroup from './ToolGroup.svelte';
+  import { partRuns, runKey, type ToolPart } from '../lib/tool-groups';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -42,6 +44,8 @@
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const thought = $derived(progress.thought(message.turnId));
+  const runs = $derived(partRuns(message.parts));
+  const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
 </script>
 
 {#if message.role === 'assistant' && execution}
@@ -55,8 +59,14 @@
 {/if}
 {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
-  {#each message.parts as part, index (index)}
-    {#if part.type !== 'thinking'}
+  {#each runs as run (runKey(run))}
+    {#if run.kind === 'tools'}
+      <div class="part" data-kind="tool">
+        <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground} />
+      </div>
+    {:else if message.parts[run.index]}
+    {@const index = run.index}
+    {@const part = message.parts[run.index]!}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
@@ -66,18 +76,6 @@
 
       {:else if part.type === 'file'}
         <ChatFile file={part} />
-      {:else if part.type === 'tool'}
-        <ToolCard
-          name={part.name}
-          input={part.input}
-          inputText={part.inputText}
-          output={part.output}
-          status={part.status}
-          documents={part.documents ?? []}
-          startedAt={part.startedAt ?? null}
-          finishedAt={part.finishedAt ?? null}
-          background={store.openThread?.background?.some((task) => task.toolId === part.toolId) ?? false}
-        />
       {:else if part.type === 'permission'}
         <PermissionCard
           toolName={part.toolName}
@@ -85,6 +83,13 @@
           request={store.permissionRequests[part.requestId] ?? null}
           answer={(decision) => void store.answer(part.requestId, decision)}
         />
+      {:else if part.type === 'question' && part.async === true && (part.answer ?? null) === null && store.pendingQuestions.some((q) => q.id === part.questionId)}
+        <!-- Waiting in the dock above the composer: here only a line that brings it up. -->
+        <button type="button" class="ghost docked-question" data-testid="question-docked" title={strings.chat.questionOpen} onclick={() => showDockedQuestion(part.questionId)}>
+          <MessageCircleQuestionMark size={15} strokeWidth={1.75} />
+          <span class="docked-text">{part.text}</span>
+          <span class="docked-hint">{strings.chat.questionDocked}</span>
+        </button>
       {:else if part.type === 'question'}
         <QuestionCard
           text={part.text}
@@ -209,6 +214,13 @@
   .compaction .label {
     flex: none;
   }
+
+  /* A question waiting in the dock: one line like a tool call, the live colour on its mark. */
+  .docked-question { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; height: auto; padding: 1px 4px 1px 4px; border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-muted-foreground); justify-content: flex-start; text-align: left; }
+  .docked-question:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-foreground); }
+  .docked-question :global(svg) { flex: none; color: var(--color-live); }
+  .docked-text { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-foreground); }
+  .docked-hint { flex: 0 10 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-xs); color: var(--color-subtle); }
 
   /* One muted line, the words wrapping under their own start, the event name last and quieter. */
   .hook {

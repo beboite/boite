@@ -58,7 +58,7 @@ test("settings reveal sections and protection switches persist across navigation
     await page.waitFor(
       '!document.querySelector("[data-testid=setting-reap-orphans]").checked',
     );
-    expect(await page.evaluate('document.fonts.check("14px Geist")')).toBe(
+    expect(await page.evaluate('document.fonts.check("14px Inter")')).toBe(
       true,
     );
     await page.send("Emulation.setDeviceMetricsOverride", {
