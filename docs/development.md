@@ -597,10 +597,10 @@ edit with its diff.
 Settings, Appearance, Reading picks the text face and the code face for this
 device. Inter is the default text face; Geist, IBM Plex Sans, Atkinson
 Hyperlegible Next, Figtree, Source Sans 3, DM Sans and the system's own are the
-others, and the code face is Geist Mono, JetBrains Mono or the system's. Every
-face is a bundled variable woff2 under the OFL, its licence beside it in
-`public/fonts`, cut by `unicode-range` so a face nobody picked is never
-downloaded. `lib/fonts.ts` stamps the pick on `<html>` as `data-font` and
+others, and the code face is Geist Mono, JetBrains Mono or the system's. The
+system choices use the fonts the OS has. Every other face is a bundled variable
+woff2 under the OFL, its licence beside it in `public/fonts`, cut by
+`unicode-range` so a face nobody picked is never downloaded. `lib/fonts.ts` stamps the pick on `<html>` as `data-font` and
 `data-mono`, whose rules in `app.css` swap `--font-sans` and `--font-mono`;
 the boot script of `index.html` stamps and preloads it before the first paint.
 The service worker precaches the default faces only.
