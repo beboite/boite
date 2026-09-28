@@ -1447,6 +1447,9 @@ export const strings = {
     glance: 'Account limits',
     /** The popover's way to the Limits page in Settings. */
     allLimits: 'Limits page',
+    /** A read of the limits failed; the core's reason follows. */
+    readFailed: "Couldn't read the limits: {error}",
+    retry: 'Try again',
     quit: 'Quit Boite',
   },
   harnessUpdates: {
@@ -1676,7 +1679,7 @@ export const strings = {
       everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, and the agent asks before it acts.',
       developer: "I'm a developer, give me the works.",
       developerHint: 'The app opens on your last project, conversations show the terminal and the process trace, and the panel opens on the changes.',
-      later: "Nothing is taken away either way. The composer's Options menu and Settings change any of it."
+      later: "Nothing is taken away either way. Settings change any of it."
     },
 
     welcome: {
