@@ -219,7 +219,7 @@ tasks gets no invented task list. Pi uses the same successful-tool observation.
 
 Each connected provider's row in Settings, Providers stores a default model and
 effort for that provider on this device.
-Initial defaults are Claude Opus 5 High, Codex GPT 5.6 Sol Medium and Grok 4.6
+Initial defaults are Opus 5 High, Codex GPT 5.6 Sol Medium and Grok 4.6
 High. The account must offer the model; a first send probes when needed and
 refuses an unavailable default by name. New thread uses these defaults;
 Ctrl+Enter preserves the current explicit choice. Existing threads keep theirs.

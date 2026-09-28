@@ -374,7 +374,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => store.draft !== null);
 
   // A draft opens on the first available provider, its default model.
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -399,7 +399,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
   query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5 · Second seat');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5 · Second seat');
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'On the second seat';
@@ -415,7 +415,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -459,7 +459,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -490,7 +490,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect((document.activeElement as HTMLElement).getAttribute('data-model')).toBe('anthropic/claude-sonnet-5');
   press('Enter');
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Sonnet 5');
 
   // A query nothing answers says so, and Escape clears it before it closes anything.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
@@ -521,7 +521,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
@@ -537,7 +537,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5');
   expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
   await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
 

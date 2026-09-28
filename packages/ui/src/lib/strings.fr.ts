@@ -1649,7 +1649,7 @@ export const fr: Translation = {
     agents: {
       title: 'Une conversation qui suit votre travail',
       body: "Changez d'agent, dictez un message, relisez le résultat. Sans changer de conversation.",
-      demoModel: 'Claude Sonnet 5',
+      demoModel: 'Sonnet 5',
       demoEffort: 'Élevé',
       demoMode: 'Demander'
     },

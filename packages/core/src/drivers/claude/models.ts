@@ -34,8 +34,10 @@ export async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Pro
     const models: ModelInfo[] = rows.filter(row => !/^(default|auto)$/i.test(row.value)).map(row => {
       const id = row.resolvedModel ?? row.value;
       const known = ctx.provider.models.find(model => model.id === id.replace(/\[.*\]$/, ''));
-      const versioned = row.description.match(/^(?:Claude\s+)?((?:Fable|Opus|Sonnet|Haiku)\s+\d+(?:\.\d+)*)(?:\b|$)/i)?.[1];
-      const name = known?.name ?? (versioned ? `Claude ${versioned}` : row.displayName);
+      // The family and version alone, as the other providers name theirs: `Opus 5.5`, never `Claude Opus 5.5`.
+      // Older CLIs put the version in the description and a bare `Opus` in the display name.
+      const versioned = (name: string) => name.match(/^(?:Claude\s+)?((?:Fable|Opus|Sonnet|Haiku)\s+\d+(?:\.\d+)*)(?:\b|$)/i)?.[1];
+      const name = known?.name ?? versioned(row.displayName) ?? versioned(row.description) ?? row.displayName.replace(/^Claude\s+/i, '');
       const levels = row.supportsEffort ? (row.supportedEffortLevels ?? []).map(id => ({ id: String(id), label: id === 'xhigh' ? 'Extra high' : id.charAt(0).toUpperCase() + id.slice(1) })) : [];
       if (row.supportsAdaptiveThinking) levels.push({ id: 'ultrathink', label: 'Ultrathink' });
       return { id, name: id.includes('[1m]') ? `${name} (1M)` : name,

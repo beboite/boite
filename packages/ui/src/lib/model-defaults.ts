@@ -5,7 +5,7 @@ export interface ModelDefault { model: string; effort: string | null }
 export type ModelDefaults = Record<string, ModelDefault>;
 export const MODEL_DEFAULTS_KEY = 'boite.model-defaults:v1';
 export const DEFAULT_MODEL_NAMES: Record<string, string> = {
-  'claude-opus-5': 'Claude Opus 5',
+  'claude-opus-5': 'Opus 5',
   'gpt-5.6-sol': 'GPT 5.6 Sol',
   'grok-4.6': 'Grok 4.6'
 };

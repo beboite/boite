@@ -314,7 +314,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -399,7 +399,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
-  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  // Haiku 4.5 is the one legacy model the descriptor gives no levels.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
@@ -408,7 +408,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Haiku 4.5');
 });
 
 test('an install that already has conversations keeps every chip in the bar', async () => {
@@ -457,7 +457,7 @@ test('a first run keeps effort and worktree in Options until pinned, and a workt
   // The record on the device wins over the threads the core holds.
   expect(work.current.pins).toEqual({ effort: false, worktree: false });
   store.startDraft('p-boite');
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
   expect(effortChip()).toBeNull();
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
   // The permission mode is never hidden.
