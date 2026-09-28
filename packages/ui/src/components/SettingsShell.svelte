@@ -65,7 +65,7 @@
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
-    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }],
+    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
     keyboard: [
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
@@ -122,13 +122,15 @@
     ['general', 'conversations', strings.settings.asyncQuestions],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
-    ['general', 'app', strings.settings.developer],
     ['general', 'app', strings.onboarding.label],
     ['appearance', 'theme', strings.settings.accent],
     ['appearance', 'theme', strings.settings.material],
     ['appearance', 'theme', strings.settings.language],
     ['appearance', 'workspace', strings.settings.startIn],
     ['appearance', 'workspace', strings.settings.panelStart],
+    // The buttons people most often look for by name, the ones the old developer switch hid.
+    ['appearance', 'buttons', strings.terminal.title],
+    ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
     ['accounts', null, strings.harnessUpdates.auto],
     ['resources', 'quiet', strings.settings.focusGuard],
@@ -286,7 +288,7 @@
       {:else if tab === 'advanced'}
         <AdvancedSettings {store} />
       {:else if tab === 'appearance'}
-        <AppearancePage />
+        <AppearancePage {store} />
       {:else if tab === 'keyboard'}
         <KeyboardPage {store} />
       {:else if tab === 'accounts'}

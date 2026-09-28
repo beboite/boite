@@ -11,6 +11,8 @@
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
+  import { controlMenu } from '../lib/controls';
+  import { work } from '../lib/work-prefs.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
@@ -218,14 +220,18 @@
       {/each}
     {/if}
   </div>
-  {#if store.owner}
+  {#if store.owner && work.shows('sidebar.add-project')}
     <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
+      oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}
       ><Plus size={13} />{strings.sidebar.addProject}</button
     >
   {/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
-    <LimitsGlance {store} />
+    {#if work.shows('sidebar.limits')}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
+    {/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     <button
       class="ghost icon"
@@ -415,6 +421,9 @@
     gap: 6px;
     padding: 6px 8px;
     border-top: 1px solid var(--color-border);
+  }
+  .control {
+    display: contents;
   }
   /* The machine button, when there is one, sits alone on the left. */
   .foot :global(.machines) {
