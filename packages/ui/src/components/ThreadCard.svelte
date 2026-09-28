@@ -6,6 +6,7 @@
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
+  import { moveBlocked, moveItem, openMovePicker, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
@@ -79,6 +80,13 @@
     await tick();
     row?.focus({ preventScroll: true });
   }
+  /** A row dragged onto another project's section moves there; the project reads `threadDrag` while it is over it. */
+  function dragStart(event: DragEvent) {
+    if (!event.dataTransfer) return;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(THREAD_DRAG_TYPE, JSON.stringify({ machineId: machine.id, threadId: thread.id }));
+    threadDrag.current = { machineId: machine.id, threadId: thread.id, projectId: thread.projectId };
+  }
   function menu(event: MouseEvent) {
     contextMenu.open(
       event,
@@ -93,6 +101,8 @@
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
         { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+        // A sub-thread moves with its parent, which is the row the sidebar lists.
+        ...(thread.parentThreadId ? [] : [moveItem(owner, thread.id)]),
         separator(),
         { id: 'archive', label: strings.sidebar.archive, danger: true }
       ],
@@ -103,6 +113,7 @@
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
+        if (action === 'move') openMovePicker(owner, thread);
         if (action === 'archive') void archiveThread(owner, thread.id);
       }
     );
@@ -123,7 +134,18 @@
   />
 {:else}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="thread" class:open class:unread={thread.unread} class:pinned={thread.pinned} class:meta oncontextmenu={menu}>
+  <div
+    class="thread"
+    class:open
+    class:unread={thread.unread}
+    class:pinned={thread.pinned}
+    class:meta
+    class:dragging={threadDrag.current?.threadId === thread.id && threadDrag.current.machineId === machine.id}
+    draggable={!thread.parentThreadId && !moveBlocked(owner, thread.id)}
+    ondragstart={dragStart}
+    ondragend={() => (threadDrag.current = null)}
+    oncontextmenu={menu}
+  >
     <button
       type="button"
       class="ghost row"
@@ -181,6 +203,9 @@
   }
   .thread.open {
     background: var(--color-active);
+  }
+  .thread.dragging {
+    opacity: 0.5;
   }
   .row {
     display: flex;

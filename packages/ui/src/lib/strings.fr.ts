@@ -458,6 +458,20 @@ export const fr: Translation = {
     draft: 'Nouvelle conversation'
   },
 
+  threadMove: {
+    moveTo: 'Déplacer vers un projet',
+    archivedProject: '{project} (archivé)',
+    noOtherProject: 'Aucun autre projet',
+    stopFirst: 'Arrêtez le tour avant de déplacer cette conversation',
+    monitorsTitle: 'Des moniteurs tournent encore',
+    backgroundTitle: 'Du travail tourne encore en arrière-plan',
+    backgroundBody: "L'agent fait encore tourner quelque chose dans {folder}. Arrêtez-le maintenant, ou laissez-le tourner là-bas jusqu'à ce que l'agent commence son prochain tour dans {project}.",
+    stopMonitors: 'Arrêter les moniteurs',
+    stopWork: "L'arrêter",
+    keep: 'Les garder',
+    dropHere: 'Déplacer la conversation vers {project}'
+  },
+
   palette: {
     placeholder: 'Cherchez une conversation, ou tapez une commande',
     terminal: 'Afficher ou masquer le terminal',
@@ -690,6 +704,10 @@ export const fr: Translation = {
     compactionNoPost: 'Contexte compacté depuis {pre} jetons',
     compactionUnknown: 'Contexte compacté',
     compactionManual: 'à la main',
+    moveExplained: "Déplacement expliqué à l'agent",
+    moveShow: "Voir ce qui a été dit à l'agent",
+    moveHide: "Masquer ce qui a été dit à l'agent",
+    movedByAgent: "Déplacé par l'agent vers {project}",
     hookBlocked: 'Un hook a bloqué ce message',
     hookStopped: 'Un hook a arrêté le tour',
     hookSays: '{label} : {message}',

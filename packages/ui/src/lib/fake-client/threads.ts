@@ -48,6 +48,8 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  // A move the agent asked for goes with the thread, before its turn ends and would apply it.
+  ctx.waitingMoves.delete(thread.id);
   await ctx.stopTurn(thread.id);
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
     if (pending.request.threadId !== thread.id) continue;

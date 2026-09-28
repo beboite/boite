@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { AgentLetter, Message } from '@boite/contracts';
+  import type { AgentLetter, Message, MoveNotice } from '@boite/contracts';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
@@ -12,6 +12,7 @@
   import DelegationActivity from './DelegationActivity.svelte';
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
+  import MoveMarker from './MoveMarker.svelte';
   import MessageActions from './MessageActions.svelte';
   import { visibleAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
@@ -71,6 +72,13 @@
     return message.parts.some(part => part.type === 'text' &&
       (part.text.startsWith('Boite agent coordination.') || part.text.startsWith('Boite delegation messages.')) &&
       [...ids].some(id => part.text.includes(`"id":"${id}"`)));
+  }
+
+  /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
+  function movedBy(message: Message): MoveNotice | null {
+    if (message.role !== 'system') return null;
+    for (const part of message.parts) if (part.type === 'text' && part.moved?.by === 'agent') return part.moved;
+    return null;
   }
 
   function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
@@ -525,6 +533,8 @@
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+          {:else if movedBy(message)}
+            <MoveMarker notice={movedBy(message)!} />
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}

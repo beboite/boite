@@ -414,6 +414,7 @@ export class Store {
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
   pin(...args: Parameters<Threads['pin']>) { return this.#ctx.threads.pin(...args); }
+  move(...args: Parameters<Threads['move']>) { return this.#ctx.threads.move(...args); }
   archive(...args: Parameters<Threads['archive']>) { return this.#ctx.threads.archive(...args); }
   openImports(...args: Parameters<Imports['openImports']>) { return this.#ctx.imports.openImports(...args); }
   closeImports(...args: Parameters<Imports['closeImports']>) { return this.#ctx.imports.closeImports(...args); }

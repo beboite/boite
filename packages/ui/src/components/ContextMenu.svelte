@@ -131,6 +131,7 @@
           role="menuitem"
           tabindex="-1"
           disabled={item.disabled}
+          title={item.title}
           data-row
           data-value={item.id}
           onclick={() => pick(item)}

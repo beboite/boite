@@ -4,6 +4,7 @@
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
+  import { moveItem, openMovePicker } from '../lib/thread-move.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
@@ -62,6 +63,7 @@
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      ...(thread.parentThreadId || thread.projectId === null ? [] : [moveItem(store, thread.id)]),
       separator(),
       { id: 'archive', label: strings.sidebar.archive, danger: true }
     ];
@@ -95,6 +97,8 @@
     else if (action === 'retitle') void store.retitle(open.id);
     else if (action === 'pin') void store.pin(open.id, !open.pinned);
     else if (action === 'copy') void store.copy(open.cwd);
+    // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
+    else if (action === 'move') openMovePicker(store, open, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'));
     else if (action === 'archive') void archiveThread(store, open.id);
   }
 

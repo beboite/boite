@@ -12,6 +12,7 @@
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
   import { projectRollup } from '../lib/thread-state';
+  import { moveThread, takesDrop, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { controlMenu } from '../lib/controls';
   import { undo } from '../lib/undo.svelte';
   import { work } from '../lib/work-prefs.svelte';
@@ -111,6 +112,27 @@
       }
     );
   }
+  /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
+  let dropOver = $state<string | null>(null);
+  function dragOver(event: DragEvent, machine: Machine, project: Project, key: string) {
+    if (!event.dataTransfer?.types.includes(THREAD_DRAG_TYPE) || !takesDrop(threadDrag.current, machine.id, project.id)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    dropOver = key;
+  }
+  function dragLeave(event: DragEvent, key: string) {
+    // Leaving for a child of the same section is not leaving it.
+    if (event.relatedTarget instanceof Node && (event.currentTarget as HTMLElement).contains(event.relatedTarget)) return;
+    if (dropOver === key) dropOver = null;
+  }
+  function drop(event: DragEvent, machine: Machine, project: Project) {
+    const drag = threadDrag.current;
+    dropOver = null;
+    threadDrag.current = null;
+    if (!takesDrop(drag, machine.id, project.id) || drag === null) return;
+    event.preventDefault();
+    void moveThread(machine.store, drag.threadId, project.id);
+  }
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -197,7 +219,18 @@
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
         {@const draftHere = store === owner && owner.draft?.projectId === project.id}
-        <section class="project" data-testid="project" data-project-id={project.id} data-machine-id={machine.id}>
+        {@const dropKey = `${machine.id}:${project.id}`}
+        <section
+          class="project"
+          class:drop={dropOver === dropKey}
+          data-testid="project"
+          data-project-id={project.id}
+          data-machine-id={machine.id}
+          aria-label={dropOver === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
+          ondragover={(event) => dragOver(event, machine, project, dropKey)}
+          ondragleave={(event) => dragLeave(event, dropKey)}
+          ondrop={(event) => drop(event, machine, project)}
+        >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="head" oncontextmenu={(e) => projectMenu(e, machine, project)}>
             <button
@@ -353,6 +386,11 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+  }
+  /* A thread row dragged over a project it can move to. */
+  .project.drop {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
   }
   .head {
     display: flex;
