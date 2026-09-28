@@ -5,6 +5,8 @@ export function registerThreadMethods(core: Core): void {
   const pullRequests = new PullRequests(core);
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
+  core.router.register('threads.rewind', (params) => core.threads.rewind(params.threadId, params.messageId));
+  core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) =>
     params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),

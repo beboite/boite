@@ -637,6 +637,14 @@ export interface ThreadSummary {
   pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
+  /**
+   * The entry of `sessionId`'s native transcript the next turn resumes at,
+   * forking the rest away: set by `threads.rewind` and `threads.fork` on a
+   * driver that can cut its own transcript (Claude), cleared once the agent
+   * answered on the forked session. Null or absent means resume the whole
+   * session. Clients have nothing to do with it.
+   */
+  sessionResumeAt?: string | null;
   /** Changes when the account changes; native sessions never cross this boundary. */
   sessionGeneration?: number;
   /** Optimistic revision of the selection for future turns. Missing on older clients means zero. */
@@ -709,7 +717,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
-  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
+  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId' | 'sessionResumeAt'
 > & {
   sessionGeneration: number;
   selectionVersion: number;
@@ -731,6 +739,14 @@ export interface Turn {
   error: string | null;
   /** Absent only for turns saved before execution snapshots were introduced. */
   execution?: TurnExecution;
+  /**
+   * Where the agent's native transcript stood when this turn ended: the
+   * session it ran on and the id of the last entry it wrote there (Claude: the
+   * uuid of the last main-chain message). What `threads.rewind` and
+   * `threads.fork` resume at. Absent on drivers that report none and on turns
+   * finished before it was recorded.
+   */
+  checkpoint?: { sessionId: string; entry: string } | null;
 }
 
 /** A thread status that means one of its turns is still under way. */
@@ -949,6 +965,24 @@ export interface Thread extends ThreadSummary {
   messagesBefore: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
+}
+
+/** What `threads.rewind` answers: the thread after the cut and the removed message, ready for the composer. */
+export interface ThreadRewind {
+  /** As `threads.get` would answer now: the last page of what is left. */
+  thread: Thread;
+  /** What the user typed, without the page context a preview reference added to it. */
+  prompt: string;
+  /** The images and files the removed message carried, as `turns.start` takes them. */
+  attachments: Attachment[];
+  /** The page elements the removed message referred to, empty when none. */
+  previewReferences: PreviewReference[];
+  /**
+   * How the agent forgets the removed part. `native`: the driver resumes its
+   * own transcript at the cut. `seeded`: the next turn starts a fresh session
+   * carrying the kept history, as a change of account does.
+   */
+  session: 'native' | 'seeded';
 }
 
 // ---------------------------------------------------------------------------
@@ -2112,6 +2146,27 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /**
+   * Edit a sent message: `messageId`, a user message of the thread, and every
+   * message and turn after it leave the conversation, and the next turn
+   * continues from just before it, the agent's own memory included. The answer
+   * is the thread as it now stands and the removed message's content, for the
+   * composer. Refused while a turn runs or waits in the queue (stop it first),
+   * for a message that is not a user message of that thread, and on a
+   * persistent agent session, each naming the field and what it expected.
+   * Every client subscribed to the thread gets `message.truncated`. The journal
+   * keeps the removed messages' events; the removed turns keep their usage.
+   */
+  'threads.rewind': { params: { threadId: ThreadId; messageId: MessageId }; result: ThreadRewind };
+  /**
+   * A new thread holding a copy of this thread's history up to and including
+   * `messageId`, whose next turn continues from there; the original thread is
+   * untouched. `worktree: true` puts it in a git worktree of its own, as
+   * `threads.create` does with `worktree: {}`; false or absent works in the
+   * same folder. Refused while the named message is still streaming, and on a
+   * persistent agent session.
+   */
+  'threads.fork': { params: { threadId: ThreadId; messageId: MessageId; worktree?: boolean }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
@@ -2252,6 +2307,12 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** A part created or replaced whole (tool call state, permission card). */
   'message.part': { threadId: ThreadId; messageId: MessageId; partIndex: number; part: MessagePart };
   'message.completed': { threadId: ThreadId; messageId: MessageId; state: Message['state'] };
+  /**
+   * `messageId` and every message after it left the thread (`threads.rewind`),
+   * and so did their turns. A client holding the thread drops them; one that
+   * does not hold `messageId` reads the thread again.
+   */
+  'message.truncated': { threadId: ThreadId; messageId: MessageId };
 
   /** A client that missed this one reads the request from `permissions.list`. */
   'permission.requested': PermissionRequest;

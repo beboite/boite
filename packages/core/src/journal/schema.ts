@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -323,6 +323,13 @@ export function migrate(db: Database, file: string): void {
       );
       CREATE INDEX workflow_templates_project ON workflow_templates(project_id, name);`);
     version = 19;
+  }
+  // Rewind and fork: the transcript entry a thread's next turn resumes at, and
+  // the entry each turn ended on (`Turn.checkpoint`, JSON).
+  if (!db.query("SELECT 1 FROM pragma_table_info('turns') WHERE name = 'checkpoint'").get()) {
+    db.exec(`ALTER TABLE threads ADD COLUMN session_resume_at TEXT;
+      ALTER TABLE turns ADD COLUMN checkpoint TEXT;`);
+    version = 20;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

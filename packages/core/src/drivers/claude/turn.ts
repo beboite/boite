@@ -50,6 +50,12 @@ export class ClaudeTurn {
   private readonly streamedThinking = new Map<string, string>();
 
   private sessionId: string | null;
+  /**
+   * The uuid of the last main-chain entry the CLI wrote for this turn: an
+   * assistant message, a tool result, a compaction boundary. What a later
+   * rewind or fork resumes at (`resumeSessionAt`).
+   */
+  private lastEntry: string | null = null;
   private usage: Usage | null = null;
   private costBefore = 0;
   /** What the last API request of the turn carried, the context meter's reading. */
@@ -113,6 +119,7 @@ export class ClaudeTurn {
       error: this.error ?? undefined,
       promptCache: this.cacheLife,
       ...(this.sessionLost ? { sessionLost: true } : {}),
+      ...(this.sessionId !== null && this.lastEntry !== null ? { checkpoint: { sessionId: this.sessionId, entry: this.lastEntry } } : {}),
     });
   }
 
@@ -129,6 +136,7 @@ export class ClaudeTurn {
       this.handleSubagent(message, parent);
       return;
     }
+    this.noteEntry(message);
     switch (message.type) {
       case 'stream_event':
         this.handleStream(message.event as StreamEvent);
@@ -148,6 +156,13 @@ export class ClaudeTurn {
       default:
         break;
     }
+  }
+
+  /** Only what the transcript chains: a streamed delta, a result or an init is no entry of it. */
+  private noteEntry(message: SDKMessage): void {
+    const chained = message.type === 'assistant' || message.type === 'user' || (message.type === 'system' && message.subtype === 'compact_boundary');
+    const uuid = (message as { uuid?: unknown }).uuid;
+    if (chained && typeof uuid === 'string' && uuid.length > 0) this.lastEntry = uuid;
   }
 
   /**
@@ -315,6 +330,11 @@ export class ClaudeTurn {
    */
   private resumeRefused(message: SDKResultMessage): string | null {
     if (message.subtype !== 'error_during_execution' || this.ctx.sessionId === null || this.messageId !== null) return null;
+    // A resume cut at an entry (a rewind or a fork) that failed before writing
+    // anything: whatever the CLI's words, the core must not keep the whole
+    // session, which still holds the part the user removed. It starts fresh
+    // with the kept history instead.
+    if (this.ctx.resumeAt) return message.errors.length > 0 ? message.errors.join('; ') : 'the agent could not resume its session at the cut';
     return message.errors.some((error) => MISSING_SESSION.test(error)) ? message.errors.join('; ') : null;
   }
 

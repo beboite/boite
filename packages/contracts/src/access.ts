@@ -57,6 +57,11 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.
+  // Editing a sent prompt and branching a conversation are the composer's own
+  // moves. A fork in a worktree writes no more than `threads.create` with one,
+  // which a device already reaches, and names no path either.
+  'threads.rewind',
+  'threads.fork',
   'threads.archive',
   'threads.pin',
   'threads.markRead',
@@ -90,7 +95,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'project.added', 'project.removed',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
   'turn.started', 'turn.finished',
-  'message.started', 'message.delta', 'message.part', 'message.completed',
+  'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'settings.updated', 'keybindings.updated', 'sessions.updated',

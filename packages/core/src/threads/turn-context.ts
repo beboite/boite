@@ -135,6 +135,7 @@ export class TurnContexts {
       coordination: () => this.core.delegation.take(threadId, turn.id) ?? this.core.coordination.take(threadId, turn.id),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
+      resumeAt: thread.sessionId === null ? null : thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, turn.id),
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,

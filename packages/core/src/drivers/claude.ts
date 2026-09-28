@@ -25,7 +25,10 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
     const key = sessionKey(ctx);
 
     let session = sessions.get(threadId) ?? null;
-    if (session !== null && !session.usable(key, warmMs)) {
+    // A turn that resumes at an entry needs a CLI of its own: the running one
+    // holds the whole session, the part a rewind removed included.
+    const cut = ctx.sessionId !== null && Boolean(ctx.resumeAt);
+    if (session !== null && (cut || !session.usable(key, warmMs))) {
       sessions.delete(threadId);
       session.close(session.key === key ? null : 'the thread changed account, folder or bypass mode');
       session = null;

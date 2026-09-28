@@ -75,6 +75,42 @@ call and incur usage. The driver does not invent a post-compaction token count.
 The protocol operations follow the [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction)
 and [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
 
+## Editing a message and forking
+
+`threads.rewind { threadId, messageId }` removes a user message and everything
+after it, then returns the new thread with the removed prompt, attachments and
+element references for the composer. It refuses a thread with a turn running or
+queued (`reason: 'turn-in-flight'`) and any message that is not a user message
+of that thread (`field: 'messageId'`). The journal keeps a `thread.rewound`
+event naming every removed message and turn. The projection drops those
+messages, so `threads.get` and `messages.list` no longer return them. The turn
+rows stay, so the usage history still counts what they spent. Every subscribed
+client gets `message.truncated` and drops the message and what follows it.
+
+`threads.fork { threadId, messageId, worktree? }` copies the history up to and
+including any finished message into a new thread titled after the source with
+` (fork)`. The source is left as it was. `worktree: true` makes the worktree
+the way `threads.create` does, from the project's HEAD. The source thread's
+branch and uncommitted changes are not copied.
+
+The agent must forget the removed part too. Each driver does it in one of two
+ways, and the rewind result's `session` field says which one applied:
+
+| Driver | Behaviour |
+|---|---|
+| Claude | Exact. Each turn records `checkpoint: { sessionId, entry }`, the uuid of the last transcript entry it wrote. The next turn resumes that session with `resumeSessionAt: entry` and `forkSession: true`, so the CLI keeps the transcript up to the cut under a new session id and the original transcript is never shortened. A rewind closes the warm process first. |
+| Every other driver (Codex, ACP agents, pi, agy, grok, echo and the rest) | Seeded. The thread drops its native session. The next turn starts a fresh one carrying the kept history as bounded excerpts, the same [context transfer](model-switching.md#context-transfer) a change of account uses. |
+
+Claude falls back to the seeded path in four cases: the kept turn left no
+checkpoint (it ran before checkpoints existed, failed early, or was stopped
+before the agent wrote anything), it ran on another account or provider, the
+fork is placed in a worktree (the CLI files transcripts by folder), or the CLI
+refuses the cut before writing anything, in which case the core retries the
+turn once on a fresh seeded session. A fork cut in the middle of a turn is
+also seeded, because the transcript has no entry at that point. No driver
+resumes the whole old session after a rewind: the session id the thread keeps
+is either the checkpoint's own, always resumed with `forkSession`, or none.
+
 ## The divider
 
 A compaction is a message part, `{ type: 'compaction', trigger, preTokens,

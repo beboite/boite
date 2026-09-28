@@ -181,8 +181,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -210,6 +210,7 @@ export class Journal {
         thread.parentThreadId ?? null,
         thread.promptCache ? JSON.stringify(thread.promptCache) : null,
         thread.agentSessionId ?? null,
+        thread.sessionResumeAt ?? null,
       );
   }
 
@@ -277,8 +278,8 @@ export class Journal {
   putTurn(turn: Turn): void {
     this.db
       .query(
-        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         turn.id,
@@ -290,6 +291,7 @@ export class Journal {
         turn.usage === null ? null : JSON.stringify(turn.usage),
         turn.error,
         turn.execution === undefined ? null : JSON.stringify(turn.execution),
+        turn.checkpoint ? JSON.stringify(turn.checkpoint) : null,
       );
   }
 
@@ -465,6 +467,29 @@ export class Journal {
       .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
       .all(threadId, fromRowid, limit + 1) as MessageRow[];
     return rows.length > limit ? null : rows.map(toMessage);
+  }
+
+  /**
+   * Deletes the message at `fromRowid` and every later one of the thread, and
+   * the request keys of their turns, so a retried `clientRequestId` cannot
+   * hand back a turn that left the conversation. The turn rows stay: their
+   * usage was spent. Returns what went, oldest first. Run inside `append`.
+   */
+  truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
+    const removed = this.messageIdsFrom(threadId, fromRowid);
+    this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
+    for (const turnId of removed.turnIds) this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ?').run(threadId, turnId);
+    return removed;
+  }
+
+  /** The ids of the message at `fromRowid`, of every later one, and of their turns, oldest first. */
+  messageIdsFrom(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
+    this.flushDeltas();
+    this.persistMessages();
+    const rows = this.db
+      .query('SELECT id, turn_id FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid')
+      .all(threadId, fromRowid) as { id: string; turn_id: string }[];
+    return { messageIds: rows.map((row) => row.id), turnIds: [...new Set(rows.map((row) => row.turn_id))] };
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
