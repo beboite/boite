@@ -242,12 +242,14 @@
     return installExternalLinks(root);
   });
 
-  // The unread count rides the document title, so the taskbar and a browser
-  // tab say "(2) Boite" while the window is somewhere behind.
+  // What wants the user rides the document title, so the taskbar and a browser
+  // tab say "(2) Boite" while the window is somewhere behind: the threads of
+  // every connected machine that wait on an answer or finished unread.
   $effect(() => {
-    const unread = store.unreadCount;
+    const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
+    const count = stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting')).length, 0);
     const name = appName();
-    document.title = unread > 0 ? `(${unread}) ${name}` : name;
+    document.title = count > 0 ? `(${count}) ${name}` : name;
   });
 
   onMount(() => {
