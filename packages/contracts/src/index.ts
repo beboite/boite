@@ -643,6 +643,12 @@ export interface ThreadSummary {
    * `Thread.background`. Null when nothing runs; missing on older cores.
    */
   backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
+  /**
+   * A move asked for while the thread's turn ran, applied when that turn
+   * ends (`threads.move`, `agent.move`). In memory only: null after a core
+   * restart, and missing on older cores.
+   */
+  pendingMove?: PendingMove | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
@@ -866,6 +872,17 @@ export interface MoveNotice {
   note: string;
   by?: 'agent';
   /** Epoch milliseconds of the last move. */
+  at: number;
+}
+
+/** A move waiting for the thread's turn to end (`ThreadSummary.pendingMove`). */
+export interface PendingMove {
+  projectId: ProjectId;
+  /** The target project's name, for the row's "Moves to ... after this turn". */
+  project: string;
+  /** Who asked: the user from a menu or a drag, or the agent with `boite thread move`. */
+  by: 'user' | 'agent';
+  /** Epoch milliseconds of the request. */
   at: number;
 }
 
@@ -2307,12 +2324,24 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * their parent. A target project put away comes back. Refused for an unknown
    * thread or project, the same project, an archived thread, a sub-thread, a
    * persistent agent session, a missing target folder, a turn running or
-   * queued on the thread or one of its sub-threads (`reason: 'turn-in-flight'`),
-   * and background work without `stopBackground` (true stops it, false leaves
-   * it running in the old folder until the agent's next turn). Every client
-   * gets `thread.updated` with the new `projectId`, `cwd` and `branch`.
+   * queued on one of its sub-threads (`reason: 'turn-in-flight'`), and
+   * background work without `stopBackground` (true stops it, false leaves it
+   * running in the old folder until the agent's next turn). Every client gets
+   * `thread.updated` with the new `projectId`, `cwd` and `branch`.
+   *
+   * A thread whose own turn runs, waits or is queued is not refused: the move
+   * is recorded as `pendingMove` on the answered row and happens when that
+   * turn ends, however it ends, through the same path as the agent's own move.
+   * A second move replaces a pending one; archiving the thread drops it. The
+   * pending move lives in memory and a core restart forgets it.
    */
   'threads.move': { params: { threadId: ThreadId; projectId: ProjectId; stopBackground?: boolean }; result: ThreadSummary };
+  /**
+   * Drop the move waiting for the thread's turn to end (`pendingMove`), the
+   * user's or the agent's. Answers the row without it; a thread with no
+   * pending move is refused naming `threadId`.
+   */
+  'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };

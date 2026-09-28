@@ -10,6 +10,7 @@ import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
+import { dropWaitingMove } from './thread-move';
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
@@ -48,8 +49,8 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
-  // A move the agent asked for goes with the thread, before its turn ends and would apply it.
-  ctx.waitingMoves.delete(thread.id);
+  // A waiting move goes with the thread, before its turn ends and would apply it.
+  dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
     if (pending.request.threadId !== thread.id) continue;

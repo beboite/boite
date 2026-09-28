@@ -1,14 +1,14 @@
 import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import type { AgentMove, Message, MoveEnd, MoveNotice, Project, ProjectId, Protocol, ThreadId, ThreadSummary } from '@boite/contracts';
+import type { AgentMove, Message, MoveEnd, MoveNotice, PendingMove, Project, ProjectId, Protocol, ThreadId, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
 import type { PlacedWorktree } from '../worktree.ts';
 import { draftFolderName, makeDraftFolder } from './inputs.ts';
-import { saveThread } from './records.ts';
+import { saveThread, withLoad } from './records.ts';
 
 /** The journal setting holding the note a thread's next message carries to its agent. */
 export const MOVE_NOTE_PREFIX = 'move-note:';
@@ -41,34 +41,92 @@ export function agentMoveNote(from: MoveEnd, to: MoveEnd, branch: string | null)
 
 const IN_FLIGHT = ['queued', 'running', 'waiting'];
 
+function checkStop(threadId: ThreadId, stopBackground: unknown): void {
+  if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
+    throw refused('threads.move.stopBackground must be a boolean', { threadId, field: 'stopBackground', expected: 'true, false or absent' });
+  }
+}
+
 /**
- * Who moves the thread, and so what counts as busy:
- * - `user`: `threads.move`; the thread and its sub-threads must be idle.
- * - `agent-request`: `agent.move`, from inside the thread's own turn, which
- *   is not in the way; its sub-threads still are.
- * - `agent-apply`: the move the agent asked for, applied once its turn
- *   ended. A turn queued meanwhile runs after it, in the new folder.
+ * What counts as busy when the thread moves:
+ * - `now`: the thread and its sub-threads must be idle.
+ * - `request`: asked from inside or during the thread's own turn, which is
+ *   not in the way (the move waits for it); its sub-threads still are.
+ * - `apply`: a waiting move, once the turn ended. A turn queued meanwhile
+ *   runs after it, in the new folder.
  */
-type Mode = 'user' | 'agent-request' | 'agent-apply';
+type Phase = 'now' | 'request' | 'apply';
+
+/** A move waiting for the thread's turn to end, and how it will run. */
+interface Waiting {
+  projectId: ProjectId;
+  by: 'user' | 'agent';
+  stopBackground: boolean | undefined;
+  at: number;
+}
 
 /**
  * `threads.move` and `agent.move`: a thread and its sub-threads change
  * project. Everything a refusal can come from is checked before anything is
  * made on disk; a new worktree made for the move is removed again when a
- * later step fails. The old folder is never touched.
+ * later step fails. The old folder is never touched. A thread whose turn is
+ * in flight moves when the turn ends (`applyWaiting`), whoever asked.
  */
 export class ThreadMove {
-  /** Moves an agent asked for while its turn ran, applied when the turn ends. Memory only. */
-  private readonly waiting = new Map<ThreadId, ProjectId>();
+  /** Moves asked for while the thread's turn ran, applied when the turn ends. Memory only. */
+  private readonly waiting = new Map<ThreadId, Waiting>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
-  async move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean, mode: Mode = 'user'): Promise<ThreadSummary> {
-    if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
-      throw refused('threads.move.stopBackground must be a boolean', { threadId, field: 'stopBackground', expected: 'true, false or absent' });
-    }
+  /** The row's "Moves to ... after this turn", or null. */
+  pendingOf(threadId: ThreadId): PendingMove | null {
+    const waiting = this.waiting.get(threadId);
+    if (waiting === undefined) return null;
+    const project = this.core.journal.getProject(waiting.projectId);
+    return { projectId: waiting.projectId, project: project?.name ?? waiting.projectId, by: waiting.by, at: waiting.at };
+  }
+
+  /**
+   * `threads.move`. An idle thread moves on the spot. A thread whose own turn
+   * runs, waits or is queued gets the move recorded and answered as
+   * `pendingMove`; a second one replaces it.
+   */
+  async userMove(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
+    checkStop(threadId, stopBackground);
     const thread = this.threads.require(threadId);
-    const target = this.check(thread, projectId, stopBackground, mode);
+    if (!this.inFlight(thread)) return this.move(threadId, projectId, stopBackground, 'now', 'user');
+    const target = this.check(thread, projectId, stopBackground, 'request');
+    await this.requireFolder(threadId, target);
+    // The turn may have ended while the folder was looked at: then it moves now.
+    if (!this.inFlight(this.threads.require(threadId))) return this.move(threadId, projectId, stopBackground, 'now', 'user');
+    this.waiting.set(threadId, { projectId: target.id, by: 'user', stopBackground, at: Date.now() });
+    return this.announce(threadId);
+  }
+
+  /** `threads.moveCancel`: the waiting move goes, the thread stays where it is. */
+  cancel(threadId: ThreadId): ThreadSummary {
+    this.threads.require(threadId);
+    if (!this.waiting.delete(threadId)) {
+      throw refused(`thread ${threadId} has no move waiting for its turn to end`, { threadId, field: 'threadId', expected: 'a thread with a pending move' });
+    }
+    return this.announce(threadId);
+  }
+
+  private inFlight(thread: ThreadSummary): boolean {
+    return IN_FLIGHT.includes(thread.status) || this.threads.runner.handles.has(thread.id);
+  }
+
+  /** Every client hears the row with its pending move, which lives in memory and changes nothing stored. */
+  private announce(threadId: ThreadId): ThreadSummary {
+    const summary = withLoad(this.core, this.threads.require(threadId));
+    this.core.bus.emit('thread.updated', summary);
+    return summary;
+  }
+
+  async move(threadId: ThreadId, projectId: ProjectId, stopBackground: boolean | undefined, phase: Phase, by: 'user' | 'agent'): Promise<ThreadSummary> {
+    checkStop(threadId, stopBackground);
+    const thread = this.threads.require(threadId);
+    const target = this.check(thread, projectId, stopBackground, phase);
     await this.requireFolder(threadId, target);
     // A thread that had a worktree of its own gets one in the target, the way
     // `threads.create` does with `worktree: {}`; a target that is no repository
@@ -77,10 +135,10 @@ export class ThreadMove {
     try {
       // Git took time: a turn may have started or the project changed meanwhile.
       const now = this.threads.require(threadId);
-      const again = this.check(now, projectId, stopBackground, mode);
+      const again = this.check(now, projectId, stopBackground, phase);
       const cwd = placed?.path
         ?? (again.kind === 'drafts' ? makeDraftFolder(again.path, draftFolderName(now.title, new Date())) : again.path);
-      return this.write(now, again, cwd, placed?.branch ?? null, stopBackground === true, mode === 'user' ? 'user' : 'agent');
+      return this.write(now, again, cwd, placed?.branch ?? null, stopBackground === true, by);
     } catch (error) {
       if (placed !== null) await this.core.worktrees.remove(threadId, target, placed);
       throw error;
@@ -95,38 +153,45 @@ export class ThreadMove {
   async request(threadId: ThreadId, query: string): Promise<AgentMove> {
     const thread = this.threads.require(threadId);
     const target = this.resolve(threadId, query);
-    this.check(thread, target.id, true, 'agent-request');
+    this.check(thread, target.id, true, 'request');
     await this.requireFolder(threadId, target);
     const family = [thread, ...this.children(thread)];
     const stopsBackground = family.some((one) => (this.threads.agentState.background.get(one.id)?.length ?? 0) > 0);
     const answer = { threadId, projectId: target.id, project: target.name, projectPath: target.path, stopsBackground };
-    if (IN_FLIGHT.includes(thread.status) || this.threads.runner.handles.has(threadId)) {
-      this.waiting.set(threadId, target.id);
+    if (this.inFlight(thread)) {
+      this.waiting.set(threadId, { projectId: target.id, by: 'agent', stopBackground: true, at: Date.now() });
+      this.announce(threadId);
       const plain = target.kind !== 'drafts' && !this.wantsWorktree(thread, target);
       return { ...answer, cwd: plain ? target.path : null, when: 'turn-end' };
     }
-    const moved = await this.move(threadId, target.id, true, 'agent-apply');
+    const moved = await this.move(threadId, target.id, true, 'apply', 'agent');
     return { ...answer, cwd: moved.cwd, when: 'done' };
   }
 
   /**
-   * Called by the turn runner once a turn's end is written: the move the
-   * agent asked for during it happens now. A refusal that only appeared since
-   * (the project removed, a sub-thread started) is a system message on the
-   * thread, so the user sees why the thread stayed.
+   * Called by the turn runner once a turn's end is written, whether the turn
+   * finished, stopped or failed: the move asked for during it happens now,
+   * the user's with its note, the agent's without. A user move that did not
+   * choose about background work (none ran when it was asked) keeps it. A
+   * refusal that only appeared since (the project removed, a sub-thread
+   * started) is a system message on the thread, so the user sees why the
+   * thread stayed.
    */
   async applyWaiting(threadId: ThreadId): Promise<void> {
-    const projectId = this.waiting.get(threadId);
-    if (projectId === undefined) return;
+    const waiting = this.waiting.get(threadId);
+    if (waiting === undefined) return;
     this.waiting.delete(threadId);
     try {
-      await this.move(threadId, projectId, true, 'agent-apply');
+      await this.move(threadId, waiting.projectId, waiting.stopBackground ?? false, 'apply', waiting.by);
     } catch (error) {
       const reason = messageOf(error);
-      this.core.log('warn', `thread ${threadId}: the move the agent asked for did not happen: ${reason}`);
+      const who = waiting.by === 'agent' ? 'the agent' : 'the user';
+      this.core.log('warn', `thread ${threadId}: the move ${who} asked for did not happen: ${reason}`);
       if (this.core.journal.getThread(threadId) === null) return;
-      const name = this.core.journal.getProject(projectId)?.name ?? projectId;
-      this.systemMessage(threadId, { type: 'text', text: `The move to project ${name} the agent asked for did not happen: ${reason}` });
+      const name = this.core.journal.getProject(waiting.projectId)?.name ?? waiting.projectId;
+      this.systemMessage(threadId, { type: 'text', text: `The move to project ${name} ${who} asked for did not happen: ${reason}` });
+      // The row loses its "Moves to ..." line.
+      this.announce(threadId);
     }
   }
 
@@ -171,7 +236,7 @@ export class ThreadMove {
   }
 
   /** Every refusal, by field, before anything is made. Answers the target project. */
-  private check(thread: ThreadSummary, projectId: ProjectId, stopBackground: boolean | undefined, mode: Mode): Project {
+  private check(thread: ThreadSummary, projectId: ProjectId, stopBackground: boolean | undefined, phase: Phase): Project {
     const threadId = thread.id;
     if (thread.agentSessionId || thread.projectId === null) {
       throw refused('a persistent agent session takes its work through Agents and cannot be moved', { threadId, field: 'threadId', expected: 'a conversation thread' });
@@ -187,8 +252,8 @@ export class ThreadMove {
       throw refused(`thread ${threadId} is already in project ${target.name}`, { threadId, projectId, field: 'projectId', expected: 'another project than the thread\'s own' });
     }
     const busyNow = (one: ThreadSummary): boolean => {
-      if (one.id === threadId && mode === 'agent-request') return false;
-      if (one.id === threadId && mode === 'agent-apply') return this.threads.runner.handles.has(one.id) || one.status === 'running' || one.status === 'waiting';
+      if (one.id === threadId && phase === 'request') return false;
+      if (one.id === threadId && phase === 'apply') return this.threads.runner.handles.has(one.id) || one.status === 'running' || one.status === 'waiting';
       return IN_FLIGHT.includes(one.status) || this.threads.runner.handles.has(one.id);
     };
     const busy = [thread, ...this.children(thread)].find(busyNow);
@@ -217,6 +282,8 @@ export class ThreadMove {
     const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
     const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
     const children = this.children(thread);
+    // Whatever waited is done or overtaken: the row loses its "Moves to" line.
+    this.waiting.delete(thread.id);
     let saved: ThreadSummary | null = null;
     for (const one of [thread, ...children]) {
       // The warm process goes now unless it holds background work the user

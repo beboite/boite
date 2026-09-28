@@ -499,7 +499,7 @@ export class ThreadStore {
 
   /** Move a thread and its sub-threads to another project (`threads/move.ts`). */
   move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
-    return this.moves.move(threadId, projectId, stopBackground);
+    return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {

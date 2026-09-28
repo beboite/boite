@@ -1,10 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ArrowLeft, ChevronDown, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
-  import { moveItem, openMovePicker } from '../lib/thread-move.svelte';
+  import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
@@ -63,7 +63,7 @@
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
-      ...(thread.parentThreadId || thread.projectId === null ? [] : [moveItem(store, thread.id)]),
+      ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
       separator(),
       { id: 'archive', label: strings.sidebar.archive, danger: true }
     ];
@@ -98,7 +98,7 @@
     else if (action === 'pin') void store.pin(open.id, !open.pinned);
     else if (action === 'copy') void store.copy(open.cwd);
     // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
-    else if (action === 'move') openMovePicker(store, open, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'));
+    else if (pickMoveItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
     else if (action === 'archive') void archiveThread(store, open.id);
   }
 
@@ -137,6 +137,13 @@
             <Menu items={phoneItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
               <span class="title-text">{thread.title}</span><ChevronDown size={14} />
             </Menu>
+          </span>
+        {/if}
+        {@const pending = pendingLine(thread)}
+        {#if pending}
+          <!-- A move asked for while the turn runs. A phone keeps only the mark; its sidebar row carries the words. -->
+          <span class="pending" data-testid="thread-pending" title={pending} aria-label={pending}>
+            <FolderInput size={13} strokeWidth={1.75} /><span class="pending-text">{pending}</span>
           </span>
         {/if}
       {:else}
@@ -282,6 +289,18 @@
   }
 
 
+  .pending {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+  }
+  .pending :global(svg) { flex: none; }
+  .pending-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   .control { display: contents; }
   .title { min-width: 0; }
   .title-menu { display: none; }
@@ -290,6 +309,8 @@
        up their words for it, and keep a finger-sized square. */
     .thread-header { gap: 4px; }
     .path { display: none; }
+    .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
+    .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
     .trace .label { display: none; }
     /* The title's sheet holds these on a phone. */

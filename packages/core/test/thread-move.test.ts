@@ -43,7 +43,7 @@ function git(cwd: string, ...args: string[]): string {
  * An echo driver that records what every turn was handed and answers
  * `reply <prompt>`. A prompt with `[bg]` reports one monitor still running
  * after the turn; a prompt with `[hold]` keeps the turn running until
- * `release()` is called.
+ * `release()` is called; with `[fail]` too, the turn then ends in an error.
  */
 function recordingEcho(): { seen: TurnContext[]; release: () => void } {
   const seen: TurnContext[] = [];
@@ -59,7 +59,7 @@ function recordingEcho(): { seen: TurnContext[]; release: () => void } {
       const cut = ctx.prompt.lastIndexOf('Current user request:');
       const request = cut === -1 ? ctx.prompt : ctx.prompt.slice(cut);
       if (request.includes('[bg]')) ctx.background?.([{ id: 'mon-1', kind: 'monitor', description: 'watch the log', toolId: null, startedAt: Date.now() }]);
-      const result: TurnResult = { status: 'done', sessionId: `native-${seen.length}`, usage: null };
+      const result: TurnResult = request.includes('[fail]') ? { status: 'error', sessionId: null, usage: null, error: 'the agent failed' } : { status: 'done', sessionId: `native-${seen.length}`, usage: null };
       if (!request.includes('[hold]')) return { stop() {}, done: Promise.resolve(result) };
       const done = new Promise<TurnResult>((resolve) => {
         release = () => resolve(result);
@@ -246,23 +246,117 @@ describe('threads.move', () => {
     expect(h.core.threads.require(moving.id).projectId).toBe(alpha.id);
   });
 
-  test('refuses a running thread, and one whose sub-thread runs', async () => {
+  /** A turn held open by `[hold]` until `release()`; answers its id. */
+  async function holdTurn(threadId: string, prompt = '[hold] work'): Promise<string> {
+    const turn = await client.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.threads.runner.handles.has(threadId));
+    return turn.id;
+  }
+
+  test('a running thread moves when its turn ends, and keeps its note to the agent', async () => {
+    const { seen, release } = recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const moving = await thread(alpha.id);
+    const other = await h.connect();
+    const heard: ThreadSummary[] = [];
+    other.on('thread.updated', (summary) => {
+      if (summary.id === moving.id) heard.push(summary);
+    });
+    const turnId = await holdTurn(moving.id);
+
+    const pending = await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    expect(pending).toMatchObject({ projectId: alpha.id, cwd: alpha.path, pendingMove: { projectId: beta.id, project: 'beta', by: 'user' } });
+    await waitFor(() => heard.some((summary) => summary.pendingMove?.projectId === beta.id));
+    expect((await other.call('threads.list', { projectId: alpha.id })).find((one) => one.id === moving.id)?.pendingMove?.project).toBe('beta');
+    // Nothing moved under the running process.
+    expect(h.core.threads.require(moving.id)).toMatchObject({ projectId: alpha.id, cwd: alpha.path });
+
+    release();
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    await waitFor(() => h.core.threads.require(moving.id).projectId === beta.id);
+    expect(h.core.threads.moves.pendingOf(moving.id)).toBeNull();
+    await waitFor(() => heard.at(-1)?.projectId === beta.id && heard.at(-1)?.pendingMove === null);
+
+    // The user's move explains itself on the next message, as an idle move does.
+    await run(moving.id, 'where now');
+    expect(seen.at(-1)?.thread.cwd).toBe(beta.path);
+    expect(seen.at(-1)?.prompt).toContain(`This thread moved from project alpha (${alpha.path}) to project beta (${beta.path}).`);
+    const users = h.core.threads.get(moving.id).messages.filter((message) => message.role === 'user');
+    const part = users.at(-1)?.parts[0];
+    const moved = part?.type === 'text' ? part.moved : undefined;
+    expect(moved).toMatchObject({ to: { projectId: beta.id, name: 'beta' } });
+    expect(moved?.by).toBeUndefined();
+  });
+
+  test('a second move replaces the first, and a cancel drops it', async () => {
+    const { release } = recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const gamma = await folderProject('gamma');
+    const moving = await thread(alpha.id);
+
+    let turnId = await holdTurn(moving.id);
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    const replaced = await client.call('threads.move', { threadId: moving.id, projectId: gamma.id });
+    expect(replaced.pendingMove).toMatchObject({ projectId: gamma.id, project: 'gamma' });
+    release();
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    await waitFor(() => h.core.threads.require(moving.id).projectId === gamma.id);
+    const note = h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${moving.id}`) as { to: { name: string } } | undefined;
+    expect(note?.to.name).toBe('gamma');
+
+    turnId = await holdTurn(moving.id);
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    const cancelled = await client.call('threads.moveCancel', { threadId: moving.id });
+    expect(cancelled.pendingMove).toBeNull();
+    const nothing = await refusal(client.call('threads.moveCancel', { threadId: moving.id }));
+    expect(nothing).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'threadId', expected: 'a thread with a pending move' } });
+    release();
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    await waitFor(() => !h.core.threads.runner.handles.has(moving.id));
+    expect(h.core.threads.require(moving.id).projectId).toBe(gamma.id);
+  });
+
+  test('a failed or stopped turn still applies the move; an archived thread drops it', async () => {
     const { release } = recordingEcho();
     const alpha = await folderProject('alpha');
     const beta = await folderProject('beta');
     const moving = await thread(alpha.id);
-    const turn = await client.call('turns.start', { threadId: moving.id, prompt: '[hold] work' });
-    await waitFor(() => h.core.threads.runner.handles.has(moving.id));
-    const busy = await refusal(client.call('threads.move', { threadId: moving.id, projectId: beta.id }));
-    expect(busy.data).toMatchObject({ reason: 'turn-in-flight', expected: 'an idle thread' });
-    release();
-    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
 
+    let turnId = await holdTurn(moving.id, '[hold] [fail] work');
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    release();
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    expect(h.core.journal.getTurn(turnId)?.status).toBe('error');
+    await waitFor(() => h.core.threads.require(moving.id).projectId === beta.id);
+
+    turnId = await holdTurn(moving.id);
+    await client.call('threads.move', { threadId: moving.id, projectId: alpha.id });
+    await client.call('turns.stop', { threadId: moving.id });
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    await waitFor(() => h.core.threads.require(moving.id).projectId === alpha.id);
+
+    turnId = await holdTurn(moving.id);
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    const archived = await client.call('threads.archive', { threadId: moving.id });
+    expect(archived.pendingMove ?? null).toBeNull();
+    await waitFor(() => h.core.journal.getTurn(turnId)?.finishedAt != null);
+    await waitFor(() => !h.core.threads.runner.handles.has(moving.id));
+    expect(h.core.threads.require(moving.id).projectId).toBe(alpha.id);
+  });
+
+  test('a running sub-thread is still refused: the parent has no turn end to wait for', async () => {
+    recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const moving = await thread(alpha.id);
     const accountId = await echoAccount();
     const child = h.core.threads.create({ projectId: alpha.id, providerId: 'echo', accountId, title: 'child', cwd: moving.cwd }, { id: newId('thr_'), branch: null, parentThreadId: moving.id });
     h.core.journal.putThread({ ...h.core.threads.require(child.id), status: 'running' });
     const childBusy = await refusal(client.call('threads.move', { threadId: moving.id, projectId: beta.id }));
     expect(childBusy.data).toMatchObject({ reason: 'turn-in-flight', busyThreadId: child.id });
+    expect(h.core.threads.moves.pendingOf(moving.id)).toBeNull();
     h.core.journal.putThread({ ...h.core.threads.require(child.id), status: 'idle' });
 
     // Idle again: the parent moves and the sub-thread follows it.
@@ -351,6 +445,8 @@ describe('threads.move', () => {
     expect(AGENT_METHODS.has('threads.move')).toBe(false);
     expect(DEVICE_METHODS.has('threads.move')).toBe(true);
     expect(DEVICE_METHODS.has('agent.move')).toBe(false);
+    expect(DEVICE_METHODS.has('threads.moveCancel')).toBe(true);
+    expect(AGENT_METHODS.has('threads.moveCancel')).toBe(false);
   });
 
   test('only Codex keeps its native session across folders', () => {

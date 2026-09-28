@@ -403,14 +403,24 @@ export class Threads {
 
   /**
    * The thread and its sub-threads into another project. The core answers
-   * the row in its new place and tells every other client with
-   * `thread.updated`; the sidebar moves the row from either.
+   * the row in its new place, or with `pendingMove` while its turn runs, and
+   * tells every other client with `thread.updated`; the sidebar moves the row
+   * from either.
    */
   async move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary | null> {
+    return this.moveCall(threadId, (client) => client.call('threads.move', { threadId, projectId, ...(stopBackground === undefined ? {} : { stopBackground }) }));
+  }
+
+  /** The move waiting for the turn to end goes; the thread stays where it is. */
+  async cancelMove(threadId: ThreadId): Promise<ThreadSummary | null> {
+    return this.moveCall(threadId, (client) => client.call('threads.moveCancel', { threadId }));
+  }
+
+  private async moveCall(threadId: ThreadId, call: (client: NonNullable<typeof this.ctx.client>) => Promise<ThreadSummary>): Promise<ThreadSummary | null> {
     const client = this.ctx.client;
     if (!client) return null;
     try {
-      const summary = await client.call('threads.move', { threadId, projectId, ...(stopBackground === undefined ? {} : { stopBackground }) });
+      const summary = await call(client);
       this.upsertThread(summary);
       const open = this.openThread;
       if (open && open.id === threadId) Object.assign(open, summary);

@@ -1,12 +1,12 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { Ellipsis, Folder, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
+  import { Ellipsis, Folder, FolderInput, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
-  import { moveBlocked, moveItem, openMovePicker, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
+  import { moveBlocked, moveItems, pendingLine, pickMoveItem, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
@@ -44,6 +44,8 @@
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
   /** The second line only exists when it says something: a project, a pull request, a machine. */
   let meta = $derived(showProject || pullRequest !== null || showMachine);
+  // A move asked for while the turn runs, until the turn ends and applies it.
+  let pending = $derived(pendingLine(thread));
 
   let prLoading = $state(false);
   async function refreshPr(manual = false) {
@@ -102,7 +104,7 @@
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
         { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
         // A sub-thread moves with its parent, which is the row the sidebar lists.
-        ...(thread.parentThreadId ? [] : [moveItem(owner, thread.id)]),
+        ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),
         { id: 'archive', label: strings.sidebar.archive, danger: true }
       ],
@@ -113,7 +115,7 @@
         if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
         if (action === 'pr') void refreshPr(true);
         if (action === 'copy') void owner.copy(thread.cwd);
-        if (action === 'move') openMovePicker(owner, thread);
+        pickMoveItem(owner, thread, action);
         if (action === 'archive') void archiveThread(owner, thread.id);
       }
     );
@@ -165,6 +167,9 @@
         {#if thread.pinned}<Pin size={12} />{/if}
         <ThreadState {thread} {now} />
       </span>
+      {#if pending}
+        <span class="pending" data-testid="thread-pending" title={pending}><FolderInput size={12} /><span>{pending}</span></span>
+      {/if}
     </button>
     {#if meta}
     <div class="metadata">
@@ -253,6 +258,23 @@
     display: inline-flex;
     flex: none;
     color: var(--color-accent);
+  }
+  /* A move waiting for the turn's end: the accent, like the marker the move leaves in the chat. */
+  .pending {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--color-accent);
+  }
+  .pending span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pending :global(svg) {
+    flex: none;
   }
   .metadata {
     display: flex;

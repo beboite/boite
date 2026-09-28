@@ -127,14 +127,46 @@ test('a row dropped on another project moves there; its own project and a foreig
   expect(boite.classList.contains('drop')).toBe(false);
 });
 
-test('a running thread cannot be dragged, and a move asked anyway says to stop it first', async () => {
+test('a running thread stays draggable; its move asks first, waits for the turn, and Cancel move drops it', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
-  expect(card('t-bench').getAttribute('draggable')).toBe('false');
+  // t-bench waits on a permission: its turn still runs.
+  expect(card('t-bench').getAttribute('draggable')).toBe('true');
+  await workspace.select(store, 't-bench');
+  await waitFor(() => store.openThread?.id === 't-bench');
+
+  const answer = moveThread(store, 't-bench', 'p-notes');
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  expect(document.body.textContent).toContain('The thread moves to notes when the current turn ends.');
+  expect(query('[data-testid=confirm-ok]').textContent?.trim()).toBe('Move after this turn');
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  expect(await answer).toBe(true);
+
+  // The row stays where it is and says where it goes, and so does the header.
+  await waitFor(() => card('t-bench').querySelector('[data-testid=thread-pending]') !== null);
+  expect(inProject('t-bench', 'p-boite')).toBe(true);
+  expect(card('t-bench').querySelector('[data-testid=thread-pending]')?.textContent?.trim()).toBe('Moves to notes after this turn');
+  expect(query('[data-testid=thread-header] [data-testid=thread-pending]').getAttribute('title')).toBe('Moves to notes after this turn');
+
+  query('[data-thread-id="t-bench"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=move-cancel]') !== null);
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
+  expect(query('[data-testid=context-menu] [data-value=move-cancel]').textContent?.trim()).toBe('Cancel move');
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=thread-pending]') === null);
+  expect(store.threads.find((t) => t.id === 't-bench')?.pendingMove ?? null).toBeNull();
+});
+
+test('a working sub-thread keeps the move out, and a move asked anyway says to stop it first', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-descriptors"]') !== null);
+  const parent = store.threads.find((t) => t.id === 't-descriptors')!;
+  store.threads = [...store.threads, { ...parent, id: 't-child', title: 'child', parentThreadId: 't-descriptors', status: 'running' }];
+  await waitFor(() => card('t-descriptors').getAttribute('draggable') === 'false');
   const move = vi.spyOn(store, 'move');
-  expect(await moveThread(store, 't-bench', 'p-notes')).toBe(false);
+  expect(await moveThread(store, 't-descriptors', 'p-boite')).toBe(false);
   expect(move).not.toHaveBeenCalled();
-  expect(store.error).toBe('Stop the turn before moving this thread');
+  expect(store.error).toBe('A sub-thread is working; stop it before moving this thread');
   store.error = null;
 });
 

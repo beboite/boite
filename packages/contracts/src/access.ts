@@ -69,6 +69,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // already lists, never a path: the core picks the folder or makes the
   // worktree, as it does for `threads.create` and `threads.fork`.
   'threads.move',
+  // Taking back a move the device may ask for: it only forgets what waits in
+  // memory for the turn's end, and changes nothing on disk.
+  'threads.moveCancel',
   'threads.pin',
   'threads.markRead',
   'threads.subscribe',

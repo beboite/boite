@@ -134,8 +134,8 @@ export class FakeContext {
   readonly usage = new Map<ThreadId, Usage>();
   /** The note each moved thread's next message carries, as the core's `move-note:` setting (`thread-move.ts`). */
   readonly moveNotes = new Map<ThreadId, MoveNotice>();
-  /** Moves an agent asked for during its turn, applied when the turn ends, as the core's `ThreadMove.waiting`. */
-  readonly waitingMoves = new Map<ThreadId, string>();
+  /** Moves asked for during a turn, applied when it ends, as the core's `ThreadMove.waiting`. Memory only. */
+  readonly waitingMoves = new Map<ThreadId, { projectId: string; by: 'user' | 'agent'; stopBackground: boolean | undefined; at: number }>();
   /** Turns this session finished, added to the seeded ledger `usage.history` draws. */
   readonly finished: FakeFinishedTurn[] = [];
   usageSeeded = true;

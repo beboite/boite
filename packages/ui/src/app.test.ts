@@ -570,9 +570,8 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
   expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Move to project', 'Archive']);
-  // t-bench waits on a permission: its turn still runs, so it cannot move yet, and the row says why.
-  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(true);
-  expect(query('[data-testid=context-menu] [data-value=move]').title).toBe('Stop the turn before moving this thread');
+  // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);

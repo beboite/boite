@@ -34,13 +34,11 @@ function find(store: Store, threadId: ThreadId): ThreadSummary | null {
 }
 
 /**
- * Whether a turn runs in the thread or one of its sub-threads. The core
- * refuses the move then: a stopped turn can leave half-done edits in the old
- * folder, so the user stops it first and sees what it left.
+ * Whether a sub-thread of this thread works. The core refuses the move then:
+ * the parent's turn end is no moment to move a thread whose child still runs.
+ * The thread's own turn is no reason: its move waits for the turn to end.
  */
 export function moveBlocked(store: Store, threadId: ThreadId): boolean {
-  const thread = find(store, threadId);
-  if (thread && LIVE.includes(thread.status)) return true;
   return store.threads.some((t) => t.parentThreadId === threadId && !t.archived && LIVE.includes(t.status));
 }
 
@@ -56,10 +54,11 @@ export function moveTargets(store: Store, thread: Pick<ThreadSummary, 'projectId
 }
 
 /**
- * The one way the UI moves a thread (row menu, title menu, drag). Background
- * work asks first: stop it, or keep it running in the old folder until the
- * agent's next turn starts in the new one. The target project unfolds so the
- * row stays in sight.
+ * The one way the UI moves a thread (row menu, title menu, drag). A running
+ * turn asks first and the move waits for the turn to end; a second move
+ * replaces the waiting one. Background work asks too: stop it with the move,
+ * or keep it running in the old folder until the agent's next turn starts in
+ * the new one. The target project unfolds so the row stays in sight.
  */
 export async function moveThread(store: Store, threadId: ThreadId, projectId: ProjectId): Promise<boolean> {
   const thread = find(store, threadId);
@@ -69,13 +68,15 @@ export async function moveThread(store: Store, threadId: ThreadId, projectId: Pr
     return false;
   }
   const target = store.projects.find((p) => p.id === projectId);
+  const names = { folder: thread.cwd, project: target ? projectName(target) : projectId };
+  const running = LIVE.includes(thread.status);
   const kinds = [thread, ...store.threads.filter((t) => t.parentThreadId === threadId)].flatMap((t) => t.backgroundWork?.kinds ?? []);
   let stopBackground: boolean | undefined;
   if (kinds.length > 0) {
     const monitors = kinds.every((kind) => kind === 'monitor');
     const choice = await confirm.choose({
-      title: monitors ? strings.threadMove.monitorsTitle : strings.threadMove.backgroundTitle,
-      body: fill(strings.threadMove.backgroundBody, { folder: thread.cwd, project: target ? projectName(target) : projectId }),
+      title: running ? strings.threadMove.runningTitle : monitors ? strings.threadMove.monitorsTitle : strings.threadMove.backgroundTitle,
+      body: fill(running ? strings.threadMove.runningBackgroundBody : strings.threadMove.backgroundBody, names),
       confirmLabel: monitors ? strings.threadMove.stopMonitors : strings.threadMove.stopWork,
       altLabel: strings.threadMove.keep,
       cancelLabel: strings.common.cancel,
@@ -83,6 +84,14 @@ export async function moveThread(store: Store, threadId: ThreadId, projectId: Pr
     });
     if (choice === 'cancel') return false;
     stopBackground = choice === 'confirm';
+  } else if (running) {
+    const go = await confirm.ask({
+      title: strings.threadMove.runningTitle,
+      body: fill(strings.threadMove.runningBody, names),
+      confirmLabel: strings.threadMove.runningConfirm,
+      cancelLabel: strings.common.cancel,
+    });
+    if (!go) return false;
   }
   const moved = await store.move(threadId, projectId, stopBackground);
   if (moved === null) return false;
@@ -104,8 +113,26 @@ export function openMovePicker(store: Store, thread: Pick<ThreadSummary, 'id' | 
   else contextMenu.follow(items, pick);
 }
 
-/** The "Move to project" row of a thread menu, out while a turn runs. */
-export function moveItem(store: Store, threadId: ThreadId): MenuItem {
-  const blocked = moveBlocked(store, threadId);
-  return { id: 'move', label: strings.threadMove.moveTo, disabled: blocked, ...(blocked ? { title: strings.threadMove.stopFirst } : {}) };
+/**
+ * The move rows of a thread menu: "Move to project", out while a sub-thread
+ * works, and "Cancel move" while a move waits for the turn to end. The menu
+ * picks them as `move` and `move-cancel`; `pickMoveItem` answers both.
+ */
+export function moveItems(store: Store, thread: Pick<ThreadSummary, 'id' | 'pendingMove'>): MenuItem[] {
+  const blocked = moveBlocked(store, thread.id);
+  const move: MenuItem = { id: 'move', label: strings.threadMove.moveTo, disabled: blocked, ...(blocked ? { title: strings.threadMove.stopFirst } : {}) };
+  return thread.pendingMove ? [move, { id: 'move-cancel', label: strings.threadMove.cancelMove }] : [move];
+}
+
+/** Answers a pick of `moveItems`' rows; false for any other row. */
+export function pickMoveItem(store: Store, thread: Pick<ThreadSummary, 'id' | 'projectId'>, action: string, anchor?: HTMLElement | null): boolean {
+  if (action === 'move') openMovePicker(store, thread, anchor);
+  else if (action === 'move-cancel') void store.cancelMove(thread.id);
+  else return false;
+  return true;
+}
+
+/** The "Moves to <project> after this turn" line, or null. */
+export function pendingLine(thread: Pick<ThreadSummary, 'pendingMove'>): string | null {
+  return thread.pendingMove ? fill(strings.threadMove.pending, { project: thread.pendingMove.project }) : null;
 }

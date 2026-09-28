@@ -70,8 +70,6 @@ test('the refusals name the field and what was expected', async () => {
   await expect(client.call('threads.move', { threadId: PLAIN, projectId: 'p-notes' })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'projectId', expected: 'another project than the thread\'s own' } });
   await expect(client.call('threads.move', { threadId: PLAIN, projectId: 'p-gone' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
   await expect(client.call('threads.move', { threadId: 't-gone', projectId: 'p-notes' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
-  // t-bench waits on a permission: its turn is still running.
-  await expect(client.call('threads.move', { threadId: 't-bench', projectId: 'p-notes' })).rejects.toMatchObject({ data: { reason: 'turn-in-flight', expected: 'an idle thread' } });
   await expect(client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite', stopBackground: 'yes' as unknown as boolean })).rejects.toMatchObject({ data: { field: 'stopBackground' } });
 });
 
@@ -122,4 +120,60 @@ test('agent.move on an idle thread moves at once, by folder, and refuses an unkn
   expect(await client.call('agent.move', { threadId: PLAIN, project: 'c:/src/boite/' })).toMatchObject({ when: 'done', cwd: 'C:\\src\\boite' });
   await expect(client.call('agent.move', { threadId: PLAIN, project: 'boite' })).rejects.toMatchObject({ data: { field: 'projectId' } });
   await expect(client.call('agent.move', { threadId: PLAIN, project: 'nowhere' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound, data: { field: 'project', expected: 'the id, name or absolute folder of a project added to Boite' } });
+});
+
+/** A turn on `threadId` held by a permission card until `permissions.answer`; answers the turn's id and the card's. */
+async function heldTurn(client: FakeClient, threadId: string): Promise<{ turnId: string; requestId: string }> {
+  const turn = await client.call('turns.start', { threadId, prompt: '[permission] hold on' });
+  let requestId = '';
+  await vi.waitFor(async () => {
+    const card = (await client.call('permissions.list', { threadId })).at(0);
+    expect(card).toBeDefined();
+    requestId = card!.id;
+  }, { timeout: 2000 });
+  return { turnId: turn.id, requestId };
+}
+
+test('a user move during a turn waits for its end and keeps its note; a second move replaces it', async () => {
+  const client = await fake();
+  const pending: string[] = [];
+  client.on('thread.updated', (thread) => { if (thread.id === PLAIN) pending.push(thread.pendingMove?.project ?? '-'); });
+  const { turnId, requestId } = await heldTurn(client, PLAIN);
+
+  const first = await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  expect(first).toMatchObject({ projectId: 'p-notes', cwd: 'C:\\src\\notes', pendingMove: { projectId: 'p-boite', project: 'boite', by: 'user' } });
+  const other = await client.call('projects.drafts', {});
+  expect(other).toBeDefined();
+  const second = await client.call('threads.move', { threadId: PLAIN, projectId: other!.id });
+  expect(second.pendingMove).toMatchObject({ projectId: other!.id, by: 'user' });
+  expect((await client.call('threads.list', {})).find((t) => t.id === PLAIN)?.pendingMove?.projectId).toBe(other!.id);
+
+  await client.call('permissions.answer', { requestId, decision: 'allow' });
+  await finished(client, PLAIN, turnId);
+  const moved = await client.call('threads.get', { threadId: PLAIN });
+  expect(moved).toMatchObject({ projectId: other!.id, pendingMove: null });
+  expect(pending.at(-1)).toBe('-');
+
+  const next = await client.call('turns.start', { threadId: PLAIN, prompt: 'where now' });
+  await finished(client, PLAIN, next.id);
+  const prompt = (await client.call('threads.get', { threadId: PLAIN })).messages.find((m) => m.turnId === next.id && m.role === 'user')?.parts[0];
+  expect(prompt).toMatchObject({ moved: { from: { projectId: 'p-notes' }, to: { projectId: other!.id } } });
+});
+
+test('a cancel drops the waiting move; a stopped turn still applies one; nothing to cancel is refused', async () => {
+  const client = await fake();
+  let held = await heldTurn(client, PLAIN);
+  await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  const cancelled = await client.call('threads.moveCancel', { threadId: PLAIN });
+  expect(cancelled.pendingMove).toBeNull();
+  await expect(client.call('threads.moveCancel', { threadId: PLAIN })).rejects.toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'threadId', expected: 'a thread with a pending move' } });
+  await client.call('permissions.answer', { requestId: held.requestId, decision: 'allow' });
+  await finished(client, PLAIN, held.turnId);
+  expect((await client.call('threads.get', { threadId: PLAIN })).projectId).toBe('p-notes');
+
+  held = await heldTurn(client, PLAIN);
+  await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  await client.call('turns.stop', { threadId: PLAIN });
+  await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: PLAIN })).projectId).toBe('p-boite'), { timeout: 2000 });
+  expect((await client.call('threads.get', { threadId: PLAIN })).turns.find((t) => t.id === held.turnId)?.status).toBe('stopped');
 });

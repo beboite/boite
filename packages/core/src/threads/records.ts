@@ -28,5 +28,6 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
     backgroundWork: tasks.length === 0 ? null : { kinds: tasks.map(task => task.kind), since: Math.min(...tasks.map(task => task.startedAt)) },
+    pendingMove: core.threads?.moves?.pendingOf(thread.id) ?? null,
   };
 }

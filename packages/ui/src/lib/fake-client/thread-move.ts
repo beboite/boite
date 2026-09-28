@@ -25,14 +25,16 @@ function refuse(message: string, data: Record<string, unknown>): RpcFailure {
   return new RpcFailure({ code: RpcErrorCode.Refused, message, data });
 }
 
-type Mode = 'user' | 'agent-request' | 'agent-apply';
+/** As the core's `Phase`: `now` wants the whole family idle, `request` lets the thread's own turn run, `apply` runs once it ended. */
+type Phase = 'now' | 'request' | 'apply';
+type By = 'user' | 'agent';
 const IN_FLIGHT = ['queued', 'running', 'waiting'];
 
 function familyOf(ctx: FakeContext, thread: Thread): Thread[] {
   return [thread, ...[...ctx.threads.values()].filter((one) => one.parentThreadId === thread.id)];
 }
 
-function check(ctx: FakeContext, thread: Thread, projectId: string, stopBackground: boolean | undefined, mode: Mode): Project {
+function check(ctx: FakeContext, thread: Thread, projectId: string, stopBackground: boolean | undefined, phase: Phase): Project {
   const threadId = thread.id;
   if (thread.agentSessionId || thread.projectId === null) {
     throw refuse('a persistent agent session takes its work through Agents and cannot be moved', { threadId, field: 'threadId', expected: 'a conversation thread' });
@@ -47,8 +49,8 @@ function check(ctx: FakeContext, thread: Thread, projectId: string, stopBackgrou
     throw refuse(`thread ${threadId} is already in project ${target.name}`, { threadId, projectId, field: 'projectId', expected: 'another project than the thread\'s own' });
   }
   const busyNow = (one: Thread): boolean => {
-    if (one.id === threadId && mode === 'agent-request') return false;
-    if (one.id === threadId && mode === 'agent-apply') return ctx.inFlight.has(one.id) || one.status === 'running' || one.status === 'waiting';
+    if (one.id === threadId && phase === 'request') return false;
+    if (one.id === threadId && phase === 'apply') return ctx.inFlight.has(one.id) || one.status === 'running' || one.status === 'waiting';
     return IN_FLIGHT.includes(one.status) || ctx.inFlight.has(one.id);
   };
   const busy = familyOf(ctx, thread).find(busyNow);
@@ -78,12 +80,14 @@ function systemMessage(ctx: FakeContext, thread: Thread, part: Message['parts'][
   ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
 }
 
-function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackground: boolean | undefined, mode: Mode): ThreadSummary {
+function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackground: boolean | undefined, phase: Phase, by: By): ThreadSummary {
   if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
     throw refuse('threads.move.stopBackground must be a boolean', { threadId, field: 'stopBackground', expected: 'true, false or absent' });
   }
   const thread = ctx.thread(threadId);
-  const target = check(ctx, thread, projectId, stopBackground, mode);
+  const target = check(ctx, thread, projectId, stopBackground, phase);
+  // Whatever waited is done or overtaken: the row loses its "Moves to" line.
+  forgetWaiting(ctx, thread);
   const placed = wantsWorktree(thread, target) ? fakeWorktree(target.path, thread.title) : null;
   if (placed) registerFakeWorktree(ctx, target.id, placed);
   const cwd = placed?.path
@@ -103,7 +107,7 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
       one.context = null;
       one.promptCache = null;
     }
-    if (mode === 'user') {
+    if (by === 'user') {
       const earlier = ctx.moveNotes.get(one.id);
       const origin = earlier?.from ?? { ...from, cwd: one.cwd };
       if (origin.cwd === cwd) ctx.moveNotes.delete(one.id);
@@ -118,7 +122,7 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
     const summary = ctx.touch(one);
     if (one.id === thread.id) answer = summary;
   }
-  if (mode !== 'user') {
+  if (by === 'agent') {
     const notice: MoveNotice = { from, to, note: fakeAgentMoveNote(from, to, branch), at: ctx.now(), by: 'agent' };
     systemMessage(ctx, thread, { type: 'text', text: '', moved: notice });
   }
@@ -143,38 +147,91 @@ function resolveProject(ctx: FakeContext, threadId: ThreadId, query: string): Pr
   return found;
 }
 
-/** The move an agent asked for during its turn, now that the turn ended. A refusal that appeared since is a system line. */
+function inFlight(ctx: FakeContext, thread: Thread): boolean {
+  return IN_FLIGHT.includes(thread.status) || ctx.inFlight.has(thread.id);
+}
+
+/** The row hears its pending move without a new `updatedAt`, as the core's `announce`. */
+function announce(ctx: FakeContext, thread: Thread): ThreadSummary {
+  const summary = structuredClone(toSummary(thread));
+  ctx.emit('thread.updated', summary);
+  return structuredClone(summary);
+}
+
+function wait(ctx: FakeContext, thread: Thread, projectId: string, by: By, stopBackground: boolean | undefined): ThreadSummary {
+  const at = ctx.now();
+  ctx.waitingMoves.set(thread.id, { projectId, by, stopBackground, at });
+  const project = ctx.projects.find((p) => p.id === projectId);
+  thread.pendingMove = { projectId, project: project?.name ?? projectId, by, at };
+  return announce(ctx, thread);
+}
+
+function forgetWaiting(ctx: FakeContext, thread: Thread): void {
+  ctx.waitingMoves.delete(thread.id);
+  thread.pendingMove = null;
+}
+
+/**
+ * The move asked for during the turn, now that it ended, stopped or failed:
+ * the user's keeps its note, the agent's does not. A refusal that appeared
+ * since is a system line.
+ */
 export function applyWaitingMove(ctx: FakeContext, threadId: ThreadId): void {
-  const projectId = ctx.waitingMoves.get(threadId);
-  if (projectId === undefined) return;
+  const waiting = ctx.waitingMoves.get(threadId);
+  if (waiting === undefined) return;
+  const thread = ctx.threads.get(threadId);
   ctx.waitingMoves.delete(threadId);
   try {
-    move(ctx, threadId, projectId, true, 'agent-apply');
+    move(ctx, threadId, waiting.projectId, waiting.stopBackground ?? false, 'apply', waiting.by);
   } catch (error) {
-    const thread = ctx.threads.get(threadId);
     if (!thread) return;
-    const name = ctx.projects.find((p) => p.id === projectId)?.name ?? projectId;
+    thread.pendingMove = null;
+    const name = ctx.projects.find((p) => p.id === waiting.projectId)?.name ?? waiting.projectId;
     const reason = error instanceof RpcFailure ? error.message : String(error);
-    systemMessage(ctx, thread, { type: 'text', text: `The move to project ${name} the agent asked for did not happen: ${reason}` });
+    const who = waiting.by === 'agent' ? 'the agent' : 'the user';
+    systemMessage(ctx, thread, { type: 'text', text: `The move to project ${name} ${who} asked for did not happen: ${reason}` });
+    announce(ctx, thread);
   }
+}
+
+/** A waiting move goes with an archived thread, as the core's `forget`. */
+export function dropWaitingMove(ctx: FakeContext, thread: Thread): void {
+  forgetWaiting(ctx, thread);
 }
 
 export function threadMoveMethods(ctx: FakeContext) {
   return {
-    'threads.move': async (params) => move(ctx, params.threadId, params.projectId, params.stopBackground, 'user'),
+    'threads.move': async (params) => {
+      const { threadId, projectId, stopBackground } = params;
+      const thread = ctx.thread(threadId);
+      if (!inFlight(ctx, thread)) return move(ctx, threadId, projectId, stopBackground, 'now', 'user');
+      if (stopBackground !== undefined && typeof stopBackground !== 'boolean') {
+        throw refuse('threads.move.stopBackground must be a boolean', { threadId, field: 'stopBackground', expected: 'true, false or absent' });
+      }
+      const target = check(ctx, thread, projectId, stopBackground, 'request');
+      return wait(ctx, thread, target.id, 'user', stopBackground);
+    },
+    'threads.moveCancel': async (params) => {
+      const thread = ctx.thread(params.threadId);
+      if (!ctx.waitingMoves.has(thread.id)) {
+        throw refuse(`thread ${thread.id} has no move waiting for its turn to end`, { threadId: thread.id, field: 'threadId', expected: 'a thread with a pending move' });
+      }
+      forgetWaiting(ctx, thread);
+      return announce(ctx, thread);
+    },
     'agent.move': async (params): Promise<AgentMove> => {
       const { threadId } = params;
       const thread = ctx.thread(threadId);
       const target = resolveProject(ctx, threadId, params.project);
-      check(ctx, thread, target.id, true, 'agent-request');
+      check(ctx, thread, target.id, true, 'request');
       const stopsBackground = familyOf(ctx, thread).some((one) => (one.background?.length ?? 0) > 0);
       const answer = { threadId, projectId: target.id, project: target.name, projectPath: target.path, stopsBackground };
-      if (IN_FLIGHT.includes(thread.status) || ctx.inFlight.has(threadId)) {
-        ctx.waitingMoves.set(threadId, target.id);
+      if (inFlight(ctx, thread)) {
+        wait(ctx, thread, target.id, 'agent', true);
         const plain = target.kind !== 'drafts' && !wantsWorktree(thread, target);
         return { ...answer, cwd: plain ? target.path : null, when: 'turn-end' };
       }
-      const moved = move(ctx, threadId, target.id, true, 'agent-apply');
+      const moved = move(ctx, threadId, target.id, true, 'apply', 'agent');
       return { ...answer, cwd: moved.cwd, when: 'done' };
     },
   } satisfies Partial<FakeMethods>;

@@ -120,8 +120,10 @@ added to its next prompt; the timeline shows "Moved by the agent to
 sub-thread still working. A worktree with uncommitted changes is not refused:
 nothing in the old folder is touched. A move that became impossible by the
 turn's end (the project removed meanwhile) leaves a system line in the thread
-saying why. A pending move lives in memory: a core restart before the turn ends
-drops it.
+saying why. Until then the thread's row shows "Moves to <project> after this
+turn", and the user can cancel it or replace it with a move of their own, which
+waits for the same turn end. A pending move lives in memory: a core restart
+before the turn ends drops it.
 
 `attach` saves a copy in an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread
