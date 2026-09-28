@@ -432,15 +432,18 @@
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
       <Sidebar {store} />
-      <div class="notice framed">
-        <h1>{strings.app.noEndpointTitle}</h1>
-        <p class="muted">{strings.app.noEndpointBody}</p>
-        <button type="button" class="primary" onclick={() => store.showSettings()}>
-          {strings.app.openSettings}
-        </button>
-      </div>
+      <!-- The notice gives way to Settings: the two cards side by side left
+           Settings too narrow for its nav and its page. -->
       {#if store.page === 'settings'}
         {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+      {:else}
+        <div class="notice framed">
+          <h1>{strings.app.noEndpointTitle}</h1>
+          <p class="muted">{strings.app.noEndpointBody}</p>
+          <button type="button" class="primary" onclick={() => store.showSettings()}>
+            {strings.app.openSettings}
+          </button>
+        </div>
       {/if}
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
