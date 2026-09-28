@@ -7,7 +7,7 @@
   import { readTheme, setTheme, type Theme } from '../lib/theme';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
-  import { controlGroups } from '../lib/controls';
+  import { controlGroups } from '../lib/control-groups';
   import type { Store } from '../lib/store.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
 
