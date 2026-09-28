@@ -173,9 +173,12 @@ on September 15 is `boite (de nuit) v2.0.0-nightly.20260915.1`; a new commit tha
 gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 
-The workflow reserves the version tag against the exact commit before building.
-A failed build reuses that version on retry, even on a later day. A reserved tag
-alone is not a successful release. The installer and core carry the nightly
+The workflow reserves the version tag against the exact commit once the checks
+pass, before it publishes the server image and the prerelease. The `release tags`
+ruleset keeps a tag from being deleted, so a build that fails its checks takes
+none, and the next build takes the same number. A build that fails while
+publishing keeps its tag and reuses that version on retry, even on a later day.
+A reserved tag alone is not a successful release. The installer and core carry the nightly
 version through temporary build inputs; source manifests keep their version.
 
 The desktop shares Boite's identifier, installation and data directory, allowing
