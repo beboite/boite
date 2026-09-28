@@ -26,10 +26,9 @@ jobs:
     # Enabled by default; false is the emergency stop for both entry points.
     if: vars.NIGHTLY_ENABLED != 'false' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     outputs:
       changed: ${{ steps.revision.outputs.changed }}
+      reserved: ${{ steps.revision.outputs.reserved }}
       tag: ${{ steps.revision.outputs.tag }}
       version: ${{ steps.revision.outputs.version }}
     steps:
@@ -46,12 +45,6 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/tags?per_page=100" > tags.json
           bun scripts/ci/nightly.ts released.json tags.json
-      - name: Reserve version for this commit
-        if: steps.revision.outputs.changed == 'true' && steps.revision.outputs.reserved != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.revision.outputs.tag }}
-        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
 
   verify:
     needs: revision
@@ -68,8 +61,24 @@ jobs:
       contents: read
       packages: write
 
-  image:
+  # The tag is taken once the checks pass: the release tags ruleset keeps a tag
+  # from being deleted, so one taken before them outlived every failed build.
+  reserve:
     needs: [revision, verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Reserve version for this commit
+        # A step, not the job, is skipped: a skipped job would skip every job after it.
+        if: needs.revision.outputs.reserved != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.revision.outputs.tag }}
+        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+
+  image:
+    needs: [revision, reserve]
     uses: ./.github/workflows/server.yml
     permissions:
       contents: read
