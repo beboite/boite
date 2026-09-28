@@ -36,6 +36,8 @@ let turnCounter = 0;
 let itemCounter = 0;
 let threadId = '';
 let planEnabled = false;
+/** The thread was opened `ephemeral`, the way the core asks for a title. */
+let ephemeral = false;
 /**
  * The turns an interrupt already arrived for, and what is waiting on one. A
  * real server knows a turn from the moment it answers `turn/start`, so an
@@ -251,7 +253,8 @@ async function runTurn(turnId: string, text: string): Promise<void> {
     summary(1, '**Editing** it');
   }
 
-  for (const chunk of chunksOf(plainOf(text))) say(chunk);
+  // An ephemeral thread is a title call: it answers in a few words, not with the request.
+  for (const chunk of chunksOf(ephemeral ? '"Pelican notes."' : plainOf(text))) say(chunk);
 
   for (const directive of directives) {
     switch (directive) {
@@ -484,8 +487,9 @@ function handle(method: string, raw: unknown): unknown {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
       threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
+      ephemeral = params['ephemeral'] === true;
       log(
-        `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}`,
+        `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}${ephemeral ? ' ephemeral' : ''}`,
       );
       const opened = { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
       // `CODEX_FAKE_SLOW_START=<ms>`: an app-server slow to open its thread.
@@ -495,6 +499,7 @@ function handle(method: string, raw: unknown): unknown {
     }
     case 'thread/resume': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
+      ephemeral = false;
       threadId = textOf(params['threadId']);
       log(
         `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,

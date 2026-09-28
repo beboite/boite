@@ -226,7 +226,7 @@ export const fr: Translation = {
     settingsPhone: 'Application et notifications',
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
-    search: 'Trouver une conversation', unread: 'Non lu', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
+    search: 'Trouver une conversation', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
   },
   machines: {
     heading: 'Machines', local: 'Ce PC', projects: 'Projets', recent: 'Récent',
@@ -424,6 +424,14 @@ export const fr: Translation = {
     rename: 'Renommer',
     retitle: 'Regénérer le titre',
     retitling: "Rédaction d'un titre",
+    state: {
+      working: 'En cours',
+      workingFor: 'Travaille depuis {elapsed}',
+      waiting: 'Vous attend',
+      error: 'Échec',
+      done: 'Terminé',
+      queued: 'En attente'
+    },
     pin: 'Épingler',
     unpin: 'Désépingler',
     pinned: 'Épinglée',
@@ -1283,6 +1291,11 @@ export const fr: Translation = {
     reapOrphansHint: "Dix secondes après un tour, un processus dont le parent est sorti est arrêté, comme ceux qu'une commande interrompue laisse derrière elle. Windows seulement.",
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
     asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent la commande boite ask au début d’une session. Codex pose ses questions ainsi nativement.',
+    titleModel: 'Modèle des titres',
+    titleModelHint: 'Le modèle qui nomme une conversation après sa première réponse. Automatique prend l’agent de la conversation sur son petit modèle. Un choix écrit tous les titres avec ce modèle, sur son premier compte connecté.',
+    titleModelAuto: 'Automatique',
+    titleModelAutoHint: 'L’agent de la conversation, petit modèle',
+    titleModelSmall: 'petit',
     numberRange: 'Un nombre entier de {min} à {max}.',
     save: 'Enregistrer',
     saved: 'Enregistré',

@@ -46,7 +46,7 @@ beforeAll(async () => {
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
   // The app opens on a draft; the picker under test is the thread's.
   await page.click(`[data-thread-id="${threadId}"]`);
-  await page.waitFor(`document.querySelector('${selector('thread-status')}')`);
+  await page.waitFor(`document.querySelector('${selector('thread-header')}[data-status]')`);
   await page.waitFor(`document.querySelector('${selector('composer-picker')}')`);
 }, 30_000);
 

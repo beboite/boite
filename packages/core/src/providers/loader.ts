@@ -11,6 +11,7 @@ import type {
   RpcResult,
 } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { writesTitles } from '../drivers/index.ts';
 import { InstallManager } from './install.ts';
 import { detectResolves, HOST_CANDIDATES, hostAgentsEnabled, launcherScriptOnly, profileFor, resolveCommand } from './resolve.ts';
 import { Rejection, validateDescriptor } from './validate.ts';
@@ -91,6 +92,7 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,
     install: installs.stateOf(entry.descriptor.id, profile?.install),
+    titles: writesTitles(entry.descriptor.protocol),
   };
 }
 

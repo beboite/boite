@@ -341,6 +341,8 @@ export interface ProviderSummary {
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
   install: ProviderInstallState | null;
+  /** True when this provider's agent writes thread titles: what Settings offers for `titleModel`. Missing on older cores. */
+  titles?: boolean;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -616,6 +618,12 @@ export interface ThreadSummary {
   branch: string | null;
   permissionMode: PermissionMode;
   status: ThreadStatus;
+  /**
+   * When the turn now running started, what a sidebar row counts its time
+   * from. Also set while the turn waits on the user. Null when no turn runs;
+   * missing on older cores.
+   */
+  runningSince?: Timestamp | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
@@ -1112,6 +1120,21 @@ export interface Settings {
    * Missing on older cores, which read as on.
    */
   asyncQuestions?: boolean;
+  /**
+   * The model that writes every thread's title after its first answer. Null
+   * or missing: each thread's own provider on its small model
+   * (`defaultTitleModel`), under the thread's account. A provider that can no
+   * longer write one falls back to that too.
+   */
+  titleModel?: TitleModel | null;
+}
+
+/** One provider's model, picked in Settings to write thread titles. */
+export interface TitleModel {
+  /** A provider whose summary says `titles`. */
+  providerId: ProviderId;
+  /** A model id that provider lists. */
+  model: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -2073,8 +2096,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   };
   /**
    * A title written from the thread's first prompt and first answer. The
-   * agent's own driver writes it when it can (Claude on one short call to a
-   * small model, echo in memory), the core cuts the first line of the prompt
+   * model `Settings.titleModel` names writes it, else the thread's own agent
+   * on its small model when its driver can (Claude and Codex on one short
+   * call, echo in memory); the core cuts the first line of the prompt
    * otherwise. Refused by name on a thread that has no prompt yet, or while
    * a title is already being written for it. The answer is the thread as
    * saved, `titleSource` saying which of the two wrote it.
@@ -2370,6 +2394,7 @@ export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
 export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
 import type { SpeechModelTier } from './speech-models.ts';

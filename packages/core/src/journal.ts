@@ -329,6 +329,14 @@ export class Journal {
     return rows.map(toTurn);
   }
 
+  /** When the turn this thread now runs started, or null when none runs. */
+  runningSince(threadId: string): number | null {
+    const row = this.db
+      .query("SELECT MIN(started_at) AS since FROM turns WHERE thread_id = ? AND status = 'running'")
+      .get(threadId) as { since: number | null } | null;
+    return row?.since ?? null;
+  }
+
   unfinishedTurns(): Turn[] {
     const rows = this.db.query("SELECT * FROM turns WHERE status IN ('running', 'queued') ORDER BY rowid").all() as TurnRow[];
     return rows.map(toTurn);

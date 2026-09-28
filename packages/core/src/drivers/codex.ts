@@ -2,6 +2,7 @@ import type { ThreadId } from '@boite/contracts';
 import { sessionKey } from './codex/mapping.ts';
 import { readModels } from './codex/models.ts';
 import { CodexSession } from './codex/session.ts';
+import { titleTurn } from './codex/title.ts';
 import { CodexTurn } from './codex/turn.ts';
 import { ModelProbes } from './model-probes.ts';
 import type { Driver, TurnContext, TurnHandle } from './types.ts';
@@ -20,6 +21,7 @@ export function createCodexDriver(): Driver {
     probe: (context) => probes.probe(context),
     probedModels: (providerId, accountId) => probes.models(providerId, accountId),
     forgetProbes: (filter) => probes.forget(filter),
+    title: (context) => titleTurn(context),
 
     startTurn(ctx: TurnContext): TurnHandle {
       const threadId = ctx.thread.id;

@@ -10,10 +10,16 @@
   import { separator, type MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
-  import StatusMark from './StatusMark.svelte';
+  import ThreadState from './ThreadState.svelte';
 
   let { store, screen = $bindable('chat') }: { store: Store; screen: 'chat' | 'threads' | 'activity' } = $props();
   let search = $state('');
+  /** The clock the rows' times read, a minute's precision is all they show. */
+  let now = $state(Date.now());
+  $effect(() => {
+    const timer = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(timer);
+  });
   let machines = $derived(workspace.machines.length ? workspace.machines : [{ id: 'local', label: strings.machines.local, store }]);
   let machine = $derived(machines.find(m => m.store === store));
   /** With one machine its name says nothing, and a working connection needs no word either. */
@@ -97,9 +103,8 @@
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
       <div class="row">
         <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
-          <StatusMark status={row.thread.status} />
           <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{several ? `${projectName(row.project)} · ${row.machine.label}` : projectName(row.project)}</span></span>
-          {#if row.thread.unread}<span class="unread" role="img" aria-label={strings.mobile.unread}></span>{/if}
+          <ThreadState thread={row.thread} {now} />
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
@@ -138,7 +143,6 @@
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
     .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-    .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); }
     .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
     .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 52px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
     .mobile-tabs button.active { color: var(--color-accent); background: transparent; }
