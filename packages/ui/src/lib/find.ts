@@ -1,5 +1,6 @@
 import type { Message } from '@boite/contracts';
 import { visibleAnswer, visibleUserText } from './message-display';
+import { planOf } from './plan';
 
 /** One occurrence of the query: in which message, and which one there, counting from 0. */
 export interface FindHit {
@@ -15,10 +16,21 @@ function occurrences(text: string, needle: string): number {
   return count;
 }
 
-/** What a message shows as text: the prompt, or the answer without its hidden markers. Tool cards are left out. */
+/**
+ * What a message shows as text, in the order the page draws it: the prompt, or
+ * the answer without its hidden markers, and a plan card's plan. Other tool
+ * cards are folded to one line and left out.
+ */
 function readable(message: Message): string {
   return message.parts
-    .flatMap((part) => (part.type === 'text' ? [message.role === 'user' ? visibleUserText(part.text) : visibleAnswer(part.text)] : []))
+    .flatMap((part) => {
+      if (part.type === 'text') return [message.role === 'user' ? visibleUserText(part.text) : visibleAnswer(part.text)];
+      if (part.type === 'tool') {
+        const plan = planOf(part.name, part.input);
+        return plan === null ? [] : [plan];
+      }
+      return [];
+    })
     .join('\n');
 }
 

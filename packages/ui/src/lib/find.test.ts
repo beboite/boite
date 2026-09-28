@@ -22,6 +22,16 @@ test('every occurrence counts, without case, oldest message first, and tool card
   expect(findHits(messages, 'lexer')).toEqual([]);
 });
 
+test('a plan card is searched, since the page draws it whole', () => {
+  const messages = [
+    message('m-1', 'assistant', [
+      { type: 'text', text: 'A parser plan:' },
+      { type: 'tool', toolId: 'k-1', name: 'ExitPlanMode', input: { plan: '# Parser\n1. Split the parser' }, status: 'done' } as never
+    ])
+  ];
+  expect(findHits(messages, 'parser').map((hit) => hit.nth)).toEqual([0, 1, 2]);
+});
+
 test('a hidden goal marker is not a match', () => {
   const messages = [message('m-1', 'assistant', [{ type: 'text', text: 'Done.\n[BOITE_GOAL_COMPLETE]\n' }])];
   expect(findHits(messages, 'goal')).toEqual([]);

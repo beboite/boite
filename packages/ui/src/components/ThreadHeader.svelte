@@ -62,6 +62,8 @@
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      // A phone has no Ctrl+F: this sheet is its way to the find bar.
+      { id: 'find', label: strings.keyboard.commands.find },
       separator(),
       { id: 'archive', label: strings.sidebar.archive, danger: true }
     ];
@@ -95,6 +97,10 @@
     else if (action === 'retitle') void store.retitle(open.id);
     else if (action === 'pin') void store.pin(open.id, !open.pinned);
     else if (action === 'copy') void store.copy(open.cwd);
+    else if (action === 'find') {
+      store.findOpen = true;
+      store.findRequest += 1;
+    }
     else if (action === 'archive') void archiveThread(store, open.id);
   }
 

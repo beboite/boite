@@ -155,6 +155,8 @@
     input {
       flex: 1;
       width: auto;
+      /* An input's own minimum is about twenty characters, which pushed the close button off a phone. */
+      min-width: 0;
     }
   }
 </style>
