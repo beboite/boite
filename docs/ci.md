@@ -179,8 +179,10 @@ Measure actual workflow durations after the first cold and warm runs on GitHub.
 ### Measuring the E2E partition
 
 `bench/e2e.ts` runs every test in both modes and records per-group logs, elapsed
-time, assertions and test names. Its comparison refuses failures, skipped tests
-or a different list of test cases. The parallel measurement uses four local
+time and JUnit reports. Case identities and counts come from JUnit, even when
+Bun suppresses passing console lines. Its comparison requires the serial report
+first and refuses failures, skipped tests or a different list of test cases.
+The parallel measurement uses four local
 processes, including the native shell; CI uses separate runners for those
 groups. Build and stage the shell once, then run from the checkout root:
 
@@ -213,6 +215,24 @@ The comparison reported `Same test cases; elapsed time reduced by 58.9%`.
 Two earlier sharded runs took 123.48 s and 119.56 s against a 272.31 s serial
 reference, with the same 185 cases. These are local measurements with prepared
 builds, not hosted workflow or review-cycle measurements.
+
+The first hosted run of [PR #108](https://github.com/beboite/boite/actions/runs/36480733289)
+passed all checks on its first attempt. Against the medians of successful runs
+from the September 28 PR audit:
+
+| Hosted measurement | Previous median | PR #108 |
+| --- | ---: | ---: |
+| Complete CI workflow | 15 min 41 s | 6 min 57 s |
+| Windows desktop job | 14 min 43 s | 6 min 31 s |
+| Full E2E window | 8 min 28 s | 5 min 35 s |
+
+The E2E window starts with the first preparation step and ends when every E2E
+group, including the native shell, has finished. It includes the native suite's
+wait for the installer build. The hosted logs contain the same 185 cases as the
+local reference. These reductions, 55.7%, 55.7% and 34.1%, compare historical
+medians with one new run; repeated hosted runs are needed to establish a median.
+The desktop job still spent 3 min 32 s building the installer, 1 min 12 s
+compiling and running Rust tests, and 35 s in the native shell E2E suite.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
 They disable background timer throttling and report page state, JavaScript

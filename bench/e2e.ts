@@ -6,17 +6,19 @@
  */
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { readE2eReport } from './e2e-report.ts';
 
 const mode = process.argv[2];
 if (mode === 'compare') {
-  type Report = { seconds: number; tests: number; assertions: number; groups: { cases: string[]; exitCode: number; skipped: number }[] };
+  type Report = { mode: string; seconds: number; tests: number; assertions: number; groups: { cases: string[]; exitCode: number; skipped: number }[] };
   const paths = process.argv.slice(3);
   if (paths.length !== 2) throw new Error('compare requires serial and sharded result.json paths');
   const reports = paths.map((path) => JSON.parse(readFileSync(path, 'utf8')) as Report);
   const [before, after] = reports;
   if (!before || !after) throw new Error('both comparison reports are required');
+  if (before.mode !== 'serial' || after.mode !== 'sharded') throw new Error('expected serial report first, then sharded report');
   for (const report of reports) {
-    if (!(report.seconds > 0) || report.tests === 0 || report.groups.some((group) => group.exitCode !== 0 || group.skipped !== 0)) {
+    if (!(report.seconds > 0) || report.tests === 0 || report.tests !== report.groups.reduce((sum, group) => sum + group.cases.length, 0) || report.groups.some((group) => group.exitCode !== 0 || group.skipped !== 0)) {
       throw new Error('comparison requires two successful runs with no skipped tests');
     }
   }
@@ -46,31 +48,23 @@ const groups = mode === 'serial' ? [{ name: 'all', args: files }] : [
 const started = performance.now();
 const results = await Promise.all(groups.map(async (group) => {
   const log = join(output, `${group.name}.log`);
+  const report = join(output, `${group.name}.xml`);
   const fd = openSync(log, 'w');
   const start = performance.now();
   let exitCode: number;
   try {
     exitCode = await Bun.spawn({
-      cmd: [process.execPath, 'test', ...group.args], cwd: root,
+      cmd: [process.execPath, 'test', ...group.args, '--reporter=junit', `--reporter-outfile=${report}`], cwd: root,
       env: { ...process.env, BOITE_E2E_PREBUILT_UI: '1', BOITE_E2E_FAKE_UI: join(root, 'tests/e2e/.artifacts/fake-ui') },
       stdout: fd, stderr: fd, windowsHide: true,
     }).exited;
   } finally { closeSync(fd); }
   const seconds = (performance.now() - start) / 1000;
-  const text = readFileSync(log, 'utf8');
-  let file = '';
-  const cases: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (line.startsWith('tests') && line.endsWith('.test.ts:')) file = line.slice(0, -1).replaceAll('\\', '/');
-    const pass = /^\(pass\) (.*?) \[[\d.]+ms\]$/.exec(line);
-    if (pass) cases.push(`${file}: ${pass[1]}`);
-  }
+  const parsed = readE2eReport(report);
   const result = {
-    name: group.name, seconds, exitCode, log, cases,
-    assertions: Number(/\s(\d+) expect\(\) calls/.exec(text)?.[1] ?? 0),
-    skipped: Number(/\s(\d+) skip/.exec(text)?.[1] ?? 0),
+    name: group.name, seconds, exitCode, log, report, ...parsed,
   };
-  console.log(`${group.name}: ${seconds.toFixed(2)} s, ${cases.length} passed, exit ${exitCode}`);
+  console.log(`${group.name}: ${seconds.toFixed(2)} s, ${parsed.cases.length} passed, exit ${exitCode}`);
   return result;
 }));
 const result = {
