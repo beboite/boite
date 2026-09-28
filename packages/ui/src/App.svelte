@@ -432,7 +432,7 @@
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
       <Sidebar {store} />
-      <div class="notice">
+      <div class="notice framed">
         <h1>{strings.app.noEndpointTitle}</h1>
         <p class="muted">{strings.app.noEndpointBody}</p>
         <button type="button" class="primary" onclick={() => store.showSettings()}>
@@ -459,7 +459,7 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
-      <main>
+      <main class="framed">
         {#key store}
           <ChatView {store} />
         {/key}
@@ -557,11 +557,29 @@
     flex-direction: column;
   }
 
-  /* Maximized, the panel takes the room and the chat column keeps none. */
+  /* The frame: the cards keep `--frame-gap` from the window's right and bottom
+     edges and from each other. The rails on the left stand on the frame, so
+     only a folded sidebar leaves the chat card a left gap to keep itself. */
+  @media (min-width: 721px) {
+    .body {
+      gap: var(--frame-gap);
+      padding: 0 var(--frame-gap) var(--frame-gap) 0;
+    }
+
+    .body:has(> :global(.sidebar.collapsed)) {
+      padding-left: var(--frame-gap);
+    }
+  }
+
+  /* Maximized, the panel takes the room and the chat column keeps none, not
+     even its edge or the gap beside it. */
   .body.panel-maximized main {
     flex: none;
     width: 0;
     overflow: hidden;
+    border: none;
+    box-shadow: none;
+    margin-right: calc(-1 * var(--frame-gap));
   }
 
   .boot {
@@ -569,12 +587,14 @@
   }
 
   .notice {
-    margin: auto;
+    flex: 1;
+    min-width: 0;
     padding: 40px;
     text-align: center;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 8px;
   }
 

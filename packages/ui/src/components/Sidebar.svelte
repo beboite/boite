@@ -260,8 +260,6 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--color-surface);
-    border-right: 1px solid var(--color-border);
   }
 
   .top {
@@ -297,10 +295,13 @@
   .search input:focus {
     outline: none;
   }
+  /* The two rules of the sidebar stop short of its edges: on the
+     frame a full-width line would run into the window's edge. */
   .views {
     display: flex;
     gap: 3px;
-    padding: 2px 10px 10px;
+    margin: 0 10px;
+    padding: 2px 0 10px;
     border-bottom: 1px solid var(--color-border);
   }
   .views button {
@@ -413,7 +414,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    margin: 0 8px;
+    padding: 6px 0;
     border-top: 1px solid var(--color-border);
   }
   /* The machine button, when there is one, sits alone on the left. */
@@ -431,10 +433,11 @@
       transform: translateY(4px);
     }
   }
+  /* Centred in the frame's gap between the sidebar and the chat card. */
   .resize {
     position: absolute;
     top: 0;
-    right: -3px;
+    right: calc(var(--frame-gap) / -2 - 3px);
     bottom: 0;
     width: 6px;
     height: auto;
@@ -456,6 +459,8 @@
   }
   @media (max-width: 720px) {
     .sidebar {
+      background: var(--color-surface);
+      border-right: 1px solid var(--color-border);
       position: fixed;
       inset: var(--titlebar) auto 0 0;
       z-index: 30;
