@@ -36,6 +36,7 @@ test('owners choose storage in desktop and phone settings, with validation and e
   await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('worktree-storage')}')`);
   expect(await page.evaluate(`${state}.settings.worktreeStorage.mode`)).toBe('project');
+  const schedulerCwd = await page.evaluate(`${state}.threads.find(t => t.id === 't-scheduler').cwd`);
   await capture('worktree-storage-project.png');
   await mode('shared');
   await page.type(id('worktree-storage-directory'), 'relative/path');
@@ -60,7 +61,7 @@ test('owners choose storage in desktop and phone settings, with validation and e
   await page.click(id('worktree-storage-save'));
   await page.waitFor(`${state}.settings.worktreeStorage.mode === 'project'`);
   await capture('worktree-storage-phone-project.png');
-  expect(await page.evaluate(`${state}.threads.find(t => t.id === 't-scheduler').cwd`)).toContain('.boite-worktrees');
+  expect(await page.evaluate(`${state}.threads.find(t => t.id === 't-scheduler').cwd`)).toBe(schedulerCwd);
   await page.click(id('mobile-settings-back'));
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   await page.evaluate(`${state}.principal = 'session'; ${state}.client.becomes('session')`);
