@@ -107,7 +107,8 @@ export function toolGate(host: GateHost): ToolGate {
    * the raw object, a whole `originalFile` for an Edit, that no card shows.
    */
   const postToolUse = async (input: HookInput): Promise<HookJSONOutput> => {
-    if (input.hook_event_name === 'PostToolUse') {
+    // A subagent's tool call is its own conversation: what it took, the main agent would never read.
+    if (input.hook_event_name === 'PostToolUse' && input.agent_id === undefined) {
       const additionalContext = host.head()?.ctx.coordination?.();
       if (additionalContext) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext } };
     }

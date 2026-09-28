@@ -47,6 +47,10 @@ test('an async answer reaches a running Claude turn at its next PostToolUse, not
   harness.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
   const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
   const input = { hook_event_name: 'PostToolUse' as const, session_id: 'answer-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' };
+  // A subagent's tool call is its own conversation: the answer waits for the main agent.
+  const sub = await hook({ ...input, agent_id: 'agent-1', agent_type: 'Explore' }, 'read-0', { signal: new AbortController().signal });
+  expect(JSON.stringify(sub)).not.toContain('SQLite');
+  expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(true);
   const result = JSON.stringify(await hook(input, 'read-1', { signal: new AbortController().signal }));
   expect(result).toContain('Which database?');
   expect(result).toContain('SQLite');
