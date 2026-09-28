@@ -14,8 +14,8 @@
  * Run as `bun <this file> <the descriptor's launch args>`. `GROK_FAKE_LOG`
  * names a file it appends to: `argv:<the args>`, `env <NAME>=<value>`,
  * `initialize`, `loaded:<sessionId>`, `set_model <modelId> <effort>`,
- * `interject <the text as JSON>` and `set_config_option ...`, which must never
- * appear. One `initialize` line per process, so a test can count the processes
+ * `interject <the text as JSON>`, `steer waiting` once a `[steer]` prompt can
+ * take one, and `set_config_option ...`, which must never appear. One `initialize` line per process, so a test can count the processes
  * a probe cache did or did not save.
  */
 import { appendFileSync } from 'node:fs';
@@ -179,6 +179,7 @@ app
       const heard = await new Promise<string | null>((resolve) => {
         interjections.set(sessionId, resolve);
         cancels.set(sessionId, () => resolve(null));
+        log('steer waiting');
       });
       interjections.delete(sessionId);
       cancels.delete(sessionId);

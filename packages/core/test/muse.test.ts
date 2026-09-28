@@ -338,7 +338,8 @@ describe('muse driver', () => {
     const threadId = await museThread(client);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: 'working [steer]' });
-    await waitFor(() => fakeLog().includes('turn/start'));
+    // The host acks `turn/start` before its run exists: a steer sent earlier is refused.
+    await waitFor(() => fakeLog().includes('steer waiting'));
 
     harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
     expect((await finished).status).toBe('done');

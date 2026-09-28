@@ -392,10 +392,9 @@ describe('grok', () => {
   test('an async answer reaches the running turn through _x.ai/interject, not at its end', async () => {
     const client = await startCore();
     const threadId = await grokThread(client);
-    const working = client.next('message.part', (event) => event.part.type === 'thinking', 20000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[steer]' });
-    await working;
+    await waitFor(() => fakeLog().includes('steer waiting'));
 
     harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
     expect((await finished).status).toBe('done');

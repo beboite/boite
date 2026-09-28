@@ -290,6 +290,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
       case 'steer': {
         const heard = await new Promise<string>((resolve) => {
           waitingSteer.set(turnId, resolve);
+          log('steer waiting');
         });
         waitingSteer.delete(turnId);
         say(turnId, `heard: ${heard}`);
