@@ -74,6 +74,9 @@ instead of arriving after it as a second copy.
 - A streamed delta, part or turn looks up its message or turn from the end of
   the loaded timeline, where the item being written sits.
 - The trace is read when the trace surface is on screen, not on every open.
+- A project names its icon by version or stack id only. The image, up to
+  256 KB, is a `projects.icon` call made once per project and version, when a
+  tile first draws it; a list never carries it ([project icons](project-icons.md)).
 
 ## Static files
 

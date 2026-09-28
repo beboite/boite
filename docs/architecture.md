@@ -85,7 +85,9 @@ read of messages, and on close. A delta used to rewrite the whole row, every
 part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. A crash loses at
 most the text of the last write window. Thread activity (goal, loop, tasks) is a
 `settings` row with no event: its payload held the whole loop history and
-nothing read it back. A journal written by a newer release is refused at open
+nothing read it back. A project's detected icon is a `project_icons` row with
+no event either: it is derived from the folder and detected again on request
+([project icons](project-icons.md)). A journal written by a newer release is refused at open
 with the file and both schema versions, before any write. Foreign keys are off,
 so the `ON DELETE CASCADE` clauses are dead; project removal clears every
 thread-keyed table itself. A write that fails on a timer (a full disk, an I/O
