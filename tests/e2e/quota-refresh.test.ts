@@ -21,6 +21,8 @@ async function capture(name: string) {
 
 for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
   test(`${view} restores each quota bar as its account answers`, async () => {
+    // Windows runners may request reduced motion at the OS level.
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
     await page.send('Emulation.setDeviceMetricsOverride', { width: view === 'desktop' || view === 'sidebar' ? 1280 : 390, height: 850, deviceScaleFactor: 1, mobile: view === 'phone' });
     await page.navigate(`${origin}/?fake=1&open=recent${view === 'tray' ? '&view=quotas' : ''}`);
     if (view === 'sidebar') {
@@ -74,5 +76,7 @@ for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
     await capture(`quota-${view}-ready.png`);
     expect(await filter('codex')).toBe('saturate(1)');
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    expect(await page.evaluate(`getComputedStyle(document.querySelector('${track('claude')} .fill')).transitionProperty`)).toBe('none');
   }, 60_000);
 }
