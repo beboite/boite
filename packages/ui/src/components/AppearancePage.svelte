@@ -2,7 +2,7 @@
   import InfoTip from './InfoTip.svelte';
   import { Minus, Plus } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
-  import { FONT_NAMES, FONTS, MONO_NAMES, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
+  import { FONTS, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
   import { percent } from '../lib/format';
   import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
@@ -14,6 +14,22 @@
 
   let accent = $state(untrack(() => readAccent()));
   function pickAccent(hue: number) { accent = hue; setAccent(hue); }
+
+  /*
+   * A face's own name, the same in every language; `system` is the one the
+   * catalogue words. Here rather than in lib/fonts.ts, which the entry chunk
+   * carries: nothing but this picker reads them.
+   */
+  const FONT_NAMES: Record<Exclude<Font, 'system'>, string> = {
+    geist: 'Geist',
+    inter: 'Inter',
+    plex: 'IBM Plex Sans',
+    atkinson: 'Atkinson Hyperlegible',
+    figtree: 'Figtree',
+    source: 'Source Sans 3',
+    dm: 'DM Sans'
+  };
+  const MONO_NAMES: Record<Exclude<Mono, 'system'>, string> = { geist: 'Geist Mono', jetbrains: 'JetBrains Mono' };
 
   let font = $state<Font>(untrack(() => readFont()));
   let mono = $state<Mono>(untrack(() => readMono()));

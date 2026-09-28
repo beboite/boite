@@ -24,22 +24,6 @@ export type Mono = (typeof MONOS)[number];
 export const DEFAULT_FONT: Font = 'inter';
 export const DEFAULT_MONO: Mono = 'geist';
 
-/** A face's own name, the same in every language; `system` is the one the catalogue words. */
-export const FONT_NAMES: Record<Exclude<Font, 'system'>, string> = {
-  geist: 'Geist',
-  inter: 'Inter',
-  plex: 'IBM Plex Sans',
-  atkinson: 'Atkinson Hyperlegible',
-  figtree: 'Figtree',
-  source: 'Source Sans 3',
-  dm: 'DM Sans'
-};
-
-export const MONO_NAMES: Record<Exclude<Mono, 'system'>, string> = {
-  geist: 'Geist Mono',
-  jetbrains: 'JetBrains Mono'
-};
-
 function readKey<T extends string>(key: string, known: readonly T[], fallback: T): T {
   try {
     const value = localStorage.getItem(key);

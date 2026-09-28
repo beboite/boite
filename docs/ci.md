@@ -115,7 +115,11 @@ chunk, the whole UI without its `.br` and `.gz` copies, or the core's
 sit about 10% above the sizes measured on 2026-09-26 (337 KB, 2221 KB and
 649 KB; `main` built a 681 KB core that day). The core's limit moved on
 2026-09-27 to 10% above the 726 KB core of the agent hooks change, whose
-descriptor checks, profile sharing and hook ledger all run at startup. Raise
+descriptor checks, profile sharing and hook ledger all run at startup. The
+whole UI's limit moved on 2026-09-28 to 10% above 3003 KB, once Settings,
+Appearance, Reading bundled seven more faces (about 600 KB of woff2 and their
+licences): a browser fetches a face's file only after it is picked, so the
+entry chunk and the first screen do not carry them. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
