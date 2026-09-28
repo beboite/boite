@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, Bell, Ellipsis, Search, Settings2, SquarePen, UserRoundPlus, Users } from '@lucide/svelte';
   import { chatKey, previewOf, type AgentChat, type AgentEntryKind, type AgentFocus, type AgentsView } from '../../lib/agents.svelte';
-  import { ago } from '../../lib/format';
+  import { ago, exactTime } from '../../lib/format';
   import { separator, type MenuItem } from '../../lib/menu';
   import { fill, strings } from '../../lib/strings';
   import { workspace } from '../../lib/workspace.svelte';
@@ -100,7 +100,7 @@
         <span class="agents-row-text">
           <span class="agents-row-line">
             <strong>{chat.name}</strong>
-            <time datetime={new Date(chat.at).toISOString()}>{ago(chat.at, now)}</time>
+            <time datetime={new Date(chat.at).toISOString()} title={exactTime(chat.at)}>{ago(chat.at, now)}</time>
           </span>
           <span class="agents-row-line">
             <small data-status={chat.status}>{preview(chat)}</small>

@@ -96,6 +96,11 @@ export function duration(startedAt: number, endedAt: number | null): string {
   return millis((endedAt ?? Date.now()) - startedAt);
 }
 
+/** The whole date and time, for the hover title of a relative or shortened stamp. */
+export function exactTime(value: number): string {
+  return new Date(value).toLocaleString(formatLocale());
+}
+
 export function time(value: number): string {
   return formatters().clock.format(new Date(value));
 }

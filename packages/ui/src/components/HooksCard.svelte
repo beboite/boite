@@ -3,7 +3,7 @@
   import { ChevronRight, CircleAlert, RefreshCw } from '@lucide/svelte';
   import { RpcErrorCode, type HookRun, type HooksStatus, type ProviderHooks } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
-  import { clockTime, count as figure } from '../lib/format';
+  import { clockTime, count as figure, exactTime } from '../lib/format';
   import { formatLocale } from '../lib/i18n.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -126,7 +126,7 @@
 {#snippet runRow(run: HookRun)}
   <li class="run" data-testid="hooks-run" data-outcome={run.outcome}>
     <div class="run-head">
-      <span class="when">{clockTime(run.at)}</span>
+      <span class="when" title={exactTime(run.at)}>{clockTime(run.at)}</span>
       <!-- Each piece breaks as a whole, so a phone wraps at a dot, not inside `check-branch.sh`. -->
       <span class="what">{#each runParts(run) as part, index (index)}{#if index > 0}{' · '}{/if}<span class="bit">{part}</span>{/each}</span>
       <span class="verdict {run.outcome}">{strings.hooks.outcomes[run.outcome]}</span>

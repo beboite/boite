@@ -2,7 +2,7 @@
   import { LoaderCircle, Radar } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
   import { backgroundLabel } from '../lib/background';
-  import { ago, elapsed } from '../lib/format';
+  import { ago, elapsed, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { threadState } from '../lib/thread-state';
 
@@ -33,7 +33,7 @@
 </script>
 
 {#if kind === null}
-  <span class="when">{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
+  <span class="when" title={exactTime(thread.lastUserMessageAt ?? thread.createdAt)}>{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
     {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{spent ?? strings.sidebar.state.working}

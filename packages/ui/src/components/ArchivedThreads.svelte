@@ -2,7 +2,7 @@
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
-  import { ago, projectName } from '../lib/format';
+  import { ago, exactTime, projectName } from '../lib/format';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -76,7 +76,7 @@
       {#each threads as thread (thread.id)}
         <li data-thread-id={thread.id}>
           <span class="title" title={thread.title}>{thread.title}</span>
-          <span class="subtle meta">{projectOf(thread)} · {ago(thread.updatedAt)}</span>
+          <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
               {strings.settings.archived.open}

@@ -2,7 +2,7 @@
   import { ChevronRight } from '@lucide/svelte';
   import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
   import { archivedThreads, restoreThread } from '../lib/archive';
-  import { ago } from '../lib/format';
+  import { ago, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -55,7 +55,7 @@
         {#each threads as thread (thread.id)}
           <li data-thread-id={thread.id}>
             <span class="title" title={thread.title}>{thread.title}</span>
-            <span class="when">{ago(thread.updatedAt)}</span>
+            <span class="when" title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt)}</span>
             <button
               class="ghost small"
               data-testid="archived-drawer-restore"
