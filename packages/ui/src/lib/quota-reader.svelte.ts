@@ -57,6 +57,7 @@ export class QuotaReader {
   /** The last rows read, null until the first reading ever. */
   rows = $state.raw<AccountQuota[] | null>(null);
   loading = $state(false);
+  completed = $state.raw<string[]>([]);
   readonly #key: string;
   #latest = 0;
 
@@ -73,9 +74,21 @@ export class QuotaReader {
   /** Only the newest read writes, so a slow first read never lands over a refresh asked meanwhile. */
   async read(client: Client, refresh = false): Promise<void> {
     const request = ++this.#latest;
+    // getRandomValues also works on a plain HTTP connection to a LAN core.
+    const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    this.completed = [];
     this.loading = true;
+    const off = client.on('quotas.progress', (event) => {
+      if (request !== this.#latest || event.requestId !== requestId) return;
+      const rows = this.rows ?? [];
+      const quota = event.quota;
+      this.accept(rows.some((row) => row.accountId === quota.accountId)
+        ? rows.map((row) => row.accountId === quota.accountId ? quota : row)
+        : [...rows, quota]);
+      this.completed = [...this.completed, quota.accountId];
+    });
     try {
-      const rows = await client.call('quotas.list', { refresh });
+      const rows = await client.call('quotas.list', { refresh, requestId });
       if (request === this.#latest) this.accept(rows);
     } catch (error) {
       if (request === this.#latest) {
@@ -83,11 +96,14 @@ export class QuotaReader {
         throw error;
       }
     } finally {
+      off();
       if (request === this.#latest) this.loading = false;
     }
   }
 
   async configure(client: Client, accountId: string, enabled: boolean): Promise<void> {
+    ++this.#latest;
+    this.loading = false;
     this.accept(await client.call('quotas.configure', { accountId, enabled }));
     if (enabled) await this.read(client);
   }

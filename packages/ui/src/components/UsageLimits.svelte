@@ -8,9 +8,9 @@
   /**
    * One card per provider, one block per signed-in account inside it. The
    * account's name shows only when the provider has several; while a new
-   * reading loads, the old one stays and breathes.
+   * reading loads, the old one stays desaturated until that account answers.
    */
-  let { rows, loading = false }: { rows: AccountQuota[]; loading?: boolean } = $props();
+  let { rows, loading = false, completed = [] }: { rows: AccountQuota[]; loading?: boolean; completed?: string[] } = $props();
 
   let groups = $derived(quotaGroups(rows));
   const remaining = (used: number) => Math.max(0, Math.round((100 - used) * 10) / 10);
@@ -31,7 +31,7 @@
         {#if at !== null}<small title={fill(strings.quotas.checked, { time: weekdayTime(at) })}>{weekdayTime(at)}</small>{/if}
       </header>
       {#each group.rows as row (row.accountId)}
-        <article data-testid="usage-limit-account" data-provider={row.providerId}>
+        <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={loading && !completed.includes(row.accountId)}>
           {#if group.rows.length > 1}<h3>{row.label}</h3>{/if}
           {#each row.windows as limit (limit.id)}
             {@const left = remaining(limit.usedPercent)}
@@ -67,17 +67,16 @@
   .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
   .left { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .out .left { color: var(--color-danger); }
-  .track { height: 6px; border-radius: 3px; background: var(--color-surface-3); overflow: hidden; }
-  .fill { height: 100%; border-radius: 3px; background: var(--color-success); transition: width var(--dur-3) var(--ease-out-quint); }
+  .track { height: 6px; border-radius: 3px; background: var(--color-surface-3); overflow: hidden; filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
+  .fill { height: 100%; border-radius: 3px; background: var(--color-success); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .low .fill { background: var(--color-live); }
   small, .muted { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   p { margin: 0; }
   .muted { font-size: var(--text-sm); }
   .error { color: var(--color-danger); font-size: var(--text-sm); }
   /* The reading on screen is the previous one until the new one lands. */
-  .loading .track { animation: breathe 1.1s var(--ease-out-quint) infinite alternate; }
-  @keyframes breathe { from { opacity: 1; } to { opacity: 0.45; } }
+  article[aria-busy='true'] .track { filter: saturate(0.15); }
   @media (prefers-reduced-motion: reduce) {
-    .loading .track { animation: none; }
+    .track, .fill { transition: none; }
   }
 </style>

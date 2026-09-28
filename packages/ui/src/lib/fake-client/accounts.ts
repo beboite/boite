@@ -97,7 +97,14 @@ export function accountMethods(ctx: FakeContext) {
       const rows = quotas(ctx); ctx.emit('quotas.updated', rows); return rows;
     },
     'quotas.list': async (params) => {
-      return quotas(ctx);
+      if (params.requestId !== undefined && (typeof params.requestId !== 'string' || !params.requestId || params.requestId.length > 128)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'quotas.list requestId must be a non-empty string of at most 128 characters' });
+      }
+      const rows = quotas(ctx);
+      for (const quota of rows) {
+        if (params.requestId) ctx.emit('quotas.progress', { requestId: params.requestId, quota });
+      }
+      return rows;
     },
     'accounts.list': async (params) => {
       return structuredClone(ctx.accounts);

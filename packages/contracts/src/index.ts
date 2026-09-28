@@ -1799,7 +1799,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'speech.cancel': { params: { requestId: string }; result: { ok: true } };
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
-  'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
+  'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
@@ -2218,6 +2218,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** The project's whole list, after any change. */
   'todos.updated': { projectId: ProjectId; todos: Todo[] };
   'quotas.updated': AccountQuota[];
+  /** Owner-only partial result, correlated with the caller's quotas.list request. */
+  'quotas.progress': { requestId: string; quota: AccountQuota };
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */

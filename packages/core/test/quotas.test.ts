@@ -4,6 +4,38 @@ import { startTestCore, type TestCore } from './harness.ts';
 let harness: TestCore | undefined;
 afterEach(async () => { await harness?.stop(); harness = undefined; });
 
+test('a blocked provider does not delay another provider or its progress event', async () => {
+  harness = await startTestCore();
+  const slow = harness.core.accounts.add({ providerId: 'claude', label: 'Slow' });
+  const fast = harness.core.accounts.add({ providerId: 'codex', label: 'Fast' });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const reported: string[] = [];
+  let fastReported!: () => void;
+  let deadline!: ReturnType<typeof setTimeout>;
+  const fastReady = new Promise<void>((resolve, reject) => {
+    fastReported = resolve;
+    deadline = setTimeout(() => reject(new Error('Codex quota progress did not arrive while Claude was blocked')), 2_000);
+  });
+  const off = harness.core.bus.onAny((name, payload) => {
+    const event = payload as { requestId: string; quota: { accountId: string } };
+    if (name === 'quotas.progress' && event.requestId === 'progress-test') {
+      reported.push(event.quota.accountId);
+      if (event.quota.accountId === fast.id) fastReported();
+    }
+  });
+  const store = new QuotaStore(harness.core, async (account) => {
+    if (account.providerId === 'claude') await blocked;
+    return [{ id: 'session', label: 'Session', usedPercent: 20, resetsAt: null }];
+  });
+  const reading = store.list(true, 'progress-test');
+  try {
+    await fastReady;
+    expect(reported).toContain(fast.id);
+    expect(reported).not.toContain(slow.id);
+  } finally { clearTimeout(deadline); release(); await reading; off(); }
+});
+
 test('Codex selects the account bucket and respects monthly plans and reset seconds', () => {
   const result = codexQuotaWindows({ rateLimits: { limitId: 'spark', primary: { usedPercent: 99 } }, rateLimitsByLimitId: {
     codex: { planType: 'free', primary: { usedPercent: 31, resetsAt: 1900000000 }, secondary: null },

@@ -21,8 +21,7 @@
   async function refresh(force = false) {
     if (reader.loading || !client || disposed) return;
     try {
-      const [, list] = await Promise.all([reader.read(client, force), client.call('accounts.list', {})]);
-      accounts = list;
+      await Promise.all([reader.read(client, force), client.call('accounts.list', {}).then((list) => { accounts = list; })]);
       error = '';
     }
     catch (cause) { error = String(cause); }
@@ -75,7 +74,7 @@
   <section>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if reader.rows === null}<p class="muted" role="status">{strings.quotas.loading}</p>
-    {:else}<QuotaOverview {rows} loading={reader.loading} connect={() => void action('providers')} />{/if}
+    {:else}<QuotaOverview {rows} loading={reader.loading} completed={reader.completed} connect={() => void action('providers')} />{/if}
   </section>
   <footer><button class="ghost" onclick={() => void action('providers')}><Settings2 size={15} />{strings.quotas.providers}</button><button class="ghost icon" aria-label={strings.quotas.quit} onclick={() => void action('quit')}><Power size={15} /></button></footer>
 </main>

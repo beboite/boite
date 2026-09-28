@@ -82,6 +82,10 @@ describe('the access gate', () => {
       harness.core.bus.emit('core.log', { level: 'error', message: 'private diagnostic', at: Date.now() });
       harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
       harness.core.bus.emit('quotas.updated', []);
+      harness.core.bus.emit('quotas.progress', { requestId: 'private-read', quota: {
+        accountId: 'private-account', providerId: 'claude', providerName: 'Claude', label: 'Private', enabled: true,
+        status: 'ready', windows: [], checkedAt: 1, error: null,
+      } });
       harness.core.bus.emit('settings.updated', harness.core.settings.get());
       harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
       harness.core.bus.emit('delegation.changed', { threadId });
