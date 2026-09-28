@@ -1,17 +1,15 @@
 /*
- * How this device starts work: which composer options stay in the bar, where
- * a new conversation goes, and what an empty side panel opens on.
+ * How this device starts work: where a new conversation goes, what an empty
+ * side panel opens on, and whether the developer tools show.
  *
  * The tour's question, developer or not, writes all of it at once. It is a
  * preset, not a mode: nothing reads the answer itself, only these settings,
- * and each one changes on its own afterwards (the Options menu's pins, the
- * Appearance page, the developer tools switch in General). Stored per device beside the other local preferences,
+ * and each one changes on its own afterwards (the Appearance page, the
+ * developer tools switch in General). Stored per device beside the other local preferences,
  * since a phone paired to the same core has its own screen and its own habits.
  */
 
 export type Profile = 'everyday' | 'developer';
-/** The composer options a pin can keep in the bar. The permission mode is never hidden. */
-export type PinId = 'effort' | 'worktree';
 /** Where the app opens: the drafts folder, or the last project. New thread always follows the project on screen. */
 export type StartIn = 'drafts' | 'project';
 /** What an empty side panel opens on: its launcher, or one surface directly. */
@@ -20,7 +18,6 @@ export type PanelStart = 'launcher' | 'files' | 'changes';
 export interface WorkPrefs {
   /** The last answer to the tour's question, kept only so the tour can show it. */
   profile: Profile | null;
-  pins: Record<PinId, boolean>;
   startIn: StartIn;
   panel: PanelStart;
   /** The terminal and the process trace: tools a developer reaches for and nobody else needs to see. */
@@ -29,24 +26,23 @@ export interface WorkPrefs {
 
 export const WORK_STORAGE_KEY = 'boite.work';
 
-const PINS: readonly PinId[] = ['effort', 'worktree'];
 const STARTS: readonly StartIn[] = ['drafts', 'project'];
 const PANELS: readonly PanelStart[] = ['launcher', 'files', 'changes'];
 
 /** What each answer writes. */
 export const PRESETS: Record<Profile, Omit<WorkPrefs, 'profile'>> = {
-  everyday: { pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files', developer: false },
-  developer: { pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes', developer: true }
+  everyday: { startIn: 'drafts', panel: 'files', developer: false },
+  developer: { startIn: 'project', panel: 'changes', developer: true }
 };
 
-/** A device that has not answered yet: the calm bar, the drafts first. */
+/** A device that has not answered yet: the drafts first. */
 export function freshWork(): WorkPrefs {
-  return { profile: null, ...PRESETS.everyday, pins: { ...PRESETS.everyday.pins } };
+  return { profile: null, ...PRESETS.everyday };
 }
 
-/** An install that predates the question keeps every chip where it was, the panel's launcher and its tools. */
+/** An install that predates the question keeps opening on its project, the panel's launcher and its tools. */
 export function migratedWork(): WorkPrefs {
-  return { profile: null, pins: { effort: true, worktree: true }, startIn: 'project', panel: 'launcher', developer: true };
+  return { profile: null, startIn: 'project', panel: 'launcher', developer: true };
 }
 
 /** A stored record, or null when it is missing or does not read like one. */
@@ -54,13 +50,10 @@ export function parseWork(raw: string | null): WorkPrefs | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return null;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Partial<WorkPrefs>;
-    const pins = typeof record.pins === 'object' && record.pins !== null ? record.pins : null;
-    if (!pins) return null;
     return {
       profile: record.profile === 'everyday' || record.profile === 'developer' ? record.profile : null,
-      pins: Object.fromEntries(PINS.map((id) => [id, pins[id] === true])) as Record<PinId, boolean>,
       startIn: STARTS.includes(record.startIn as StartIn) ? (record.startIn as StartIn) : 'project',
       panel: PANELS.includes(record.panel as PanelStart) ? (record.panel as PanelStart) : 'launcher',
       // A record from before the switch keeps what its answer meant; no answer was a working setup.
@@ -117,12 +110,7 @@ class Work {
 
   choose(profile: Profile): void {
     const preset = PRESETS[profile];
-    this.#write({ profile, pins: { ...preset.pins }, startIn: preset.startIn, panel: preset.panel, developer: preset.developer });
-  }
-
-  pin(id: PinId, on: boolean): void {
-    if (this.current.pins[id] === on) return;
-    this.#write({ ...this.current, pins: { ...this.current.pins, [id]: on } });
+    this.#write({ profile, startIn: preset.startIn, panel: preset.panel, developer: preset.developer });
   }
 
   setStartIn(startIn: StartIn): void {

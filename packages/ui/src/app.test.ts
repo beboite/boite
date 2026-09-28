@@ -538,8 +538,8 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
   expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5');
-  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Xhigh');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
 
   // The dots are filled up to the one that is live, and no further.
   const filled = Array.from(document.querySelectorAll('[data-dot]')).filter((dot) => dot.classList.contains('on'));
@@ -550,7 +550,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
 
   // The draft carries the effort into the thread the first send creates.
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
   press('Escape');
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Think harder about the caps';

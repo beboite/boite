@@ -61,14 +61,13 @@ test('titlebar details open and scroll to the card on the first and later clicks
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
   await capture('titlebar-first-click');
-  await page.click('[data-settings-section="conversations"]');
-  await page.waitFor(`document.querySelector('[data-settings-section="conversations"]').classList.contains('chosen')`);
-  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-conversations');
-  expect(await page.evaluate(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`)).toBe(false);
+  // General lists no sections in the nav: the user scrolls away by hand, and the next click brings the card back.
+  await page.evaluate(`document.getElementById('settings-conversations').scrollIntoView({ block: 'start' })`);
+  expect(await page.evaluate(`document.querySelector('${id('settings-tab-general')}').hasAttribute('aria-expanded')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('.subcategories.open') === null`)).toBe(true);
   await page.evaluate('window.__appUpdateScrollTarget = null');
   await page.click(id('titlebar-update-details'));
-  await page.waitFor(`document.querySelector('[data-settings-section="app-update"]').classList.contains('chosen')`);
-  expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
+  await page.waitFor(`window.__appUpdateScrollTarget === 'settings-app-update'`);
 }, 30_000);
 
 test('the titlebar installs with confirmation without leaving chat', async () => {
