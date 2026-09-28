@@ -1,16 +1,18 @@
 <script lang="ts">
-  import { Brain, Pin, Zap } from '@lucide/svelte';
+  import { Brain, Zap } from '@lucide/svelte';
   import type { EffortLevel } from '@boite/contracts';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
-  import { fill, strings } from '../lib/strings';
+  import { strings } from '../lib/strings';
   import { levelName } from '../lib/format';
 
   /**
    * The reasoning chip and its popover: one dot per level of the model's scale,
    * filled up to the active one. A click on a dot or its name, a drag along the
    * track, or the arrows move it, and none of them close the popover: the level
-   * is a setting of the model the composer already runs.
+   * is a setting of the model the composer already runs. A model with a fast
+   * mode puts its switch at the top left of the popover, and the chip carries
+   * a bolt while it is on.
    */
   let {
     levels,
@@ -18,9 +20,7 @@
     onpick,
     speeds = [],
     speed = null,
-    onspeed = () => {},
-    pinned = false,
-    onpin
+    onspeed = () => {}
   }: {
     levels: EffortLevel[];
     /** The level the thread or draft runs, the model's own default when it picked none. */
@@ -29,10 +29,6 @@
     speeds?: { id: string; label: string; description?: string }[];
     speed?: string | null;
     onspeed?: (id: string | null) => void;
-    /** Whether this device keeps the chip in the bar at the model's default. */
-    pinned?: boolean;
-    /** The chip's own pin, so the Options menu never lists the effort twice. */
-    onpin?: (on: boolean) => void;
   } = $props();
 
   const popover = new Closing();
@@ -149,14 +145,9 @@
   >
     <Brain size={14} strokeWidth={1.75} />
     {current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}
+    <!-- A fast mode switched on stays in sight with the popover closed. -->
+    {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
   </button>
-
-  {#if speeds.length > 0}
-    <button type="button" class="chip speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
-      <Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} />
-      {#if selectedSpeed}<span data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
-    </button>
-  {/if}
 
   {#if popover.shown}
     <div
@@ -172,11 +163,13 @@
       {onkeydown}
     >
       <div class="heading">
-        <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
-        {#if onpin}
-          {@const pinLabel = fill(pinned ? strings.composer.unpinOption : strings.composer.pin, { option: strings.composer.effortTitle })}
-          <button type="button" class="ghost icon pin" class:on={pinned} aria-pressed={pinned} aria-label={pinLabel} title={pinLabel} data-testid="composer-pin-effort" onclick={() => onpin(!pinned)}><Pin size={13} strokeWidth={1.75} /></button>
+        {#if speeds.length > 0}
+          <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
+            <Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} />
+            {#if selectedSpeed}<span data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
+          </button>
         {/if}
+        <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}
@@ -213,18 +206,16 @@
 </div>
 
 <style>
-.effort { position: relative; display: inline-flex; gap: 4px; }
+.effort { position: relative; display: inline-flex; }
 .trigger { cursor: pointer; height: var(--control-sm); }
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
+.fast-mark { display: inline-flex; margin-left: -2px; color: var(--color-accent); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-.heading { position: relative; display: flex; justify-content: center; align-items: center; min-height: 22px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
-.pin { position: absolute; right: -4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; color: var(--color-subtle); }
-.pin:active:not(:disabled) { transform: translateY(-50%) scale(0.97); }
-.pin.on { color: var(--color-accent); }
-.pin.on :global(svg) { fill: currentColor; }
-.level { white-space: nowrap; }
-.speed { height: var(--control-sm); color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
+/* Three columns: the fast switch on the left, the level in the middle whatever the switch's width. */
+.heading { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 24px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
+.level { grid-column: 2; white-space: nowrap; }
+.speed { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-left: -4px; padding: 0 6px; border: none; border-radius: var(--radius-md); background: transparent; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
 .speed :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
 .speed:hover { color: var(--color-accent); background: var(--color-accent-soft); box-shadow: 0 0 12px var(--color-accent-soft); }
 .speed:hover :global(svg) { transform: rotate(-12deg) scale(1.16); }

@@ -875,11 +875,6 @@ export const strings = {
     placeholderNoProject: 'Message the agent',
     /** A new conversation, before anything is sent. */
     placeholderNew: 'What do you want to do?',
-    /** The desktop button holding the options the bar does not show. */
-    moreOptions: 'Options',
-    /** A pin in that menu: pressed, the option has its own chip in the bar. */
-    pin: 'Keep {option} in the bar',
-    unpinOption: 'Remove {option} from the bar',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
@@ -1462,6 +1457,13 @@ export const strings = {
     providers: 'Manage providers',
     unavailable: 'No quota reading available.',
     refresh: 'Refresh quotas',
+    /** The sidebar's gauge button and the popover it opens. */
+    glance: 'Account limits',
+    /** The popover's way to the Limits page in Settings. */
+    allLimits: 'Limits page',
+    /** A read of the limits failed; the core's reason follows. */
+    readFailed: "Couldn't read the limits: {error}",
+    retry: 'Try again',
     quit: 'Quit Boite',
   },
   harnessUpdates: {
@@ -1614,7 +1616,7 @@ export const strings = {
     low: 'Low',
     medium: 'Medium',
     high: 'High',
-    xhigh: 'Extra high',
+    xhigh: 'Xhigh',
     max: 'Max',
     ultra: 'Ultra',
     ultrathink: 'Ultrathink',
@@ -1688,10 +1690,10 @@ export const strings = {
     profile: {
       title: 'First, which one are you?',
       everyday: "I'm not a developer! Don't confuse me with code and commands!",
-      everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, the bar stays simple, and the agent asks before it acts.',
+      everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, and the agent asks before it acts.',
       developer: "I'm a developer, give me the works.",
-      developerHint: 'The app opens on your last project, effort and worktree stay in the bar, and the panel opens on the changes.',
-      later: "Nothing is taken away either way. The composer's Options menu and Settings change any of it."
+      developerHint: 'The app opens on your last project, conversations show the terminal and the process trace, and the panel opens on the changes.',
+      later: "Nothing is taken away either way. Settings change any of it."
     },
 
     welcome: {
@@ -1703,7 +1705,7 @@ export const strings = {
     agents: {
       title: 'A conversation that follows your work',
       body: 'Switch agents, dictate a message, inspect the result. Stay in the same thread.',
-      demoModel: 'Claude Sonnet 5',
+      demoModel: 'Sonnet 5',
       demoEffort: 'High',
       demoMode: 'Ask'
     },

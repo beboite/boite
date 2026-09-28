@@ -31,7 +31,7 @@ export function seedAccounts() {
       executable: 'C:\\Users\\you\\.local\\bin\\claude.exe',
       models: [
         {
-          id: 'claude-fable-5-1', name: 'Claude Fable 5.1', badge: 'new', effort: {
+          id: 'claude-fable-5-1', name: 'Fable 5.1', badge: 'new', effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -44,7 +44,7 @@ export function seedAccounts() {
           }
         },
         {
-          id: 'claude-opus-5', name: 'Claude Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
+          id: 'claude-opus-5', name: 'Opus 5', speeds: [{ id: 'fast', label: 'Fast' }], effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -57,7 +57,7 @@ export function seedAccounts() {
           }
         },
         {
-          id: 'claude-sonnet-5', name: 'Claude Sonnet 5', default: true, effort: {
+          id: 'claude-sonnet-5', name: 'Sonnet 5', default: true, effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -70,7 +70,7 @@ export function seedAccounts() {
           }
         },
         {
-          id: 'claude-fable-5', name: 'Claude Fable 5', legacy: true, effort: {
+          id: 'claude-fable-5', name: 'Fable 5', legacy: true, effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -80,7 +80,7 @@ export function seedAccounts() {
           }
         },
         {
-          id: 'claude-opus-4-8', name: 'Claude Opus 4.8', legacy: true, effort: {
+          id: 'claude-opus-4-8', name: 'Opus 4.8', legacy: true, effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -90,7 +90,7 @@ export function seedAccounts() {
           }
         },
         {
-          id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', legacy: true, effort: {
+          id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', legacy: true, effort: {
             levels: [
               { id: 'low', label: 'Low' },
               { id: 'medium', label: 'Medium' },
@@ -99,7 +99,7 @@ export function seedAccounts() {
             default: 'high'
           }
         },
-        { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', legacy: true }
+        { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', legacy: true }
       ],
       install: null,
       capabilities: {
