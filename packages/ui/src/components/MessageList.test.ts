@@ -390,6 +390,29 @@ test('what arrives while the reader is scrolled up is counted on the way back, a
   client.close();
 });
 
+test('a thread reopened where the reader left it, above the bottom, counts what arrives after', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  live.readingPositions.set('t-long', { top: 0, pinned: false, heights: new Map() });
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()?.textContent?.trim()).toBe('Jump to latest');
+
+  messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-new-1' });
+  scrollHeight = messages.length * ESTIMATE;
+  await settle();
+  expect(jumpButton()?.textContent?.trim()).toBe('1 new message');
+  live.detach();
+  client.close();
+});
+
 test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async () => {
   window.localStorage.clear();
   // jsdom measures no range; the bar only reads one to decide whether to scroll.

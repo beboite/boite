@@ -322,7 +322,11 @@
     if (!box) return;
     if (!restoredReading) {
       restoredReading = true;
-      if (savedReading && !savedReading.pinned) box.scrollTop = savedReading.top;
+      if (savedReading && !savedReading.pinned) {
+        box.scrollTop = savedReading.top;
+        // What is loaded now is the baseline: the button counts what arrives after.
+        untrack(markSeen);
+      }
     }
     viewHeight = box.clientHeight;
     scrollTop = box.scrollTop;

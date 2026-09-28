@@ -568,6 +568,9 @@
     if (text.trim().length > 0) {
       writeStash(key, text);
       recall = null;
+      // The text set aside is plain text: the next prompt typed is not an edit of a sent one.
+      const state = stateForInput();
+      if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
       return;
     }
