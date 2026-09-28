@@ -3,13 +3,22 @@
   // file in the side panel, which already reads text, shows pictures and offers
   // a download for the rest. "Show in folder" hands the path to the system file
   // manager, only in the shell on its own core, and never opens the file itself.
-  import { FileText, FolderOpen } from '@lucide/svelte';
+  import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePenLine, FilePlus2, FileMinus2, Folder, FolderOpen } from '@lucide/svelte';
   import { revealFile } from '../lib/links';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import type { TurnFile } from '../lib/turn-files';
+  import { turnFileTree, type TurnFile, type TurnFileNode } from '../lib/turn-files';
 
   let { store, files }: { store: Store; files: TurnFile[] } = $props();
+  let tree = $derived(turnFileTree(files));
+  let expanded = $state<Record<string, boolean>>({});
+  let allExpanded = $state(false);
+  let hasFolders = $derived(tree.some((node) => node.kind === 'folder'));
+
+  function toggleAll(): void {
+    allExpanded = !allExpanded;
+    expanded = {};
+  }
 
   const CHANGE_LABEL = {
     created: () => strings.chat.fileCreated,
@@ -33,30 +42,66 @@
 </script>
 
 <section class="turn-files" data-testid="turn-files" aria-label={strings.chat.turnFiles}>
-  <span class="section-label">{strings.chat.turnFiles}</span>
+  <header>
+    <span>{strings.chat.turnFiles}</span>
+    <span class="count">{files.length}</span>
+    {#if hasFolders}
+      <button type="button" class="ghost small icon expand" data-testid="turn-files-expand"
+        title={allExpanded ? strings.chat.collapseFileFolders : strings.chat.expandFileFolders}
+        aria-label={allExpanded ? strings.chat.collapseFileFolders : strings.chat.expandFileFolders}
+        onclick={toggleAll}>
+        {#if allExpanded}<ChevronsDownUp size={14} />{:else}<ChevronsUpDown size={14} />{/if}
+      </button>
+    {/if}
+  </header>
+  <div class="tree">{@render branch(tree, 0)}</div>
+</section>
+
+{#snippet fileIcon(file: TurnFile)}
+  <span class="file-icon" data-testid="turn-file-change" title={CHANGE_LABEL[file.change]()}>
+    {#if file.change === 'created'}<FilePlus2 size={14} strokeWidth={1.75} />
+    {:else if file.change === 'deleted'}<FileMinus2 size={14} strokeWidth={1.75} />
+    {:else}<FilePenLine size={14} strokeWidth={1.75} />{/if}
+    <span class="visually-hidden">{CHANGE_LABEL[file.change]()}</span>
+  </span>
+{/snippet}
+
+{#snippet branch(nodes: TurnFileNode[], depth: number)}
   <ul>
-    {#each files as file (file.path)}
-      <li class="row" data-change={file.change}>
+    {#each nodes as node (node.key)}
+      {#if node.kind === 'folder'}
+        {@const open = expanded[node.key] ?? allExpanded}
+        <li>
+          <button type="button" class="folder-row" data-testid="turn-file-folder" aria-expanded={open}
+            style:--depth={depth} title={node.name}
+            onclick={() => expanded[node.key] = !open}>
+            <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
+            {#if open}<FolderOpen size={14} strokeWidth={1.75} />{:else}<Folder size={14} strokeWidth={1.75} />{/if}
+            <span class="folder">{node.name}</span>
+            <span class="count">{node.count}</span>
+          </button>
+          {#if open}{@render branch(node.children, depth + 1)}{/if}
+        </li>
+      {:else}
+      {@const file = node.file}
+      <li class="row" data-change={file.change} style:--depth={depth} title={file.path}>
         {#if openable(file)}
           <button
             type="button"
             class="open"
             data-testid="turn-file"
-            aria-label={fill(strings.chat.openFile, { name: file.name })}
+            aria-label={`${fill(strings.chat.openFile, { name: file.name })}, ${CHANGE_LABEL[file.change]()}`}
             onclick={() => store.panel.openFile(file.relative!)}
           >
-            <FileText size={14} strokeWidth={1.75} />
+            {@render fileIcon(file)}
             <span class="name">{file.name}</span>
-            {#if file.folder}<span class="folder">{file.folder}</span>{/if}
           </button>
         {:else}
           <span class="open" data-testid="turn-file">
-            <FileText size={14} strokeWidth={1.75} />
+            {@render fileIcon(file)}
             <span class="name">{file.name}</span>
-            {#if file.folder}<span class="folder">{file.folder}</span>{/if}
           </span>
         {/if}
-        <span class="change" data-testid="turn-file-change">{CHANGE_LABEL[file.change]()}</span>
         {#if store.pickerAvailable && file.absolute !== null && file.change !== 'deleted'}
           <button
             type="button"
@@ -70,23 +115,41 @@
           </button>
         {/if}
       </li>
+      {/if}
     {/each}
   </ul>
-</section>
+{/snippet}
 
 <style>
   .turn-files {
     display: flex;
     flex-direction: column;
-    gap: 4px;
     /* The answer's parts sit 4px in; the card lines up with them. */
     margin: 12px 0 0 4px;
-    padding: 8px 6px 6px;
-    border: 1px solid var(--color-border);
+    background: var(--color-surface);
     border-radius: var(--radius-md);
+    overflow: hidden;
   }
 
-  .section-label { padding: 0 6px; }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--row);
+    padding: 6px 12px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+  }
+
+  .count {
+    flex: none;
+    color: var(--color-muted-foreground);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+  .expand { margin-left: auto; }
+  .tree { padding: 0 6px 6px; }
 
   ul {
     list-style: none;
@@ -100,7 +163,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: var(--control-sm);
+    min-height: var(--control);
+    padding-left: calc(8px + var(--depth) * 14px + 22px);
     border-radius: var(--radius-sm);
   }
 
@@ -113,8 +177,8 @@
     gap: 8px;
     min-width: 0;
     height: auto;
-    min-height: var(--control-sm);
-    padding: 0 6px;
+    min-height: var(--control);
+    padding: 0;
     border: 0;
     border-radius: var(--radius-sm);
     background: none;
@@ -127,16 +191,18 @@
   /* The row carries the hover, so the button inside it stays flat. */
   button.open:hover:not(:disabled) { background: none; }
   button.open:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
-  .open :global(svg) { flex: none; color: var(--color-muted-foreground); }
+  .file-icon { display: flex; flex: none; color: var(--color-muted-foreground); }
 
   .name {
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    font-weight: 400;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .folder {
+    flex: 1;
     min-width: 0;
     font-size: var(--text-xs);
     color: var(--color-muted-foreground);
@@ -145,16 +211,38 @@
     text-overflow: ellipsis;
   }
 
-  [data-change='deleted'] .name { text-decoration: line-through; color: var(--color-muted-foreground); }
-
-  .change {
-    flex: none;
-    padding-right: 6px;
-    font-size: var(--text-xs);
+  .folder-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--control);
+    height: auto;
+    padding: 4px 8px 4px calc(8px + var(--depth) * 14px);
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    font-weight: 400;
     color: var(--color-muted-foreground);
   }
+  .folder-row :global(svg) { flex: none; }
+  .folder-row :global(.chevron) { transition: transform var(--dur-2); }
+  .folder-row :global(.expanded) { transform: rotate(90deg); }
+  .folder-row:hover { background: var(--color-hover); }
+  .folder-row:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
-  [data-change='created'] .change { color: var(--color-success); }
+  [data-change='deleted'] .name { text-decoration: line-through; color: var(--color-muted-foreground); }
 
-  .reveal { flex: none; }
+  [data-change='created'] .file-icon { color: var(--color-success); }
+  [data-change='deleted'] .file-icon { color: var(--color-danger); }
+
+  .reveal { flex: none; opacity: 0; }
+  .row:hover .reveal, .row:focus-within .reveal { opacity: 1; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  @media (pointer: coarse), (max-width: 720px) {
+    .folder-row, .row, .open { min-height: var(--touch-target); }
+    .reveal { opacity: 1; }
+  }
 </style>

@@ -687,7 +687,9 @@ export const fr: Translation = {
       other: 'Utiliser son outil {tool}'
     },
     permissionTechnical: 'Détails techniques',
-    turnFiles: 'Fichiers de cette réponse',
+    turnFiles: 'Fichiers modifiés',
+    expandFileFolders: 'Déplier tous les dossiers',
+    collapseFileFolders: 'Replier tous les dossiers',
     fileCreated: 'Nouveau',
     fileChanged: 'Modifié',
     fileDeleted: 'Supprimé',

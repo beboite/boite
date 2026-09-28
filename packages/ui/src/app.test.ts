@@ -1514,10 +1514,22 @@ test('a finished answer lists the files it changed, and a row opens one in the p
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
-  const row = query('[data-testid=turn-files] li');
+  const folder = query<HTMLButtonElement>('[data-testid=turn-file-folder]');
+  expect(folder.textContent).toContain('src');
+  expect(folder.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=turn-file]')).toBeNull();
+  folder.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') !== null);
+  expect(folder.getAttribute('aria-expanded')).toBe('true');
+  query<HTMLButtonElement>('[data-testid=turn-files-expand]').click();
+  await waitFor(() => query('[data-testid=turn-files-expand]').getAttribute('aria-label') === 'Collapse all folders');
+  query<HTMLButtonElement>('[data-testid=turn-files-expand]').click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') === null);
+  folder.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') !== null);
+  const row = query('[data-testid=turn-files] li[data-change]');
   expect(row.querySelector('.name')?.textContent).toBe('app.ts');
-  expect(row.querySelector('.folder')?.textContent).toBe('src');
-  expect(row.querySelector('[data-testid=turn-file-change]')?.textContent).toBe('Changed');
+  expect(row.querySelector('[data-testid=turn-file-change]')?.textContent?.trim()).toBe('Changed');
   // A browser has no file manager to hand the path to.
   expect(row.querySelector('[data-testid=turn-file-reveal]')).toBeNull();
 

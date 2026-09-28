@@ -700,7 +700,9 @@ export const strings = {
       other: 'Use its {tool} tool'
     },
     permissionTechnical: 'Technical details',
-    turnFiles: 'Files from this answer',
+    turnFiles: 'Changed files',
+    expandFileFolders: 'Expand all folders',
+    collapseFileFolders: 'Collapse all folders',
     fileCreated: 'New',
     fileChanged: 'Changed',
     fileDeleted: 'Deleted',
