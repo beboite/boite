@@ -1504,6 +1504,17 @@ export const strings = {
     },
     /** The worktrees a thread leaves on disk, and their removal by hand. */
     worktrees: {
+      storage: 'Storage location',
+      storageProject: 'In each project',
+      storageShared: 'One shared folder',
+      storageProjectHint: 'Inside each project, under',
+      storageDirectory: 'Folder on this machine',
+      storagePlaceholder: 'Absolute folder path',
+      storageBrowse: 'Choose a folder',
+      storageSharedHint: 'Each project gets its own subfolder. Projects with the same name stay separate.',
+      storageNewOnly: 'Applies to new worktrees. Existing worktrees stay where they are.',
+      storageInvalid: 'Enter an absolute folder path on the machine that runs your agents.',
+      storageSaveFailed: 'Could not save the storage location. Check the path and connection, then try again.',
       heading: 'Worktrees',
       intro: 'A thread started with its own worktree works on a boite/ branch beside the project. The worktree stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
       show: 'Show worktrees',

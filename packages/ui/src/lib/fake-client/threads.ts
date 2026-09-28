@@ -15,7 +15,7 @@ import { dropWaitingMove, fakeMoveNote } from './thread-move';
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
   const project = ctx.projects.find(p => p.id === mission?.projectId);
-  const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`) : null;
+  const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`, undefined, ctx.settings.worktreeStorage, project.id) : null;
   if (project && placed) registerFakeWorktree(ctx, project.id, placed);
   const now = Date.now();
   const thread: Thread = { id: `t-${++ctx.seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
@@ -117,9 +117,9 @@ export function threadMethods(ctx: FakeContext) {
       const at = ctx.now();
       const title = params.title !== undefined && params.title.length > 0 ? params.title : 'New thread';
       // The core's own placement: a branch named after the title, the
-      // worktree beside the repository. No git here, only the two strings.
+      // worktree in the configured storage. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
-      const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch, ctx.settings.worktreeStorage, project.id);
       if (placed) registerFakeWorktree(ctx, project.id, placed);
       // The core makes a dated folder per draft; the fake only names it.
       const draftFolder = project.kind === 'drafts' && !params.cwd
@@ -394,7 +394,7 @@ export function threadMethods(ctx: FakeContext) {
       if (!project) throw ctx.notFound('project', source.projectId);
       if (params.worktree === true && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id, field: 'worktree', expected: false } });
       const title = `${source.title} (fork)`;
-      const placed = params.worktree === true ? fakeWorktree(project.path, title) : null;
+      const placed = params.worktree === true ? fakeWorktree(project.path, title, undefined, ctx.settings.worktreeStorage, project.id) : null;
       if (placed) registerFakeWorktree(ctx, project.id, placed);
       const now = ctx.now();
       const id = `t-${++ctx.seq}`;

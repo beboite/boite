@@ -89,10 +89,10 @@ describe('a thread in its own worktree', () => {
     expect(slugOf('Fix the login: retry on 401!')).toBe('fix-the-login-retry-on-401');
     expect(slugOf('   ')).toBe('thread');
     expect(slugOf('a'.repeat(60))).toBe('a'.repeat(40));
-    expect(worktreeRoot(join('D:', 'Dev', 'boite'))).toBe(join('D:', 'Dev', '.boite-worktrees', 'boite'));
+    expect(worktreeRoot(join('D:', 'Dev', 'boite'))).toBe(join('D:', 'Dev', 'boite', '.boite', 'worktrees'));
   });
 
-  test('the branch is boite/<slug>, the worktree is beside the repository, and the journal keeps both', async () => {
+  test('the worktree lives inside the project without dirtying it, and the journal keeps its branch and path', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();
     const thread = await client.call('threads.create', {
@@ -105,12 +105,37 @@ describe('a thread in its own worktree', () => {
     expect(thread.branch).toBe('boite/fix-the-login');
     expect(thread.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login'));
     expect(existsSync(join(thread.cwd, '.git'))).toBe(true);
+    expect(thread.cwd).toBe(join(project.path, '.boite', 'worktrees', 'fix-the-login'));
+    expect(git(project.path, 'status', '--porcelain')).toBe('');
     expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/boite/fix-the-login');
     expect(harness.core.journal.getThread(thread.id)?.branch).toBe('boite/fix-the-login');
     expect(harness.core.journal.getThread(thread.id)?.cwd).toBe(thread.cwd);
     // The git calls ran under the thread's id, so the trace has them.
     const processes = await client.call('trace.get', { threadId: thread.id });
     expect(processes.some((record) => record.exe === 'git')).toBe(true);
+  });
+
+  test('storage changes affect new worktrees only and separate repositories with the same name', async () => {
+    const first = await repoProject('one/repo');
+    const second = await repoProject('two/repo');
+    const accountId = await echoAccount();
+    const create = (projectId: string, title: string) => client.call('threads.create', { projectId, title, providerId: 'echo', accountId, worktree: {} });
+    const original = await create(first.id, 'Original');
+    const directory = join(harness.dataDir, 'shared');
+    await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory } });
+    const a = await create(first.id, 'Same title');
+    const b = await create(second.id, 'Same title');
+    expect(a.cwd.startsWith(directory)).toBe(true);
+    expect(b.cwd.startsWith(directory)).toBe(true);
+    expect(a.cwd).not.toBe(b.cwd);
+    expect(harness.core.threads.require(original.id).cwd).toBe(original.cwd);
+    expect(existsSync(original.cwd)).toBe(true);
+    await client.call('settings.set', { worktreeStorage: { mode: 'project', directory } });
+    const back = await create(first.id, 'Back');
+    expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', 'back'));
+    expect((await client.call('worktrees.list', { projectId: first.id })).map(w => w.path.replaceAll('\\', '/')))
+      .toContain(a.cwd.replaceAll('\\', '/'));
+    expect(harness.core.journal.getSetting('settings')).toMatchObject({ worktreeStorage: { mode: 'project', directory } });
   });
 
   test('a second thread with the same title gets -2, and a wanted branch is honoured or refused', async () => {

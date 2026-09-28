@@ -88,7 +88,7 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
   const target = check(ctx, thread, projectId, stopBackground, phase);
   // Whatever waited is done or overtaken: the row loses its "Moves to" line.
   forgetWaiting(ctx, thread);
-  const placed = wantsWorktree(thread, target) ? fakeWorktree(target.path, thread.title) : null;
+  const placed = wantsWorktree(thread, target) ? fakeWorktree(target.path, thread.title, undefined, ctx.settings.worktreeStorage, target.id) : null;
   if (placed) registerFakeWorktree(ctx, target.id, placed);
   const cwd = placed?.path
     ?? (target.kind === 'drafts' ? fakeDraftFolder(target.path, thread.title, new Date(ctx.now()), new Set([...ctx.threads.values()].map((one) => one.cwd))) : target.path);

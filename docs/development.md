@@ -139,7 +139,7 @@ word lists the project's files, ranked by `projects.files` on the word after
 it, and the pick writes the path in as `@src/lib/store.ts`. That is plain text
 in the prompt: Claude Code reads a mention as the file itself, every other
 agent gets a path relative to its working directory. The core walks the project
-once per query burst (a five second hold), skips `.git`, `node_modules` and the
+once per query burst (a five second hold), skips `.git`, `.boite`, `node_modules` and the
 names the root `.gitignore` lists outright, and stops at twenty thousand files,
 saying so in `capped`. A glob or a negation in `.gitignore` is not read, so a
 tree ignored through one still shows up in the menu.
@@ -156,8 +156,16 @@ client that gets no field keeps the chip. On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
 `-3` when the name is taken, or the `branch` the call names), the directory
-is `<parent of the project>/.boite-worktrees/<project>/<slug>`, beside the
-repository and on its volume, and the thread's `cwd` is that directory with
+defaults to `<project>/.boite/worktrees/<slug>`. Settings > General > Worktrees
+offers a shared folder instead, with `<project-name>-<project-id>/<slug>`
+under it so repositories with the same name stay separate. On a phone, owners
+reach the same setting through Settings > Worktrees. `settings.worktreeStorage`
+stores `{ mode: 'project', directory: null }` by default or
+`{ mode: 'shared', directory: '<absolute path on the core machine>' }`.
+Changing storage affects new worktrees only. Existing threads keep their
+`cwd`, and prepared agent workspaces retain their recorded path across restarts.
+Nested worktree folders are excluded through Git's local `info/exclude`,
+without changing `.gitignore`. The thread's `cwd` is that directory with
 `branch` set, which the header shows as a badge. A project that is not a git
 repository, a missing git, a branch that already exists: each is refused by
 name and no thread is written. The git calls run under the thread's id, so
@@ -166,8 +174,8 @@ where they are: the branch may carry work nobody merged, and deleting it is a
 person's call, made through `worktrees.remove`.
 
 `worktrees.list { projectId }` reads `git worktree list` for the project's
-repository and returns every linked worktree, the core's own under
-`.boite-worktrees` and any made by hand, but never the main checkout or the
+repository and returns every linked worktree, including older storage locations
+and any made by hand, but never the main checkout or the
 project's own folder. Each entry says:
 
 - `dirty`: `git status --untracked-files=normal` lists something, untracked

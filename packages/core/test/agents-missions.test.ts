@@ -59,7 +59,7 @@ test('mission artifacts retry after completion, review waits for execution and t
   } finally { await h.stop(); }
 }, 20000);
 
-test('shutdown during workspace preparation leaves one durable branch for recovery', async () => {
+test('shutdown and a storage change during workspace preparation retain its recorded path', async () => {
   const h = await startTestCore();
   let next: Core | undefined;
   try {
@@ -71,6 +71,7 @@ test('shutdown during workspace preparation leaves one durable branch for recove
     h.core.worktrees.ensure = async (...args) => { prepared = await ensure(...args); await held; return prepared; };
     await client.call('agents.task.acquire', { taskId: task.id, agentId: agent.id, expectedRevision: task.revision });
     await waitFor(() => !!prepared);
+    await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory: join(h.dataDir, 'new-storage') } });
     const closing = h.core.agentRuntime.close();
     release(); await closing;
     expect(h.core.workforce.records.list('session')).toHaveLength(0);

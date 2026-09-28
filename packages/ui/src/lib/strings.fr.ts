@@ -1440,6 +1440,17 @@ export const fr: Translation = {
       open: 'Ouvrir'
     },
     worktrees: {
+      storage: 'Emplacement de stockage',
+      storageProject: 'Dans chaque projet',
+      storageShared: 'Un dossier commun',
+      storageProjectHint: 'Dans chaque projet, sous',
+      storageDirectory: 'Dossier sur cette machine',
+      storagePlaceholder: 'Chemin absolu du dossier',
+      storageBrowse: 'Choisir un dossier',
+      storageSharedHint: 'Chaque projet a son sous-dossier. Les projets de même nom restent séparés.',
+      storageNewOnly: 'S’applique aux nouveaux worktrees. Les worktrees existants gardent leur emplacement.',
+      storageInvalid: 'Saisis un chemin absolu sur la machine qui exécute tes agents.',
+      storageSaveFailed: 'Impossible de sauvegarder cet emplacement. Vérifie le chemin et la connexion, puis réessaie.',
       heading: 'Worktrees',
       intro: 'Une conversation lancée avec son propre worktree travaille sur une branche boite/ à côté du projet. Le worktree reste sur le disque une fois la conversation archivée. Supprimez ceux dont vous n’avez plus besoin : le dossier et sa branche partent.',
       show: 'Afficher les worktrees',

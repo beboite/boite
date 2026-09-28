@@ -55,6 +55,20 @@ function browserOrigin(value: unknown): string | null {
  */
 export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck {
   const next: Partial<Settings> = { ...patch };
+  if (patch.worktreeStorage !== undefined) {
+    const storage = patch.worktreeStorage;
+    if (!storage || typeof storage !== 'object' || !['project', 'shared'].includes(storage.mode)) {
+      return { ok: false, field: 'worktreeStorage', message: 'worktreeStorage.mode must be project or shared' };
+    }
+    const directory = typeof storage.directory === 'string' ? storage.directory.trim() : storage.directory;
+    // Accept either host's absolute paths; the core checks its own OS before use.
+    const absolute = typeof directory === 'string' && directory.length > 0 && !/[\u0000-\u001f]/.test(directory)
+      && (/^\//.test(directory) || /^[a-z]:[\\/]/i.test(directory) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(directory));
+    if (!absolute && !(storage.mode === 'project' && directory === null)) {
+      return { ok: false, field: 'worktreeStorage', message: 'worktreeStorage.directory must be an absolute folder path, or null in project mode' };
+    }
+    next.worktreeStorage = { mode: storage.mode, directory } as Settings['worktreeStorage'];
+  }
   if (patch.publicUrl !== undefined && patch.publicUrl !== null) {
     const origin = publicOrigin(patch.publicUrl);
     if (origin === null) {
