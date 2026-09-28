@@ -167,9 +167,10 @@ describe('worktrees.remove', () => {
     const dirty = addWorktree(project, 'dirty');
     writeFileSync(join(dirty, 'notes.txt'), 'new\n');
     const unmerged = addWorktree(project, 'unmerged');
-    git(unmerged, 'commit', '-q', '--allow-empty', '-m', 'only here');
+    // Two messages: two empty commits on one parent in the same second would be one commit.
+    git(unmerged, 'commit', '-q', '--allow-empty', '-m', 'only in unmerged');
     const both = addWorktree(project, 'both');
-    git(both, 'commit', '-q', '--allow-empty', '-m', 'only here');
+    git(both, 'commit', '-q', '--allow-empty', '-m', 'only in both');
     writeFileSync(join(both, 'notes.txt'), 'new\n');
 
     await expect(client.call('worktrees.remove', { projectId: project.id, path: dirty })).rejects.toMatchObject({
