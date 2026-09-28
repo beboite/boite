@@ -2,6 +2,7 @@ import {
   RpcErrorCode,
   type CoreInfo,
   type HookRun,
+  type MemoryEvent,
   type Principal,
   type RpcEventName,
   type RpcEvents,
@@ -203,6 +204,17 @@ export class FakeClient implements ObservableClient {
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
   emitCoreLog(level: RpcEvents['core.log']['level'], message: string): void {
     this.#ctx.emit('core.log', { level, message, at: this.#ctx.now() });
+  }
+
+  emitMemory(event: MemoryEvent): void {
+    const ctx = this.#ctx;
+    ctx.memoryState = event.state;
+    ctx.emit('resources.memory', structuredClone(event));
+    if (event.threadId === null) return;
+    const thread = ctx.threads.get(event.threadId);
+    if (!thread) return;
+    thread.memoryEvents = [...(thread.memoryEvents ?? []), event].slice(-100);
+    ctx.emitToThread(event.threadId, 'thread.memory', { ...event, threadId: event.threadId });
   }
 
   /**

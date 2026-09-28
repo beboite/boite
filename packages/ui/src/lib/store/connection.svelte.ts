@@ -486,6 +486,7 @@ export class Connection {
     // What `bench/startup.ts` reads: the first moment the app holds its data.
     if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
     void s.loadHarnessUpdates();
+    void s.refreshMemory();
     if (open && reopened) {
       await reopened;
       // The socket resubscribed the agent and the team, but what they said

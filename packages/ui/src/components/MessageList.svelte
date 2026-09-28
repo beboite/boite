@@ -13,6 +13,7 @@
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
   import MoveMarker from './MoveMarker.svelte';
+  import MemoryRow from './MemoryRow.svelte';
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
@@ -51,7 +52,7 @@
   /** The runs this thread started, each a card where it began. */
   const workflowRows = $derived(new Map(store.workflowsOf(threadId).filter(run => run.rootThreadId === threadId).map(run => [`workflow:${run.id}`, run])));
   const timeline = $derived.by(() => {
-    if (letters.length === 0 && team.length === 0 && workflowRows.size === 0) return messages;
+    if (letters.length === 0 && team.length === 0 && workflowRows.size === 0 && memoryRows.size === 0) return messages;
     const ids = new Set(letters.map(letter => letter.id));
     const visible = messages.filter(message => !coordinationPlaceholder(message, ids));
     const forwarded = letters.map((letter): Message => ({
@@ -68,8 +69,10 @@
       createdAt: Math.min(...team.map(agent => agent.thread.createdAt))
     }] : [];
     const runs: Message[] = [...workflowRows].map(([id, run]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: run.createdAt }));
-    return [...visible, ...forwarded, ...activity, ...runs].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
+    return [...visible, ...forwarded, ...activity, ...runs, ...memory].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   });
+  const memoryRows = $derived(new Map((store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []).map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
@@ -567,6 +570,8 @@
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+          {:else if memoryRows.has(message.id)}
+            <MemoryRow event={memoryRows.get(message.id)!} />
           {:else if movedBy(message)}
             <MoveMarker notice={movedBy(message)!} />
           {:else if message.role === 'user'}

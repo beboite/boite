@@ -41,6 +41,7 @@ import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
+import { readMemoryEvents } from './threads/memory-read.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
@@ -133,6 +134,7 @@ export class ThreadStore {
       ...thread,
       ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
       messages: page.messages,
+      memoryEvents: readMemoryEvents(this.core.journal, threadId),
       commands: this.agentState.commands.get(threadId) ?? [],
       background: this.agentState.background.get(threadId) ?? [],
       activity: this.core.activity.get(threadId),

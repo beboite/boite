@@ -1,4 +1,4 @@
-import type { MemoryEvent, MemoryState, Settings } from '@boite/contracts';
+import type { MemoryEvent, MemoryState, MemoryStatus, Settings } from '@boite/contracts';
 import { totalmem } from 'node:os';
 import type { Bus } from './bus.ts';
 import { decideMemory, initialMemoryPolicy, type MemoryProcess } from './memory-guard-logic.ts';
@@ -13,6 +13,11 @@ export class MemoryGuard {
   constructor(private readonly bus: Bus, private readonly platform: ProcessPlatform) {}
 
   get state(): MemoryState { return this.policy.state; }
+
+  status(agentBytes: number): MemoryStatus {
+    if (this.limits === null) throw new Error('Memory limits have not been initialized');
+    return { state: this.state, agentBytes, availableBytes: this.platform.machineMemory()?.availableBytes ?? null, limits: { ...this.limits } };
+  }
 
   applySettings(settings: Settings): void {
     this.limits = resolveMemoryLimits(settings, this.platform.machineMemory()?.totalBytes ?? totalmem());

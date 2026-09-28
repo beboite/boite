@@ -19,7 +19,7 @@ export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
 
 /** The row part of a thread, without what only an open thread carries. */
 function summaryOf(thread: Thread): ThreadSummary {
-  const { messages: _messages, turns: _turns, commands: _commands, background: _background, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
+  const { memoryEvents: _memoryEvents, messages: _messages, turns: _turns, commands: _commands, background: _background, activity: _activity, messagesBefore: _before, messagesFrom: _from, ...summary } = thread;
   return summary;
 }
 

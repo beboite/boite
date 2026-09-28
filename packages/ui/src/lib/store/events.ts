@@ -178,6 +178,12 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('scheduler.updated', (state) => {
     s.scheduler = state;
   });
+  on('resources.memory', (event) => ctx.workbench.memoryEvent(event));
+  on('thread.memory', (event) => {
+    for (const thread of threads.threadSnapshots(event.threadId)) {
+      thread.memoryEvents = [...(thread.memoryEvents ?? []), event].slice(-100);
+    }
+  });
   on('account.login', (event) => {
     accounts.loginChanges.set(event.accountId, ++accounts.loginRevision);
     if (event.state === 'done') {
@@ -214,6 +220,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('settings.updated', (settings) => {
     s.settings = settings;
+    void s.refreshMemory();
   });
   on('keybindings.updated', (keybindings) => {
     s.keybindings = keybindings;

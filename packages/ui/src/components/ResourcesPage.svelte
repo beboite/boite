@@ -12,6 +12,9 @@
 
   let cpuCap = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
   let memoryCap = $state(untrack(() => store.settings?.threadMemoryCapMb ?? 0));
+  let memoryBudget = $state(untrack(() => store.settings?.agentMemoryBudgetMb ?? 0));
+  let memoryReserve = $state(untrack(() => store.settings?.memoryReserveMb ?? 0));
+  const resources = $derived([...store.resources].sort((a, b) => b.load.memoryBytes - a.load.memoryBytes));
   let confirming = $state<ThreadId | null>(null);
 
   async function kill(threadId: ThreadId) {
@@ -61,11 +64,29 @@
   </section>
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
-    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, threadMemoryCapMb: memoryCap}); }}>
+    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, agentMemoryBudgetMb: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve}); }}>
       <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
-      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input type="number" min="0" max="65536" required bind:value={memoryCap} /></label>
+      <label><span class="name">{strings.settings.agentMemoryBudgetMb}<InfoTip topic={strings.settings.agentMemoryBudgetMb} text={strings.settings.agentMemoryBudgetHint} /></span><input aria-label={strings.settings.agentMemoryBudgetMb} data-testid="memory-budget" type="number" min="0" required bind:value={memoryBudget} />
+        {#if memoryBudget === 0 && store.memory}<span class="hint" data-testid="memory-budget-auto">{strings.resources.auto(store.memory.limits.agentMemoryBudgetMb)}</span>{/if}
+      </label>
+      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input aria-label={strings.settings.threadMemoryCapMb} data-testid="memory-cap" type="number" min="0" required bind:value={memoryCap} />
+        {#if memoryCap === 0 && store.memory}<span class="hint" data-testid="memory-cap-auto">{strings.resources.auto(store.memory.limits.threadMemoryCapMb)}</span>{/if}
+      </label>
+      <label><span class="name">{strings.settings.memoryReserveMb}<InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
+        {#if memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
+      </label>
       <button type="submit" class="primary">{strings.settings.save}</button>
     </form>
+  </section>
+  <section class="card" data-testid="memory-status">
+    <h2>{strings.resources.memory}<InfoTip topic={strings.resources.memory} text={strings.resources.memoryHint} /></h2>
+    {#if store.memory}
+      <dl class="memory-reading">
+        <div><dt>{strings.resources.agents}</dt><dd>{bytes(store.memory.agentBytes)} / {bytes(store.memory.limits.agentMemoryBudgetMb * 1048576)}</dd></div>
+        <div><dt>{strings.resources.available}</dt><dd>{store.memory.availableBytes === null ? strings.resources.unknown : bytes(store.memory.availableBytes)} / {bytes(store.memory.limits.memoryReserveMb * 1048576)}</dd></div>
+        <div><dt>{strings.resources.state}</dt><dd data-state={store.memoryState}>{strings.resources.states[store.memoryState ?? store.memory.state]}</dd></div>
+      </dl>
+    {:else}<p class="hint">{strings.resources.unknown}</p>{/if}
   </section>
   <div class="group-heading" id="settings-tasks">
     <h2 class="tasks-heading">{strings.protection.tasks}<span class="live-dot" aria-hidden="true"></span></h2>
@@ -75,7 +96,7 @@
     <p class="empty" data-testid="resources-empty">{strings.resources.empty}</p>
   {/if}
 
-  {#each store.resources as entry (entry.threadId)}
+  {#each resources as entry (entry.threadId)}
     <section class="card flush" data-testid="resource-row" data-thread-id={entry.threadId}>
       <div class="head">
         <StatusMark status={entry.status} />
@@ -116,7 +137,12 @@
 </div>
 
 <style>
-  form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: end; }
+  .memory-reading { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 0; font-size: var(--text-sm); }
+  dt { color: var(--color-muted-foreground); }
+  dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+  dd[data-state="tight"] { color: var(--color-live); }
+  dd[data-state="critical"] { color: var(--color-danger); }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
   form button { justify-self: start; }
   form label { display: grid; gap: 6px; justify-items: start; }
   form .name { display: inline-flex; align-items: center; font-size: var(--text-sm); color: var(--color-muted-foreground); }

@@ -1017,6 +1017,8 @@ export interface ActivityIteration {
 }
 
 export interface Thread extends ThreadSummary {
+  /** The latest 100 memory notices, oldest first, including those missed while disconnected. */
+  memoryEvents?: MemoryEvent[];
   activity?: ThreadActivity;
   /**
    * Set when `threads.get` answered an `after`: `messages` starts at this
@@ -1180,6 +1182,13 @@ export interface SchedulerState {
 }
 
 export type MemoryState = 'ok' | 'tight' | 'critical';
+
+export interface MemoryStatus {
+  state: MemoryState;
+  agentBytes: number;
+  availableBytes: number | null;
+  limits: Pick<Settings, 'agentMemoryBudgetMb' | 'threadMemoryCapMb' | 'memoryReserveMb'>;
+}
 
 export interface MemoryEvent {
   threadId: string | null;
@@ -2459,6 +2468,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
+  /** Owner-only machine memory reading and the limits actually applied by the governor. */
+  'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };
 
   'scheduler.get': { params: Record<string, never>; result: SchedulerState };
