@@ -224,20 +224,21 @@ describe('terminals', () => {
 
 describe('output history', () => {
   test('ten megabytes in small chunks keep exactly the last window, without copying it per chunk', () => {
+    // Making the chunks is the yardstick: a runner slow at one is slow at the other.
+    let started = performance.now();
+    const chunks = Array.from({ length: 160_000 }, (_, index) => `${String(index).padStart(8, '0')}${'x'.repeat(55)}\n`);
+    const making = performance.now() - started;
     const history = new OutputHistory();
-    let reference = '';
-    const started = performance.now();
-    for (let index = 0; index < 160_000; index += 1) {
-      const chunk = `${String(index).padStart(8, '0')}${'x'.repeat(55)}\n`;
-      history.push(chunk);
-      if (index >= 155_000) reference += chunk;
-    }
-    const elapsed = performance.now() - started;
+    started = performance.now();
+    for (const chunk of chunks) history.push(chunk);
+    const pushing = performance.now() - started;
     const text = history.text();
     expect(text.length).toBe(HISTORY_CHARS);
-    expect(text).toBe(reference.slice(-HISTORY_CHARS));
-    // The old append-and-slice copied 256 KB per chunk: seconds for this input.
-    expect(elapsed).toBeLessThan(500);
+    expect(text).toBe(chunks.slice(-5000).join('').slice(-HISTORY_CHARS));
+    // Keeping them costs about half of making them. The old append-and-slice
+    // copied 256 KB per chunk: 800 ms, 50 to 60 times the making (2026-09-28,
+    // Ryzen 7 9800X3D). The bound stretches on a runner slow at both.
+    expect(pushing).toBeLessThan(Math.max(500, making * 10));
   });
 
   test('a chunk larger than the window keeps its tail', () => {
