@@ -6,6 +6,9 @@ fn resolve_file(directory: &Path, path: &Path) -> Result<PathBuf, String> {
         return Err(format!("directory {}: expected an absolute directory", directory.display()));
     }
     let root = directory.canonicalize().map_err(|error| format!("directory {}: {error}", directory.display()))?;
+    if !root.is_dir() {
+        return Err(format!("directory {}: expected a directory", directory.display()));
+    }
     let candidate = root.join(path);
     let file = candidate.canonicalize().map_err(|error| format!("path {}: {error}", path.display()))?;
     if !file.starts_with(&root) || !file.is_file() {
@@ -40,6 +43,8 @@ mod tests {
         assert!(resolve_file(&inside, Path::new("missing.exe")).is_err());
         assert!(resolve_file(&inside, Path::new(".")).is_err());
         assert!(resolve_file(Path::new("relative"), Path::new("game.exe")).is_err());
+        let error = resolve_file(&inside.join("game.exe"), &inside.join("game.exe")).unwrap_err();
+        assert!(error.starts_with("directory ") && error.contains("expected a directory"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

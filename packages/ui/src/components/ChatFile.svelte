@@ -77,8 +77,8 @@
   <div class="file-row">
     <FileText size={22} />
     <span class="identity"><span>{name}</span>{#if !error}<small>{loading ? strings.artifacts.loading : bytes(size)}</small>{/if}</span>
+    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
     {#if url}
-      {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
       {#if rich && previewable}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
       <a class="ghost small download" href={url} download={name} data-testid="artifact-download" aria-label={strings.artifacts.download}><Download size={16} /></a>
     {/if}

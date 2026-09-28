@@ -16,7 +16,7 @@ test('local launch links and file actions use the owning desktop, with browser a
       const store = workspace.active;
       const thread = store.openThread;
       await store.client.call('files.write', { threadId: thread.id, path: 'game.exe', text: 'Inert game fixture' });
-      thread.messages.at(-1).parts = [{ type: 'text', text: 'The game is ready.\\n\\n[Launch game](game.exe) · [Instructions](README.md)' }];
+      thread.messages.at(-1).parts = [{ type: 'text', text: 'The game is ready.\\n\\n[Launch game](game.exe) · [Instructions](README.md) · [Manual](missing.pdf)' }];
       window.__fileOpens = [];
       window.__TAURI_INTERNALS__ = { invoke: async (command, args) => { if (command === 'open_local_file') window.__fileOpens.push(args); } };
       store.localCore = true;
@@ -37,12 +37,23 @@ test('local launch links and file actions use the owning desktop, with browser a
     expect(await page.evaluate('window.__fileOpens[1].path')).toBe('README.md');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'local-file-open-desktop.png'));
 
+    await page.click('a[data-file-path="missing.pdf"]');
+    await page.waitFor('document.querySelector("[data-testid=chat-file] [role=alert]")');
+    expect(await page.evaluate('document.querySelector("[data-testid=artifact-download]")')).toBeNull();
+    await page.click('[data-testid=artifact-open]');
+    await page.waitFor('window.__fileOpens.length === 3');
+    expect(await page.evaluate('window.__fileOpens[2].path')).toBe('missing.pdf');
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'local-file-preview-error-desktop.png'));
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'local-file-preview-error-phone.png'));
+
     // A remote core must never hand its paths to this computer's opener.
     await page.evaluate(`(async () => { const { workspace } = await import('/src/lib/workspace.svelte.ts'); workspace.active.localCore = false; })()`);
     await page.click('a[data-file-path="game.exe"]');
     await page.waitFor('document.querySelector("[data-testid=artifact-download]")?.download === "game.exe"');
     expect(await page.evaluate('document.querySelector("[data-testid=artifact-open]")')).toBeNull();
-    expect(await page.evaluate('window.__fileOpens.length')).toBe(2);
+    expect(await page.evaluate('window.__fileOpens.length')).toBe(3);
     // The browser/phone keeps the same download path, with no native opener.
     await page.evaluate('delete window.__TAURI_INTERNALS__');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

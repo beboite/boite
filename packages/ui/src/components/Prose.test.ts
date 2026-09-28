@@ -40,6 +40,24 @@ test('a native open failure is shown and never falls back to downloading', async
   expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
 });
 
+test('a local file can still open when its preview cannot be read', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = {
+    owner: true, localCore: true, threads: [{ id: 'game', cwd: 'C:/project' }],
+    readFile: vi.fn(async () => ({ ok: false, error: 'Preview could not be read' })),
+  } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Manual](manual.pdf)', store, threadId: 'game' } });
+  flushSync();
+  query<HTMLAnchorElement>('a[data-file-path]').click();
+  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe('Preview could not be read'));
+  expect(invoke).not.toHaveBeenCalled();
+  expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=artifact-open]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_local_file', { directory: 'C:/project', path: 'manual.pdf' }, undefined));
+});
+
 function query<T extends Element>(selector: string): T {
   const node = document.querySelector<T>(selector);
   if (!node) throw new Error(`no ${selector}`);
