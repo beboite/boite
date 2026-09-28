@@ -323,6 +323,7 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
     // The shape Claude Code 2.1 answers for a model the descriptor does not list yet.
     { value: 'claude-opus-5-5', resolvedModel: 'claude-opus-5-5', displayName: 'Opus 5.5', description: 'Most capable for ambitious work' },
     { value: 'claude-opus-6', resolvedModel: 'claude-opus-6', displayName: 'Claude Opus 6', description: '' },
+    { value: 'claude-next', resolvedModel: 'claude-next', displayName: ' ', description: '' },
   ]; }, answerEach('native-speeds'));
   const client = await harness.connect();
   const id = await claudeThread(client);
@@ -333,6 +334,7 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   expect(result.models.find(model => model.id === 'claude-opus-4-8')).toMatchObject({ legacy: true, name: 'Opus 4.8' });
   expect(result.models.find(model => model.id === 'claude-opus-5-5')?.name).toBe('Opus 5.5');
   expect(result.models.find(model => model.id === 'claude-opus-6')?.name).toBe('Opus 6');
+  expect(result.models.find(model => model.id === 'claude-next')?.name).toBe('claude-next');
   expect(result.models.find(model => model.id === 'claude-opus-4-8')?.speeds).toBeUndefined();
   expect(result.models[0]?.effort?.levels.map(level => level.id)).toEqual(['low', 'high', 'ultrathink']);
   expect(result.models[0]?.speeds).toEqual([{ id: 'fast', label: 'Fast' }]);
