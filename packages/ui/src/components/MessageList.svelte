@@ -15,6 +15,7 @@
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
+  import { dockRoom } from '../lib/question-dock.svelte';
 
   let {
     store,
@@ -412,6 +413,15 @@
     }
   });
 
+  /** The dock over the timeline's end growing, a question opening in it, lifts a pinned tail with it. */
+  $effect(() => {
+    void dockRoom.height;
+    const box = viewport;
+    if (!box || !pinned) return;
+    box.scrollTop = box.scrollHeight;
+    scrollTop = box.scrollTop;
+  });
+
   /** The window moving under a pinned viewport changes the spacers: take the bottom again. */
   $effect(() => {
     void view;
@@ -462,7 +472,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} style:--dock-room="{dockRoom.height}px" data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -532,8 +542,9 @@
     min-height: 0;
     overflow: auto;
     /* A fixed reading margin keeps the last answer above the compact activity
-       overlay without moving the viewport when tasks appear or update. */
-    padding: 20px 20px 132px var(--outline-room);
+       overlay without moving the viewport when tasks appear or update. A dock
+       taller than that, a question open in it, widens it to its own height. */
+    padding: 20px 20px max(132px, calc(var(--dock-room, 0px) + 20px)) var(--outline-room);
     overscroll-behavior: contain;
   }
 

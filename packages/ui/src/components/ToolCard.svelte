@@ -1,10 +1,20 @@
 <script lang="ts">
-  import { Check, ChevronRight, CircleSlash, Wrench, X } from '@lucide/svelte';
+  import { Bot, ChevronRight, FilePen, FileText, Globe, Search, SquareTerminal, Wrench, X } from '@lucide/svelte';
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
-  import { partialSummaryOf, summaryOf } from '../lib/tool-summary';
+  import { familyOf, toolLine, type ToolPart } from '../lib/tool-groups';
+  import { describeTool } from '../lib/tool-summary';
+  import { diffCounts, diffRows } from '../lib/diff';
+  import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
+
+  /*
+   * One tool call as a plain line of the timeline, T3 Code's way: what it did
+   * in words or the command it ran, a clock past one second, a mark only when
+   * it runs or failed, and the input, the output and what it produced one
+   * click below. A run of calls folds under `ToolGroup`.
+   */
 
   let {
     name,
@@ -48,8 +58,6 @@
     return spent >= 1000 ? elapsed(spent) : '';
   });
 
-  let open = $state(false);
-
   /** `2 diffs` when every document is one, `2 docs` when they are mixed. */
   function chipFor(list: ToolDocument[]): string {
     const count = String(list.length);
@@ -71,11 +79,38 @@
   let showAll = $state(false);
 
   let streaming = $derived(typeof inputText === 'string');
+  let part = $derived<ToolPart>({ type: 'tool', toolId: '', name, input, inputText, output, status });
+  let line = $derived(toolLine(part));
+  let family = $derived(familyOf(part));
+  let failed = $derived(status === 'error' || status === 'denied');
+  const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
+  let Glyph = $derived(ICONS[family]);
+
+  type Diff = Extract<ToolDocument, { kind: 'diff' }>;
+  /**
+   * What a file change did, as a diff: the ones the driver attached, else the
+   * one the edit's own input spells out (an agent whose driver attaches none).
+   */
+  let diffs = $derived.by<Diff[]>(() => {
+    const attached = documents.filter((doc): doc is Diff => doc.kind === 'diff');
+    if (attached.length > 0 || streaming) return attached;
+    const change = describeTool(name, input).change;
+    return change ? [{ kind: 'diff', ...change }] : [];
+  });
+  let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
+  let counts = $derived(diffs.reduce((sum, doc) => {
+    const one = diffCounts(diffRows(doc.oldText, doc.newText));
+    return { added: sum.added + one.added, removed: sum.removed + one.removed };
+  }, { added: 0, removed: 0 }));
+  /** One file needs no heading of its own: the line already names it. */
+  let oneFile = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1);
+
   // The body opens itself while the input is being typed: that is the whole point
-  // of the stream. It folds back to the one line once the parsed input lands.
-  let shown = $derived(open || streaming);
-  let line = $derived(streaming ? partialSummaryOf(inputText ?? '') : summaryOf(input));
-  let chip = $derived(documents.length > 0 && !shown ? chipFor(documents) : '');
+  // of the stream. It folds back to the one line once the parsed input lands. A
+  // file change comes open on its diff, unless it failed: then nothing changed.
+  let toggled = $state<boolean | null>(null);
+  let shown = $derived(toggled ?? (streaming || (diffs.length > 0 && !failed)));
+  let chip = $derived(others.length > 0 && !shown ? chipFor(others) : '');
 
   let inputJson = $derived(streaming ? '' : json(input));
   /**
@@ -93,19 +128,22 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
-<div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming}>
+<div class="tool" data-testid="tool-card" data-status={status} data-streaming={streaming} data-family={family}>
   <button
     type="button"
     class="ghost head"
     data-testid="tool-toggle"
     aria-expanded={shown}
-    onclick={() => (open = !open)}
+    aria-label={failed ? `${line.text}, ${strings.chat.toolStatus[status]}` : undefined}
+    onclick={() => (toggled = !shown)}
   >
-    <span class="caret" class:open={shown}><ChevronRight size={13} strokeWidth={2} /></span>
-    <span class="glyph"><Wrench size={13} strokeWidth={1.75} /></span>
-    <span class="name">{name}</span>
-    {#if line}
-      <span class="line mono" title={line}>{line}</span>
+    <span class="glyph" class:failed><Glyph size={15} strokeWidth={1.75} /></span>
+    <span class="line" class:mono={line.mono} title={diffs[0]?.path ?? line.title}>{line.text}</span>
+    {#if counts.added > 0 || counts.removed > 0}
+      <span class="counts" data-testid="tool-diff-counts">
+        {#if counts.added > 0}<span class="added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>{/if}
+        {#if counts.removed > 0}<span class="removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>{/if}
+      </span>
     {/if}
     {#if chip}
       <span class="chip" data-testid="tool-document-chip">{chip}</span>
@@ -116,50 +154,64 @@
     {#if took}
       <span class="took" data-testid="tool-elapsed">{took}</span>
     {/if}
-    <span class="status {status}" title={strings.chat.toolStatus[status]}>
-      {#if status === 'running'}
-        <span class="spinner"></span>
-      {:else if status === 'done'}
-        <Check size={13} strokeWidth={2.25} />
-      {:else if status === 'denied'}
-        <CircleSlash size={13} strokeWidth={2} />
-      {:else}
-        <X size={13} strokeWidth={2.25} />
-      {/if}
-    </span>
+    {#if status === 'running'}
+      <span class="status" title={strings.chat.toolStatus.running}><span class="spinner"></span></span>
+    {:else if failed}
+      <span class="status failed" title={strings.chat.toolStatus[status]}><X size={12} strokeWidth={2.25} /></span>
+    {/if}
+    <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
   </button>
 
   <div class="fold" class:open={shown} inert={!shown}>
     <div class="clip">
       {#if built}
         <div class="body">
-          <div class="section-label">{strings.chat.toolInput}</div>
-          {#if streaming}
-            <pre
-              class="mono"
-              data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
-          {:else}
-            <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
-            {#if clamped}
-              <button
-                type="button"
-                class="ghost small show-all"
-                data-testid="tool-input-show-all"
-                onclick={() => (showAll = true)}
-              >
-                {strings.chat.showAll}
-              </button>
+          {#if diffs.length > 0}
+            <!-- A file change reads as its diff: the input only restates it. -->
+            {#if failed}
+              <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
             {/if}
-          {/if}
-          <div class="section-label">{strings.chat.toolOutput}</div>
-          <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
-          {#if documents.length > 0}
-            <div class="section-label">{strings.chat.toolDocuments}</div>
-            <div class="documents">
-              {#each documents as doc, index (index)}
-                <DocumentView {doc} />
+            <div class="diffs">
+              {#each diffs as doc, index (index)}
+                <div data-testid="tool-document" data-kind="diff"><DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} headless={oneFile} /></div>
               {/each}
             </div>
+            {#if others.length > 0}
+              <div class="documents">
+                {#each others as doc, index (index)}
+                  <DocumentView {doc} />
+                {/each}
+              </div>
+            {/if}
+          {:else}
+            <div class="section-label">{strings.chat.toolInput}</div>
+            {#if streaming}
+              <pre
+                class="mono"
+                data-testid="tool-input">{inputText}<span class="cursor" aria-label={strings.chat.streaming}></span></pre>
+            {:else}
+              <pre class="mono" class:clamped data-testid="tool-input">{inputJson}</pre>
+              {#if clamped}
+                <button
+                  type="button"
+                  class="ghost small show-all"
+                  data-testid="tool-input-show-all"
+                  onclick={() => (showAll = true)}
+                >
+                  {strings.chat.showAll}
+                </button>
+              {/if}
+            {/if}
+            <div class="section-label">{strings.chat.toolOutput}</div>
+            <pre class="mono" data-testid="tool-output">{output ?? strings.chat.noOutput}</pre>
+            {#if documents.length > 0}
+              <div class="section-label">{strings.chat.toolDocuments}</div>
+              <div class="documents">
+                {#each documents as doc, index (index)}
+                  <DocumentView {doc} />
+                {/each}
+              </div>
+            {/if}
           {/if}
         </div>
       {/if}
@@ -168,29 +220,29 @@
 </div>
 
 <style>
+  /* No frame: a call is a line of the timeline, like T3 Code's work rows. */
   .tool {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-e1);
     max-width: 100%;
-    overflow: hidden;
+    min-width: 0;
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
-    height: var(--row);
-    padding: 0 10px 0 6px;
-    border-radius: 0;
+    min-height: 26px;
+    height: auto;
+    padding: 1px 4px 1px 2px;
+    border-radius: var(--radius-sm);
     color: var(--color-muted-foreground);
+    font-size: var(--text-sm);
     justify-content: flex-start;
   }
 
   .head:hover:not(:disabled) {
     background: var(--color-surface-2);
+    color: var(--color-foreground);
   }
 
   /* A full width row does not shrink under the finger, it fills one step more. */
@@ -199,35 +251,51 @@
     background: var(--color-surface-3);
   }
 
-  .caret {
-    display: inline-flex;
-    color: var(--color-subtle);
-    transition: transform var(--dur-2) var(--ease-out-quint);
-  }
-
-  .caret.open {
-    transform: rotate(90deg);
-  }
-
   .glyph {
     display: inline-flex;
+    flex: none;
+    width: 20px;
+    justify-content: center;
     color: var(--color-subtle);
   }
 
-  .name {
-    font-weight: 600;
-    color: var(--color-foreground);
-    flex: none;
+  .glyph.failed {
+    color: var(--color-danger);
   }
 
   .line {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--text-sm);
+  }
+
+  /* A command is set in the code face, a step smaller so it sits on the same line height. */
+  .line.mono {
+    font-size: var(--text-xs);
+  }
+
+  .caret {
+    display: inline-flex;
+    flex: none;
+    color: var(--color-subtle);
+    opacity: 0;
+    transition:
+      transform var(--dur-2) var(--ease-out-quint),
+      opacity var(--dur-2) var(--ease-out-quint);
+  }
+
+  .head:hover .caret,
+  .head:focus-visible .caret,
+  .caret.open {
+    opacity: 1;
+  }
+
+  .caret.open {
+    transform: rotate(90deg);
   }
 
   .chip {
@@ -265,28 +333,18 @@
 
   .took {
     flex: none;
-    margin-left: auto;
     color: var(--color-subtle);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
   }
 
-  .took + .status {
-    margin-left: 0;
-  }
-
   .status {
     display: inline-flex;
-    margin-left: auto;
+    flex: none;
     color: var(--color-subtle);
   }
 
-  .status.done {
-    color: var(--color-success);
-  }
-
-  .status.error,
-  .status.denied {
+  .status.failed {
     color: var(--color-danger);
   }
 
@@ -326,9 +384,9 @@
     overflow: hidden;
   }
 
+  /* The body sits under the line's words, past the glyph. */
   .body {
-    border-top: 1px solid var(--color-border);
-    padding: 8px 10px 10px;
+    padding: 4px 0 8px 28px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -366,6 +424,24 @@
     margin-bottom: 6px;
     font-size: var(--text-sm);
     color: var(--color-muted-foreground);
+  }
+
+  .counts {
+    display: inline-flex;
+    flex: none;
+    gap: 6px;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .counts .added { color: var(--color-success); }
+  .counts .removed { color: var(--color-danger); }
+
+  .diffs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
   }
 
   .documents {

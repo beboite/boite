@@ -2,7 +2,18 @@
   import { diffCounts, diffRows } from '../lib/diff';
   import { fill, strings } from '../lib/strings';
 
-  let { path, oldText, newText }: { path: string; oldText: string; newText: string } = $props();
+  let {
+    path,
+    oldText,
+    newText,
+    headless = false
+  }: {
+    path: string;
+    oldText: string;
+    newText: string;
+    /** Under a line that already names the file and counts the lines: no heading of its own. */
+    headless?: boolean;
+  } = $props();
 
   /** Rows drawn before the show-all button: the box shows about fourteen. */
   const FIRST_ROWS = 300;
@@ -21,15 +32,17 @@
 </script>
 
 <div class="diff" data-testid="diff-view" data-path={path}>
-  <div class="head">
-    <span class="path mono" title={path}>{path}</span>
-    {#if counts.added > 0}
-      <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
-    {/if}
-    {#if counts.removed > 0}
-      <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
-    {/if}
-  </div>
+  {#if !headless}
+    <div class="head">
+      <span class="path mono" title={path}>{path}</span>
+      {#if counts.added > 0}
+        <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
+      {/if}
+      {#if counts.removed > 0}
+        <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
+      {/if}
+    </div>
+  {/if}
   <div class="rows mono">
     {#each shown as row, index (index)}
       {#if row.kind === 'gap'}

@@ -203,3 +203,18 @@ test('completed goals and tasks fade after the next prompt and new tasks return'
     expect(await page.evaluate(`(() => { const messages = document.querySelectorAll('[data-mid]'); const last = messages[messages.length-1].getBoundingClientRect(); const activity = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); return last.bottom <= activity.top; })()`)).toBe(true);
   }
 }, 30_000);
+
+test('a question open in the dock keeps the last answer readable above it', async () => {
+  await size(false);
+  await command('Pick one [ask] for me');
+  await page.waitFor(`document.querySelector('${id('activity-question')}:not([hidden])')`);
+  await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);
+  const lastAboveDock = `(() => { const messages = document.querySelectorAll('[data-mid]'); const last = messages[messages.length-1].getBoundingClientRect(); const activity = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); return last.bottom <= activity.top; })()`;
+  for (const phone of [false, true]) {
+    await size(phone);
+    await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = document.querySelector('${id('timeline')}').scrollHeight`);
+    await capture(phone ? 'question-dock-latest-phone' : 'question-dock-latest-desktop');
+    expect(await page.evaluate(lastAboveDock)).toBe(true);
+  }
+  await size(false);
+}, 30_000);

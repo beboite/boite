@@ -18,8 +18,9 @@ downloads it. Returning from nightly to Boite permits a lower version. Both
 channels use the same install location, bundle identifier and `boite2` data
 directory. Projects, accounts and journal files stay in place. The Windows
 installer retains the name Boite. A nightly build calls itself boite (de nuit)
-in the window title, tray tooltip and title bar, and uses the violet and magenta
-icon.
+in the window title and tray tooltip, and uses the violet and magenta icon. The
+title bar inside the window never shows the app's name: its room goes to the
+project, the thread or settings.
 
 Keep a backup before trying nightlies: retaining files does not make a future
 journal schema readable by an older release. Boite refuses a journal schema it

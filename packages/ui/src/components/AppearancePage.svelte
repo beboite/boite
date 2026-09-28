@@ -1,6 +1,10 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import { Minus, Plus } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
+  import { FONT_NAMES, FONTS, MONO_NAMES, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
+  import { percent } from '../lib/format';
+  import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
@@ -10,6 +14,19 @@
 
   let accent = $state(untrack(() => readAccent()));
   function pickAccent(hue: number) { accent = hue; setAccent(hue); }
+
+  let font = $state<Font>(untrack(() => readFont()));
+  let mono = $state<Mono>(untrack(() => readMono()));
+  let faces = $derived(FONTS.map((id) => ({ id, name: id === 'system' ? strings.settings.fontSystem : FONT_NAMES[id] })));
+  let monos = $derived(MONOS.map((id) => ({ id, name: id === 'system' ? strings.settings.monoSystem : MONO_NAMES[id] })));
+  function pickFont(next: Font) { font = next; setFont(next); }
+  function pickMono(next: Mono) { mono = next; setMono(next); }
+
+  // The zoom is the shell webview's own; a browser tab has its own Ctrl+= already.
+  const zoomable = inShell();
+  let zoom = $state(currentZoom());
+  const smallest = ZOOM_STEPS[0] ?? ZOOM_DEFAULT;
+  const largest = ZOOM_STEPS[ZOOM_STEPS.length - 1] ?? ZOOM_DEFAULT;
 
   // Grain rides behind an experiment, so the fourth option comes and goes with
   // the switch on the Experiments page rather than on a reload.
@@ -68,10 +85,13 @@
       offered = supported;
       glass = effectiveGlass(glass, supported);
     });
-    return subscribeExperiments(() => {
+    // Ctrl+= moves the zoom from anywhere, this page included.
+    const stopZoom = subscribeZoom((factor) => { zoom = factor; });
+    const stopExperiments = subscribeExperiments(() => {
       grain = isExperimentEnabled('theme-grain');
       theme = readTheme();
     });
+    return () => { stopZoom(); stopExperiments(); };
   });
 
   function pickMaterial(next: Glass) {
@@ -149,6 +169,39 @@
     {/if}
   </section>
 
+  <section class="card" id="settings-reading">
+    <h2>{strings.settings.reading}</h2>
+    <div class="switch-row faces-row">
+      <span class="text">{strings.settings.font}<InfoTip topic={strings.settings.font} text={strings.settings.fontHint} /></span>
+      <div class="faces" role="group" aria-label={strings.settings.font}>
+        {#each faces as face (face.id)}
+          <button type="button" class="face" style:font-family="var(--face-{face.id})" aria-pressed={font === face.id} data-testid="font-{face.id}" onclick={() => pickFont(face.id)}>
+            <span class="face-name">{face.name}</span>
+            <span class="face-sample">{strings.settings.fontSample}</span>
+          </button>
+        {/each}
+      </div>
+    </div>
+    <div class="switch-row">
+      <span class="text">{strings.settings.monoFont}</span>
+      <div class="segmented monos" role="group" aria-label={strings.settings.monoFont}>
+        {#each monos as option (option.id)}
+          <button type="button" class:on={mono === option.id} style:font-family="var(--face-mono-{option.id})" aria-pressed={mono === option.id} data-testid="font-mono-{option.id}" onclick={() => pickMono(option.id)}>{option.name}</button>
+        {/each}
+      </div>
+    </div>
+    {#if zoomable}
+      <div class="switch-row">
+        <span class="text">{strings.settings.zoom}<InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
+        <div class="segmented zoom" role="group" aria-label={strings.settings.zoom}>
+          <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => void setZoom(stepZoom(zoom, -1))}><Minus size={14} strokeWidth={2} /></button>
+          <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => void setZoom(ZOOM_DEFAULT)}>{percent(zoom * 100)}</button>
+          <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => void setZoom(stepZoom(zoom, 1))}><Plus size={14} strokeWidth={2} /></button>
+        </div>
+      </div>
+    {/if}
+  </section>
+
   <!-- What the tour's question set, each piece on its own. -->
   <section class="card" id="settings-workspace">
     <h2>{strings.settings.workspace}</h2>
@@ -172,6 +225,31 @@
 </div>
 
 <style>
+  /* The text font's choices are tiles, each drawn in the face it picks, so the
+     choice is made by reading rather than by name. */
+  :global(.settings .page) .faces-row { flex-direction: column; align-items: stretch; gap: 12px; }
+  .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .face {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    height: auto;
+    min-height: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    color: var(--color-foreground);
+    text-align: left;
+    white-space: normal;
+  }
+  .face:hover:not([aria-pressed='true']) { background: var(--color-surface-3); }
+  .face[aria-pressed='true'] { border-color: var(--color-foreground); box-shadow: inset 0 0 0 1px var(--color-foreground); }
+  .face-name { font-size: var(--text-sm); font-weight: 600; }
+  .face-sample { font-size: var(--text-base); line-height: 1.45; color: var(--color-muted-foreground); }
+  .zoom button { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; }
+  .zoom .zoom-value { min-width: 56px; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
   .accent-controls { display: grid; gap: 10px; min-width: 220px; }
   .swatches { display: flex; gap: 7px; }
   .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; background: var(--color-accent); border: 3px solid var(--color-surface-2); transition: transform var(--dur-2) var(--ease-out-quint); }
@@ -187,7 +265,10 @@
     :global(.settings .page) .accent-row,
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
+    .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .segmented button { flex: 1; min-width: 0; }
+    /* A code face runs wide: each name takes the room it needs, a step smaller. */
+    .monos button { flex: 1 1 auto; min-width: auto; padding: 0 6px; font-size: var(--text-xs); }
     /* A 26 px dot keeps its look and gets a finger-sized hit box. */
     .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: 0 -9px -9px; }
     .swatch { position: relative; }

@@ -11,9 +11,6 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
-    <!-- Geist only: the first screen draws no mono text, and on a slow link Geist Mono's
-         70 KB would compete with the entry chunk. The service worker caches both. -->
-    <link rel="preload" href="./fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <title>Boite</title>
     <!-- Painted before the stylesheet arrives, so a reload never flashes the wrong ground. -->
     <style>
@@ -43,6 +40,25 @@
     <script>
       if (new URLSearchParams(location.search).get('view') === 'quotas') document.documentElement.dataset.view = 'quotas';
       try {
+        // The face picked under Appearance (lib/fonts.ts), stamped and preloaded
+        // before the stylesheet so the first frame is drawn in it. The sans face
+        // only: the first screen draws no mono text, and on a slow link a mono
+        // file would compete with the entry chunk.
+        var faces = { geist: 'Geist-Variable', inter: 'Inter-latin', plex: 'IBMPlexSans-latin', atkinson: 'AtkinsonHyperlegibleNext-latin', figtree: 'Figtree-latin', source: 'SourceSans3-latin', dm: 'DMSans-latin', system: '' };
+        var face = localStorage.getItem('boite.font');
+        if (face === null || !Object.prototype.hasOwnProperty.call(faces, face)) face = 'inter';
+        if (face !== 'inter') document.documentElement.dataset.font = face;
+        var mono = localStorage.getItem('boite.font-mono');
+        if (mono === 'jetbrains' || mono === 'system') document.documentElement.dataset.mono = mono;
+        if (faces[face]) {
+          var preload = document.createElement('link');
+          preload.rel = 'preload';
+          preload.as = 'font';
+          preload.type = 'font/woff2';
+          preload.crossOrigin = 'anonymous';
+          preload.href = './fonts/' + faces[face] + '.woff2';
+          document.head.appendChild(preload);
+        }
         var accent = localStorage.getItem('boite.accent-hue');
         if (accent !== null && Number.isFinite(Number(accent)) && Number(accent) >= 0 && Number(accent) <= 360) document.documentElement.style.setProperty('--accent-hue', accent);
         var stored = localStorage.getItem('boite.theme');
