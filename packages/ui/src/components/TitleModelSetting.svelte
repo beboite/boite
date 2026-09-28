@@ -30,9 +30,11 @@
   /** Per provider: its small default first, then the rest it lists, and the current pick even when unlisted. */
   let groups = $derived(
     writers.map(({ provider, account }) => {
-      const listed = store.modelsOf(provider.id, account.id).filter((model) => model.id !== 'default' && model.legacy !== true);
-      const small = defaultTitleModel(provider, listed);
-      const named = (id: string): ModelInfo => listed.find((model) => model.id === id) ?? { id, name: DEFAULT_MODEL_NAMES[id] ?? id };
+      const offered = store.modelsOf(provider.id, account.id).filter((model) => model.id !== 'default');
+      const listed = offered.filter((model) => model.legacy !== true);
+      // The small model can be a legacy one (Haiku 4.5), which the core still picks.
+      const small = defaultTitleModel(provider, offered);
+      const named = (id: string): ModelInfo => offered.find((model) => model.id === id) ?? { id, name: DEFAULT_MODEL_NAMES[id] ?? id };
       const ids = [small, chosen?.providerId === provider.id ? chosen.model : null, ...listed.map((model) => model.id)];
       const models = [...new Set(ids.filter((id): id is string => id !== null))].map(named);
       return { provider, small, models };

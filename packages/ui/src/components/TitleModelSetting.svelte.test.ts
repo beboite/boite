@@ -14,12 +14,13 @@ afterEach(async () => {
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
 const provider = (id: string, protocol: string, shortName: string, titles: boolean, available = true) => ({ id, shortName, name: shortName, protocol, titles, available, models: [] });
 const MODELS: Record<string, ModelInfo[]> = {
-  claude: [{ id: 'default', name: 'Default' }, { id: 'claude-opus-5', name: 'Opus 5' }, { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5' }],
+  // As the shipped descriptor has it: Haiku 4.5 is legacy, and still the small model.
+  claude: [{ id: 'default', name: 'Default' }, { id: 'claude-opus-5', name: 'Opus 5' }, { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', legacy: true }],
   codex: [{ id: 'gpt-6', name: 'GPT 6' }, { id: 'gpt-5.2', name: 'GPT 5.2', legacy: true }],
   opencode: [{ id: 'openai/gpt-5', name: 'GPT 5' }],
 };
 
-function render(titleModel: TitleModel | null) {
+function render(titleModel: TitleModel | null, models = MODELS) {
   const store = $state({
     settings: { titleModel } as Partial<Settings>,
     providers: [
@@ -34,7 +35,7 @@ function render(titleModel: TitleModel | null) {
       { id: 'opencode-main', providerId: 'opencode', status: 'ok' },
       { id: 'pi-main', providerId: 'pi', status: 'ok' },
     ],
-    modelsOf: (providerId: string) => MODELS[providerId] ?? [],
+    modelsOf: (providerId: string) => models[providerId] ?? [],
     saveSettings: vi.fn(async (patch: Partial<Settings>) => {
       store.settings = { ...store.settings, ...patch };
       return true;
@@ -87,4 +88,10 @@ test('a pick the provider no longer lists stays in the menu, and Automatic clear
   await settle();
   expect(store.saveSettings).toHaveBeenCalledWith({ titleModel: null });
   expect(trigger.textContent).toContain('Automatic');
+});
+
+test('a dated pick the account no longer offers keeps its model name', async () => {
+  render({ providerId: 'claude', model: 'claude-haiku-4-5-20251001' }, { ...MODELS, claude: [{ id: 'claude-opus-5', name: 'Opus 5' }] });
+  await settle();
+  expect(document.querySelector('[data-testid="setting-title-model"]')!.textContent).toContain('Haiku 4.5');
 });
