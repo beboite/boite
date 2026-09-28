@@ -69,6 +69,27 @@ test('editing the prompt that carried the note puts it back for the resent one',
   expect(messages.find((m) => m.turnId === resent.id && m.role === 'user')?.parts[0]).toMatchObject({ moved: { to: { projectId: 'p-boite' } } });
 });
 
+test('editing a prompt before two moves says where the thread is now, from where the agent last knew it', async () => {
+  const client = await fake();
+  const third = await client.call('projects.add', { path: 'C:\\src\\third' });
+  const before = await client.call('threads.get', { threadId: PLAIN });
+  await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  const first = await client.call('turns.start', { threadId: PLAIN, prompt: 'in boite' });
+  await finished(client, PLAIN, first.id);
+  const carrier = (await client.call('threads.get', { threadId: PLAIN })).messages.find((m) => m.turnId === first.id && m.role === 'user')!;
+  await client.call('threads.move', { threadId: PLAIN, projectId: third.id });
+  const second = await client.call('turns.start', { threadId: PLAIN, prompt: 'in third' });
+  await finished(client, PLAIN, second.id);
+
+  await client.call('threads.rewind', { threadId: PLAIN, messageId: carrier.id });
+  const resent = await client.call('turns.start', { threadId: PLAIN, prompt: 'where now' });
+  await finished(client, PLAIN, resent.id);
+  const now = await client.call('threads.get', { threadId: PLAIN });
+  expect(now.messages.find((m) => m.turnId === resent.id && m.role === 'user')?.parts[0]).toMatchObject({
+    moved: { from: { cwd: before.cwd }, to: { projectId: third.id, name: 'third', cwd: now.cwd } }
+  });
+});
+
 test('moving back to where the thread started leaves nothing to explain', async () => {
   const client = await fake();
   await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });

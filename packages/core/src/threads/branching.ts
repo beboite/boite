@@ -2,6 +2,7 @@ import type {
   Attachment,
   Message,
   MessageId,
+  MoveEnd,
   MoveNotice,
   PreviewReference,
   ThreadId,
@@ -15,7 +16,7 @@ import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
-import { MOVE_NOTE_PREFIX, pendingMove } from './move.ts';
+import { MOVE_NOTE_PREFIX, moveNote } from './move.ts';
 import { withLoad } from './records.ts';
 
 type SessionPlan = Pick<ThreadSummary, 'sessionId' | 'sessionResumeAt'> & { session: ThreadRewind['session'] };
@@ -68,10 +69,11 @@ export class ThreadBranching {
     const kept = this.core.journal.listMessagePage(threadId, { beforeRowid: rowid, limit: 1 }).messages[0] ?? null;
     const removed = this.core.journal.messageIdsFrom(threadId, rowid);
     // The thread moved after the kept turn: its checkpoint belongs to the old
-    // folder, and the note that told the agent goes with the removed message,
-    // so it waits again for the next one.
+    // folder, and the notes that told the agent go with the removed messages.
+    // The next one says it again, from where the kept history left the agent
+    // to where the thread is now, however many moves came between.
     const moved = firstMove(removed.messageIds.map((id) => this.core.journal.getMessage(id)));
-    const restoreNote = moved !== null && pendingMove(this.core, threadId) === null;
+    const note = moved === null ? undefined : this.noteSince(thread, moved.from);
     const plan = kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
     const next: ThreadSummary = {
       ...thread,
@@ -110,7 +112,8 @@ export class ThreadBranching {
       () => {
         this.core.journal.truncateMessages(threadId, rowid);
         this.core.journal.putThread(next);
-        if (restoreNote) this.core.journal.setSetting(`${MOVE_NOTE_PREFIX}${threadId}`, moved);
+        if (note) this.core.journal.setSetting(`${MOVE_NOTE_PREFIX}${threadId}`, note);
+        else if (note === null) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
       },
     );
     this.core.bus.emit('message.truncated', { threadId, messageId });
@@ -254,6 +257,18 @@ export class ThreadBranching {
     if (turn.status === 'queued' || turn.status === 'running') return null;
     if (turn.execution?.accountId !== thread.accountId || turn.execution.providerId !== thread.providerId) return null;
     return { sessionId: checkpoint.sessionId, sessionResumeAt: checkpoint.entry, session: 'native' };
+  }
+
+  /**
+   * The note from `origin`, where the kept history last put the agent, to the
+   * thread's folder now. It replaces a pending one, which starts later. Null
+   * when the thread is back where the agent last knew it.
+   */
+  private noteSince(thread: ThreadSummary, origin: MoveEnd): MoveNotice | null {
+    if (origin.cwd === thread.cwd) return null;
+    const project = this.core.journal.getProject(thread.projectId ?? '');
+    const here: MoveEnd = { projectId: thread.projectId ?? '', name: project?.name ?? thread.projectId ?? '', cwd: thread.cwd };
+    return { from: origin, to: here, note: moveNote(origin, here, thread.branch), at: Date.now() };
   }
 }
 

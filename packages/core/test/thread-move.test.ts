@@ -233,6 +233,35 @@ describe('threads.move', () => {
     expect(h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${moving.id}`)).toBeUndefined();
   });
 
+  test('editing a prompt before two moves says where the thread is now, from where the agent last knew it', async () => {
+    const { seen } = recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const gamma = await folderProject('gamma');
+    const moving = await thread(alpha.id);
+    await run(moving.id, 'the widgets are blue');
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    await run(moving.id, 'in beta');
+    const carrier = h.core.threads.get(moving.id).messages.filter((message) => message.role === 'user').at(-1)!;
+    await client.call('threads.move', { threadId: moving.id, projectId: gamma.id });
+    await run(moving.id, 'in gamma');
+
+    await client.call('threads.rewind', { threadId: moving.id, messageId: carrier.id });
+    expect(h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${moving.id}`)).toMatchObject({ from: { cwd: alpha.path }, to: { name: 'gamma', cwd: gamma.path } });
+    await run(moving.id, 'where now');
+    expect(seen.at(-1)?.prompt).toContain(`This thread moved from project alpha (${alpha.path}) to project gamma (${gamma.path}).`);
+
+    // Back in the folder the kept history left the agent in, there is nothing to say.
+    const back = await thread(alpha.id, 'round trip');
+    await run(back.id, 'start');
+    await client.call('threads.move', { threadId: back.id, projectId: beta.id });
+    await run(back.id, 'in beta');
+    const first = h.core.threads.get(back.id).messages.filter((message) => message.role === 'user').at(-1)!;
+    await client.call('threads.move', { threadId: back.id, projectId: alpha.id });
+    await client.call('threads.rewind', { threadId: back.id, messageId: first.id });
+    expect(h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${back.id}`)).toBeUndefined();
+  });
+
   test('refuses what cannot move, naming the field', async () => {
     recordingEcho();
     const alpha = await folderProject('alpha');

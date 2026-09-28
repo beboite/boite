@@ -507,7 +507,8 @@
     const thread = store.openThread;
     return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
   });
-  const atRest = $derived(branchable && !store.busy);
+  // A prompt still waiting in the queue would run after the edit, on the rewound thread.
+  const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0);
 
   function editMessage(message: Message): void {
     store.startEdit(threadId, message);

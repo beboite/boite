@@ -124,7 +124,8 @@ moved the same day to 448 KB with the buttons chosen from Appearance. Folded
 tool rows, their diffs, the question dock and the zoom applied at boot also
 draw a thread's first screen: they added 13 KB to the 362 KB `main` of that
 morning, and the merge of both built 424 KB, under that limit. It moved again
-to 520 KB, 10% above the 462 KB of the change that edits, forks, rewinds and
+to 520 KB, 10% above the 462 KB that `bun run build:ui` then
+`bun scripts/ci/budgets.ts` measured on 2026-09-28 for the change that edits, forks, rewinds and
 moves a thread from its messages and menus, folds changed files and archives
 projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise

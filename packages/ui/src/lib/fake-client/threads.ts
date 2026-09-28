@@ -1,5 +1,5 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { RETITLE_DELAY_MS } from './providers';
@@ -10,7 +10,7 @@ import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
-import { dropWaitingMove } from './thread-move';
+import { dropWaitingMove, fakeMoveNote } from './thread-move';
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
@@ -353,9 +353,15 @@ export function threadMethods(ctx: FakeContext) {
       if (!message) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is not a message of thread ${thread.id}`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, expected: 'a user message of this thread' } });
       if (message.role !== 'user') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is a ${message.role} message; only a message the user sent can be edited`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, role: message.role, expected: 'user' } });
       const removed = thread.messages.splice(at);
-      // The note to the agent went with a removed message: it waits for the next one again.
+      // The notes to the agent went with removed messages: the next one says it
+      // again, from where the kept history left the agent to where the thread is now.
       const moved = removed.flatMap((entry) => entry.parts).find((part) => part.type === 'text' && part.moved !== undefined);
-      if (moved?.type === 'text' && moved.moved && !ctx.moveNotes.has(thread.id)) ctx.moveNotes.set(thread.id, moved.moved);
+      if (moved?.type === 'text' && moved.moved) {
+        const origin = moved.moved.from;
+        const here: MoveEnd = { projectId: thread.projectId ?? '', name: ctx.projects.find((p) => p.id === thread.projectId)?.name ?? thread.projectId ?? '', cwd: thread.cwd };
+        if (origin.cwd === here.cwd) ctx.moveNotes.delete(thread.id);
+        else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
+      }
       const gone = new Set(removed.map((entry) => entry.turnId));
       thread.turns = thread.turns.filter((turn) => !gone.has(turn.id));
       thread.sessionId = null;

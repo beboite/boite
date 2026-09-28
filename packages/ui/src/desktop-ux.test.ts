@@ -369,6 +369,21 @@ test('ArrowUp in an empty box of a thread at rest recalls the last prompt to edi
   expect(userTexts()).toEqual(before);
 });
 
+test('a prompt left in a paused queue takes Edit and Retry away until it is sent or removed', async () => {
+  await openIdleThread();
+  expect(document.querySelector('[data-testid=message-edit]')).not.toBeNull();
+  const state = store.composerStates['t-descriptors']!;
+  state.queued.push({ text: 'waiting', attachments: [] });
+  state.paused = true;
+  flushSync();
+  await waitFor(() => document.querySelector('[data-testid=message-edit]') === null);
+  expect(document.querySelector('[data-testid=message-retry]')).toBeNull();
+  state.queued.splice(0);
+  state.paused = false;
+  flushSync();
+  await waitFor(() => document.querySelector('[data-testid=message-edit]') !== null);
+});
+
 test('fork from an answer opens a new thread holding the history, the source untouched', async () => {
   await openIdleThread();
   const before = userTexts();

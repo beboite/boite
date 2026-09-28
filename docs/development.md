@@ -214,7 +214,9 @@ restores one in a click. The fold is not remembered between sessions.
 Settings > General > Worktrees (owner only, also in each git project's `...`
 menu) lists every project's worktrees with what each would lose. "Remove the
 clean ones" takes those that are neither dirty nor unmerged and hold no live
-thread, without `force`. Removing a dirty or unmerged one asks first, then
+thread, without `force`. Files git ignores do not make a worktree dirty, as
+for `git worktree remove` itself: dependencies and build output an agent left
+there would otherwise mark every used worktree, and they go with it. Removing a dirty or unmerged one asks first, then
 passes `force`. A worktree a live thread stands in cannot be removed.
 
 `projects.archive { projectId, archived? }` flags a project archived (the

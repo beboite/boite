@@ -507,7 +507,7 @@
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
     const thread = store.openThread;
-    const edit = !store.busy && thread !== null && !thread.agentSessionId && thread.projectId !== null;
+    const edit = !store.busy && state.queued.length === 0 && thread !== null && !thread.agentSessionId && thread.projectId !== null;
     restorePrompt(prompt.text, prompt.previewReferences);
     if (edit) state.attachments = prompt.attachments;
     else if (state.editing) state.attachments = [];
