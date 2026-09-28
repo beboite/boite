@@ -411,6 +411,7 @@ export const strings = {
     importSession: 'Import a Claude Code session',
     /** Out of the list, not out of Boite: its threads keep running and a new one brings it back. */
     archiveProject: 'Archive project',
+    refreshIcon: 'Refresh icon',
     projectArchivedToast: 'Archived {project}',
     archivedProjects: 'Archived projects ({count})',
     restoreProject: 'Restore',

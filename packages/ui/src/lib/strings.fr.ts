@@ -416,6 +416,7 @@ export const fr: Translation = {
     copied: 'Copié',
     importSession: 'Importer une session Claude Code',
     archiveProject: 'Archiver le projet',
+    refreshIcon: "Rafraîchir l'icône",
     projectArchivedToast: '{project} archivé',
     archivedProjects: 'Projets archivés ({count})',
     restoreProject: 'Restaurer',

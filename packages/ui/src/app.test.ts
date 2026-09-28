@@ -2139,7 +2139,7 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project', 'worktrees', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project', 'worktrees', 'refresh-icon', 'remove']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
