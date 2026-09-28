@@ -10,6 +10,7 @@ mod closing;
 mod failure;
 mod instance;
 mod local_core;
+mod local_files;
 mod material;
 mod platform;
 mod quota_window;
@@ -107,6 +108,7 @@ pub fn run() {
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
+            local_files::open_local_file,
             window::shell_ready,
             tray::quit_shell,
             notify,
