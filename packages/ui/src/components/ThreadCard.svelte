@@ -278,9 +278,14 @@
   .thread:focus-within .actions {
     opacity: 1;
   }
-  .thread:hover .headline :global(.when),
-  .thread:focus-within .headline :global(.when) {
+  /* The menu button takes the time's place; a state steps left of it and stays. */
+  .thread:hover .headline :global(.when:not(.state)),
+  .thread:focus-within .headline :global(.when:not(.state)) {
     opacity: 0;
+  }
+  .thread:hover .headline :global(.when.state),
+  .thread:focus-within .headline :global(.when.state) {
+    margin-right: 22px;
   }
   .rename {
     width: 100%;

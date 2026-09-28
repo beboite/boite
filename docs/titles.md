@@ -46,6 +46,8 @@ a provider and a model, or `null` for Automatic.
   the thread uses the same provider, else on that provider's first account
   signed in. A pick whose provider is gone, not installed or signed out falls
   back to Automatic for that title.
+- Neither: a thread whose provider is not installed, or whose account signed
+  out, starts no title call and keeps the prompt's title.
 
 `settings.update` refuses a `titleModel` whose provider is not loaded or has
 no `title` hook, and a blank or over 200 characters model. The menu lists

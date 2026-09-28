@@ -185,4 +185,32 @@ describe('thread titles', () => {
       restore();
     }
   });
+
+  test('a thread whose account signed out keeps the title from its prompt, no agent asked', async () => {
+    const asked: string[] = [];
+    const restore = setDriver('echo', {
+      ...echoDriver,
+      title: async (ctx) => {
+        asked.push(ctx.account.id);
+        return 'Named anyway';
+      },
+    });
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client, 'crates');
+      await client.call('threads.subscribe', { threadId });
+      const retitled = client.next('thread.updated', (thread) => thread.id === threadId && thread.titleSource === 'agent', EVENT_TIMEOUT_MS);
+      await client.call('turns.start', { threadId, prompt: 'stack the crates' });
+      await retitled;
+      expect(asked).toHaveLength(1);
+
+      const account = harness.core.journal.getAccount((await client.call('threads.get', { threadId })).accountId)!;
+      harness.core.journal.putAccount({ ...account, status: 'unauthenticated' });
+      const back = await client.call('threads.retitle', { threadId });
+      expect(back).toMatchObject({ title: 'stack the crates', titleSource: 'prompt' });
+      expect(asked).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
 });

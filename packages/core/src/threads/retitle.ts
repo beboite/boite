@@ -108,32 +108,40 @@ export class ThreadTitles {
    * the provider is the thread's and that provider's first signed-in account
    * otherwise. Without a choice, or while the chosen provider cannot run or
    * write titles, the thread's own provider writes it on its small default.
-   * Null when that one writes no titles either.
+   * Null when that one cannot either: no title hook, not installed, or the
+   * thread's account signed out.
    */
   private writer(thread: ThreadSummary): TitleWriter | null {
     const chosen = this.core.settings.get().titleModel ?? null;
     if (chosen !== null) {
       const provider = this.core.providers.get(chosen.providerId);
       const account = provider === undefined ? undefined : this.accountOf(thread, provider.id);
-      if (
-        provider !== undefined &&
-        account !== undefined &&
-        writesTitles(provider.protocol) &&
-        this.core.providers.summary(provider.id)?.available === true
-      ) {
+      if (provider !== undefined && account !== undefined && this.canWrite(provider)) {
         return { provider, account, model: chosen.model };
       }
     }
     const provider = this.core.providers.get(thread.providerId);
-    const account = this.core.journal.getAccount(thread.accountId);
-    if (provider === undefined || account === null || !writesTitles(provider.protocol)) return null;
+    const account = provider === undefined ? undefined : this.accountOf(thread, provider.id);
+    if (provider === undefined || account === undefined || !this.canWrite(provider)) return null;
     const models = probedModelsOf(provider.protocol, provider.id, account.id) ?? provider.models;
     return { provider, account, model: defaultTitleModel(provider, models) };
   }
 
-  /** The account a provider writes a title under: the thread's own when it is that provider's. */
+  /** A provider with a title hook that is installed here, the check a turn passes too. */
+  private canWrite(provider: ProviderDescriptor): boolean {
+    return writesTitles(provider.protocol) && this.core.providers.summary(provider.id)?.available === true;
+  }
+
+  /**
+   * The account a provider writes a title under: the thread's own when it is
+   * that provider's and not signed out, like `assertDriverRunnable` asks of a
+   * turn, else that provider's first account signed in.
+   */
   private accountOf(thread: ThreadSummary, providerId: ProviderId): Account | undefined {
-    if (thread.providerId === providerId) return this.core.journal.getAccount(thread.accountId) ?? undefined;
+    if (thread.providerId === providerId) {
+      const own = this.core.journal.getAccount(thread.accountId);
+      return own === null || own.status === 'unauthenticated' ? undefined : own;
+    }
     return this.core.accounts.list().find((account) => account.providerId === providerId && account.status === 'ok');
   }
 }
