@@ -233,6 +233,8 @@ export function seedAccounts() {
     install: null,
     capabilities: { approvals: false, hooks: false, checkpoint: false, images: false, planMode: true, resume: true }
   });
+  // The core's drivers that write titles (`ProviderSummary.titles`).
+  for (const provider of providers) provider.titles = ['claude-sdk', 'codex-appserver', 'echo'].includes(provider.protocol);
   const accounts: Account[] = [
     {
       id: 'a-echo',

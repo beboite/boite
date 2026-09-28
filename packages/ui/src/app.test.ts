@@ -1735,20 +1735,23 @@ test('Import a Claude Code session in the project menu lists the transcripts and
   await waitFor(() => document.querySelector('[data-testid=import-dialog]') === null);
 });
 
-test('the chat header keeps the mark and the title, the status word riding the mark', async () => {
+test('the chat header keeps the title alone, and the rows say what each agent is doing', async () => {
   // The store is the singleton every test shares: a draft left open by another
   // one would keep the boot from opening a thread at all.
   store.draft = null;
   await mountOnFake();
 
-  // The word used to sit beside the title and repeat what the mark already says.
+  // The status is the row's to say: the header repeats neither a word nor a dot.
   expect(document.querySelector('[data-testid=thread-status-label]')).toBeNull();
-
-  const mark = query('[data-testid=thread-status]');
-  expect(mark.getAttribute('data-status')).toBe('idle');
-  expect(mark.getAttribute('title')).toBe('idle');
-  expect(mark.getAttribute('aria-label')).toBe('idle');
+  expect(document.querySelector('[data-testid=thread-header] .mark')).toBeNull();
+  expect(query('[data-testid=thread-header]').getAttribute('data-status')).toBe('idle');
   expect(query('[data-testid=thread-title]').textContent?.trim()).toBe(store.openThread?.title);
+
+  // No dot on any row; a thread waiting on the user says so in words.
+  expect(document.querySelector('[data-testid=thread-row] .mark')).toBeNull();
+  const waiting = query('[data-testid=thread-row][data-thread-id=t-scheduler] [data-testid=thread-state]');
+  expect(waiting.dataset['state']).toBe('waiting');
+  expect(waiting.textContent?.trim()).toBe('Needs you');
 });
 
 test('Add another account names the account itself and goes straight to the sign-in', async () => {

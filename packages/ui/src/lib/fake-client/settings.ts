@@ -55,6 +55,10 @@ export function settingsMethods(ctx: FakeContext) {
       // The core's own check, so a value the core refuses is refused here too.
       const checked = checkSettingsPatch(params);
       if (!checked.ok) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: checked.message, data: { field: checked.field } });
+      const titleModel = checked.patch.titleModel;
+      if (titleModel && ctx.providers.find(p => p.id === titleModel.providerId)?.titles !== true) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, data: { field: 'titleModel' } });
+      }
       ctx.settings = { ...ctx.settings, ...checked.patch };
       ctx.scheduler = {
         ...ctx.scheduler,

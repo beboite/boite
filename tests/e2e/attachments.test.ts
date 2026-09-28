@@ -18,7 +18,7 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
       await page.click(`[data-thread-id="${thread.id}"]`);
       // The app opens on a draft with its own composer; wait for the thread's.
-      await page.waitFor('document.querySelector("[data-testid=thread-status]")');
+      await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")');
       await page.waitFor('document.querySelector("[data-testid=composer-file]")');
       if (mobile) {
         await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -46,7 +46,7 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       await page.screenshot(join(import.meta.dir, '.artifacts', `files-${mobile ? 'phone' : 'desktop'}-draft.png`));
       await page.click('[data-testid=composer-send]');
       await page.waitFor(`Array.from(document.querySelectorAll('[data-testid=file-part]')).some(el => el.textContent.includes(${JSON.stringify(name)}))`);
-      await page.waitFor('document.querySelector("[data-testid=thread-status]")?.dataset.status === "idle"');
+      await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
       const updated = await client.call('threads.get', { threadId: thread.id });
       const user = updated.messages.filter(m => m.role === 'user').at(-1)!;
       const file = user.parts.find(p => p.type === 'file')!;

@@ -120,6 +120,7 @@
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
+    ['general', 'conversations', strings.settings.titleModel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
     ['general', 'app', strings.settings.developer],

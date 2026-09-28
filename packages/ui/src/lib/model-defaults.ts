@@ -7,7 +7,13 @@ export const MODEL_DEFAULTS_KEY = 'boite.model-defaults:v1';
 export const DEFAULT_MODEL_NAMES: Record<string, string> = {
   'claude-opus-5': 'Opus 5',
   'gpt-5.6-sol': 'GPT 5.6 Sol',
-  'grok-4.6': 'Grok 4.6'
+  'grok-4.6': 'Grok 4.6',
+  // The small models titles are written with by default (`TITLE_MODEL_DEFAULTS`).
+  'claude-haiku-4-5': 'Haiku 4.5',
+  'claude-haiku-4-5-20251001': 'Haiku 4.5',
+  'gpt-6-luna': 'GPT 6 Luna',
+  'gpt-5.6-luna': 'GPT 5.6 Luna',
+  'gpt-5.4-mini': 'GPT 5.4 mini'
 };
 export const INITIAL_MODEL_DEFAULTS: ModelDefaults = {
   claude: { model: 'claude-opus-5', effort: 'high' },

@@ -1,5 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
+  import TitleModelSetting from './TitleModelSetting.svelte';
   import ShellSettings from './ShellSettings.svelte';
   import AppUpdateCard from './AppUpdateCard.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
@@ -50,6 +51,7 @@
         <input id="{uid}-async" aria-labelledby="{uid}-async-name" type="checkbox" role="switch" data-testid="setting-async-questions"
           checked={store.settings?.asyncQuestions ?? true} disabled={!store.settings} onchange={(event) => void toggleAsync(event.currentTarget)} />
       </label>
+      {#if store.settings}<TitleModelSetting {store} />{/if}
     {/if}
   </section>
 

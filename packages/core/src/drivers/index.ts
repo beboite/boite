@@ -11,14 +11,14 @@ import { unavailable } from '../errors.ts';
 import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, TurnContext, TurnHandle } from './types.ts';
 
 /**
  * A driver whose module is imported on its first turn. The Claude and ACP
  * drivers load their SDK that way; the Codex one carries its own transport, so
  * the whole module is what stays out of core start.
  */
-function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
+function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean } = {}): Driver {
   let loaded: Driver | null = null;
   const ready = async (): Promise<Driver> => {
     if (loaded === null) loaded = await load();
@@ -26,6 +26,10 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
   };
   return {
     protocol,
+    // Declared up front, since `writesTitles` asks before anything is loaded.
+    ...(options.titles === true
+      ? { title: async (ctx: TitleContext): Promise<string | null> => (await ready()).title?.(ctx) ?? null }
+      : {}),
     startTurn(ctx: TurnContext): TurnHandle {
       let inner: TurnHandle | null = null;
       let stopped = false;
@@ -82,7 +86,7 @@ const DRIVERS = new Map<Protocol, Driver>([
   ],
   [
     'codex-appserver',
-    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver())),
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true }),
   ],
   ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
@@ -95,6 +99,11 @@ export function getDriver(protocol: Protocol): Driver {
   const driver = DRIVERS.get(protocol);
   if (driver === undefined) throw unavailable(`no driver for protocol ${protocol}`, { protocol });
   return driver;
+}
+
+/** Whether this protocol's agent writes thread titles (`Driver.title`). */
+export function writesTitles(protocol: Protocol): boolean {
+  return DRIVERS.get(protocol)?.title !== undefined;
 }
 
 /** Called before a turn is queued so the refusal reaches the caller, not only the journal. */

@@ -10,9 +10,9 @@
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
-  import { ago, projectName } from '../lib/format';
+  import { projectName } from '../lib/format';
   import MachineIcon from './MachineIcon.svelte';
-  import StatusMark from './StatusMark.svelte';
+  import ThreadState from './ThreadState.svelte';
   let {
     machine,
     project,
@@ -134,11 +134,10 @@
       onclick={() => void workspace.select(owner, thread.id)}
       ondblclick={rename}
     >
-      <span class="headline"
-        ><StatusMark status={thread.status} unread={thread.unread} />
+      <span class="headline">
         <span class="title">{thread.title}</span>
         {#if thread.pinned}<Pin size={12} />{/if}
-        <span class="when">{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
+        <ThreadState {thread} {now} />
       </span>
     </button>
     {#if meta}
@@ -220,18 +219,13 @@
   .unread .title {
     font-weight: 600;
   }
-  .when {
-    font-size: var(--text-xs);
-    color: var(--color-subtle);
-    font-variant-numeric: tabular-nums;
-  }
   .metadata {
     display: flex;
     align-items: center;
     gap: 9px;
     position: absolute;
     bottom: 9px;
-    left: 28px;
+    left: 10px;
     right: 10px;
     pointer-events: none;
     min-width: 0;
@@ -284,9 +278,14 @@
   .thread:focus-within .actions {
     opacity: 1;
   }
-  .thread:hover .when,
-  .thread:focus-within .when {
+  /* The menu button takes the time's place; a state steps left of it and stays. */
+  .thread:hover .headline :global(.when:not(.state)),
+  .thread:focus-within .headline :global(.when:not(.state)) {
     opacity: 0;
+  }
+  .thread:hover .headline :global(.when.state),
+  .thread:focus-within .headline :global(.when.state) {
+    margin-right: 22px;
   }
   .rename {
     width: 100%;
@@ -296,7 +295,7 @@
     .actions {
       opacity: 1;
     }
-    .when {
+    .headline :global(.when) {
       margin-right: 22px;
     }
   }

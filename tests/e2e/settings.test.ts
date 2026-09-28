@@ -110,6 +110,7 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await page.click(id('nav-settings')); await page.click(id('settings-tab-limits'));
   await page.waitFor(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}')`);
   const opencode = `${id('limits-tracked')} [data-account-id="a-opencode"]`;
+  await page.waitFor(`document.querySelector('${opencode}')`);
   expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
   // The Antigravity CLI's own reading starts off, and the only switch that turns it on is here.
   expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} [data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
