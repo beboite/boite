@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, test } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { relativeTo, turnDiffs, turnFiles, turnFileTree } from './turn-files';
+import { countsOf, relativeTo, turnDiffs, turnFiles, turnFileTree, turnLineCounts, type TurnDiff } from './turn-files';
 
 function tool(name: string, input: unknown, extra: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): MessagePart {
   return { type: 'tool', toolId: `${name}-${Math.random()}`, name, input, output: null, status: 'done', ...extra };
@@ -104,4 +104,18 @@ describe('turnDiffs', () => {
       tool('Edit', {}, { documents: [second] })
     ])).toEqual([first, second]);
   });
+});
+
+test('lines added and removed add up per file, whichever separator the agent used, and in all', () => {
+  const diff = (path: string, oldText: string, newText: string) => ({ kind: 'diff', path, oldText, newText }) as TurnDiff;
+  const { total, byPath } = turnLineCounts([
+    diff('C:\\w\\src\\a.ts','one\ntwo\n', 'one\n2\nthree\n'),
+    diff('C:/w/src/a.ts', 'x\n', ''),
+    diff('b.ts', '', 'new\n')
+  ]);
+  expect(total).toEqual({ added: 3, removed: 2 });
+  const file = (path: string) => ({ path, relative: null, absolute: null, name: '', folder: '', change: 'changed' as const });
+  expect(countsOf(byPath, file('C:/w/src/a.ts'))).toEqual({ added: 2, removed: 2 });
+  expect(countsOf(byPath, file('b.ts'))).toEqual({ added: 1, removed: 0 });
+  expect(countsOf(byPath, file('c.ts'))).toBeNull();
 });

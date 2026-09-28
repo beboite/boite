@@ -1514,6 +1514,13 @@ test('a finished answer lists the files it changed, and a row opens one in the p
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
+  // Folded: the count and the lines added and removed, the list on a click.
+  const toggle = query<HTMLButtonElement>('[data-testid=turn-files-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.querySelector('[data-testid=turn-lines]')?.textContent).toBe('+2-1');
+  expect(document.querySelector('[data-testid=turn-file-folder]')).toBeNull();
+  toggle.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file-folder]') !== null);
   const folder = query<HTMLButtonElement>('[data-testid=turn-file-folder]');
   expect(folder.textContent).toContain('src');
   expect(folder.getAttribute('aria-expanded')).toBe('false');

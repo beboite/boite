@@ -1,5 +1,6 @@
 import type { MessagePart, ToolDocument } from '@boite/contracts';
 import { describeTool, fileName } from './tool-summary';
+import { diffCounts, diffRows } from './diff';
 
 /**
  * The files one answer made or changed, for the card at its end. Read from
@@ -153,4 +154,37 @@ export function turnDiffs(parts: readonly MessagePart[]): TurnDiff[] {
       ? (part.documents ?? []).filter((document): document is TurnDiff => document.kind === 'diff')
       : []
   );
+}
+
+export interface LineCounts {
+  added: number;
+  removed: number;
+}
+
+/** A path as the agent may spell it twice: one separator. */
+function pathKey(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+/**
+ * Lines added and removed, per file and in all, from the answer's own diffs.
+ * A file with no diff document (a shell `rm`, a write the tool did not draw)
+ * has no entry: its row shows no count rather than a false zero.
+ */
+export function turnLineCounts(diffs: readonly TurnDiff[]): { total: LineCounts; byPath: Map<string, LineCounts> } {
+  const byPath = new Map<string, LineCounts>();
+  const total = { added: 0, removed: 0 };
+  for (const doc of diffs) {
+    const { added, removed } = diffCounts(diffRows(doc.oldText, doc.newText));
+    const key = pathKey(doc.path);
+    const seen = byPath.get(key) ?? { added: 0, removed: 0 };
+    byPath.set(key, { added: seen.added + added, removed: seen.removed + removed });
+    total.added += added;
+    total.removed += removed;
+  }
+  return { total, byPath };
+}
+
+export function countsOf(counts: Map<string, LineCounts>, file: TurnFile): LineCounts | null {
+  return counts.get(pathKey(file.path)) ?? (file.absolute ? counts.get(pathKey(file.absolute)) : undefined) ?? null;
 }

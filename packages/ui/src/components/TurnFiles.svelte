@@ -7,7 +7,7 @@
   import { revealFile } from '../lib/links';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { turnFileTree, type TurnDiff, type TurnFile, type TurnFileNode } from '../lib/turn-files';
+  import { countsOf, turnFileTree, turnLineCounts, type TurnDiff, type TurnFile, type TurnFileNode } from '../lib/turn-files';
   import DiffView from './DiffView.svelte';
 
   /**
@@ -17,6 +17,9 @@
    */
   let { store, files, diffs = [] }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[] } = $props();
   let showDiff = $state(false);
+  /** Folded by default: the count and the lines added and removed say enough until the list is wanted. */
+  let open = $state(false);
+  let lines = $derived(turnLineCounts(diffs));
   let repository = $derived(store.owner && store.openProject?.repository === true);
   let tree = $derived(turnFileTree(files));
   let expanded = $state<Record<string, boolean>>({});
@@ -51,9 +54,13 @@
 
 <section class="turn-files" data-testid="turn-files" aria-label={strings.chat.turnFiles}>
   <header>
-    <span>{strings.chat.turnFiles}</span>
-    <span class="count">{files.length}</span>
-    {#if hasFolders}
+    <button type="button" class="ghost small fold" data-testid="turn-files-toggle" aria-expanded={open} onclick={() => (open = !open)}>
+      <ChevronRight size={14} class={open ? 'chevron expanded' : 'chevron'} />
+      <span>{strings.chat.turnFiles}</span>
+      <span class="count">{files.length}</span>
+      {#if diffs.length > 0}{@render counts(lines.total)}{/if}
+    </button>
+    {#if open && hasFolders}
       <button type="button" class="ghost small icon expand" data-testid="turn-files-expand"
         title={allExpanded ? strings.chat.collapseFileFolders : strings.chat.expandFileFolders}
         aria-label={allExpanded ? strings.chat.collapseFileFolders : strings.chat.expandFileFolders}
@@ -73,7 +80,7 @@
       {/if}
     </span>
   </header>
-  <div class="tree">{@render branch(tree, 0)}</div>
+  {#if open}<div class="tree" data-testid="turn-files-tree">{@render branch(tree, 0)}</div>{/if}
   {#if showDiff}
     <div class="diffs" data-testid="turn-diff">
       {#each diffs as doc, index (index)}
@@ -82,6 +89,10 @@
     </div>
   {/if}
 </section>
+
+{#snippet counts(value: { added: number; removed: number })}
+  <span class="lines" data-testid="turn-lines"><span class="added">+{value.added}</span><span class="removed">-{value.removed}</span></span>
+{/snippet}
 
 {#snippet fileIcon(file: TurnFile)}
   <span class="file-icon" data-testid="turn-file-change" title={CHANGE_LABEL[file.change]()}>
@@ -110,6 +121,7 @@
         </li>
       {:else}
       {@const file = node.file}
+      {@const fileLines = countsOf(lines.byPath, file)}
       <li class="row" data-change={file.change} style:--depth={depth} title={file.path}>
         {#if openable(file)}
           <button
@@ -128,6 +140,7 @@
             <span class="name">{file.name}</span>
           </span>
         {/if}
+        {#if fileLines}{@render counts(fileLines)}{/if}
         {#if store.pickerAvailable && file.absolute !== null && file.change !== 'deleted'}
           <button
             type="button"
@@ -174,6 +187,27 @@
     font-variant-numeric: tabular-nums;
     font-weight: 400;
   }
+  .fold {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: -6px;
+    padding: 0 6px;
+    font-weight: 500;
+  }
+  .fold :global(.chevron) { flex: none; color: var(--color-muted-foreground); transition: transform var(--dur-2); }
+  .fold :global(.expanded) { transform: rotate(90deg); }
+  .lines {
+    display: inline-flex;
+    flex: none;
+    gap: 4px;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+  .added { color: var(--color-success); }
+  .removed { color: var(--color-danger); }
+  .row .lines { padding-right: 6px; }
   .expand, .tools { margin-left: auto; }
   .expand ~ .tools { margin-left: 0; }
   .tools { display: flex; align-items: center; gap: 2px; }
