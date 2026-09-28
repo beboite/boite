@@ -1,8 +1,24 @@
+<script module lang="ts">
+  import type { TechGlyph } from '../lib/tech-icons';
+
+  // The marks are 28 KB of path data: they load the first time a tile needs
+  // one, not with the first chunk. Until then, and if the load fails, the
+  // initial stands.
+  let techGlyphs = $state.raw<Partial<Record<string, TechGlyph>> | null>(null);
+  let glyphsAsked = false;
+  function loadGlyphs(): void {
+    if (glyphsAsked) return;
+    glyphsAsked = true;
+    void import('../lib/tech-icons')
+      .then((module) => { techGlyphs = module.techGlyphs; })
+      .catch(() => { glyphsAsked = false; });
+  }
+</script>
+
 <script lang="ts">
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { projectName } from '../lib/format';
-  import { techGlyphs } from '../lib/tech-icons';
 
   /**
    * A project's mark: the logo the core found in its folder, else the mark of
@@ -13,13 +29,14 @@
   let { project, store, size = 20 }: { project: Project; store: Store; size?: number } = $props();
 
   let url = $derived(store.projectIconUrl(project));
-  let glyph = $derived(project.icon?.kind === 'tech' ? (techGlyphs[project.icon.id] ?? null) : null);
+  let glyph = $derived(project.icon?.kind === 'tech' ? (techGlyphs?.[project.icon.id] ?? null) : null);
   let initial = $derived(projectName(project).slice(0, 1).toUpperCase());
   /** An image that fails to decode falls back to the initial rather than a broken picture. */
   let broken = $state<string | null>(null);
 
   $effect(() => {
     if (project.icon?.kind === 'image' && url === null) void store.loadProjectIcon(project);
+    if (project.icon?.kind === 'tech') loadGlyphs();
   });
 </script>
 

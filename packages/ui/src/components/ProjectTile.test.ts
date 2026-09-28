@@ -58,11 +58,23 @@ test('a project whose folder had a logo draws it, fetched once for its version',
   expect(asked.mock.calls.filter(([method]) => method === 'projects.icon')).toHaveLength(1);
 });
 
+test('an answer for a newer version than the list named still draws, and is asked for once', async () => {
+  const { store, client } = await seeded();
+  const asked = vi.spyOn(client, 'call');
+  const boite = store.projects.find((p) => p.id === 'p-boite')!;
+  draw(store, { ...boite, icon: { kind: 'image', version: 'older' } });
+  await settle();
+  await settle();
+  expect(tile().dataset['kind']).toBe('image');
+  expect(asked.mock.calls.filter(([method]) => method === 'projects.icon')).toHaveLength(1);
+});
+
 test("a project with no logo draws its stack's mark, a black or white one in the foreground colour", async () => {
   const { store } = await seeded();
   const notes = store.projects.find((p) => p.id === 'p-notes')!;
   draw(store, notes);
-  expect(tile().dataset['tech']).toBe('python');
+  // The marks are their own chunk: the initial until it lands.
+  await vi.waitFor(() => expect(tile().dataset['tech']).toBe('python'));
   const path = tile().querySelector('path');
   expect(path?.getAttribute('d')).toBe(techGlyphs.python.path);
   expect(path?.getAttribute('fill')).toBe(techGlyphs.python.hex);
@@ -82,6 +94,7 @@ test('nothing detected, a stack this UI does not know, or an image that cannot b
 
   unmount(running!, { outro: false });
   draw(store, { ...notes, icon: { kind: 'tech', id: 'cobol' as never } });
+  await settle();
   expect(tile().dataset['kind']).toBe('letter');
 
   // The core refuses: this project holds no image, whatever an old answer said.
