@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Command, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -11,6 +11,7 @@
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
+  import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
@@ -224,8 +225,7 @@
   {/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
-    <!-- The palette's only pointer and touch door: its chord is the tooltip. -->
-    <button class="ghost icon" aria-label={strings.keyboard.commands.palette} title={`${strings.keyboard.commands.palette}${store.keyHint('palette')}`} data-testid="nav-palette" onclick={() => (store.paletteOpen = true)}><Command size={16} /></button>
+    <LimitsGlance {store} />
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     <button
       class="ghost icon"
