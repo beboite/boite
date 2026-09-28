@@ -2,6 +2,7 @@ import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
+import { MemoryNotices } from './memory-notices.ts';
 
 /**
  * What reaches an agent outside a prompt the user typed: answers to
@@ -9,6 +10,7 @@ import type { ThreadStore } from '../threads.ts';
  * turns an agent opens by itself when background work finishes.
  */
 export class DeferredInput {
+  readonly memory: MemoryNotices;
   /**
    * Answers to asynchronous questions that could not reach the agent yet: a
    * turn was running with no way to steer it, or queued. They go out together
@@ -18,7 +20,9 @@ export class DeferredInput {
   /** A driver asked for a background turn while the thread's last turn was still closing. */
   readonly pendingWakes = new Map<ThreadId, string>();
 
-  constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
+  constructor(private readonly core: Core, private readonly threads: ThreadStore) {
+    this.memory = new MemoryNotices(core, threads);
+  }
 
   /**
    * An asynchronous answer on its way to the agent: steered into the running
@@ -41,7 +45,10 @@ export class DeferredInput {
           this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
           hold();
         })
-        .finally(() => this.threads.runner.steering.delete(threadId));
+        .finally(() => {
+          this.threads.runner.steering.delete(threadId);
+          void this.memory.flushRunning(threadId);
+        });
       return;
     }
     this.defer(threadId, text);
@@ -74,6 +81,8 @@ export class DeferredInput {
    * given mid-turn does not wait for the turn to end.
    */
   takeForRunningTurn(threadId: ThreadId): string | null {
+    const memory = this.memory.take(threadId);
+    if (memory) return memory;
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
     this.deferredAnswers.delete(threadId);

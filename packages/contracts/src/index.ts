@@ -1176,7 +1176,19 @@ export interface SchedulerState {
   maxConcurrentTurns: number;
   perAccountConcurrency: number;
   running: { turnId: TurnId; threadId: ThreadId; startedAt: Timestamp }[];
-  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
+  queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp; reason?: 'memory' }[];
+}
+
+export type MemoryState = 'ok' | 'tight' | 'critical';
+
+export interface MemoryEvent {
+  threadId: string | null;
+  kind: 'killed' | 'thread-cap' | 'budget' | 'pressure';
+  pid?: number;
+  exe?: string;
+  bytes?: number;
+  state: MemoryState;
+  at: number;
 }
 
 /** Per-core consent. Installation identifiers never cross RPC. */
@@ -2501,6 +2513,8 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+  'resources.memory': MemoryEvent;
+  'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };

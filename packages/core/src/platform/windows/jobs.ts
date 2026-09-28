@@ -58,7 +58,6 @@ const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
 /** Enough for GetProcessTimes, and granted on processes the full query right is not. */
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-const ERROR_ACCESS_DENIED = 5;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const KILL_EXIT_CODE = 9;
@@ -335,7 +334,7 @@ export function jobsCapability(): TraceCapability {
     };
   }
   const suffix = nestingRefused
-    ? '; the global job refused nesting (access denied), thread jobs run standalone'
+    ? '; the global job refused nesting, thread jobs run standalone'
     : '';
   if (workerFailure !== null) {
     return {
@@ -347,7 +346,10 @@ export function jobsCapability(): TraceCapability {
   return { os, mode: 'events', note: `${EVENTS_NOTE}${suffix}` };
 }
 
-// -- the two seams `procs` calls --------------------------------------------
+export function kernelMemoryBudget(): boolean {
+  const limit = memoryLimitOfJob(null);
+  return !nestingRefused && limit !== null && (limit.flags & JOB_OBJECT_LIMIT_JOB_MEMORY) !== 0 && limit.bytes > 0;
+}
 
 export function assignToThreadJob(threadId: string, pid: number): boolean {
   if (pid <= 0) return false;
@@ -366,7 +368,7 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
     if (globalJob !== 0 && !nestingRefused) {
       // The thread job nests under the global job through this first assignment:
       // the process is already in the global job when it joins the thread job.
-      if (!api.assign(globalJob, handle) && api.lastError() === ERROR_ACCESS_DENIED) nestingRefused = true;
+      if (!api.assign(globalJob, handle)) nestingRefused = true;
     }
     return api.assign(job.handle, handle);
   } finally {
@@ -453,17 +455,17 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   job.lastSampleAt = now;
 
   let memoryBytes = 0;
+  const workingSets: { pid: number; bytes: number }[] = [];
   for (const [pid, entry] of tracked) {
     if (entry.threadId !== threadId) continue;
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
-    if (memory.peak > entry.peakMemoryBytes) {
-      tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
-    }
+    workingSets.push({ pid, bytes: memory.workingSet });
+    if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
 
-  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes };
+  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets };
 }
 
 // -- job creation -----------------------------------------------------------
@@ -686,7 +688,7 @@ function onJobPacket(message: number, key: number, pid: number, handle = 0): voi
   if (key === GLOBAL_JOB_KEY) {
     // Starts and exits also reach the global job. Only the thread owns their trace.
     if (handle !== 0) native?.close(handle);
-    if (message === MSG_JOB_MEMORY_LIMIT) sink?.memoryLimit(null, 'budget');
+    if (message === MSG_JOB_MEMORY_LIMIT) sink?.memoryLimit(tracked.get(pid)?.threadId ?? null, 'budget');
     return;
   }
   const threadId = threadsByKey.get(key);

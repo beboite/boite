@@ -86,12 +86,12 @@ describe('a thread load on Linux', () => {
     proc.set(100, 1000, 200, 50_000);
     proc.set(101, 10, 0, 30_000);
 
-    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 0, memoryBytes: 80_000 * 1024 });
+    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 0, memoryBytes: 80_000 * 1024, workingSets: [{ pid: 100, bytes: 50_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
 
     // One second later: 2 cores busy on pid 100, idle on 101.
     proc.at += 1000;
     proc.set(100, 1000 + 2 * USER_HZ, 200, 60_000);
-    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 50, memoryBytes: 90_000 * 1024 });
+    expect(load.sample('thr')).toEqual({ processes: 2, cpuPercent: 50, memoryBytes: 90_000 * 1024, workingSets: [{ pid: 100, bytes: 60_000 * 1024 }, { pid: 101, bytes: 30_000 * 1024 }] });
   });
 
   test('a pid that exited between samples is skipped, and one read the first time adds no CPU', () => {
@@ -105,7 +105,7 @@ describe('a thread load on Linux', () => {
     proc.at += 1000;
     proc.gone(200);
     proc.set(201, 9000, 0, 2000);
-    expect(load.sample('thr')).toEqual({ processes: 1, cpuPercent: 0, memoryBytes: 2000 * 1024 });
+    expect(load.sample('thr')).toEqual({ processes: 1, cpuPercent: 0, memoryBytes: 2000 * 1024, workingSets: [{ pid: 201, bytes: 2000 * 1024 }] });
 
     proc.gone(201);
     expect(load.sample('thr')).toBeNull();

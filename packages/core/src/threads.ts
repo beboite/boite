@@ -642,7 +642,10 @@ export class ThreadStore {
       const submitted = await handle.steer(text);
       if (submitted && !this.core.journal.isClosed()) this.noteCoordination(threadId, turn.id, text);
       return submitted;
-    } finally { this.runner.steering.delete(threadId); }
+    } finally {
+      this.runner.steering.delete(threadId);
+      void this.deferred.memory.flushRunning(threadId);
+    }
   }
 
   noteCoordination(threadId: string, turnId: string, text: string): void {

@@ -118,6 +118,7 @@ export class LinuxLoad {
     if (pids === undefined) return null;
     const ticks = new Map<number, number>();
     let memoryBytes = 0;
+    const workingSets: { pid: number; bytes: number }[] = [];
     let processes = 0;
     for (const pid of pids) {
       const stat = this.read(`/proc/${pid}/stat`);
@@ -126,7 +127,9 @@ export class LinuxLoad {
       processes += 1;
       ticks.set(pid, used);
       const status = this.read(`/proc/${pid}/status`);
-      memoryBytes += (status === null ? null : residentBytes(status)) ?? 0;
+      const bytes = status === null ? null : residentBytes(status);
+      if (bytes !== null) workingSets.push({ pid, bytes });
+      memoryBytes += bytes ?? 0;
     }
     if (processes === 0) return null;
 
@@ -145,6 +148,6 @@ export class LinuxLoad {
       const cpuMs = (spent * 1000) / USER_HZ;
       cpuPercent = Math.round((cpuMs / (elapsedMs * Math.max(1, this.logicalCpus))) * 1000) / 10;
     }
-    return { processes, cpuPercent, memoryBytes };
+    return { processes, cpuPercent, memoryBytes, workingSets };
   }
 }

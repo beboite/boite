@@ -7,6 +7,7 @@ import { Journal } from '../src/journal.ts';
 import { ProcRegistry } from '../src/procs.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import type { ProcessEventSink } from '../src/platform/types.ts';
+import type { MemoryEvent } from '@boite/contracts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 import { waitFor } from './harness.ts';
 
@@ -36,6 +37,7 @@ describeWindows('job memory notifications', () => {
   let bus: Bus;
   let notices: Parameters<ProcessEventSink['memoryLimit']>[];
   let started: Set<number>;
+  let memoryEvents: MemoryEvent[];
 
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'boite-memory-'));
@@ -44,6 +46,10 @@ describeWindows('job memory notifications', () => {
     journal = new Journal(join(directory, 'journal.db'));
     bus = new Bus();
     notices = [];
+    memoryEvents = [];
+    bus.onAny((name, payload) => {
+      if (name === 'resources.memory') memoryEvents.push(payload as MemoryEvent);
+    });
     started = new Set();
     procs = new ProcRegistry(journal, bus, {
       ...processPlatform,
@@ -84,6 +90,8 @@ describeWindows('job memory notifications', () => {
     await waitFor(() => notices.some(([id, kind]) => id === 'limited' && kind === 'thread-cap'), 5000);
     expect(logs).toContain('thread limited: the thread reached its memory cap');
     expect(notices.some(([, kind]) => kind === 'budget')).toBe(false);
+    expect(memoryEvents.filter(event => event.kind === 'thread-cap')).toHaveLength(notices.length);
+    expect(memoryEvents[0]).toMatchObject({ threadId: 'limited', kind: 'thread-cap', state: 'ok', at: expect.any(Number) });
     procs.killTree('limited');
     await child.exited;
     expect(await output).toContain('allocation refused');
@@ -104,7 +112,9 @@ describeWindows('job memory notifications', () => {
       reader.releaseLock();
       expect(output).toContain(id === 'first' ? 'allocation complete' : 'allocation refused');
     }
-    await waitFor(() => notices.some(([id, kind]) => id === null && kind === 'budget'), 5000);
+    await waitFor(() => notices.some(([id, kind]) => id === 'second' && kind === 'budget'), 5000);
     expect(notices.some(([, kind]) => kind === 'thread-cap')).toBe(false);
+    expect(memoryEvents.filter(event => event.kind === 'budget')).toHaveLength(notices.length);
+    expect(memoryEvents[0]).toMatchObject({ threadId: 'second', kind: 'budget', state: 'ok', at: expect.any(Number) });
   });
 });

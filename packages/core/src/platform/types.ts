@@ -17,6 +17,7 @@ export interface ProcessSample {
   processes: number;
   cpuPercent: number;
   memoryBytes: number;
+  workingSets?: { pid: number; bytes: number }[];
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -72,6 +73,8 @@ export interface ProcessPlatform {
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
   machineMemory(): { totalBytes: number; availableBytes: number } | null;
+  /** True only while the kernel enforces the shared budget across every thread job. */
+  kernelMemoryBudget?(): boolean;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */

@@ -458,7 +458,7 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
       }
       case 'spawn': {
         const shell = shellFor(segment.command);
-        const child = ctx.spawn(shell.cmd, shell.args);
+        const child = ctx.spawn(shell.cmd, shell.args, { agentRoot: false });
         const output = await Promise.race([new Response(child.proc.stdout).text(), untilStopped(state)]);
         if (output === null || state.stopped) {
           // A stop does not wait for the child: the thread's tree goes, and
@@ -477,6 +477,8 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         return { status: 'error', sessionId, usage: usage(), error: ERROR_MESSAGE };
       }
     }
+    const notice = state.stopped ? null : ctx.coordination?.();
+    if (notice) await writeText(notice);
   }
 
   ctx.emit.complete(messageId, 'complete');

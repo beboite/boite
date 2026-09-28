@@ -4,12 +4,12 @@ import type { ProcessPlatform } from './types.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
- * also measures their load and reads start times from procfs; macOS has no such
- * files and reports neither.
+ * also measures CPU and reads start times from procfs. macOS supplies resident
+ * memory through libproc when the platform entry loads its native backend.
  */
 export function createPosixPlatform(
   os: 'linux' | 'macos',
-  load: LinuxLoad | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
+  load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
 ): ProcessPlatform {
   return {
     retain() {},

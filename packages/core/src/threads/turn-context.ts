@@ -29,6 +29,7 @@ import { systemOperation } from './operations.ts';
  * a fresh session reuses them instead of taking again and finding nothing.
  */
 export interface CarriedInput {
+  memory?: string;
   deferred?: string;
   letters?: string;
 }
@@ -117,11 +118,12 @@ export class TurnContexts {
     // core's retry on a fresh session) and a driver's `continuation` get what
     // the first one took.
     carried.deferred ??= operation || slash(prepared.prompt) ? '' : this.threads.deferred.takeDeferred(threadId);
+    carried.memory ??= this.threads.deferred.memory.take(threadId);
     carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
     const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters;
     const compose = (body: string, sessionId: string | null): string =>
-      ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id, sessionId === null)) + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+      carried.memory + ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id, sessionId === null)) + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     return {
       thread,
       account,

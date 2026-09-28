@@ -24,7 +24,13 @@ export class Scheduler {
   private readonly queue: Entry[] = [];
   private readonly running = new Map<TurnId, RunningEntry>();
 
-  constructor(private readonly core: Core) {}
+  constructor(private readonly core: Core) {
+    core.bus.onAny((name) => {
+      if (name !== 'resources.memory') return;
+      this.emitUpdated();
+      this.pump();
+    });
+  }
 
   /** Account ownership follows accepted turns even when their thread selects another model. */
   activeAccountIds(): AccountId[] {
@@ -52,6 +58,7 @@ export class Scheduler {
         threadId: entry.threadId,
         position: index,
         queuedAt: entry.queuedAt,
+        ...(this.core.procs.memory.state === 'ok' ? {} : { reason: 'memory' as const }),
       })),
     };
   }
@@ -81,6 +88,7 @@ export class Scheduler {
   }
 
   private pump(): void {
+    if (this.core.procs.memory.state !== 'ok') return;
     const settings = this.core.settings.get();
     let started = false;
     for (;;) {
