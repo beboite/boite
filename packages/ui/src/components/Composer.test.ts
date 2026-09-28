@@ -576,6 +576,46 @@ test('Escape stops the running turn and sends pending input next', async () => {
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
 });
 
+test('Enter in the emptied composer sends the oldest pending prompt now, and the next one waits for its turn', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Hold on [permission]');
+  press('Enter');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const rpc = vi.spyOn(store.client!, 'call');
+  await type('Now please');
+  press('Enter');
+  await type('After that');
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 2);
+  expect(query('[data-testid=composer-queued]').textContent).toContain('Now please');
+  press('Enter');
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  const prompts = store.openThread!.messages.filter((message) => message.role === 'user').slice(-2)
+    .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
+  expect(prompts).toEqual(['Now please', 'After that']);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
+});
+
+test('Enter with text still queues, and Send now under the pending bubbles stops the turn', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Hold on [permission]');
+  press('Enter');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const rpc = vi.spyOn(store.client!, 'call');
+  await type('Queued by the button');
+  press('Enter');
+  await type('still typing');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 2);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  query<HTMLButtonElement>('[data-testid=composer-send-now]').click();
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+});
+
 test('goal and loop coexist above the composer with expandable agent tasks', async () => {
   await mountOnFake();
   await store.open('t-trace');

@@ -874,6 +874,11 @@ export const strings = {
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',
+    /** A refused send held the pending messages until the user sends again. */
+    queuedPaused: 'Held after a refused send',
+    sendNow: 'Send now',
+    sendNowHint: 'Stops the current turn and sends the oldest pending message. Enter in the empty composer does the same.',
+    retryQueuedHint: 'Sends the oldest pending message again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
     models: 'Models',
     searchModels: 'Search models',
