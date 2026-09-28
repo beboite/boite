@@ -2,7 +2,7 @@
   import InfoTip from './InfoTip.svelte';
   import { Minus, Plus } from '@lucide/svelte';
   import { onMount, untrack } from 'svelte';
-  import { FONTS, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
+  import { FONT_KEY, FONTS, MONO_KEY, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
   import { percent } from '../lib/format';
   import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, wantedZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
@@ -114,7 +114,13 @@
       grain = isExperimentEnabled('theme-grain');
       theme = readTheme();
     });
-    return () => { stopZoom(); stopExperiments(); };
+    // A face picked in another window restamps this one (`startFonts`); the buttons follow it.
+    const followFaces = (event: StorageEvent) => {
+      if (event.key === FONT_KEY) font = readFont();
+      if (event.key === MONO_KEY) mono = readMono();
+    };
+    window.addEventListener('storage', followFaces);
+    return () => { stopZoom(); stopExperiments(); window.removeEventListener('storage', followFaces); };
   });
 
   function pickMaterial(next: Glass) {
