@@ -19,15 +19,17 @@ async function capture(name: string) {
   await page.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
 }
 
-for (const view of ['tray', 'desktop', 'phone']) {
+for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
   test(`${view} restores each quota bar as its account answers`, async () => {
-    await page.send('Emulation.setDeviceMetricsOverride', { width: view === 'desktop' ? 1280 : 390, height: 850, deviceScaleFactor: 1, mobile: view === 'phone' });
+    await page.send('Emulation.setDeviceMetricsOverride', { width: view === 'desktop' || view === 'sidebar' ? 1280 : 390, height: 850, deviceScaleFactor: 1, mobile: view === 'phone' });
     await page.navigate(`${origin}/?fake=1&open=recent${view === 'tray' ? '&view=quotas' : ''}`);
-    if (view !== 'tray') {
+    if (view === 'sidebar') {
+      await page.click('[data-testid="nav-limits"]');
+    } else if (view !== 'tray') {
       await page.click('[data-testid="nav-settings"]');
       await page.click('[data-testid="settings-tab-limits"]');
     }
-    const refresh = `[data-testid="${view === 'tray' ? 'quota' : 'limits'}-refresh"]`;
+    const refresh = `[data-testid="${view === 'tray' ? 'quota' : view === 'sidebar' ? 'limits-glance' : 'limits'}-refresh"]`;
     await page.waitFor(`document.querySelector('${refresh}')?.getAttribute('aria-busy') === 'false' && document.querySelector('[role="meter"]')`);
     // Hold the RPC's final response and deliver individual account events ourselves.
     // This controls network timing without changing the reader or either view.
@@ -47,7 +49,7 @@ for (const view of ['tray', 'desktop', 'phone']) {
     })()`);
     await page.click(refresh);
     await page.waitFor('globalThis.quotaFixture');
-    const root = view === 'tray' ? '[data-testid="quota-provider"]' : '[data-testid="usage-limit-account"]';
+    const root = view === 'tray' || view === 'sidebar' ? '[data-testid="quota-provider"]' : '[data-testid="usage-limit-account"]';
     const track = (provider: string) => `${root}[data-provider="${provider}"] .track`;
     const filter = (provider: string) => page.evaluate<string>(`getComputedStyle(document.querySelector('${track(provider)}')).filter`);
     await capture(`quota-${view}-waiting.png`);
