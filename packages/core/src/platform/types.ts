@@ -73,7 +73,8 @@ export interface ProcessPlatform {
   terminateProcess(threadId: string, pid: number): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
-  machineMemory(): { totalBytes: number; availableBytes: number } | null;
+  /** Null `availableBytes` when the OS gives no honest reading; the reserve check then sits out. */
+  machineMemory(): { totalBytes: number; availableBytes: number | null } | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
   /** A turn is starting: have the process drain and the protections ready before its first process. */

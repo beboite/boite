@@ -1226,7 +1226,7 @@ export const strings = {
   },
   resources: {
     memory: 'Memory protection',
-    memoryHint: 'Boite stops processes that exceed memory limits to leave room for your other apps.',
+    memoryHint: 'When a conversation goes over its quota, the agents over their budget, or free memory under the reserve, Boite stops the largest process the agent started.',
     resolved: (mb: number) => `${Math.round(mb)} MB`,
     auto: (mb: number) => `Auto: ${Math.round(mb)} MB`,
     agents: 'Agents / budget',

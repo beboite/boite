@@ -1167,7 +1167,7 @@ export const fr: Translation = {
   },
   resources: {
     memory: 'Protection mémoire',
-    memoryHint: "Boite arrête les processus qui dépassent les limites de mémoire pour en laisser aux autres applications.",
+    memoryHint: "Quand une conversation dépasse son quota, les agents leur budget, ou la mémoire libre la réserve, Boite arrête le plus gros processus lancé par l'agent.",
     resolved: (mb: number) => `${Math.round(mb)} Mo`,
     auto: (mb: number) => `Auto : ${Math.round(mb)} Mo`,
     agents: 'Agents / budget',
