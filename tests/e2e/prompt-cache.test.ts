@@ -64,7 +64,7 @@ test('an active turn hides the old cache clock until its new result arrives', as
       thread.status = '${status}';
       thread.promptCache.at = Date.now() - 6 * 60000;
     })()`);
-    await page.waitFor(`!document.querySelector('${CHIP}') || document.querySelector('${CHIP}').dataset.state === 'cold'`);
+    await page.waitFor(`!document.querySelector('${CHIP}')`);
     if (status === 'running') await page.screenshot(join(import.meta.dir, '.artifacts', 'prompt-cache-running-desktop.png'));
     expect(await page.evaluate<boolean>(`!!document.querySelector('${CHIP}')`)).toBe(false);
     expect(await page.evaluate<string>(`document.querySelector('[data-testid="context-trigger"]').getAttribute('aria-label')`)).toBe('Context');
