@@ -172,8 +172,8 @@ Questions come in two kinds. A blocking one (Claude's `AskUserQuestion`, one
 card per question) holds the turn in `waiting` until it is answered. An
 asynchronous one (Codex's `delivery: "async"` messages, or `boite ask` from any
 agent) draws the same card without stopping anything; the core answers it by
-steering the running turn, or by sending `> question` and the answer as the
-next prompt once the thread is idle. The core stamps `startedAt` and
+steering the running turn (Claude takes it at its next PostToolUse hook), or by
+sending `> question` and the answer as the next prompt once the thread is idle. The core stamps `startedAt` and
 `finishedAt` on every tool part, so a card shows how long a command has run.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn

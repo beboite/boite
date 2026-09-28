@@ -38,6 +38,24 @@ test('coordination arrives once through Claude PostToolUse with agent provenance
   await client.call('turns.stop', { threadId });
 });
 
+test('an async answer reaches a running Claude turn at its next PostToolUse, not at its end', async () => {
+  scripted(fake => fake.emit(init('answer-session')));
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  await client.call('turns.start', { threadId, prompt: 'Migrate the schema' });
+  await waitFor(() => !!calls[0]?.prompts.length);
+  harness.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
+  const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
+  const input = { hook_event_name: 'PostToolUse' as const, session_id: 'answer-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' };
+  const result = JSON.stringify(await hook(input, 'read-1', { signal: new AbortController().signal }));
+  expect(result).toContain('Which database?');
+  expect(result).toContain('SQLite');
+  expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+  const again = await hook(input, 'read-2', { signal: new AbortController().signal });
+  expect(JSON.stringify(again)).not.toContain('SQLite');
+  await client.call('turns.stop', { threadId });
+});
+
 describe('claude driver', () => {
   test('canUseTool routes to the permission gate and answers the CLI', async () => {
     const client = await harness.connect();

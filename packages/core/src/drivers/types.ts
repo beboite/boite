@@ -70,7 +70,11 @@ export interface TurnContext {
   provider: ProviderDescriptor;
   turn: Turn;
   prompt: string;
-  /** An authenticated agent message at a safe tool boundary, never a user instruction. */
+  /**
+   * What reaches a running turn at a safe tool boundary: an authenticated agent
+   * message (never a user instruction), or the user's answers to asynchronous
+   * questions, for a driver with no steer.
+   */
   coordination?(): string | null;
   /**
    * The images sent with the prompt, already checked by the core (format,

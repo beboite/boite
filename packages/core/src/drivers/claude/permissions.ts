@@ -101,7 +101,8 @@ export function toolGate(host: GateHost): ToolGate {
   };
 
   /**
-   * Only the coordination context. The tool's result is the `tool_result` the
+   * Only the context the turn takes in mid-way: other agents' messages and the
+   * user's asynchronous answers, since Claude has no steer. The tool's result is the `tool_result` the
    * CLI sends next, with its own text and error flag; `tool_response` here is
    * the raw object, a whole `originalFile` for an Edit, that no card shows.
    */
