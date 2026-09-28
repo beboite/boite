@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Project, ThreadId, WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
@@ -143,9 +143,9 @@ export class Worktrees {
   /** Local exclusions keep nested checkouts out of status without editing .gitignore. */
   private async exclude(threadId: ThreadId, project: Project, path: string): Promise<void> {
     const local = relative(project.path, dirname(path));
-    if (!local || isAbsolute(local) || local === '..' || local.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) return;
-    const folder = local.replaceAll('\\', '/');
-    const pattern = folder.startsWith('.boite/') ? '/.boite/' : `/${folder.replace(/[\[\]*?!# ]/g, '\\$&')}/`;
+    if (!local || isAbsolute(local) || local === '..' || local.startsWith(`..${sep}`)) return;
+    const folder = local.split(sep).join('/');
+    const pattern = folder.startsWith('.boite/') ? '/.boite/' : `/${folder.replace(/[\\[\]*?!# ]/g, '\\$&')}/`;
     const result = await this.git(threadId, project.path, ['rev-parse', '--git-path', 'info/exclude']);
     if (result.code !== 0) throw refused(`cannot locate the git exclude file in ${project.path}: ${result.stderr.trim()}`);
     const file = resolve(project.path, result.stdout.trim());

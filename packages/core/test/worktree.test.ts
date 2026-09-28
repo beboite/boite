@@ -138,6 +138,16 @@ describe('a thread in its own worktree', () => {
     expect(harness.core.journal.getSetting('settings')).toMatchObject({ worktreeStorage: { mode: 'project', directory } });
   });
 
+  test('a shared folder inside the project escapes literal characters in its Git exclusion', async () => {
+    const project = await repoProject();
+    const name = process.platform === 'win32' ? 'shared [work] !' : 'shared \\[work] !';
+    const directory = join(project.path, name);
+    await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory } });
+    const accountId = await echoAccount();
+    await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Nested', worktree: {} });
+    expect(git(project.path, 'status', '--porcelain')).toBe('');
+  });
+
   test('a second thread with the same title gets -2, and a wanted branch is honoured or refused', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();
