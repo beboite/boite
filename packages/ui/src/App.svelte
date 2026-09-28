@@ -349,9 +349,9 @@
       quitHold.press();
       return;
     }
-    // Ctrl+=, Ctrl+- and Ctrl+0 zoom the whole interface in the shell, T3 Code's
-    // way, except inside a browser surface's own chrome, whose page walks its
-    // own ladder. A browser tab keeps its native zoom.
+    // Ctrl+=, Ctrl+- and Ctrl+0 zoom the whole interface in the shell, except
+    // inside a browser surface's own chrome, whose page walks its own ladder.
+    // A browser tab keeps its native zoom.
     const zoom = inShell ? zoomKey(event) : null;
     if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
       event.preventDefault();

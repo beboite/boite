@@ -580,7 +580,7 @@ and disabled for reduced motion. Finished turns show a check and elapsed time;
 usage totals remain in Usage settings. Context details open separately from
 compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
 
-Tool calls read as a work log, the way T3 Code draws them. A run of calls with
+Tool calls read as a work log. A run of calls with
 nothing between them folds under one sentence ("Ran 4 commands, read 1 file and
 searched the code once"): one clause per kind, in the order the kinds first
 ran, with edits counted by file. While a call runs, the folded line says what

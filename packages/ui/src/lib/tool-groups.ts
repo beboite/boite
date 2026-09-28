@@ -3,7 +3,7 @@ import { fill, strings } from './strings';
 import { describeTool, fileName, partialSummaryOf, summaryOf, type ToolFamily } from './tool-summary';
 
 /*
- * How a message's tool calls read in the timeline, T3 Code's way: a run of
+ * How a message's tool calls read in the timeline: a run of
  * calls with nothing between them folds under one sentence ("Ran 3 commands,
  * read 2 files"), each call is a plain line rather than a card, and a command
  * reads as what it runs rather than as the shell that wraps it.

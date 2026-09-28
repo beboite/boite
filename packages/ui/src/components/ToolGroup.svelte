@@ -6,7 +6,7 @@
 
   /*
    * A run of tool calls with nothing between them. One call is its own line;
-   * two or more fold under one sentence, T3 Code's activity row: "Ran 3
+   * two or more fold under one sentence: "Ran 3
    * commands and read 2 files" once they are done, the running call's own
    * words ("Running git") while one runs. The fold opens on the calls, each
    * one the same line it would be alone.
@@ -25,7 +25,7 @@
   let open = $state(false);
   let live = $derived(parts.findLast((part) => part.status === 'running'));
   let last = $derived(parts.at(-1));
-  /** The mark follows the latest call, as T3 does: an early miss the agent recovered from is no alarm. */
+  /** The mark follows the latest call: an early miss the agent recovered from is no alarm. */
   let failed = $derived(!live && (last?.status === 'error' || last?.status === 'denied'));
   let label = $derived(live ? liveLabel(live) : runSummary(parts));
   let Glyph = $derived(ICONS[familyOf(live ?? last ?? parts[0]!)]);
@@ -148,7 +148,7 @@
     text-align: left;
   }
 
-  /* A light passing over the words while a call runs: T3's live row. */
+  /* A light passing over the words while a call runs. */
   .label.shimmer {
     background: linear-gradient(90deg, var(--color-muted-foreground) 35%, var(--color-foreground) 50%, var(--color-muted-foreground) 65%) 0 0 / 300% 100%;
     -webkit-background-clip: text;

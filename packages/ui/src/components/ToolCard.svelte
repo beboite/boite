@@ -10,7 +10,7 @@
   import DocumentView from './DocumentView.svelte';
 
   /*
-   * One tool call as a plain line of the timeline, T3 Code's way: what it did
+   * One tool call as a plain line of the timeline: what it did
    * in words or the command it ran, a clock past one second, a mark only when
    * it runs or failed, and the input, the output and what it produced one
    * click below. A run of calls folds under `ToolGroup`.
@@ -225,7 +225,7 @@
 </div>
 
 <style>
-  /* No frame: a call is a line of the timeline, like T3 Code's work rows. */
+  /* No frame: a call is a line of the timeline. */
   .tool {
     max-width: 100%;
     min-width: 0;

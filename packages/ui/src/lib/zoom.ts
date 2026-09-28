@@ -2,9 +2,8 @@
  * The interface zoom: `Ctrl+=`, `Ctrl+-` and `Ctrl+0` anywhere in the desktop
  * shell, and the Zoom row of Settings, Appearance. It is the webview's own
  * zoom, the one a browser applies, so the layout recomputes at the new size
- * (the media queries included) rather than scaling a picture of it. T3 Code
- * does the same on its main `webContents`, and for the same reason leaves the
- * page of a browser surface to its own ladder.
+ * (the media queries included) rather than scaling a picture of it. For the
+ * same reason the page of a browser surface keeps its own ladder.
  *
  * A browser tab reading the UI has its own `Ctrl+=` already, so nothing here
  * runs outside the shell. The factor is kept on this device under `boite.zoom`
