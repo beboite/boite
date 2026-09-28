@@ -5,7 +5,7 @@
   import { openExternal } from '../lib/links';
   import { strings } from '../lib/strings';
   import { focusComposer } from '../lib/focus';
-  import { ZOOM_DEFAULT, stepZoom, zoomKey } from '../lib/zoom';
+  import { ZOOM_DEFAULT, currentZoom, stepZoom, zoomKey } from '../lib/zoom';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -108,7 +108,11 @@
     let frame = 0;
     const report = (): void => {
       const rect = node.getBoundingClientRect();
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      // The interface zoom is in the key: the bridge scales the rectangle by
+      // it, and the page lays out at a new zoom a frame or more before the
+      // factor changes here (`lib/zoom.ts`), so the last new rectangle can go
+      // out scaled by the old one.
+      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${currentZoom()}`;
       if (key !== last) {
         last = key;
         browserBridge.setBounds(surfaceId, {

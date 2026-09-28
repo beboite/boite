@@ -21,15 +21,20 @@
   let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
   let at = $derived(shown ? asked.indexOf(shown) : 0);
   let questionOpen = $state(true);
-  // A new question comes up open, even over one the user folded.
-  let seen = 0;
+  // A new question comes up open, even over one the user folded, and so does
+  // another thread's: the dock stays mounted while the open thread changes, and
+  // a count would miss a question that replaces another.
+  let seen = new Set<string>();
+  let seenThread: string | undefined;
   $effect(() => {
-    const count = asked.length;
-    if (count > seen) {
-      shownId = asked[count - 1]?.id ?? null;
+    const thread = store.openThread?.id;
+    const fresh = asked.filter((question) => !seen.has(question.id));
+    if (thread !== seenThread || fresh.length > 0) {
+      shownId = (fresh.at(-1) ?? asked.at(-1))?.id ?? null;
       questionOpen = true;
     }
-    seen = count;
+    seen = new Set(asked.map((question) => question.id));
+    seenThread = thread;
   });
   // The timeline's line for a docked question brings that one up.
   $effect(() => {
@@ -236,6 +241,8 @@
   .pager .meta { font-variant-numeric: tabular-nums; }
   .activity-row > :global(svg) { flex: none; color: var(--color-muted-foreground); }
   .activity-row button { flex: none; }
+  /* A folded question's text gives way to the pager, not the pager to it. */
+  .activity-row .question-toggle { flex: 1 1 auto; min-width: 0; }
   .kind { font-weight: 600; color: var(--color-accent); }
   .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }

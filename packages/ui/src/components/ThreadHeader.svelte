@@ -86,7 +86,10 @@
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
-    const toggles: MenuItem[] = [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }];
+    // Without a team, the same entry the desktop title menu offers to start one.
+    const toggles: MenuItem[] = hasTeam
+      ? [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }]
+      : [{ id: 'agents', label: strings.delegation.openTeam }];
     if (store.owner && work.current.developer) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
     return [...toggles, separator('sep-toggles'), ...titleItems];
   });

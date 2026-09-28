@@ -25,7 +25,7 @@
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
-  import { currentZoom, setZoom, stepZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
+  import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
@@ -355,7 +355,7 @@
     const zoom = inShell ? zoomKey(event) : null;
     if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
       event.preventDefault();
-      void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(currentZoom(), zoom)).catch((error: unknown) => {
+      void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
         store.error = error instanceof Error ? error.message : String(error);
       });
       return;

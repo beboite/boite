@@ -4,7 +4,7 @@
   import { onMount, untrack } from 'svelte';
   import { FONTS, MONOS, readFont, readMono, setFont, setMono, type Font, type Mono } from '../lib/fonts';
   import { percent } from '../lib/format';
-  import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
+  import { currentZoom, inShell, setZoom, stepZoom, subscribeZoom, wantedZoom, ZOOM_DEFAULT, ZOOM_STEPS } from '../lib/zoom';
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
@@ -210,9 +210,9 @@
       <div class="switch-row">
         <span class="text">{strings.settings.zoom}<InfoTip topic={strings.settings.zoom} text={strings.settings.zoomHint} /></span>
         <div class="segmented zoom" role="group" aria-label={strings.settings.zoom}>
-          <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => void setZoom(stepZoom(zoom, -1))}><Minus size={14} strokeWidth={2} /></button>
+          <button type="button" aria-label={strings.settings.zoomOut} title={strings.settings.zoomOut} disabled={zoom <= smallest} data-testid="zoom-out" onclick={() => void setZoom(stepZoom(wantedZoom(), -1))}><Minus size={14} strokeWidth={2} /></button>
           <button type="button" class="zoom-value" title={strings.settings.zoomReset} aria-label={strings.settings.zoomReset} data-testid="zoom-reset" onclick={() => void setZoom(ZOOM_DEFAULT)}>{percent(zoom * 100)}</button>
-          <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => void setZoom(stepZoom(zoom, 1))}><Plus size={14} strokeWidth={2} /></button>
+          <button type="button" aria-label={strings.settings.zoomIn} title={strings.settings.zoomIn} disabled={zoom >= largest} data-testid="zoom-in" onclick={() => void setZoom(stepZoom(wantedZoom(), 1))}><Plus size={14} strokeWidth={2} /></button>
         </div>
       </div>
     {/if}

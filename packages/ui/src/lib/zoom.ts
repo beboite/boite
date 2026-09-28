@@ -53,11 +53,18 @@ export function readZoom(): number {
 }
 
 let current = ZOOM_DEFAULT;
+let wanted = ZOOM_DEFAULT;
+let applying: Promise<void> | null = null;
 const listeners = new Set<(factor: number) => void>();
 
 /** The factor the webview wears right now. The browser bridge scales a surface's rectangle by it. */
 export function currentZoom(): number {
   return current;
+}
+
+/** The factor last asked for, worn or on its way: a key pressed twice quickly steps from it twice. */
+export function wantedZoom(): number {
+  return wanted;
 }
 
 export function subscribeZoom(listener: (factor: number) => void): () => void {
@@ -70,6 +77,34 @@ async function apply(factor: number): Promise<void> {
   await getCurrentWebview().setZoom(factor);
 }
 
+/*
+ * One factor goes to the webview at a time, and each time the latest asked:
+ * a reset pressed while a step is on its way lands after it rather than being
+ * dropped as already worn. A refusal ends the run, reaches every caller and
+ * leaves the next step to start from the factor worn.
+ */
+async function drain(): Promise<void> {
+  try {
+    while (wanted !== current) {
+      const factor = wanted;
+      await apply(factor);
+      current = factor;
+      for (const listener of listeners) listener(factor);
+    }
+  } catch (error) {
+    wanted = current;
+    throw error;
+  } finally {
+    applying = null;
+  }
+}
+
+function want(factor: number): Promise<void> {
+  wanted = factor;
+  if (!applying && wanted !== current) applying = drain();
+  return applying ?? Promise.resolve();
+}
+
 /** Zooms the shell's webview and keeps the factor. Outside the shell it does nothing. */
 export async function setZoom(factor: number): Promise<void> {
   if (!inShell() || !ZOOM_STEPS.includes(factor)) return;
@@ -78,10 +113,7 @@ export async function setZoom(factor: number): Promise<void> {
   } catch {
     // Storage refused: the zoom holds until the window closes.
   }
-  if (factor === current) return;
-  await apply(factor);
-  current = factor;
-  for (const listener of listeners) listener(factor);
+  await want(factor);
 }
 
 /** Applies the stored factor at boot. Resolved once the webview wears it, or refused it. */
@@ -89,9 +121,7 @@ export async function startZoom(): Promise<void> {
   const stored = readZoom();
   if (!inShell() || stored === ZOOM_DEFAULT) return;
   try {
-    await apply(stored);
-    current = stored;
-    for (const listener of listeners) listener(stored);
+    await want(stored);
   } catch {
     // An older shell without the permission keeps 100 %.
   }
