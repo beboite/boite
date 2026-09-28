@@ -14,6 +14,7 @@
   import AssistantMessage from './AssistantMessage.svelte';
   import MessageActions from './MessageActions.svelte';
   import { visibleAnswer } from '../lib/message-display';
+  import { focusComposer } from '../lib/focus';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
@@ -463,6 +464,31 @@
       .join('\n\n');
   }
 
+  /**
+   * Edit, retry and fork go through the core's rewind and fork, which a
+   * persistent agent's session refuses, and only on a thread at rest: a turn
+   * still running is stopped first (Escape).
+   */
+  const branchable = $derived.by(() => {
+    const thread = store.openThread;
+    return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
+  });
+  const atRest = $derived(branchable && !store.busy);
+
+  function editMessage(message: Message): void {
+    store.startEdit(threadId, message);
+    focusComposer();
+  }
+
+  /** The last turn again from its own prompt: the answer and what followed it leave, the same prompt goes out. */
+  async function retry(turnId: string): Promise<void> {
+    const prompt = messages.find((message) => message.turnId === turnId && message.role === 'user');
+    if (!prompt) return;
+    const rewound = await store.rewind(prompt.id);
+    if (!rewound) return;
+    await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
+  }
+
   function toggleImage(id: string): void {
     expanded = expanded.includes(id) ? expanded.filter((entry) => entry !== id) : [...expanded, id];
   }
@@ -498,7 +524,7 @@
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} />
+            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {progress} {signedOut} />
           {/if}
@@ -513,7 +539,11 @@
               stop={() => void store.stop()}
             >
               {#snippet actions()}
-                <MessageActions text={() => answerOf(turn.id)} />
+                <MessageActions
+                  text={() => answerOf(turn.id)}
+                  retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
+                  fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
+                />
               {/snippet}
             </TurnSummary>
           {/if}

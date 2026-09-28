@@ -1,11 +1,12 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
+  import { Pencil, X } from '@lucide/svelte';
   import type { Attachment, PreviewReference } from '@boite/contracts';
   import { restorePreviewMentions } from '../lib/preview-mentions';
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
-  import { drainQueue, sentPrompts } from '../lib/composer-queue';
+  import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -360,11 +361,21 @@
     const references = previewReferences;
     if (!canSend || !choice) return;
     const state = stateForInput();
+    // An edited message: the thread goes back to before it, then this goes out
+    // in its place. A refusal is shown and the text stays in the box.
+    if (state.editing && !store.busy && state.queued.length === 0) {
+      state.sending = true;
+      const rewound = await store.rewind(state.editing);
+      state.sending = false;
+      if (!rewound) return;
+      state.editing = null;
+    }
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
     if (store.busy || state.queued.length > 0) {
       state.queued.push({ text: prompt, attachments: images, ...(references.length ? { previewReferences: references } : {}) });
+      state.editing = null;
       state.text = '';
       state.attachments = [];
       state.previewReferences = [];
@@ -457,8 +468,33 @@
     const prompt = sent[next];
     if (prompt === undefined) return recall !== null;
     recall = next;
-    restorePrompt(prompt.text, prompt.previewReferences);
+    recallPrompt(prompt);
     return true;
+  }
+
+  /**
+   * A sent prompt back in the box. On a thread at rest it comes back as the
+   * message to edit, pictures and files included: sending replaces it and
+   * what followed. A running thread only recalls the words, to queue again.
+   */
+  function recallPrompt(prompt: SentPrompt) {
+    const state = stateForInput();
+    const edit = !store.busy && store.openThread !== null;
+    restorePrompt(prompt.text, prompt.previewReferences);
+    if (edit) state.attachments = prompt.attachments;
+    else if (state.editing) state.attachments = [];
+    state.editing = edit ? prompt.id : null;
+  }
+
+  /** Leaves edit mode: the box empties, nothing was rewound. */
+  function cancelEdit() {
+    const state = stateForInput();
+    state.editing = null;
+    state.attachments = [];
+    state.previewReferences = [];
+    recall = null;
+    put('');
+    box?.focus();
   }
 
   function restoreQueued(at: number) {
@@ -478,14 +514,16 @@
     const next = recall - 1;
     if (next < 0) {
       recall = null;
-      stateForInput().previewReferences = [];
+      const state = stateForInput();
+      state.previewReferences = [];
+      if (state.editing) { state.editing = null; state.attachments = []; }
       put('');
       return true;
     }
     const prompt = sent[next];
     if (prompt === undefined) return true;
     recall = next;
-    restorePrompt(prompt.text, prompt.previewReferences);
+    recallPrompt(prompt);
     return true;
   }
 
@@ -596,6 +634,9 @@
     } else if (event.key === 'Escape' && (store.busy || store.openThread?.activity?.goal?.status === 'active' || store.openThread?.activity?.loop?.status === 'active')) {
       event.preventDefault();
       void store.stop();
+    } else if (event.key === 'Escape' && composer?.editing) {
+      event.preventDefault();
+      cancelEdit();
     }
   }
 </script>
@@ -608,6 +649,14 @@
       <ComposerQueue queued={composer.queued}
         disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
         onrestore={restoreQueued} />
+    {/if}
+
+    {#if composer?.editing}
+      <div class="editing" data-testid="composer-editing">
+        <Pencil size={13} />
+        <span>{strings.composer.editing}</span>
+        <button type="button" class="ghost small icon" data-testid="composer-editing-cancel" title={strings.composer.editingCancel} aria-label={strings.composer.editingCancel} onclick={cancelEdit}><X size={13} /></button>
+      </div>
     {/if}
 
     {#if attachments.length > 0}
@@ -722,6 +771,17 @@
       var(--shadow-e1),
       0 0 0 2px color-mix(in srgb, var(--color-foreground) 22%, transparent);
   }
+
+  /* Editing a sent message: one quiet line above the box, the way out on its right. */
+  .editing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 6px 0 14px;
+    color: var(--color-accent);
+    font-size: var(--text-xs);
+  }
+  .editing span { flex: 1; min-width: 0; }
 
   .input-wrap { position: relative; }
 

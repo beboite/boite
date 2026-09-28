@@ -866,6 +866,8 @@ export const fr: Translation = {
   },
 
   composer: {
+    editing: 'Modification d’un message envoyé : l’envoi le remplace, avec tout ce qui suit',
+    editingCancel: 'Arrêter la modification (Échap)',
     switchTitle: 'Passer une conversation de {tokens} jetons à {provider} ?',
     switchBody: "{provider} démarre une nouvelle session et reçoit des extraits du début et des échanges les plus récents, environ 20 000 jetons. Le reste lui est inaccessible. Compacter avant ne change rien.",
     switchConfirm: "Changer d'agent",

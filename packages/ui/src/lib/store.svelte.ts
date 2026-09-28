@@ -425,6 +425,7 @@ export class Store {
 
   registerComposerInsertion(...args: Parameters<Composer['registerComposerInsertion']>) { return this.#ctx.composer.registerComposerInsertion(...args); }
   editComposerText(...args: Parameters<Composer['editComposerText']>) { return this.#ctx.composer.editComposerText(...args); }
+  startEdit(...args: Parameters<Composer['startEdit']>) { return this.#ctx.composer.startEdit(...args); }
   addPreviewReference(...args: Parameters<Composer['addPreviewReference']>) { return this.#ctx.composer.addPreviewReference(...args); }
   revealPreviewReference(...args: Parameters<Composer['revealPreviewReference']>) { return this.#ctx.composer.revealPreviewReference(...args); }
   appendComposerText(...args: Parameters<Composer['appendComposerText']>) { return this.#ctx.composer.appendComposerText(...args); }

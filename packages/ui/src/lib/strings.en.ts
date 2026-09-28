@@ -888,6 +888,9 @@ export const strings = {
   },
 
   composer: {
+    /** Above the box while a sent message is being edited. */
+    editing: 'Editing a sent message: sending replaces it and everything after it',
+    editingCancel: 'Stop editing (Esc)',
     switchTitle: 'Switch a {tokens} token thread to {provider}?',
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
     switchConfirm: 'Switch',
