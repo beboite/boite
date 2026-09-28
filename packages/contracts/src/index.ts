@@ -531,7 +531,32 @@ export interface Project {
    * or restored. Absent when none and from a core older than this field.
    */
   archivedThreads?: number;
+  /**
+   * What the sidebar draws in place of the project's initial, detected from
+   * its folder after it was added and on `projects.refreshIcon`, never while a
+   * list is answered. An `image` carries only its version: the bytes come
+   * from `projects.icon`, once per version, so a list stays a few bytes per
+   * project. Absent when nothing was found, before the first detection and
+   * from a core older than this field.
+   */
+  icon?: ProjectIcon;
 }
+
+/**
+ * The stacks a project can be recognised by when its folder holds no logo,
+ * each drawn by the UI as a small mark. A core only ever names one of these.
+ */
+export const TECH_ICON_IDS = [
+  'unity', 'unreal', 'godot', 'flutter', 'dart', 'electron', 'next', 'nuxt', 'svelte', 'angular',
+  'react', 'android', 'swift', 'rust', 'go', 'python', 'dotnet', 'java', 'cpp', 'node',
+] as const;
+export type TechIconId = (typeof TECH_ICON_IDS)[number];
+
+export type ProjectIcon =
+  /** A logo, favicon or app icon read from the folder; `version` changes with its bytes. */
+  | { kind: 'image'; version: string }
+  /** No image, but the folder reads as this stack. */
+  | { kind: 'tech'; id: TechIconId };
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
 
@@ -1997,6 +2022,19 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
   /**
+   * The image of a project whose `icon.kind` is `image`, as a `data:` URL for
+   * an `<img>` (an SVG drawn that way runs no script and loads nothing), at
+   * most 256 KB before encoding. Read from the journal, not the folder. Refused
+   * with `field: 'projectId'` for a project whose icon is not an image.
+   */
+  'projects.icon': { params: { projectId: ProjectId }; result: { version: string; dataUrl: string } };
+  /**
+   * Detects the project's icon again from its folder, stores it and answers
+   * the project; `project.updated` follows when the icon changed. Owner only:
+   * it reads the disk.
+   */
+  'projects.refreshIcon': { params: { projectId: ProjectId }; result: Project };
+  /**
    * The drafts project: `Boite` in the Documents folder of the machine running
    * this core, or `BOITE_DRAFTS_DIR` when set. The folder and the project are
    * made on the first call and returned as they are on every later one, so a
@@ -2358,7 +2396,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
-  /** A project archived or restored, or one whose count of archived threads moved. */
+  /** A project archived or restored, one whose count of archived threads moved, or one whose icon changed. */
   'project.updated': Project;
 
   'thread.created': ThreadSummary;

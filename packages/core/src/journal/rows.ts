@@ -11,6 +11,13 @@ export interface ProjectRow {
   archived?: number;
 }
 
+/** A row of `project_icons` without its bytes. */
+export interface ProjectIconRow {
+  kind: 'image' | 'tech' | 'none';
+  tech: string | null;
+  version: string | null;
+}
+
 export interface ThreadRow {
   parent_thread_id: string | null;
   last_user_message_at?: number | null;

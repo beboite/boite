@@ -39,6 +39,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'push.test',
   // The sidebar and the composer's `@`.
   'projects.list',
+  // The logo the list announces: a bounded image already stored in the journal, no path and no disk read.
+  'projects.icon',
   'projects.files',
   // A phone starts a draft like the desktop: the core picks the folder, the device names no path.
   'projects.drafts',
