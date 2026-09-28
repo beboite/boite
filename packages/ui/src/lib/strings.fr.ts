@@ -106,7 +106,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -997,6 +997,7 @@ export const fr: Translation = {
     attachReadError: '{name} est illisible.',
     attachRemove: 'Retirer {name}',
     attachAlt: 'Image jointe',
+    attachPending: 'Recharger pour récupérer',
     attachUnnamed: "l'image collée",
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
     attachTooLarge: '{name} est trop lourde : une image pèse {max} au maximum.',
@@ -1463,6 +1464,17 @@ export const fr: Translation = {
       open: 'Ouvrir'
     },
     worktrees: {
+      storage: 'Emplacement de stockage',
+      storageProject: 'Dans chaque projet',
+      storageShared: 'Un dossier commun',
+      storageProjectHint: 'Dans chaque projet, sous',
+      storageDirectory: 'Dossier sur cette machine',
+      storagePlaceholder: 'Chemin absolu du dossier',
+      storageBrowse: 'Choisir un dossier',
+      storageSharedHint: 'Chaque projet a son sous-dossier. Les projets de même nom restent séparés.',
+      storageNewOnly: 'S’applique aux nouveaux worktrees. Les worktrees existants gardent leur emplacement.',
+      storageInvalid: 'Saisis un chemin absolu sur la machine qui exécute tes agents.',
+      storageSaveFailed: 'Impossible de sauvegarder cet emplacement. Vérifie le chemin et la connexion, puis réessaie.',
       heading: 'Worktrees',
       intro: 'Une conversation lancée avec son propre worktree travaille sur une branche boite/ à côté du projet. Le worktree reste sur le disque une fois la conversation archivée. Supprimez ceux dont vous n’avez plus besoin : le dossier et sa branche partent.',
       show: 'Afficher les worktrees',
@@ -1723,6 +1735,9 @@ export const fr: Translation = {
   },
 
   errors: {
+    draftStorage: "Cet appareil n'a pas pu enregistrer votre brouillon. Gardez cette fenêtre ouverte et copiez votre texte avant de la fermer.",
+    draftAttachment: "Une pièce jointe n'a pas pu être lue depuis le stockage. Rechargez pour la récupérer, ou retirez-la avant l'envoi.",
+    draftExists: 'Ce projet contient déjà un brouillon. Ouvrez-le ou envoyez-le avant de déplacer un autre brouillon ici.',
     prefix: 'Erreur',
     activityUnsupported: "Ce cœur ne gère pas les objectifs ni les boucles. Mettez Boite à jour sur {machine}, puis reconnectez-vous. Votre commande n'a pas été envoyée.",
     pullRequestUnsupported: "Mettez Boite à jour sur la machine qui héberge cette conversation pour afficher sa pull request. Ce cœur ne sait pas encore les chercher.",

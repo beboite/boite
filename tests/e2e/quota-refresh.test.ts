@@ -80,3 +80,24 @@ for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
     expect(await page.evaluate(`getComputedStyle(document.querySelector('${track('claude')} .fill')).transitionProperty`)).toBe('none');
   }, 60_000);
 }
+
+test('quota failures name the provider error at desktop and phone widths', async () => {
+  for (const width of [1280, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.navigate(`${origin}/?fake=1&view=quotas`);
+    await page.waitFor('document.querySelector("[data-testid=quota-refresh]")?.getAttribute("aria-busy") === "false"');
+    await page.evaluate(`(async () => {
+      const { FakeClient } = await import('/src/lib/fake-client.ts');
+      const call = FakeClient.prototype.call;
+      FakeClient.prototype.call = function(method, params) {
+        if (method !== 'quotas.list') return call.call(this, method, params);
+        return Promise.resolve([{ accountId: 'grok-default', providerId: 'grok', providerName: 'Grok', label: 'Default', enabled: true, status: 'unavailable', windows: [], checkedAt: null, error: 'Grok login is missing or expired. Run grok login, then refresh.' }]);
+      };
+    })()`);
+    await page.click('[data-testid=quota-refresh]');
+    await page.waitFor('document.querySelector("[data-provider=grok] [role=status]")');
+    expect(await page.evaluate('document.querySelector("[data-provider=grok] [role=status]").textContent')).toContain('Run grok login');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await capture(`quota-grok-error-${width}.png`);
+  }
+}, 60_000);

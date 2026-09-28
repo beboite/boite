@@ -2,6 +2,7 @@ import { RpcFailure, type Client } from '../client';
 import type { Store } from '../store.svelte';
 import { Accounts } from './accounts.svelte';
 import { Composer } from './composer.svelte';
+import { Drafts } from './drafts.svelte';
 import { Connection } from './connection.svelte';
 import { Delegation } from './delegation.svelte';
 import { Imports } from './imports.svelte';
@@ -37,6 +38,7 @@ export class StoreContext {
   readonly threads: Threads;
   readonly imports: Imports;
   readonly composer: Composer;
+  readonly drafts: Drafts;
   readonly requests: Requests;
   readonly delegation: Delegation;
   readonly workbench: Workbench;
@@ -54,6 +56,7 @@ export class StoreContext {
     this.threads = new Threads(this);
     this.imports = new Imports(this);
     this.composer = new Composer(this);
+    this.drafts = new Drafts(this);
     this.requests = new Requests(this);
     this.delegation = new Delegation(this);
     this.workbench = new Workbench(this);

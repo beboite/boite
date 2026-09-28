@@ -18,7 +18,18 @@ function limit(id: string, label: string, percent: unknown, reset: unknown): Quo
 
 export function grokQuotaWindows(raw: unknown): QuotaWindow[] {
   const config = obj(obj(raw)['config']);
-  return limit('credits', 'Credits', config['creditUsagePercent'], obj(config['currentPeriod'])['end'] ?? config['billingPeriodEnd']);
+  const periodEnd = obj(config['currentPeriod'])['end'];
+  let percent = config['creditUsagePercent'];
+  if (percent === undefined) {
+    const budget = obj(config['monthlyLimit'])['val'];
+    const used = config['used'];
+    const amount = used !== null && typeof used === 'object' && !Array.isArray(used) ? obj(used)['val'] ?? 0 : undefined;
+    if (typeof budget === 'number' && Number.isFinite(budget) && budget > 0 && typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) percent = amount / budget * 100;
+    // The credits endpoint omits proto3 zero scalars, but reported legacy
+    // amounts take precedence over that default when both field sets coexist.
+    else if (typeof periodEnd === 'string' && Number.isFinite(Date.parse(periodEnd))) percent = 0;
+  }
+  return limit('credits', 'Credits', percent, periodEnd ?? config['billingPeriodEnd']);
 }
 
 export function openCodeQuotaWindows(raw: unknown, now = Date.now()): QuotaWindow[] {

@@ -210,6 +210,7 @@ export class Projects {
     }
     const s = this.ctx.store;
     if (archived && (s.openThread?.projectId === projectId || this.draft?.projectId === projectId)) {
+      this.ctx.drafts.park();
       if (s.openThread?.projectId === projectId) s.openThread = null;
       if (this.draft?.projectId === projectId) this.draft = null;
       await s.openWhereLeft();
@@ -281,6 +282,8 @@ export class Projects {
   /** What a project going away costs the UI, whether this client removed it or another did. */
   async dropProject(projectId: ProjectId): Promise<void> {
     const s = this.ctx.store;
+    this.ctx.drafts.forget(projectId);
+    for (const thread of s.threads.filter(t => t.projectId === projectId)) delete s.composerStates[thread.id];
     this.projects = this.projects.filter((p) => p.id !== projectId);
     s.threads = s.threads.filter((t) => t.projectId !== projectId);
     if (s.openThread?.projectId === projectId) s.openThread = null;
@@ -306,11 +309,12 @@ export class Projects {
     void threads.unsubscribe();
     threads.leaveArchived(null);
     s.openThread = null;
-    s.draftChoice = null;
     s.trace = [];
     workbench.tracedThreadId = null;
     this.ctx.requests.keepRequestsOf(null);
-    this.draft = { projectId: target, worktree: false };
+    this.ctx.drafts.resume(target);
+    this.ctx.drafts.persist();
+    if (target !== null) this.collapsedProjects = this.collapsedProjects.filter(id => id !== target);
     if (target !== null) this.rememberProject(target);
     void this.refreshProjects();
     s.page = 'chat';
@@ -327,9 +331,11 @@ export class Projects {
     const target = projectId ?? this.ctx.store.draftsProject?.id ?? null;
     if (!draft || draft.projectId === target) return;
     if (target !== null && !this.projects.some((p) => p.id === target)) return;
+    if (this.ctx.drafts.has(target)) { this.ctx.store.error = strings.errors.draftExists; return; }
     const project = target === null ? null : this.projects.find((p) => p.id === target);
     // The drafts folder is no repository: the worktree switch does not follow the draft there.
     const drafts = target === null || project?.kind === 'drafts';
+    this.ctx.drafts.forget(draft.projectId);
     this.draft = { projectId: target, worktree: drafts ? false : draft.worktree };
     if (target === null) return;
     this.rememberProject(target);

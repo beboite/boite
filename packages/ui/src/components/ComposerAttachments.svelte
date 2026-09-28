@@ -3,6 +3,7 @@
   import type { Attachment } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
+  import { unresolvedAssetId } from '../lib/draft-attachments';
   import { fill, strings } from '../lib/strings';
 
   /** The attachments this prompt carries, above the box they were pasted into. */
@@ -12,12 +13,13 @@
 <div class="attachments" data-testid="composer-attachments">
   {#each attachments as attachment, at (at)}
     {@const label = attachment.name ?? strings.composer.attachAlt}
-    <div class="attachment" class:document={attachment.kind === 'file'} data-testid="composer-attachment" title={label}>
-      {#if attachment.kind === 'image'}
+    {@const pending = unresolvedAssetId(attachment)}
+    <div class="attachment" class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : label}>
+      {#if attachment.kind === 'image' && !pending}
         <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
       {:else}
         <FileText size={20} strokeWidth={1.5} />
-        <span class="file-info"><span>{label}</span><small>{bytes(decodedBytes(attachment.data))}</small></span>
+        <span class="file-info"><span>{label}</span><small>{pending ? strings.composer.attachPending : bytes(decodedBytes(attachment.data))}</small></span>
       {/if}
       <button
         type="button"

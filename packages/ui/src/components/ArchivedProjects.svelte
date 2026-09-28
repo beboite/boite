@@ -12,15 +12,17 @@
    */
   let { entries, multi }: { entries: { machine: Machine; project: Project }[]; multi: boolean } = $props();
   let open = $state(false);
+  let visited = $state(false);
 </script>
 
 {#if entries.length > 0}
   <div class="archived" data-testid="archived-projects">
-    <button class="ghost small toggle" aria-expanded={open} data-testid="archived-projects-toggle" onclick={() => (open = !open)}>
+    <button class="ghost small toggle" aria-expanded={open} data-testid="archived-projects-toggle" onclick={() => { visited = true; open = !open; }}>
       <span class="caret" class:open><ChevronRight size={11} /></span>
       {fill(strings.sidebar.archivedProjects, { count: String(entries.length) })}
     </button>
-    {#if open}
+    <div class="motion-fold" class:expanded={open} inert={!open}><div>
+      {#if visited}
       <ul>
         {#each entries as { machine, project } (`${machine.id}:${project.id}`)}
           <li data-project-id={project.id}>
@@ -33,7 +35,8 @@
           </li>
         {/each}
       </ul>
-    {/if}
+      {/if}
+    </div></div>
   </div>
 {/if}
 

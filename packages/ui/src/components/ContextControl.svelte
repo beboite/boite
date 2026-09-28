@@ -6,15 +6,13 @@
   import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
-  import { mobileOverlay } from '../lib/mobile-history';
+  import { floating } from '../lib/floating';
   import { experimentOn } from '../lib/experiments.svelte';
   import { cacheSpan, promptCacheState, PROMPT_CACHE_TICK_MS } from '../lib/prompt-cache';
   let { store }: { store: Store } = $props();
   let submitting = $state(false);
   let root = $state<HTMLDivElement>();
   const popup = new Closing();
-  let left = $state(0);
-  let top = $state(0);
   let leave: ReturnType<typeof setTimeout> | undefined;
   const thread = $derived(store.openThread);
   const context = $derived(thread?.context ?? null);
@@ -45,13 +43,7 @@
     : cacheNow.kind === 'maybe' ? strings.thread.cacheChipMaybe(remaining(cacheNow.secondsLeft))
     : strings.thread.cacheChipWarm(remaining(cacheNow.secondsLeft)));
   const lifetime = (seconds: number) => seconds % 3600 === 0 ? strings.thread.hours(seconds / 3600) : strings.thread.minutes(Math.round(seconds / 60));
-  function place() {
-    const box = root?.getBoundingClientRect();
-    if (!box) return;
-    left = Math.max(12, Math.min(box.right - 290, innerWidth - 302));
-    top = box.bottom + 8;
-  }
-  function show() { clearTimeout(leave); place(); popup.show(); }
+  function show() { clearTimeout(leave); popup.show(); }
   function hideLater() { clearTimeout(leave); leave = setTimeout(() => { if (!root?.contains(document.activeElement)) popup.hide(); }, 180); }
   onDestroy(() => clearTimeout(leave));
   /**
@@ -65,7 +57,6 @@
     event.stopPropagation();
     popup.hide();
   }
-  $effect(() => { if (popup.open) return mobileOverlay(() => popup.hide()); });
   async function compact() {
     if (reason || submitting) return;
     submitting = true;
@@ -73,7 +64,7 @@
   }
 </script>
 
-<svelte:window onresize={() => { if (popup.open) place(); }} onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydowncapture={closeOnEscape} />
+<svelte:window onpointerdown={event => { if (event.target instanceof Node && !root?.contains(event.target)) popup.hide(); }} onkeydowncapture={closeOnEscape} />
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="context" bind:this={root} data-testid="context-meter" data-percent={percent ?? ''} data-level={contextLevel(percent)} onmouseenter={show} onmouseleave={hideLater} onfocusin={show} onfocusout={hideLater}>
   <button type="button" class="trigger ghost" data-testid="context-trigger" aria-label={cacheLabel ? `${strings.thread.contextDetails}, ${cacheLabel}` : strings.thread.contextDetails} aria-expanded={popup.open} aria-haspopup="dialog" onclick={show}>
@@ -86,7 +77,8 @@
     {/if}
   </button>
   {#if popup.shown}
-    <div class="popup" style:left={`${left}px`} style:top={`${top}px`} class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}>
+    <div class="popup" class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}
+      use:floating={{ anchor: () => root ?? null, align: 'end', dismiss: () => popup.hide() }}>
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
         <p class="total mono">{exact(context.tokens)}{#if context.window !== null}{' / '}{exact(context.window)}{/if}</p>

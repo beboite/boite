@@ -15,6 +15,7 @@
   import VoiceSettings from './VoiceSettings.svelte';
   import BrainPage from './BrainPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
+  import WorktreesCard from './WorktreesCard.svelte';
   import InfoTip from './InfoTip.svelte';
 
   let { store }: { store: Store } = $props();
@@ -26,11 +27,13 @@
    */
   let archived = $state(false);
   let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
+  let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
   let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : 'home');
+    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'archived' ? strings.settings.archived.heading
+    : page === 'worktrees' ? strings.settings.worktrees.heading
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
@@ -89,6 +92,11 @@
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
             <ArchiveRestore size={20} /><span>{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
+          {#if store.owner}
+            <button class="ghost row" data-testid="mobile-settings-worktrees" onclick={() => store.showSettings('general', 'worktrees')}>
+              <Monitor size={20} /><span>{strings.settings.worktrees.heading}</span><ChevronRight size={18} />
+            </button>
+          {/if}
         </div>
       </section>
     </div>
@@ -119,6 +127,8 @@
         <LimitsPage {store} />
       {:else if page === 'experiments'}
         <ExperimentsPage />
+      {:else if page === 'worktrees'}
+        <div class="page"><WorktreesCard {store} /></div>
       {:else if page === 'archived'}
         <div class="page archived-page">
           <ArchivedThreads {store} eager />

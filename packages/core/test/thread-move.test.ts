@@ -468,7 +468,7 @@ describe('threads.move', () => {
     const moved = await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
     expect(moved.branch).toBe('boite/worktree-work');
     expect(moved.cwd).not.toBe(oldCwd);
-    expect(moved.cwd).toContain(join('.boite-worktrees', 'beta'));
+    expect(moved.cwd).toContain(join('beta', '.boite', 'worktrees'));
     expect(git(beta.path, 'worktree', 'list')).toContain(basename(moved.cwd));
     expect(existsSync(oldCwd)).toBe(true);
     expect(git(alpha.path, 'worktree', 'list')).toContain(basename(oldCwd));

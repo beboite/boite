@@ -43,18 +43,18 @@ async function open(anchor: { top: number; bottom: number }, viewport: number): 
 
 test('a composer low in a tall window keeps the whole list above it', async () => {
   const menu = await open({ top: 700, bottom: 780 }, 800);
-  expect(menu.classList.contains('below')).toBe(false);
+  expect(menu.dataset.direction).toBe('up');
   expect(menu.style.maxHeight).toBe('420px');
 });
 
 test('a composer high in a short window opens the list below, never past the top', async () => {
   const menu = await open({ top: 150, bottom: 260 }, 720);
-  expect(menu.classList.contains('below')).toBe(true);
+  expect(menu.dataset.direction).toBe('down');
   expect(menu.style.maxHeight).toBe('420px');
 });
 
 test('with room above but less than the cap, the list above is shortened to fit', async () => {
   const menu = await open({ top: 340, bottom: 470 }, 768);
-  expect(menu.classList.contains('below')).toBe(false);
+  expect(menu.dataset.direction).toBe('up');
   expect(menu.style.maxHeight).toBe(`${340 - 6 - 8}px`);
 });

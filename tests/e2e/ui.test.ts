@@ -37,7 +37,7 @@ const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streame
 let core: RunningCore;
 let page: BrowserPage;
 let projectDir: string;
-/** Where the core puts the project's worktrees: beside it, under `.boite-worktrees`. */
+/** Where the core puts the project's worktrees: inside `.boite/worktrees`. */
 let worktreesDir: string;
 
 function testid(id: string): string {
@@ -59,7 +59,7 @@ beforeAll(async () => {
   ensureProductionUi();
   core = await startCore();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
-  worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
+  worktreesDir = join(projectDir, '.boite', 'worktrees');
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
 }, TIMEOUT);
 

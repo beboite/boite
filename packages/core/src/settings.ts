@@ -2,8 +2,10 @@ import { checkSettingsPatch, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
+import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
+  worktreeStorage: { mode: 'project', directory: null },
   maxConcurrentTurns: 6,
   perAccountConcurrency: 2,
   warmProcessMinutes: 0,
@@ -32,6 +34,13 @@ export class SettingsStore {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    const storage = checked.patch.worktreeStorage;
+    if (storage?.directory) {
+      if (!isAbsolute(storage.directory) || (process.platform === 'win32' && !/^(?:[a-z]:[\\/]|\\\\)/i.test(storage.directory))) {
+        throw invalidParams('worktreeStorage.directory must be an absolute folder path on this machine', { field: 'worktreeStorage' });
+      }
+      storage.directory = resolve(storage.directory);
+    }
     const titleModel = checked.patch.titleModel;
     if (titleModel !== undefined && titleModel !== null) {
       const provider = this.core.providers.get(titleModel.providerId);

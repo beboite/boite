@@ -126,7 +126,7 @@
       tabindex="-1"
       {onkeydown}
       use:popover.attach
-      use:floating={{ anchor: () => trigger ?? null, mobileOnly: true, dismiss: () => popover.hide() }}
+      use:floating={{ anchor: () => trigger ?? null, placement, align, dismiss: () => popover.hide() }}
       onanimationend={popover.end}
       data-testid={testid ? `${testid}-menu` : undefined}
     >

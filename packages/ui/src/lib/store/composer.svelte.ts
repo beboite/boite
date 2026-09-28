@@ -9,6 +9,7 @@ import { DRAFT_STASH_KEY } from '../prefs';
 import { editPreviewMentions, insertPreviewMention } from '../preview-mentions';
 import { showPreviewReference } from '../preview-navigation';
 import { strings } from '../strings';
+import { unresolvedAssetId } from '../draft-attachments';
 import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
@@ -58,7 +59,7 @@ export class Composer {
     const draft = this.composerStates[key]!;
     const historyKey = this.ctx.store.threadKey(key);
     const previous = this.previewUndo.get(historyKey);
-    if (!previous && !draft.previewReferences?.length) { draft.text = value; return; }
+    if (!previous && !draft.previewReferences?.length) { draft.text = value; this.ctx.drafts.persist(); return; }
     const history = previous ?? [];
     const restored = undo ? history.findLast(entry => entry.text === value) : undefined;
     history.push({ text: draft.text, references: draft.previewReferences ?? [] });
@@ -66,6 +67,7 @@ export class Composer {
     this.previewUndo.set(historyKey, history);
     draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
     draft.text = value;
+    this.ctx.drafts.persist();
   }
 
   /**
@@ -141,6 +143,7 @@ export class Composer {
 
   async submit(prompt: string, choice: Choice, attachments: Attachment[] = [], previewReferences: PreviewReference[] = []): Promise<boolean> {
     const s = this.ctx.store;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     if ((prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) || s.connection !== 'ready') return false;
     try {
       if (activityCommand(prompt) && previewReferences.length) throw new Error(strings.previewComments.activityUnsupported);
@@ -174,6 +177,7 @@ export class Composer {
       ...(draft.worktree ? { worktree: {} } : {})
     });
     if (!created) return false;
+    this.ctx.drafts.forget(draft.projectId);
     if (composer) {
       this.composerStates[created.id] = composer;
       delete this.composerStates[DRAFT_STASH_KEY];
@@ -214,6 +218,7 @@ export class Composer {
   ): Promise<boolean> {
     const s = this.ctx.store;
     const connection = this.ctx.connection;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return false; }
     const client = this.ctx.client;
     if (!client || !threadId || s.connection !== 'ready') return false;
     if (prompt.trim().length === 0 && attachments.length === 0 && previewReferences.length === 0) return false;

@@ -532,6 +532,27 @@ shellTest('the native updater reports its local version and refuses installation
   expect(refused).toContain('installed Windows x64');
 }, TIMEOUT);
 
+shellTest('the native file opener launches the original executable and rejects paths outside the thread', async () => {
+  if (!page) throw new Error('the shell did not expose its page');
+  await page.waitFor(TAURI_READY);
+  const executable = join(projectDir, 'game fixture.exe');
+  const compiler = Bun.spawn(['rustc', '--crate-name', 'file_open', join(import.meta.dir, 'fixtures', 'file-open.rs'), '-o', executable], {
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  const output = await new Response(compiler.stderr).text();
+  expect(await compiler.exited, output).toBe(0);
+  const marker = join(projectDir, 'game fixture.opened');
+  expect(existsSync(marker)).toBe(false);
+  await page.evaluate(`window.__TAURI_INTERNALS__.invoke('open_local_file', ${JSON.stringify({ directory: projectDir, path: 'game fixture.exe' })})`);
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(marker) && Date.now() < deadline) await Bun.sleep(50);
+  expect(readFileSync(marker, 'utf8')).toBe('opened original file');
+  const outside = join(dataDir, 'outside.txt');
+  writeFileSync(outside, 'must never open');
+  const error = await page.evaluate<string>(`window.__TAURI_INTERNALS__.invoke('open_local_file', ${JSON.stringify({ directory: projectDir, path: outside })}).then(() => 'allowed', error => String(error))`);
+  expect(error).toContain('expected a file inside');
+}, TIMEOUT);
+
 shellTest(
   'the shipped webview refuses what the content security policy forbids',
   async () => {

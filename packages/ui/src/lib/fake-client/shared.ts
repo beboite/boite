@@ -5,6 +5,7 @@ import {
   type Thread,
   type ThreadSummary,
   type Usage,
+  type WorktreeStorage,
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 
@@ -52,21 +53,25 @@ export function fakeDraftFolder(root: string, title: string, at: Date, taken: Re
   return path;
 }
 
-/** Where the core would put a worktree: `<parent>/.boite-worktrees/<repo>/<slug>` on `boite/<slug>`. */
-export function fakeWorktree(projectPath: string, title: string, branch?: string): { branch: string; path: string } {
+/** Mirrors the core's per-project and shared storage for newly created worktrees. */
+export function fakeWorktree(projectPath: string, title: string, branch?: string, storage?: WorktreeStorage, projectId?: string): { branch: string; path: string } {
   const slug =
     title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'thread';
-  const separator = projectPath.includes('\\') ? '\\' : '/';
-  const parts = projectPath.split(/[\\/]/);
-  const repo = parts.pop() ?? 'repo';
+  const root = storage?.mode === 'shared' ? storage.directory : projectPath;
+  const separator = root.includes('\\') ? '\\' : '/';
+  const repo = projectPath.split(/[\\/]/).filter(Boolean).pop() ?? 'repo';
+  const repoSlug = repo.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'thread';
+  const folder = storage?.mode === 'shared'
+    ? `${repoSlug}-${(projectId ?? '').replace(/[^a-z0-9_-]/gi, '-')}`
+    : `.boite${separator}worktrees`;
   const dir = branch === undefined ? slug : branch.replace(/^boite\//, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
   return {
     branch: branch ?? `boite/${slug}`,
-    path: [...parts, '.boite-worktrees', repo, dir].join(separator)
+    path: [root.replace(/[\\/]+$/, ''), folder, dir].join(separator)
   };
 }
 

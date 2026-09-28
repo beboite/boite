@@ -69,6 +69,7 @@ describe('settings', () => {
     const client = await harness.connect();
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
+      worktreeStorage: { mode: 'project', directory: null },
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
       warmProcessMinutes: 0,

@@ -239,6 +239,7 @@ export class FakeContext {
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
       warmProcessMinutes: 0,
+      worktreeStorage: { mode: 'project', directory: null },
       listenOnLan: false,
       agentCpuCapPercent: 75,
       agentMemoryBudgetPercent: 60,

@@ -208,7 +208,7 @@ export class ThreadStore {
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const effort = checkEffort(provider, account.id, model, params.effort ?? null);
     const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
-    // A worktree's directory is the core's own and sits beside the project;
+    // A worktree's directory is the core's own and uses the configured storage;
     // anything a client names has to be inside it. A draft with no directory
     // named gets a new folder of its own, made once everything else passed.
     const cwd =

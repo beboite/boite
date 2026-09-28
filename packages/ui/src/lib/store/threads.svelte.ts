@@ -234,6 +234,7 @@ export class Threads {
         this.readingThreads.delete(threadId);
         this.readingPositions.delete(threadId);
       }
+      this.ctx.drafts.park();
       s.draft = null;
       // The last page, pinned to the bottom; what is above it arrives on scroll.
       this.loadingOlder = false;

@@ -94,7 +94,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -1049,6 +1049,7 @@ export const strings = {
     attachReadError: '{name} could not be read.',
     attachRemove: 'Remove {name}',
     attachAlt: 'Attached file',
+    attachPending: 'Reload to recover',
     attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
     attachTooLarge: '{name} is too big: a file may weigh {max} at most.',
@@ -1527,6 +1528,17 @@ export const strings = {
     },
     /** The worktrees a thread leaves on disk, and their removal by hand. */
     worktrees: {
+      storage: 'Storage location',
+      storageProject: 'In each project',
+      storageShared: 'One shared folder',
+      storageProjectHint: 'Inside each project, under',
+      storageDirectory: 'Folder on this machine',
+      storagePlaceholder: 'Absolute folder path',
+      storageBrowse: 'Choose a folder',
+      storageSharedHint: 'Each project gets its own subfolder. Projects with the same name stay separate.',
+      storageNewOnly: 'Applies to new worktrees. Existing worktrees stay where they are.',
+      storageInvalid: 'Enter an absolute folder path on the machine that runs your agents.',
+      storageSaveFailed: 'Could not save the storage location. Check the path and connection, then try again.',
       heading: 'Worktrees',
       intro: 'A thread started with its own worktree works on a boite/ branch beside the project. The worktree stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
       show: 'Show worktrees',
@@ -1794,6 +1806,9 @@ export const strings = {
   },
 
   errors: {
+    draftStorage: 'This device could not save your draft. Keep this window open and copy your text before closing it.',
+    draftAttachment: 'An attachment could not be read from storage. Reload to recover it, or remove it before sending.',
+    draftExists: 'This project already has a draft. Open or send it before moving another draft here.',
     prefix: 'Error',
     activityUnsupported: 'This core does not support goals or loops. Update Boite on {machine}, then reconnect. Your command has not been sent.',
     pullRequestUnsupported: 'Update Boite on the machine hosting this thread to show its pull request. This core does not support pull request lookup yet.',

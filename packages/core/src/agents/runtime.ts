@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { slugOf } from '../worktree.ts';
 import type { AgentProfile, AgentResource, AgentRun, AgentSession, AgentWork, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
@@ -164,13 +165,16 @@ export class AgentRuntime {
       if (projectId) {
         const project = this.core.projects.require(projectId);
         const key = `agents:workspace:${agent.id}:${mission.id}`;
-        let intent = this.core.journal.getSetting(key) as { projectId: string; branch: string } | undefined;
+        let intent = this.core.journal.getSetting(key) as { projectId: string; branch: string; path?: string } | undefined;
         if (!intent) {
-          intent = { projectId, branch: `boite/${newId('agent-')}` };
+          const branch = `boite/${newId('agent-')}`;
+          intent = { projectId, branch, path: this.core.worktrees.pathFor(project, branch) };
           this.core.journal.append({ type: 'agents.workspace', threadId: null, version: 1, payload: { key, ...intent } }, () => this.core.journal.setSetting(key, intent));
         }
         if (intent.projectId !== projectId) throw refused('mission.projectId changed after workspace preparation');
-        workspace = await this.core.worktrees.ensure(`workspace:${work.id}`, project, intent.branch);
+        // Older intents predate storage settings and always used the adjacent folder.
+        const path = intent.path ?? join(dirname(project.path), '.boite-worktrees', basename(project.path), slugOf(intent.branch.replace(/^boite\//, '')));
+        workspace = await this.core.worktrees.ensure(`workspace:${work.id}`, project, intent.branch, path);
       }
     }
     // Recheck after asynchronous worktree creation; a paused or cancelled item cannot start.
