@@ -1691,7 +1691,7 @@ export const strings = {
     agents: {
       title: 'A conversation that follows your work',
       body: 'Switch agents, dictate a message, inspect the result. Stay in the same thread.',
-      demoModel: 'Claude Sonnet 5',
+      demoModel: 'Sonnet 5',
       demoEffort: 'High',
       demoMode: 'Ask'
     },

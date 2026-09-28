@@ -314,7 +314,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -399,7 +399,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
-  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  // Haiku 4.5 is the one legacy model the descriptor gives no levels.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
@@ -408,7 +408,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Haiku 4.5');
 });
 
 test('a first run shows the reasoning, mode and worktree chips at their defaults, with nothing to pin', async () => {
@@ -416,7 +416,7 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   work.load();
   await mountOnFake();
   store.startDraft('p-boite');
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
   // The calm preset hides nothing from the bar: every chip is there at the model's default.
   await waitFor(() => effortChip() !== null);
   query('[data-testid=composer-mode]');
