@@ -76,7 +76,10 @@
   .content { flex: 1; min-width: 0; display: grid; gap: 3px; }
   .headline { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .name { font-size: var(--text-base); font-weight: 550; color: var(--color-foreground); }
-  .amount { color: var(--color-muted-foreground); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* A line box no taller than its glyphs: set on the name's baseline, a 13 px
+     line of its own reached half a pixel under the name's in some faces (Inter),
+     and the compact page's five rows then overflowed it. */
+  .amount { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); }
   .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
   .meters { display: flex; gap: 4px; }
