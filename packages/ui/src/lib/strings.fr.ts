@@ -647,6 +647,7 @@ export const fr: Translation = {
     cacheTokens: '{read} lus depuis le cache, {write} écrits dedans',
     workingFor: 'Travaille depuis {time}',
     workedFor: 'A travaillé {time}',
+    toolRun: '{count} appels d’outils',
     finishedAt: 'fini à {time}',
     backgroundRunning: '{what} encore en cours',
     backgroundJoin: ', ',

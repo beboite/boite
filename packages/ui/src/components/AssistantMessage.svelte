@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CircleAlert, FishingHook } from '@lucide/svelte';
+  import { ChevronRight, CircleAlert, FishingHook, Wrench } from '@lucide/svelte';
   import type { Account, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -7,6 +7,7 @@
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
   import { planOf } from '../lib/plan';
+  import { partItems } from '../lib/tool-runs';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
   import PermissionCard from './PermissionCard.svelte';
   import PlanCard from './PlanCard.svelte';
@@ -44,6 +45,9 @@
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const thought = $derived(progress.thought(message.turnId));
+  /** A finished answer's runs of tool calls, one line each until opened; open ones by their first part. */
+  const items = $derived(partItems(message.parts, message.state === 'streaming'));
+  let openRuns = $state<number[]>([]);
 </script>
 
 {#if message.role === 'assistant' && execution}
@@ -57,8 +61,30 @@
 {/if}
 {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
-  {#each message.parts as part, index (index)}
-    {#if part.type !== 'thinking'}
+  {#each items as item (item.kind === 'part' ? item.index : `run-${item.indices[0]}`)}
+    {#if item.kind === 'part'}
+      {@render partView(message.parts[item.index]!, item.index)}
+    {:else}
+      {@const open = openRuns.includes(item.indices[0]!)}
+      <div class="part run" data-kind="tools">
+        <button type="button" class="ghost small run-toggle" data-testid="tool-run" aria-expanded={open}
+          onclick={() => (openRuns = open ? openRuns.filter((i) => i !== item.indices[0]) : [...openRuns, item.indices[0]!])}>
+          <ChevronRight size={13} class={open ? 'chevron expanded' : 'chevron'} />
+          <Wrench size={13} strokeWidth={1.75} />
+          <span>{fill(strings.chat.toolRun, { count: String(item.indices.length) })}</span>
+          <span class="run-names">{item.names.map(([name, count]) => (count > 1 ? `${name} ${count}` : name)).join(', ')}</span>
+        </button>
+        {#if open}
+          <div class="run-parts">
+            {#each item.indices as index (index)}{@render partView(message.parts[index]!, index)}{/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  {/each}
+</div>
+
+{#snippet partView(part: Message['parts'][number], index: number)}
     <div class="part" data-kind={part.type}>
       {#if part.type === 'text'}
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
@@ -132,9 +158,7 @@
         </div>
       {/if}
     </div>
-    {/if}
-  {/each}
-</div>
+{/snippet}
 
 <style>
   /* On the same 4 px rest as the parts it names. */
@@ -153,6 +177,27 @@
   .part {
     min-width: 0;
   }
+
+  /* A folded run reads as one tool card; opened, its cards follow under it. */
+  .run-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: var(--row);
+    padding: 0 10px 0 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-muted-foreground);
+    justify-content: flex-start;
+  }
+  .run-toggle :global(svg) { flex: none; color: var(--color-subtle); }
+  .run-toggle :global(.chevron) { transition: transform var(--dur-2) var(--ease-out-quint); }
+  .run-toggle :global(.expanded) { transform: rotate(90deg); }
+  .run-toggle > span:first-of-type { flex: none; font-weight: 600; color: var(--color-foreground); }
+  .run-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: var(--text-xs); }
+  .run-parts { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; padding-left: 12px; border-left: 1px solid var(--color-border); }
 
   /* Consecutive cards stack as one block at the flex gap; text on either side
      of a card, or two text blocks in a row, get the full 12 px instead. */

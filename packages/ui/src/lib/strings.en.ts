@@ -658,6 +658,8 @@ export const strings = {
     /** The footer of a turn: `Working 12s`, then `Worked 4m 41s`. */
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
+    /** A finished answer's run of tool calls, folded into one line. */
+    toolRun: '{count} tool calls',
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
