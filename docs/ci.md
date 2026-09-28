@@ -133,7 +133,13 @@ The Windows suite runs files sequentially: every file takes its own ports,
 data directory and browser profile. Two and three parallel workers produced
 repeated browser navigation and startup hook timeouts on 2026-09-24.
 Sequential execution keeps the same assertions and deadlines.
-`tests/e2e/lib/warm.ts` runs first.
+`tests/e2e/lib/warm.ts` runs in a separate preparation step with a five-minute
+CI deadline. Each phase logs its start and elapsed time, with a two-minute
+deadline per phase and ten seconds for dev-server shutdown. Fetch deadlines
+cover the response body too. A preparation error fails the job before tests
+start; a stalled operation cannot leave the preparation process running until
+the desktop job's 35-minute deadline. Failure captures are also attempted when
+a step is cancelled.
 It optimizes Vite's dependencies once, since on a fresh checkout each dev
 server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that
@@ -205,6 +211,12 @@ request changes or become a required merge check. Draft PRs and generated build
 artifacts are excluded. Installing the GitHub App on this repository is a
 separate prerequisite. CodeRabbit controls free-plan eligibility and review
 limits; repository configuration does not override them.
+
+Automatic code reviews remain enabled. Chat replies require an explicit
+`@coderabbitai` mention, so a fix acknowledgement does not start another chat
+inspection. The [PR follow-up rules](../AGENTS.md#follow-through-on-pull-requests)
+group fixes before a push and bound bot waiting. CI checks must still pass, and
+unresolved bugs or missing reviews must be reported.
 
 ## Security and labels
 

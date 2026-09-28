@@ -159,15 +159,19 @@ jobs:
       - name: Check bundle size budgets
         run: bun scripts/ci/budgets.ts
       - run: bun run test:shell --release
+      - name: Prepare end-to-end tests
+        if: needs.changes.outputs.e2e == 'true'
+        timeout-minutes: 5
+        env:
+          BOITE_E2E_PREBUILT_UI: '1'
+          BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
+        run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
       - name: End-to-end tests
         if: needs.changes.outputs.e2e == 'true'
         env:
           BOITE_E2E_PREBUILT_UI: '1'
           BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
-        run: |
-          bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun test tests/e2e
+        run: bun test tests/e2e
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-installer
@@ -178,7 +182,7 @@ jobs:
           compression-level: 0
           retention-days: 7
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: desktop-failure-captures
           path: tests/e2e/.artifacts/

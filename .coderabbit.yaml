@@ -38,4 +38,4 @@ reviews:
         Check desktop and phone behavior, real and in-memory clients, and
         routing through the Store belonging to the connected machine.
 chat:
-  auto_reply: true
+  auto_reply: false
