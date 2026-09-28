@@ -30,3 +30,32 @@ test('the draft the boot lands on reuses the project list of the boot, and a dra
     client.close();
   }
 });
+
+test('archiving the open project lands elsewhere, and another client hears the flag', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  const other = new Store();
+  store.attach(client);
+  other.attach(client);
+  try {
+    await store.connect();
+    await other.connect();
+    await store.open('t-trace');
+    expect(store.openThread?.projectId).toBe('p-boite');
+
+    expect(await store.archiveProject('p-boite', true)).toBe(true);
+    expect(store.projects.find((p) => p.id === 'p-boite')?.archived).toBe(true);
+    // The screen leaves the archived project for a thread of one still listed.
+    expect(store.openThread?.projectId).not.toBe('p-boite');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(other.projects.find((p) => p.id === 'p-boite')?.archived).toBe(true);
+
+    expect(await store.archiveProject('p-boite', false)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(other.projects.find((p) => p.id === 'p-boite')?.archived).toBeUndefined();
+  } finally {
+    store.detach();
+    other.detach();
+    client.close();
+  }
+});

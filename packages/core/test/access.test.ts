@@ -245,6 +245,24 @@ describe('the access gate', () => {
       phone.close();
     }
   });
+
+  test('a thread the phone creates reaches the computer at once, without a subscription', async () => {
+    const owner = await harness.connect();
+    const project = await testProject(harness, owner);
+    const account = (await owner.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+    const phone = await pairedDevice();
+    try {
+      const created = owner.next<'thread.created'>('thread.created', (thread) => thread.title === 'from the phone', 5_000);
+      const thread = await phone.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'from the phone' });
+      expect((await created).id).toBe(thread.id);
+      // Its first turn moves the computer's row too, though the computer never opened it.
+      const updated = owner.next<'thread.updated'>('thread.updated', (row) => row.id === thread.id && row.status === 'idle' && row.lastUserMessageAt !== null, 10_000);
+      await phone.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+      expect((await updated).id).toBe(thread.id);
+    } finally {
+      phone.close();
+    }
+  });
 });
 
 describe('a working directory outside the project', () => {

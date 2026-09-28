@@ -2,7 +2,7 @@
   import InfoTip from './InfoTip.svelte';
   import type { PairedSession } from '@boite/contracts';
   import { confirm } from '../lib/confirm.svelte';
-  import { ago, time } from '../lib/format';
+  import { ago, exactTime, time } from '../lib/format';
   import { qrSvg } from '../lib/qr';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -116,7 +116,7 @@
             {#if session.role === 'owner'}<span class="subtle">({strings.settings.pairing.ownerTag})</span>{/if}
             {#if session.current}<span class="subtle">({strings.settings.pairing.thisDevice})</span>{/if}
           </span>
-          <span class="subtle seen">{fill(strings.settings.pairing.lastSeen, { when: ago(session.lastSeenAt) })}</span>
+          <span class="subtle seen" title={exactTime(session.lastSeenAt)}>{fill(strings.settings.pairing.lastSeen, { when: ago(session.lastSeenAt) })}</span>
           {#if store.principal === 'owner'}
             <button type="button" class="ghost small danger" onclick={() => void revoke(session)}>{strings.settings.pairing.revoke}</button>
           {/if}

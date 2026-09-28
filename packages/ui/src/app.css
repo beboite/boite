@@ -275,6 +275,17 @@
   color-scheme: dark;
 }
 
+/* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big
+   screen, or the whole window. The reading column stamps nothing. */
+html[data-chat-width='wide'] {
+  --content: 1180px;
+  --prose: 1040px;
+}
+html[data-chat-width='full'] {
+  --content: 100%;
+  --prose: 100%;
+}
+
 /* The face picked under Settings, Appearance (lib/fonts.ts); Inter, the default, stamps nothing. */
 [data-font='geist'] { --font-sans: var(--face-geist); }
 [data-font='plex'] { --font-sans: var(--face-plex); }
@@ -379,6 +390,15 @@ body {
 
 ::selection {
   background: var(--color-selection);
+}
+
+/* Ctrl+F in a thread: every match, and the one the arrows are on. */
+::highlight(boite-find) {
+  background: color-mix(in oklch, var(--color-live) 35%, transparent);
+}
+::highlight(boite-find-current) {
+  background: var(--color-live);
+  color: var(--color-accent-ink);
 }
 
 button,

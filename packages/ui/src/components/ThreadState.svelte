@@ -1,35 +1,45 @@
 <script lang="ts">
-  import { LoaderCircle } from '@lucide/svelte';
+  import { LoaderCircle, Radar } from '@lucide/svelte';
   import type { ThreadSummary } from '@boite/contracts';
-  import { ago, elapsed } from '../lib/format';
+  import { backgroundLabel } from '../lib/background';
+  import { ago, elapsed, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import { threadState } from '../lib/thread-state';
 
-  let { thread, now }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'lastUserMessageAt' | 'createdAt'>; now: number } = $props();
+  let { thread, now }: { thread: Pick<ThreadSummary, 'status' | 'unread' | 'runningSince' | 'backgroundWork' | 'lastUserMessageAt' | 'createdAt'>; now: number } = $props();
 
   let kind = $derived(threadState(thread));
-  let since = $derived(thread.runningSince ?? null);
+  /** The three states that count time: the turn, or the work it left running. */
+  let live = $derived(kind === 'working' || kind === 'monitoring' || kind === 'background');
+  let since = $derived(kind === 'working' ? thread.runningSince ?? null : live ? thread.backgroundWork?.since ?? null : null);
   /** The row's own second, only while the agent works: the list's clock ticks far slower. */
   let tick = $state(Date.now());
   $effect(() => {
-    if (kind !== 'working' || since === null) return;
+    if (!live || since === null) return;
     tick = Date.now();
     const timer = setInterval(() => { tick = Date.now(); }, 1000);
     return () => clearInterval(timer);
   });
   let spent = $derived(since === null ? null : elapsed(Math.max(tick, now) - since));
-  let label = $derived(
-    kind === 'working'
-      ? spent === null ? strings.sidebar.state.working : fill(strings.sidebar.state.workingFor, { elapsed: spent })
-      : kind === null ? null : strings.sidebar.state[kind]
-  );
+  let label = $derived.by(() => {
+    if (kind === null) return null;
+    if (kind === 'working') return spent === null ? strings.sidebar.state.working : fill(strings.sidebar.state.workingFor, { elapsed: spent });
+    if (kind === 'monitoring' || kind === 'background') {
+      const head = spent === null ? strings.sidebar.state[kind] : fill(kind === 'monitoring' ? strings.sidebar.state.monitoringFor : strings.sidebar.state.backgroundFor, { elapsed: spent });
+      return `${head}\n${backgroundLabel(thread.backgroundWork?.kinds ?? [])}`;
+    }
+    return strings.sidebar.state[kind];
+  });
 </script>
 
 {#if kind === null}
-  <span class="when">{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
+  <span class="when" title={exactTime(thread.lastUserMessageAt ?? thread.createdAt)}>{ago(thread.lastUserMessageAt ?? thread.createdAt, now)}</span>
 {:else}
   <span class="when state {kind}" data-testid="thread-state" data-state={kind} title={label} aria-label={label}>
-    {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{spent ?? strings.sidebar.state.working}{:else}{label}{/if}
+    {#if kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{spent ?? strings.sidebar.state.working}
+    {:else if kind === 'monitoring'}<Radar size={11} class="pulse" aria-hidden="true" />{spent ?? strings.sidebar.state.monitoring}
+    {:else if kind === 'background'}<span class="dot pulse" aria-hidden="true"></span>{spent ?? strings.sidebar.state.background}
+    {:else}{label}{/if}
   </span>
 {/if}
 
@@ -62,12 +72,30 @@
   .queued {
     color: var(--color-muted-foreground);
   }
+  /* The turn ended, the agent did not: same colour as working, a slower sign. */
+  .monitoring,
+  .background {
+    color: var(--color-accent);
+  }
+  .dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
   .state :global(.spinner) {
     flex: none;
     animation: spin 1s linear infinite;
   }
+  .state :global(.pulse) {
+    flex: none;
+    animation: pulse 1.6s var(--ease-out-quint) infinite;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
   /* An endless loop stops under reduced motion; the ring keeps its colour. */
-  @media (prefers-reduced-motion: reduce) { .state :global(.spinner) { animation: none; } }
-  :global(html[data-motion='reduced']) .state :global(.spinner) { animation: none; }
+  @media (prefers-reduced-motion: reduce) { .state :global(.spinner), .state :global(.pulse) { animation: none; } }
+  :global(html[data-motion='reduced']) .state :global(.spinner),
+  :global(html[data-motion='reduced']) .state :global(.pulse) { animation: none; }
 </style>

@@ -1,10 +1,12 @@
-/** The seeded state: two projects, four threads, one of each interesting state. */
+/** The seeded state: two projects, four threads and an archived one, one of each interesting state. */
 import type { PermissionRequest, QuestionRequest } from '@boite/contracts';
 import { seedAccounts } from './accounts-seed';
 import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
 import { T0 } from './shared';
 import { longThread, seedThreads } from './threads-seed';
 import { settlePermission, settleQuestion } from './requests';
+import { seedArchivedThread, seedWorktrees } from './worktrees';
+import { seedProjectIcons } from './project-icons';
 import type { FakeContext } from './context';
 
 export function seed(ctx: FakeContext): void {
@@ -12,6 +14,7 @@ export function seed(ctx: FakeContext): void {
     { id: 'p-boite', name: 'boite', path: 'C:\\src\\boite', createdAt: T0, repository: true },
     { id: 'p-notes', name: 'notes', path: 'C:\\src\\notes', createdAt: T0, repository: true }
   ];
+  seedProjectIcons(ctx);
 
   // What Claude Code left under its projects folder for boite: one session
   // to import, one that is already the trace thread.
@@ -50,6 +53,10 @@ export function seed(ctx: FakeContext): void {
   const { finished, running, waiting, unread } = seedThreads();
 
   for (const thread of [finished, running, waiting, unread]) ctx.threads.set(thread.id, thread);
+  // Put away two days before the seed, its worktree still on disk.
+  const parser = seedArchivedThread();
+  ctx.threads.set(parser.id, parser);
+  ctx.worktrees = seedWorktrees();
 
   // The project's cards, the list the tasks surface shows under the agent's
   // own: one waiting on the user, one open, one already confirmed. The ids

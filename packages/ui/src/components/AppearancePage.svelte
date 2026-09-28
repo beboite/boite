@@ -9,6 +9,7 @@
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, type Theme } from '../lib/theme';
+  import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
   import { controlGroups } from '../lib/control-groups';
@@ -89,6 +90,17 @@
     { id: 'changes', label: strings.settings.panelChanges }
   ]);
   let theme = $state<Theme>(untrack(() => readTheme()));
+
+  let chatWidth = $state<ChatWidth>(untrack(() => readChatWidth()));
+  let widths = $derived<{ id: ChatWidth; label: string }[]>([
+    { id: 'comfortable', label: strings.settings.chatWidthComfortable },
+    { id: 'wide', label: strings.settings.chatWidthWide },
+    { id: 'full', label: strings.settings.chatWidthFull }
+  ]);
+  function pickChatWidth(next: ChatWidth) {
+    chatWidth = next;
+    setChatWidth(next);
+  }
 
   function pickTheme(next: Theme) {
     theme = next;
@@ -189,6 +201,14 @@
           {/each}
         </div>
         <input class="hue" type="range" min="0" max="360" step="1" value={accent} aria-label={strings.settings.accentCustom} data-testid="accent-hue" oninput={event => pickAccent(Number(event.currentTarget.value))} />
+      </div>
+    </div>
+    <div class="switch-row">
+      <span class="text">{strings.settings.chatWidth}<InfoTip topic={strings.settings.chatWidth} text={strings.settings.chatWidthHint} /></span>
+      <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
+        {#each widths as option (option.id)}
+          <button type="button" class:on={chatWidth === option.id} aria-pressed={chatWidth === option.id} data-testid="chat-width-{option.id}" onclick={() => pickChatWidth(option.id)}>{option.label}</button>
+        {/each}
       </div>
     </div>
     {#if hasMaterial}

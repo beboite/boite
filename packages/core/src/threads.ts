@@ -12,12 +12,14 @@ import type {
   MessagePart,
   PermissionRequest,
   Project,
+  ProjectId,
   ProviderDescriptor,
   QuestionRequest,
   RequestId,
   RpcParams,
   Thread,
   ThreadId,
+  ThreadRewind,
   ThreadStatus,
   ThreadSummary,
   Turn,
@@ -30,8 +32,10 @@ import { notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
 import { AgentState } from './threads/agent-state.ts';
+import { ThreadBranching } from './threads/branching.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { DeferredInput } from './threads/deferred.ts';
+import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
 import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -75,6 +79,10 @@ export class ThreadStore {
   /** Commands, background tasks and context the agent reported. */
   readonly agentState: AgentState;
   readonly titles: ThreadTitles;
+  /** `threads.rewind` and `threads.fork`. */
+  readonly branching: ThreadBranching;
+  /** `threads.move`. */
+  readonly moves: ThreadMove;
   private readonly recovery: ThreadRecovery;
 
   constructor(private readonly core: Core) {
@@ -84,6 +92,8 @@ export class ThreadStore {
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
+    this.branching = new ThreadBranching(core, this);
+    this.moves = new ThreadMove(core, this);
     this.recovery = new ThreadRecovery(core);
   }
 
@@ -235,6 +245,8 @@ export class ThreadStore {
       this.core.journal.putThread(thread);
     });
     this.core.bus.emit('thread.created', thread);
+    // A thread started in a project put away says the project is in use again.
+    if (project.archived === true) this.core.projects.archive(project.id, false);
     return thread;
   }
 
@@ -379,6 +391,7 @@ export class ThreadStore {
       next.effort = null;
       next.speed = null;
       next.sessionId = null;
+      next.sessionResumeAt = null;
       next.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       next.context = null;
     }
@@ -419,6 +432,7 @@ export class ThreadStore {
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
+      this.moves.forget(threadId);
       this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
       this.releaseAgent(threadId);
@@ -431,7 +445,10 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    return this.save({ ...thread, archived }, 'thread.archived');
+    const saved = this.save({ ...thread, archived }, 'thread.archived');
+    // The sidebar counts a project's archived threads; a sub-thread is not one of them.
+    if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    return saved;
   }
 
   markRead(threadId: ThreadId): void {
@@ -468,6 +485,21 @@ export class ThreadStore {
     // agy's print mode refuses every interactive-only slash command, `/compact` among them.
     if (protocol === 'agy') throw refused('the Antigravity CLI takes no /compact in print mode', { threadId });
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
+  }
+
+  /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
+  rewind(threadId: ThreadId, messageId: MessageId): ThreadRewind {
+    return this.branching.rewind(threadId, messageId);
+  }
+
+  /** A new thread with the history up to and including a message (`threads/branching.ts`). */
+  fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
+    return this.branching.fork(threadId, messageId, worktree);
+  }
+
+  /** Move a thread and its sub-threads to another project (`threads/move.ts`). */
+  move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
+    return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
@@ -513,6 +545,10 @@ export class ThreadStore {
     checkAttachments(attachments, provider);
 
     const now = Date.now();
+    // The first message after a move carries the note to the agent. A compact
+    // or a slash command goes to the agent as the command alone, so the note
+    // waits for the next real message.
+    const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? null : pendingMove(this.core, threadId);
     const turn: Turn = {
       id: newId('trn_'),
       threadId,
@@ -525,6 +561,7 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
       },
@@ -535,7 +572,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: systemOperation(operation) ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -551,6 +588,7 @@ export class ThreadStore {
       this.core.delegation.reserveTurn(threadId, operation);
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
+      if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
     // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.

@@ -39,9 +39,13 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'push.test',
   // The sidebar and the composer's `@`.
   'projects.list',
+  // The logo the list announces: a bounded image already stored in the journal, no path and no disk read.
+  'projects.icon',
   'projects.files',
   // A phone starts a draft like the desktop: the core picks the folder, the device names no path.
   'projects.drafts',
+  // Putting a project away only hides it from the sidebar, like archiving a thread; nothing on disk moves.
+  'projects.archive',
   // What a thread needs to name its agent.
   'providers.list',
   'accounts.list',
@@ -57,7 +61,19 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.
+  // Editing a sent prompt and branching a conversation are the composer's own
+  // moves. A fork in a worktree writes no more than `threads.create` with one,
+  // which a device already reaches, and names no path either.
+  'threads.rewind',
+  'threads.fork',
   'threads.archive',
+  // Moving a thread from the sidebar or its menu. The device names a project it
+  // already lists, never a path: the core picks the folder or makes the
+  // worktree, as it does for `threads.create` and `threads.fork`.
+  'threads.move',
+  // Taking back a move the device may ask for: it only forgets what waits in
+  // memory for the turn's end, and changes nothing on disk.
+  'threads.moveCancel',
   'threads.pin',
   'threads.markRead',
   'threads.subscribe',
@@ -87,10 +103,10 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
-  'project.added', 'project.removed',
+  'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
   'turn.started', 'turn.finished',
-  'message.started', 'message.delta', 'message.part', 'message.completed',
+  'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',
   'settings.updated', 'keybindings.updated', 'sessions.updated',

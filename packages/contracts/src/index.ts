@@ -519,7 +519,44 @@ export interface Project {
    * Absent on every other project and from a core older than this field.
    */
   kind?: 'drafts';
+  /**
+   * Put away with `projects.archive`: out of the sidebar, its threads and their
+   * processes left as they were. A new thread in it brings it back. Absent when
+   * false and from a core older than this field.
+   */
+  archived?: boolean;
+  /**
+   * How many of its own threads are archived, sub-threads left out, counted on
+   * every answer; `project.updated` carries the new count when one is archived
+   * or restored. Absent when none and from a core older than this field.
+   */
+  archivedThreads?: number;
+  /**
+   * What the sidebar draws in place of the project's initial, detected from
+   * its folder after it was added and on `projects.refreshIcon`, never while a
+   * list is answered. An `image` carries only its version: the bytes come
+   * from `projects.icon`, once per version, so a list stays a few bytes per
+   * project. Absent when nothing was found, before the first detection and
+   * from a core older than this field.
+   */
+  icon?: ProjectIcon;
 }
+
+/**
+ * The stacks a project can be recognised by when its folder holds no logo,
+ * each drawn by the UI as a small mark. A core only ever names one of these.
+ */
+export const TECH_ICON_IDS = [
+  'unity', 'unreal', 'godot', 'flutter', 'dart', 'electron', 'next', 'nuxt', 'svelte', 'angular',
+  'react', 'android', 'swift', 'rust', 'go', 'python', 'dotnet', 'java', 'cpp', 'node',
+] as const;
+export type TechIconId = (typeof TECH_ICON_IDS)[number];
+
+export type ProjectIcon =
+  /** A logo, favicon or app icon read from the folder; `version` changes with its bytes. */
+  | { kind: 'image'; version: string }
+  /** No image, but the folder reads as this stack. */
+  | { kind: 'tech'; id: TechIconId };
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
 
@@ -624,12 +661,33 @@ export interface ThreadSummary {
    * missing on older cores.
    */
   runningSince?: Timestamp | null;
+  /**
+   * What the agent still runs in the background, a monitor or a shell it left
+   * going past its turn: the kind of each task and when the oldest started,
+   * so a row can say the thread is not finished. The tasks themselves are
+   * `Thread.background`. Null when nothing runs; missing on older cores.
+   */
+  backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
+  /**
+   * A move asked for while the thread's turn ran, applied when that turn
+   * ends (`threads.move`, `agent.move`). In memory only: null after a core
+   * restart, and missing on older cores.
+   */
+  pendingMove?: PendingMove | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
   pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
+  /**
+   * The entry of `sessionId`'s native transcript the next turn resumes at,
+   * forking the rest away: set by `threads.rewind` and `threads.fork` on a
+   * driver that can cut its own transcript (Claude), cleared once the agent
+   * answered on the forked session. Null or absent means resume the whole
+   * session. Clients have nothing to do with it.
+   */
+  sessionResumeAt?: string | null;
   /** Changes when the account changes; native sessions never cross this boundary. */
   sessionGeneration?: number;
   /** Optimistic revision of the selection for future turns. Missing on older clients means zero. */
@@ -702,7 +760,7 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
-  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
+  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId' | 'sessionResumeAt'
 > & {
   sessionGeneration: number;
   selectionVersion: number;
@@ -724,6 +782,14 @@ export interface Turn {
   error: string | null;
   /** Absent only for turns saved before execution snapshots were introduced. */
   execution?: TurnExecution;
+  /**
+   * Where the agent's native transcript stood when this turn ended: the
+   * session it ran on and the id of the last entry it wrote there (Claude: the
+   * uuid of the last main-chain message). What `threads.rewind` and
+   * `threads.fork` resume at. Absent on drivers that report none and on turns
+   * finished before it was recorded.
+   */
+  checkpoint?: { sessionId: string; entry: string } | null;
 }
 
 /** A thread status that means one of its turns is still under way. */
@@ -808,8 +874,45 @@ export interface PreviewReference {
 
 export { PREVIEW_REFERENCES_PER_TURN, previewReferencesError, previewPrompt } from './preview';
 
+/** One end of a thread move: the project and the folder the agent works in. */
+export interface MoveEnd {
+  projectId: ProjectId;
+  /** The project's display name when the move happened. */
+  name: string;
+  cwd: string;
+}
+
+/**
+ * Carried by the first user message after `threads.move`: where the thread
+ * came from and where it works now. `note` is the plain sentence the core
+ * put before the prompt for the agent; the UI shows a marker line instead.
+ * Several moves before that message keep the first `from` and the last `to`.
+ * With `by: 'agent'` it rides on a system message instead: the agent moved
+ * its own thread (`agent.move`), nothing was put before a prompt, and `note`
+ * is only what a fresh session's history says about it.
+ */
+export interface MoveNotice {
+  from: MoveEnd;
+  to: MoveEnd;
+  note: string;
+  by?: 'agent';
+  /** Epoch milliseconds of the last move. */
+  at: number;
+}
+
+/** A move waiting for the thread's turn to end (`ThreadSummary.pendingMove`). */
+export interface PendingMove {
+  projectId: ProjectId;
+  /** The target project's name, for the row's "Moves to ... after this turn". */
+  project: string;
+  /** Who asked: the user from a menu or a drag, or the agent with `boite thread move`. */
+  by: 'user' | 'agent';
+  /** Epoch milliseconds of the request. */
+  at: number;
+}
+
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number } }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -942,6 +1045,24 @@ export interface Thread extends ThreadSummary {
   messagesBefore: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
+}
+
+/** What `threads.rewind` answers: the thread after the cut and the removed message, ready for the composer. */
+export interface ThreadRewind {
+  /** As `threads.get` would answer now: the last page of what is left. */
+  thread: Thread;
+  /** What the user typed, without the page context a preview reference added to it. */
+  prompt: string;
+  /** The images and files the removed message carried, as `turns.start` takes them. */
+  attachments: Attachment[];
+  /** The page elements the removed message referred to, empty when none. */
+  previewReferences: PreviewReference[];
+  /**
+   * How the agent forgets the removed part. `native`: the driver resumes its
+   * own transcript at the cut. `seeded`: the next turn starts a fresh session
+   * carrying the kept history, as a change of account does.
+   */
+  session: 'native' | 'seeded';
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1291,18 @@ export const KEYBINDING_COMMANDS = [
   'archive',
   'import-session',
   'terminal',
+  'reopen-thread',
+  'copy-answer',
+  'find',
+  'thread-1',
+  'thread-2',
+  'thread-3',
+  'thread-4',
+  'thread-5',
+  'thread-6',
+  'thread-7',
+  'thread-8',
+  'thread-9',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
 
@@ -1370,6 +1503,25 @@ export interface AgentWhere {
   model: string;
 }
 
+/** What `agent.move` answers: where the thread goes, and when. */
+export interface AgentMove {
+  threadId: ThreadId;
+  projectId: ProjectId;
+  /** The target project's name. */
+  project: string;
+  /** The target project's folder. */
+  projectPath: string;
+  /**
+   * The folder the next turn starts in: known now for a plain project folder,
+   * null while a turn runs and the move will make a worktree or a draft folder.
+   */
+  cwd: string | null;
+  /** `turn-end`: a turn runs and the move waits for it to end. `done`: the thread moved on the spot. */
+  when: 'turn-end' | 'done';
+  /** Background work the agent left running stops when the move happens. */
+  stopsBackground: boolean;
+}
+
 /**
  * What the right panel shows on request. `file` opens the file at the line;
  * `diff` opens the changes, on one file when a path is given; `browser` opens
@@ -1428,6 +1580,38 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   changes: GitChange[];
+}
+
+/**
+ * One linked worktree of a project's repository, as `worktrees.list` reads it
+ * from `git worktree list`: the core's own under `.boite-worktrees` and any the
+ * user added by hand, never the main checkout. What it says is what a removal
+ * would lose.
+ */
+export interface WorktreeEntry {
+  /** The directory, in the form of the machine running the core. */
+  path: string;
+  /** The branch checked out there without `refs/heads/`, null on a detached HEAD. */
+  branch: string | null;
+  /** `git status` lists something: a modified, staged or untracked file. False when `missing`. */
+  dirty: boolean;
+  /**
+   * HEAD is reachable from no local branch or remote-tracking ref other than
+   * the worktree's own branch: removing the worktree and its branch loses
+   * those commits. A branch with no commit of its own is not unmerged.
+   */
+  unmerged: boolean;
+  /** Git still lists the worktree but its directory is gone. */
+  missing: boolean;
+  /**
+   * The thread whose working directory is this worktree or a folder inside
+   * it, compared without case on Windows. A live thread wins over an archived
+   * one; null when no thread stands there.
+   */
+  threadId: ThreadId | null;
+  threadTitle: string | null;
+  /** That thread is archived: the worktree can be removed. False when `threadId` is null. */
+  threadArchived: boolean;
 }
 
 /** Both sides of one file, the working tree against `ref` (HEAD by default). */
@@ -1855,6 +2039,20 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Where the calling thread is. */
   'agent.where': { params: { threadId: ThreadId }; result: AgentWhere };
   /**
+   * The agent moves its own thread to another project, named by id, name or
+   * folder. A process cannot change folder in the middle of a turn, so while
+   * one runs the move waits for it to end (`when: 'turn-end'`), then goes
+   * through what `threads.move` does; an idle thread moves on the spot. The
+   * agent asked, so its next message carries no `MoveNotice` note: the thread
+   * records a system message whose text part has `moved` with `by: 'agent'`.
+   * Background work stops at the move. Refused for an unknown project, the
+   * thread's own project, and every refusal of `threads.move` that already
+   * holds when asked; one that only appears at the end of the turn is a system
+   * message saying the move did not happen. A core restart before the turn
+   * ends drops a waiting move.
+   */
+  'agent.move': { params: { threadId: ThreadId; project: string }; result: AgentMove };
+  /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
    * checks a path exists inside the working directory and a url is http(s),
@@ -1906,6 +2104,25 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
+   * Put a project away, or bring it back with `archived: false`. Nothing else
+   * changes: its threads keep their state and a running one keeps running.
+   * Refused on the drafts project, which a thread with no folder lands in.
+   */
+  'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
+  /**
+   * The image of a project whose `icon.kind` is `image`, as a `data:` URL for
+   * an `<img>` (an SVG drawn that way runs no script and loads nothing), at
+   * most 256 KB before encoding. Read from the journal, not the folder. Refused
+   * with `field: 'projectId'` for a project whose icon is not an image.
+   */
+  'projects.icon': { params: { projectId: ProjectId }; result: { version: string; dataUrl: string } };
+  /**
+   * Detects the project's icon again from its folder, stores it and answers
+   * the project; `project.updated` follows when the icon changed. Owner only:
+   * it reads the disk.
+   */
+  'projects.refreshIcon': { params: { projectId: ProjectId }; result: Project };
+  /**
    * The drafts project: `Boite` in the Documents folder of the machine running
    * this core, or `BOITE_DRAFTS_DIR` when set. The folder and the project are
    * made on the first call and returned as they are on every later one, so a
@@ -1923,6 +2140,26 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'projects.files': {
     params: { projectId: ProjectId; query: string; limit?: number };
     result: { files: string[]; total: number; capped: boolean };
+  };
+
+  /**
+   * The linked worktrees of the project's repository, main checkout and the
+   * project's own folder left out, each with what removing it would lose and
+   * the thread standing in it. Owner only: it names paths.
+   */
+  'worktrees.list': { params: { projectId: ProjectId }; result: WorktreeEntry[] };
+  /**
+   * `git worktree remove`, then `git branch -d` on its branch (`-D` with
+   * `force`), then `git worktree prune --expire 1.hour.ago`. Refused by name
+   * for a path git does not list for this project, the main checkout, and a
+   * worktree a thread that is not archived stands in; refused without `force`
+   * when it is dirty or unmerged. A missing directory only loses its
+   * registration. `branchDeleted` is false when git kept the branch (not
+   * merged, checked out elsewhere) or there was none. Owner only.
+   */
+  'worktrees.remove': {
+    params: { projectId: ProjectId; path: string; force?: boolean };
+    result: { ok: true; branchDeleted: boolean };
   };
 
   'providers.list': {
@@ -2105,6 +2342,56 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /**
+   * Edit a sent message: `messageId`, a user message of the thread, and every
+   * message and turn after it leave the conversation, and the next turn
+   * continues from just before it, the agent's own memory included. The answer
+   * is the thread as it now stands and the removed message's content, for the
+   * composer. Refused while a turn runs or waits in the queue (stop it first),
+   * for a message that is not a user message of that thread, and on a
+   * persistent agent session, each naming the field and what it expected.
+   * Every client subscribed to the thread gets `message.truncated`. The journal
+   * keeps the removed messages' events; the removed turns keep their usage.
+   */
+  'threads.rewind': { params: { threadId: ThreadId; messageId: MessageId }; result: ThreadRewind };
+  /**
+   * A new thread holding a copy of this thread's history up to and including
+   * `messageId`, whose next turn continues from there; the original thread is
+   * untouched. `worktree: true` puts it in a git worktree of its own, as
+   * `threads.create` does with `worktree: {}`; false or absent works in the
+   * same folder. Refused while the named message is still streaming, and on a
+   * persistent agent session.
+   */
+  'threads.fork': { params: { threadId: ThreadId; messageId: MessageId; worktree?: boolean }; result: ThreadSummary };
+  /**
+   * Move a thread to another project of the same core. Its folder becomes the
+   * target's: the project folder, a new git worktree of the target when the
+   * thread had a worktree of its own and the target is a repository, or a new
+   * draft folder when the target is the drafts project. The old folder or
+   * worktree stays on disk untouched. The agent never works in the old folder
+   * again: its warm process is dropped, and the next user message tells it the
+   * thread moved (`MoveNotice` on that message's text part). Sub-threads follow
+   * their parent. A target project put away comes back. Refused for an unknown
+   * thread or project, the same project, an archived thread, a sub-thread, a
+   * persistent agent session, a missing target folder, a turn running or
+   * queued on one of its sub-threads (`reason: 'turn-in-flight'`), and
+   * background work without `stopBackground` (true stops it, false leaves it
+   * running in the old folder until the agent's next turn). Every client gets
+   * `thread.updated` with the new `projectId`, `cwd` and `branch`.
+   *
+   * A thread whose own turn runs, waits or is queued is not refused: the move
+   * is recorded as `pendingMove` on the answered row and happens when that
+   * turn ends, however it ends, through the same path as the agent's own move.
+   * A second move replaces a pending one; archiving the thread drops it. The
+   * pending move lives in memory and a core restart forgets it.
+   */
+  'threads.move': { params: { threadId: ThreadId; projectId: ProjectId; stopBackground?: boolean }; result: ThreadSummary };
+  /**
+   * Drop the move waiting for the thread's turn to end (`pendingMove`), the
+   * user's or the agent's. Answers the row without it; a thread with no
+   * pending move is refused naming `threadId`.
+   */
+  'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
@@ -2226,6 +2513,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
+  /** A project archived or restored, one whose count of archived threads moved, or one whose icon changed. */
+  'project.updated': Project;
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
@@ -2245,6 +2534,12 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** A part created or replaced whole (tool call state, permission card). */
   'message.part': { threadId: ThreadId; messageId: MessageId; partIndex: number; part: MessagePart };
   'message.completed': { threadId: ThreadId; messageId: MessageId; state: Message['state'] };
+  /**
+   * `messageId` and every message after it left the thread (`threads.rewind`),
+   * and so did their turns. A client holding the thread drops them; one that
+   * does not hold `messageId` reads the thread again.
+   */
+  'message.truncated': { threadId: ThreadId; messageId: MessageId };
 
   /** A client that missed this one reads the request from `permissions.list`. */
   'permission.requested': PermissionRequest;

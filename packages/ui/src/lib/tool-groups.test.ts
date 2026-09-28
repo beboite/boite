@@ -80,3 +80,17 @@ test('an edit whose input spells out its change stands alone, unless it failed',
     { kind: 'tools', indices: [2, 3, 4] }
   ]);
 });
+
+test('a proposed plan is a part of its own, never folded into the calls around it', () => {
+  const parts: MessagePart[] = [
+    tool('Read', { file_path: 'a.ts' }),
+    tool('Grep', { pattern: 'x' }),
+    tool('ExitPlanMode', { plan: '# Plan\n1. Do it' }),
+    tool('Read', { file_path: 'b.ts' })
+  ];
+  expect(partRuns(parts)).toEqual([
+    { kind: 'tools', indices: [0, 1] },
+    { kind: 'part', index: 2 },
+    { kind: 'tools', indices: [3] }
+  ]);
+});

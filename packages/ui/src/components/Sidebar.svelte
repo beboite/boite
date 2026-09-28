@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, Folder, List, LoaderCircle, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -11,12 +11,19 @@
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
+  import { projectRollup } from '../lib/thread-state';
+  import { moveThread, takesDrop, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { controlMenu } from '../lib/controls';
+  import { sidebarRows } from '../lib/sidebar-rows.svelte';
+  import { undo } from '../lib/undo.svelte';
   import { work } from '../lib/work-prefs.svelte';
+  import ArchivedDrawer from './ArchivedDrawer.svelte';
+  import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
+  import ProjectTile from './ProjectTile.svelte';
   let { store }: { store: Store } = $props();
   let projectButton = $state<HTMLButtonElement>();
   let now = $state(Date.now());
@@ -30,7 +37,10 @@
   let shownFilter = $derived(machines.some((m) => m.id === filter) ? filter : null);
   let visible = $derived(machines.filter((m) => shownFilter === null || m.id === shownFilter));
   let needle = $derived(store.search.trim().toLowerCase());
-  let groups = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
+  let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
+  /** An archived project leaves the list for the fold under it; its threads keep running. */
+  let groups = $derived(all.filter(({ project }) => project.archived !== true));
+  let shelved = $derived(all.filter(({ project }) => project.archived === true));
   let recent = $derived(
     groups
       .flatMap(({ machine, project }) =>
@@ -41,10 +51,25 @@
       )
       .sort((a, b) => compareThreads(a.thread, b.thread))
   );
-  let target = $derived(store.openProject ?? store.projects[0]);
+  let target = $derived(store.openProject ?? store.projects.find((p) => p.archived !== true));
   let newLabel = $derived(
     target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread
   );
+  // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
+  $effect(() => {
+    sidebarRows.list = (workspace.view === 'recent'
+      ? recent.map(({ machine, thread }) => ({ store: machine.store, threadId: thread.id }))
+      : groups.flatMap(({ machine, project }) =>
+          machine.store.isCollapsed(project.id)
+            ? []
+            : machine.store
+                .threadsOf(project.id)
+                .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
+                .sort(compareThreads)
+                .map((thread) => ({ store: machine.store, threadId: thread.id }))
+        )
+    ).slice(0, 9);
+  });
   $effect(() => {
     const timer = setInterval(() => (now = Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -61,9 +86,13 @@
         { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
         // An archived thread leaves this list: its way back starts where it was.
         { id: 'archived', label: strings.settings.archived.heading },
+        ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject }]),
         ...(owner.owner
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
+              ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
+              // Reads the folder again: a logo added or changed since the project was added.
+              ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon }]),
               separator(),
               { id: 'remove', label: strings.sidebar.removeProject, danger: true }
             ]
@@ -76,6 +105,15 @@
           if (workspace.active !== owner) await workspace.select(owner);
           owner.showSettings('general', 'archived');
         }
+        if (action === 'archive-project' && (await owner.archiveProject(project.id, true)))
+          undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
+            await owner.archiveProject(project.id, false);
+          });
+        if (action === 'worktrees') {
+          if (workspace.active !== owner) await workspace.select(owner);
+          owner.showSettings('general', 'worktrees');
+        }
+        if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);
@@ -93,6 +131,27 @@
           await owner.removeProject(project.id);
       }
     );
+  }
+  /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
+  let dropOver = $state<string | null>(null);
+  function dragOver(event: DragEvent, machine: Machine, project: Project, key: string) {
+    if (!event.dataTransfer?.types.includes(THREAD_DRAG_TYPE) || !takesDrop(threadDrag.current, machine.id, project.id)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    dropOver = key;
+  }
+  function dragLeave(event: DragEvent, key: string) {
+    // Leaving for a child of the same section is not leaving it.
+    if (event.relatedTarget instanceof Node && (event.currentTarget as HTMLElement).contains(event.relatedTarget)) return;
+    if (dropOver === key) dropOver = null;
+  }
+  function drop(event: DragEvent, machine: Machine, project: Project) {
+    const drag = threadDrag.current;
+    dropOver = null;
+    threadDrag.current = null;
+    if (!takesDrop(drag, machine.id, project.id) || drag === null) return;
+    event.preventDefault();
+    void moveThread(machine.store, drag.threadId, project.id);
   }
   function startResize(event: PointerEvent) {
     if (event.button !== 0) return;
@@ -178,8 +237,20 @@
           .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
+        {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
         {@const draftHere = store === owner && owner.draft?.projectId === project.id}
-        <section class="project" data-testid="project" data-project-id={project.id} data-machine-id={machine.id}>
+        {@const dropKey = `${machine.id}:${project.id}`}
+        <section
+          class="project"
+          class:drop={dropOver === dropKey}
+          data-testid="project"
+          data-project-id={project.id}
+          data-machine-id={machine.id}
+          aria-label={dropOver === dropKey ? fill(strings.threadMove.dropHere, { project: projectName(project) }) : undefined}
+          ondragover={(event) => dragOver(event, machine, project, dropKey)}
+          ondragleave={(event) => dragLeave(event, dropKey)}
+          ondrop={(event) => drop(event, machine, project)}
+        >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="head" oncontextmenu={(e) => projectMenu(e, machine, project)}>
             <button
@@ -190,10 +261,12 @@
               title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
             >
-              <span class="caret" class:collapsed><ChevronRight size={12} /></span><span class="tile"
-                >{projectName(project).slice(0, 1).toUpperCase()}</span
-              ><span class="name">{projectName(project)}</span
-              >{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
+              <span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
+              /><span class="name">{projectName(project)}</span
+              >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
+                  class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
+                  >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
+                >{/if}{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
             <button
               class="ghost small icon project-actions"
@@ -214,10 +287,12 @@
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
                 </p>{/if}
+              <ArchivedDrawer store={owner} {project} />
             </div>
           </div>
         </section>
       {/each}
+      <ArchivedProjects entries={shelved} {multi} />
     {/if}
   </div>
   {#if store.owner && work.shows('sidebar.add-project')}
@@ -331,6 +406,11 @@
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
   }
+  /* A thread row dragged over a project it can move to. */
+  .project.drop {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
   .head {
     display: flex;
     align-items: center;
@@ -344,17 +424,6 @@
     justify-content: flex-start;
     gap: 6px;
   }
-  .tile {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    flex: none;
-    background: var(--color-surface-3);
-    border-radius: var(--radius-sm);
-    color: var(--color-muted-foreground);
-    font-size: var(--text-xs);
-  }
   .name {
     flex: 1;
     min-width: 0;
@@ -364,6 +433,29 @@
     white-space: nowrap;
     font-weight: 600;
   }
+  /* A folded project still says what its threads do: the most urgent state, the count beside it. */
+  .rollup {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .rollup .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .rollup.working, .rollup.monitoring, .rollup.background { color: var(--color-accent); }
+  .rollup.waiting { color: var(--color-live); }
+  .rollup.error { color: var(--color-danger); }
+  .rollup.done { color: var(--color-success); }
+  .rollup.queued { color: var(--color-muted-foreground); }
+  .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
+  .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
+  @keyframes rollup-spin { to { transform: rotate(360deg); } }
+  @keyframes rollup-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .rollup .dot, .rollup :global(.spinner) { animation: none; } }
+  :global(html[data-motion='reduced']) .rollup .dot,
+  :global(html[data-motion='reduced']) .rollup :global(.spinner) { animation: none; }
   .host,
   .caret {
     display: flex;

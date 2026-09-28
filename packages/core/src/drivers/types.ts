@@ -84,6 +84,13 @@ export interface TurnContext {
   attachments: ImageAttachment[];
   sessionId: string | null;
   /**
+   * Resume `sessionId` only up to this entry of its transcript and fork the
+   * rest away (`ThreadSummary.sessionResumeAt`). Set only with a `sessionId`,
+   * and only for a driver that reports `TurnResult.checkpoint`; the others
+   * never see a thread in that state.
+   */
+  resumeAt?: string | null;
+  /**
    * This turn's prompt and images as a fresh session needs them: the
    * conversation so far carried in front of the request, the way the core
    * writes the first turn of a new session generation. For a driver that finds
@@ -177,6 +184,12 @@ export interface TurnResult {
    * `stopped` and is never run again.
    */
   sessionLost?: boolean;
+  /**
+   * The session this turn ended on and the id of the last entry it wrote to
+   * that session's transcript, for a driver that can later resume at such an
+   * entry (`Turn.checkpoint`). Absent when the driver has none.
+   */
+  checkpoint?: { sessionId: string; entry: string };
 }
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;

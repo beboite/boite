@@ -3,6 +3,7 @@ import App from './App.svelte';
 import './app.css';
 import { registerServiceWorker } from './lib/sw';
 import { startLocale } from './lib/i18n.svelte';
+import { applyChatWidth, readChatWidth } from './lib/chat-width';
 import { startZoom } from './lib/zoom';
 
 // Every import above parsed and ran: index.html's too-old-browser notice stands down.
@@ -12,6 +13,8 @@ const target = document.getElementById('app');
 if (!target) throw new Error('index.html is missing the #app element');
 
 registerServiceWorker();
+// The stored column width, before the first frame lays the chat out.
+applyChatWidth(readChatWidth());
 
 const quotas = new URLSearchParams(location.search).get('view') === 'quotas';
 

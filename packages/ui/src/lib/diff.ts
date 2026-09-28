@@ -179,13 +179,40 @@ function opsOf(a: string[], b: string[]): Op[] {
   ];
 }
 
+/** What a line is compared by when whitespace is ignored: its text with every space and tab gone. */
+function squeezed(line: string): string {
+  return line.replace(/\s+/g, '');
+}
+
+/**
+ * The edit script over whitespace-free lines, carried back to the real ones.
+ * A line that only moved its spaces is kept, shown the way the new text has it.
+ */
+function opsIgnoringWhitespace(a: string[], b: string[]): Op[] {
+  let i = 0;
+  let j = 0;
+  return opsOf(a.map(squeezed), b.map(squeezed)).map((entry) => {
+    if (entry.kind === 'remove') return op('remove', at(a, i++));
+    if (entry.kind === 'add') return op('add', at(b, j++));
+    i += 1;
+    return op('same', at(b, j++));
+  });
+}
+
+export interface DiffOptions {
+  /** Lines that differ only in spaces and tabs count as unchanged. */
+  ignoreWhitespace?: boolean;
+}
+
 /**
  * The rows a diff view draws: every changed line, `CONTEXT_LINES` of unchanged
  * ones around each change, and one `gap` row for every run of unchanged lines
  * that was folded away. Two identical texts give no row at all.
  */
-export function diffRows(oldText: string, newText: string): DiffRow[] {
-  const ops = opsOf(splitLines(oldText), splitLines(newText));
+export function diffRows(oldText: string, newText: string, options: DiffOptions = {}): DiffRow[] {
+  const a = splitLines(oldText);
+  const b = splitLines(newText);
+  const ops = options.ignoreWhitespace === true ? opsIgnoringWhitespace(a, b) : opsOf(a, b);
   if (!ops.some((entry) => entry.kind !== 'same')) return [];
 
   const keep = ops.map(() => false);
@@ -228,4 +255,32 @@ export function diffCounts(rows: DiffRow[]): { added: number; removed: number } 
     else if (row.kind === 'remove') removed += 1;
   }
   return { added, removed };
+}
+
+/** One line of the side-by-side view: the old side on the left, the new on the right, either empty. */
+export type SplitRow =
+  | { kind: 'pair'; left: Exclude<DiffRow, { kind: 'gap' }> | null; right: Exclude<DiffRow, { kind: 'gap' }> | null }
+  | { kind: 'gap'; hidden: number };
+
+/**
+ * The unified rows set side by side: a context line on both sides, and each run
+ * of removals faced with the additions that follow it, line for line, so a
+ * changed line reads across. The longer side of a run leaves the other empty.
+ */
+export function splitRows(rows: DiffRow[]): SplitRow[] {
+  const out: SplitRow[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    const row = rows[index]!;
+    if (row.kind === 'gap') { out.push(row); index += 1; continue; }
+    if (row.kind === 'context') { out.push({ kind: 'pair', left: row, right: row }); index += 1; continue; }
+    const removed: Extract<DiffRow, { kind: 'remove' }>[] = [];
+    const added: Extract<DiffRow, { kind: 'add' }>[] = [];
+    while (rows[index]?.kind === 'remove') removed.push(rows[index++] as Extract<DiffRow, { kind: 'remove' }>);
+    while (rows[index]?.kind === 'add') added.push(rows[index++] as Extract<DiffRow, { kind: 'add' }>);
+    for (let k = 0; k < Math.max(removed.length, added.length); k += 1) {
+      out.push({ kind: 'pair', left: removed[k] ?? null, right: added[k] ?? null });
+    }
+  }
+  return out;
 }

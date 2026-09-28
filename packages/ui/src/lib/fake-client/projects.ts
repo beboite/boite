@@ -6,13 +6,15 @@ import { FAKE_FILES, scoreFakeFile } from './files';
 import { IMPORT_LIST_MS } from './providers';
 import { FAKE_DRAFTS_PATH, toSummary } from './shared';
 import { putAway } from './threads';
+import { archiveProject, describedProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
 
 export function projectMethods(ctx: FakeContext) {
   return {
     'projects.list': async (params) => {
-      return structuredClone(ctx.projects);
+      return ctx.projects.map((project) => describedProject(ctx, project));
     },
+    'projects.archive': async (params) => archiveProject(ctx, params.projectId, params.archived ?? true),
     'projects.browse': async (params) => {
       const { path = '/workspace' } = params;
       return {

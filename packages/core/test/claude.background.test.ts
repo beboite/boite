@@ -221,4 +221,28 @@ describe('claude driver: questions and background work', () => {
     await cleared;
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
   });
+
+  test('a monitor left past the turn reaches every row, and the row forgets it once it ends', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted((fake) => {
+      fake.emit(init('sess-monitor'));
+      fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: 'sess-monitor', tasks: [{ task_id: 'mon-1', task_type: 'monitor', description: 'watch CI' }] }));
+      fake.emit(success('sess-monitor'));
+    });
+    const watching = client.next('thread.updated', (summary) => summary.id === threadId && (summary.backgroundWork?.kinds.length ?? 0) > 0, 10000);
+    expect(await runTurn(client, threadId, 'watch CI')).toBe('done');
+    const row = await watching;
+    expect(row.backgroundWork).toEqual({ kinds: ['monitor'], since: expect.any(Number) });
+    await waitFor(() => harness.core.journal.getThread(threadId)?.status === 'idle');
+    // A client that connects later reads it from the list, not from an event it missed.
+    const listed = (await client.call('threads.list', {})).find((summary) => summary.id === threadId);
+    expect(listed?.status).toBe('idle');
+    expect(listed?.backgroundWork?.kinds).toEqual(['monitor']);
+
+    const ended = client.next('thread.updated', (summary) => summary.id === threadId && summary.backgroundWork === null, 10000);
+    queries[0]!.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: 'sess-monitor', tasks: [] }));
+    expect((await ended).backgroundWork).toBeNull();
+    await client.call('turns.stop', { threadId }).catch(() => undefined);
+  });
 });

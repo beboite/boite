@@ -85,7 +85,9 @@ read of messages, and on close. A delta used to rewrite the whole row, every
 part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. A crash loses at
 most the text of the last write window. Thread activity (goal, loop, tasks) is a
 `settings` row with no event: its payload held the whole loop history and
-nothing read it back. A journal written by a newer release is refused at open
+nothing read it back. A project's detected icon is a `project_icons` row with
+no event either: it is derived from the folder and detected again on request
+([project icons](project-icons.md)). A journal written by a newer release is refused at open
 with the file and both schema versions, before any write. Foreign keys are off,
 so the `ON DELETE CASCADE` clauses are dead; project removal clears every
 thread-keyed table itself. A write that fails on a timer (a full disk, an I/O
@@ -181,7 +183,12 @@ has run.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when
-it finishes opens a turn of its own, marked "Background work finished".
+it finishes opens a turn of its own, marked "Background work finished". The
+thread summary carries it too, as `backgroundWork` (the kind of each task and
+when the oldest started), so a sidebar or phone row whose turn ended reads
+"Monitoring" or "In background" with a running clock instead of "Done". Every
+`thread.updated` the core sends is built by `withLoad`, load ticks included,
+because a client replaces its row with the summary it receives.
 
 Where they differ is worth knowing before you touch one. `claude-sdk` runs the
 Claude Agent SDK with a `PreToolUse` hook as the single gate that journals and

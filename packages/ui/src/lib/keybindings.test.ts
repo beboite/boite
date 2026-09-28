@@ -88,6 +88,17 @@ describe('recording a chord on the Keyboard page', () => {
     expect(parseChord(chordFromEvent(key({ key: 'b' }), false)!).ok).toBe(false);
   });
 
+  test('Alt and a digit reach the thread in that row, on a layout where the digit needs Shift too', () => {
+    const table = resolveBindings({});
+    expect(commandForKey(table, key({ key: '3', code: 'Digit3', altKey: true }), false)).toBe('thread-3');
+    // French AZERTY: the top row types `"` without Shift, the code still says Digit3.
+    expect(commandForKey(table, key({ key: '"', code: 'Digit3', altKey: true }), false)).toBe('thread-3');
+    expect(commandForKey(table, key({ key: '3', code: 'Numpad3', altKey: true }), false)).toBe('thread-3');
+    expect(commandForKey(table, key({ key: '"', code: 'Quote', altKey: true }), false)).toBeNull();
+    expect(commandForKey(table, key({ key: 't', code: 'KeyT', ctrlKey: true, shiftKey: true }), false)).toBe('reopen-thread');
+    expect(commandForKey(table, key({ key: 'f', code: 'KeyF', ctrlKey: true }), false)).toBe('find');
+  });
+
   test('the page draws one cap per key, and every command sits in exactly one section', () => {
     expect(chordParts(resolveBindings({}).tasks.chord!, false)).toEqual(['Ctrl', 'Shift', 'K']);
     expect(chordParts(resolveBindings({}).tasks.chord!, true)).toEqual(['Shift', 'Cmd', 'K']);

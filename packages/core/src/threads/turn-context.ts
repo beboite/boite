@@ -136,6 +136,7 @@ export class TurnContexts {
         ?? this.threads.deferred.takeForRunningTurn(threadId),
       attachments: prepared.attachments,
       sessionId: thread.sessionId,
+      resumeAt: thread.sessionId === null ? null : thread.sessionResumeAt ?? null,
       sessionBefore: this.sessionBefore(thread, turn.id),
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
@@ -228,7 +229,7 @@ export class TurnContexts {
   }
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
-  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
+  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[]; moved?: true } {
     const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
     const message = systemOperation(operation)
       ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
@@ -241,9 +242,14 @@ export class TurnContexts {
           attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
         }
       }
+      // A thread moved since the last message: the note goes first, so the
+      // agent reads where it works before what it is asked.
+      const moved = message.parts.find((part) => part.type === 'text' && part.moved !== undefined);
+      const note = moved?.type === 'text' ? moved.moved?.note ?? '' : '';
       return {
-        prompt: message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
+        prompt: note + message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
         attachments,
+        ...(note ? { moved: true as const } : {}),
       };
     }
     return { prompt: '', attachments: [] };

@@ -1,17 +1,21 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { AgentLetter, Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import type { AgentLetter, Message, MoveNotice } from '@boite/contracts';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
-  import { turnFiles, type TurnFile } from '../lib/turn-files';
+  import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import DelegationActivity from './DelegationActivity.svelte';
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
+  import MoveMarker from './MoveMarker.svelte';
+  import MessageActions from './MessageActions.svelte';
+  import { turnAnswer } from '../lib/message-display';
+  import { focusComposer } from '../lib/focus';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
@@ -22,6 +26,11 @@
     threadId,
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
+  /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
+  let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
+  $effect(() => {
+    if (store.findOpen && !FindBar) void import('./FindBar.svelte').then((module) => { FindBar = module.default; }).catch(() => { store.findOpen = false; });
+  });
   const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
   const letters = $derived([
@@ -71,6 +80,13 @@
       [...ids].some(id => part.text.includes(`"id":"${id}"`)));
   }
 
+  /** The core's line for a move the agent asked for itself (`boite thread move`), drawn as a marker, not a message. */
+  function movedBy(message: Message): MoveNotice | null {
+    if (message.role !== 'system') return null;
+    for (const part of message.parts) if (part.type === 'text' && part.moved?.by === 'agent') return part.moved;
+    return null;
+  }
+
   function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
     if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
     return coordination?.self ?? null;
@@ -82,6 +98,16 @@
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(savedReading?.pinned ?? true);
   let behind = $state(false);
+  /** The newest message the reader was at the bottom for; what came after it is what the button counts. */
+  let seenLast = $state<string | null>(null);
+  let unseen = $derived.by(() => {
+    if (!behind || seenLast === null) return 0;
+    const at = timeline.findIndex((message) => message.id === seenLast);
+    return at < 0 ? 0 : timeline.length - 1 - at;
+  });
+  function markSeen() {
+    seenLast = timeline.at(-1)?.id ?? null;
+  }
   let shown = savedReading ? untrack(() => threadId) : '';
 
   /** Measured slot heights by message id. What is not in here is worth ESTIMATE. */
@@ -296,7 +322,11 @@
     if (!box) return;
     if (!restoredReading) {
       restoredReading = true;
-      if (savedReading && !savedReading.pinned) box.scrollTop = savedReading.top;
+      if (savedReading && !savedReading.pinned) {
+        box.scrollTop = savedReading.top;
+        // What is loaded now is the baseline: the button counts what arrives after.
+        untrack(markSeen);
+      }
     }
     viewHeight = box.clientHeight;
     scrollTop = box.scrollTop;
@@ -339,7 +369,9 @@
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
     void tick().then(rememberAnchor);
-    if (pinned) behind = false;
+    // Away from the bottom, the way back shows, whether or not anything new came in.
+    behind = !pinned;
+    if (pinned) markSeen();
     pullOlder(box);
   }
 
@@ -387,6 +419,7 @@
     navigationTarget = null;
     pinned = true;
     behind = false;
+    markSeen();
     box.scrollTop = box.scrollHeight;
     scrollTop = box.scrollTop;
   }
@@ -408,6 +441,7 @@
       scrollTop = box.scrollTop;
       pinned = true;
       behind = false;
+      untrack(markSeen);
     } else {
       behind = true;
     }
@@ -436,7 +470,7 @@
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    const result = new Map<string, TurnFile[]>();
+    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
     if (!thread || thread.id !== threadId) return result;
     const parts = new Map<string, Message['parts']>();
     for (const message of messages) {
@@ -445,8 +479,9 @@
     }
     for (const turn of thread.turns) {
       if (turn.status === 'running' || turn.status === 'queued') continue;
-      const files = turnFiles(parts.get(turn.id) ?? [], thread.cwd);
-      if (files.length > 0) result.set(turn.id, files);
+      const own = parts.get(turn.id) ?? [];
+      const files = turnFiles(own, thread.cwd);
+      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own), cwd: thread.cwd });
     }
     return result;
   });
@@ -462,12 +497,48 @@
    */
   let expanded = $state<string[]>([]);
 
+  /** Everything the agent wrote in a turn, its tool cards left out: what the turn's copy button takes. */
+  function answerOf(turnId: string): string {
+    return turnAnswer(messages, turnId);
+  }
+
+  /**
+   * Edit, retry and fork go through the core's rewind and fork, which a
+   * persistent agent's session refuses, and only on a thread at rest: a turn
+   * still running is stopped first (Escape).
+   */
+  const branchable = $derived.by(() => {
+    const thread = store.openThread;
+    return thread !== null && thread.id === threadId && !thread.agentSessionId && thread.projectId !== null;
+  });
+  // A prompt still waiting in the queue would run after the edit, on the rewound thread.
+  const atRest = $derived(branchable && !store.busy && (store.composerStates[threadId]?.queued.length ?? 0) === 0);
+
+  function editMessage(message: Message): void {
+    store.startEdit(threadId, message);
+    focusComposer();
+  }
+
+  /** The last turn again from its own prompt: the answer and what followed it leave, the same prompt goes out. */
+  async function retry(turnId: string): Promise<void> {
+    const prompt = messages.find((message) => message.turnId === turnId && message.role === 'user');
+    if (!prompt) return;
+    const rewound = await store.rewind(prompt.id);
+    if (!rewound) return;
+    const sent = await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
+    // The rewind already took the prompt away: a failed send leaves it in the box, not nowhere.
+    if (!sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
+  }
+
   function toggleImage(id: string): void {
     expanded = expanded.includes(id) ? expanded.filter((entry) => entry !== id) : [...expanded, id];
   }
 </script>
 
 <div class="timeline-wrap">
+  {#if store.findOpen && FindBar}
+    <FindBar {messages} {viewport} request={store.findRequest} jump={(id) => jumpToMessage(id)} onclose={() => (store.findOpen = false)} />
+  {/if}
   <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
@@ -496,13 +567,15 @@
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+          {:else if movedBy(message)}
+            <MoveMarker notice={movedBy(message)!} />
           {:else if message.role === 'user'}
-            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} />
+            <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
             <AssistantMessage {store} {threadId} {message} {progress} {signedOut} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
-            <TurnFiles {store} files={filesByTurn.get(turn.id)!} />
+            <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
             <TurnSummary
@@ -510,7 +583,15 @@
               waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
               background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
               stop={() => void store.stop()}
-            />
+            >
+              {#snippet actions()}
+                <MessageActions
+                  text={() => answerOf(turn.id)}
+                  retry={atRest && store.openThread?.turns.at(-1)?.id === turn.id ? () => void retry(turn.id) : undefined}
+                  fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
+                />
+              {/snippet}
+            </TurnSummary>
           {/if}
         </article>
       {/each}
@@ -523,7 +604,7 @@
   {#if behind}
     <button type="button" class="small jump" onclick={jump} data-testid="jump-to-latest">
       <ArrowDown size={14} strokeWidth={2} />
-      {strings.chat.jumpToLatest}
+      {unseen > 0 ? fill(unseen === 1 ? strings.chat.newMessage : strings.chat.newMessages, { count: String(unseen) }) : strings.chat.jumpToLatest}
     </button>
   {/if}
 </div>

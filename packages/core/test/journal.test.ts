@@ -51,6 +51,18 @@ describe('journal', () => {
     journal.db.query('INSERT INTO settings (key, value) VALUES (?, ?)').run('settings', '{');
     expect(() => journal.getSetting('settings')).toThrow('settings.value row settings');
   });
+  test('a schema 21 journal gains the project icon table and keeps its projects', () => {
+    journal.putProject({ id: 'prj_old', name: 'old', path: dir, createdAt: 1 });
+    journal.db.exec('DROP TABLE project_icons; PRAGMA user_version = 21;');
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(journal.listProjects().map((p) => p.id)).toEqual(['prj_old']);
+    expect(journal.projectIcons().size).toBe(0);
+    journal.putProjectIcon('prj_old', { kind: 'tech', id: 'go' }, 2);
+    expect(journal.projectIcons().get('prj_old')).toEqual({ kind: 'tech', tech: 'go', version: null });
+  });
+
   test('the schema version is stamped and WAL is on', () => {
     const version = journal.db.query('PRAGMA user_version').get() as { user_version: number };
     expect(version.user_version).toBe(SCHEMA_VERSION);

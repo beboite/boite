@@ -1,5 +1,7 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
-import type { Attachment, ThreadSummary, TurnInFlightData } from '@boite/contracts';
+import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } from '@boite/contracts';
+import { sentPrompt } from '../composer-queue';
+import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasDropped } from '../client';
 import { titleFrom } from '../format';
@@ -36,6 +38,8 @@ export class Composer {
     queued: QueuedPrompt[];
     sending: boolean;
     paused: boolean;
+    /** The sent message this text replaces: sending rewinds the thread to before it first. */
+    editing?: MessageId | null;
   }>>({});
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
@@ -62,6 +66,38 @@ export class Composer {
     this.previewUndo.set(historyKey, history);
     draft.previewReferences = restored?.references ?? editPreviewMentions(draft.text, value, draft.previewReferences ?? [], edit);
     draft.text = value;
+  }
+
+  /**
+   * A sent message back in its thread's box to be edited: its words, pictures,
+   * files and page references, marked as the message the next send replaces.
+   * Nothing leaves the thread until that send; the box's own draft gives way.
+   */
+  startEdit(threadId: string, message: Message): void {
+    const prompt = sentPrompt(message);
+    const restored = restorePreviewMentions(prompt.text, prompt.previewReferences);
+    this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = this.composerStates[threadId]!;
+    state.text = restored.text;
+    state.previewReferences = restored.references;
+    state.attachments = prompt.attachments;
+    state.selection = { start: restored.text.length, end: restored.text.length };
+    state.editing = message.id;
+  }
+
+  /**
+   * A prompt that already left the thread back in its box as a plain draft:
+   * a retry whose resend failed after the rewind took the message away.
+   */
+  restoreDraft(threadId: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): void {
+    const restored = restorePreviewMentions(prompt, previewReferences);
+    this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = this.composerStates[threadId]!;
+    state.text = restored.text;
+    state.previewReferences = restored.references;
+    state.attachments = attachments;
+    state.selection = { start: restored.text.length, end: restored.text.length };
+    state.editing = null;
   }
 
   addPreviewReference(threadId: string, reference: PreviewReference): boolean {

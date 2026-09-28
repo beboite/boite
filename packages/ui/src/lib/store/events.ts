@@ -147,6 +147,9 @@ export function listen(ctx: StoreContext, client: Client): void {
     for (const message of threads.messages(threadId, messageId)) message.state = state;
   });
 
+  // A rewind, from this client or another: the message and what follows it go.
+  on('message.truncated', ({ threadId, messageId }) => threads.truncate(threadId, messageId));
+
   on('permission.requested', (request) => {
     requests.mergePermissions([request], 'one');
     layout.notify('needs-you', request.threadId, null);
@@ -246,6 +249,8 @@ export function listen(ctx: StoreContext, client: Client): void {
     if (!s.projects.some((p) => p.id === project.id))
       s.projects = [...s.projects, project];
   });
+  // Archived or restored anywhere, or its count of archived threads moved.
+  on('project.updated', (project) => ctx.projects.upsertProject(project));
   on('project.removed', ({ projectId }) => {
     void ctx.projects.dropProject(projectId);
   });

@@ -8,7 +8,9 @@
   import { promptText, visibleAnswer } from '../lib/message-display';
   import { isNamedModel } from '../lib/model-order';
   import type { TurnProgress } from '../lib/turn-progress.svelte';
+  import { planOf } from '../lib/plan';
   import PermissionCard from './PermissionCard.svelte';
+  import PlanCard from './PlanCard.svelte';
   import QuestionCard from './QuestionCard.svelte';
   import Prose from './Prose.svelte';
   import ChatFile from './ChatFile.svelte';
@@ -76,6 +78,8 @@
 
       {:else if part.type === 'file'}
         <ChatFile file={part} />
+      {:else if part.type === 'tool' && planOf(part.name, part.input) !== null}
+        <PlanCard {store} {threadId} plan={planOf(part.name, part.input) ?? ''} />
       {:else if part.type === 'permission'}
         <PermissionCard
           toolName={part.toolName}

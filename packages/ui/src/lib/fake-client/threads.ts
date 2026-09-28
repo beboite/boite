@@ -1,18 +1,22 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Message, type MessageId, type RpcParams, type Thread } from '@boite/contracts';
+import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { RETITLE_DELAY_MS } from './providers';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
+import { announceProject, archiveProject } from './project-archive';
 import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
+import { registerFakeWorktree, requireFakeCwd } from './worktrees';
+import { dropWaitingMove, fakeMoveNote } from './thread-move';
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
   const project = ctx.projects.find(p => p.id === mission?.projectId);
   const placed = project ? fakeWorktree(project.path, `${agent.name} ${mission?.title ?? ''}`) : null;
+  if (project && placed) registerFakeWorktree(ctx, project.id, placed);
   const now = Date.now();
   const thread: Thread = { id: `t-${++ctx.seq}`, projectId: project?.id ?? null, agentSessionId: sessionId, ...agent.selection,
     title: agent.name, titleSource: 'user', speed: null, cwd: placed?.path ?? `${DATA_DIR}/agent-workspaces/${agent.id}/${work.scope.id}`, branch: placed?.branch ?? null,
@@ -45,6 +49,8 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  // A waiting move goes with the thread, before its turn ends and would apply it.
+  dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);
   for (const [questionId, pending] of [...ctx.pendingQuestions]) {
     if (pending.request.threadId !== thread.id) continue;
@@ -114,6 +120,7 @@ export function threadMethods(ctx: FakeContext) {
       // worktree beside the repository. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch);
+      if (placed) registerFakeWorktree(ctx, project.id, placed);
       // The core makes a dated folder per draft; the fake only names it.
       const draftFolder = project.kind === 'drafts' && !params.cwd
         ? fakeDraftFolder(project.path, title, new Date(at), new Set([...ctx.threads.values()].map((thread) => thread.cwd)))
@@ -147,6 +154,8 @@ export function threadMethods(ctx: FakeContext) {
       };
       ctx.threads.set(thread.id, thread);
       ctx.emit('thread.created', structuredClone(toSummary(thread)));
+      // As the core: a thread started in a project put away brings the project back.
+      if (project.archived === true) archiveProject(ctx, project.id, false);
       return structuredClone(toSummary(thread));
     },
     'threads.get': async (params) => {
@@ -250,9 +259,12 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
+      const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) await putAway(ctx, thread);
-      return ctx.touch(thread);
+      const summary = ctx.touch(thread);
+      if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);
+      return summary;
     },
     'threads.pin': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -281,6 +293,7 @@ export function threadMethods(ctx: FakeContext) {
     },
     'turns.start': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
+      requireFakeCwd(ctx, ctx.thread(params.threadId));
       const referenceError = previewReferencesError(params.previewReferences ?? [], params.prompt);
       if (referenceError) throw new RpcFailure({ code: RpcErrorCode.Refused, message: referenceError });
       if (params.attachments !== undefined && (!Array.isArray(params.attachments) || params.attachments.some(a => !a || typeof a !== 'object'))) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'attachments must be an array of attachment objects' });
@@ -319,11 +332,97 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.compact': async (params) => {
       const thread = ctx.thread(params.threadId);
+      requireFakeCwd(ctx, thread);
       if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed' });
       if (!thread.sessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has no native session to compact' });
       if (ctx.providers.find((p) => p.id === thread.providerId)?.protocol === 'acp' && !thread.commands.some((c) => c.name === 'compact')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this agent has not advertised a compact command' });
       if (ctx.providers.find((p) => p.id === thread.providerId)?.protocol === 'agy') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the Antigravity CLI takes no /compact in print mode' });
       return ctx.startTurn(params.threadId, '[compact]', [], 'compact');
+    },
+    // The core's `threads/branching.ts`: the same refusals, by field. The fake
+    // has no native transcript, so every rewind and fork is the seeded path.
+    'threads.rewind': async (params) => {
+      const thread = ctx.thread(params.threadId);
+      if (thread.agentSessionId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be rewound', data: { threadId: thread.id, field: 'threadId', expected: 'a conversation thread' } });
+      if (thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot rewind an archived thread', data: { threadId: thread.id, field: 'threadId', expected: 'a thread that is not archived' } });
+      if (['queued', 'running', 'waiting'].includes(thread.status) || ctx.inFlight.has(thread.id)) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread has a turn running or queued; stop it before editing a message', data: { threadId: thread.id, reason: 'turn-in-flight', status: thread.status, expected: 'an idle thread' } });
+      }
+      const at = thread.messages.findIndex((message) => message.id === params.messageId);
+      const message = thread.messages[at];
+      if (!message) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is not a message of thread ${thread.id}`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, expected: 'a user message of this thread' } });
+      if (message.role !== 'user') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is a ${message.role} message; only a message the user sent can be edited`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, role: message.role, expected: 'user' } });
+      const removed = thread.messages.splice(at);
+      // The notes to the agent went with removed messages: the next one says it
+      // again, from where the kept history left the agent to where the thread is now.
+      const moved = removed.flatMap((entry) => entry.parts).find((part) => part.type === 'text' && part.moved !== undefined);
+      if (moved?.type === 'text' && moved.moved) {
+        const origin = moved.moved.from;
+        const here: MoveEnd = { projectId: thread.projectId ?? '', name: ctx.projects.find((p) => p.id === thread.projectId)?.name ?? thread.projectId ?? '', cwd: thread.cwd };
+        if (origin.cwd === here.cwd) ctx.moveNotes.delete(thread.id);
+        else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
+      }
+      const gone = new Set(removed.map((entry) => entry.turnId));
+      thread.turns = thread.turns.filter((turn) => !gone.has(turn.id));
+      thread.sessionId = null;
+      thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
+      thread.context = null;
+      thread.promptCache = null;
+      ctx.emitToThread(thread.id, 'message.truncated', { threadId: thread.id, messageId: message.id });
+      ctx.touch(thread);
+      let prompt = '';
+      const attachments: Attachment[] = [];
+      const previewReferences: PreviewReference[] = [];
+      for (const part of message.parts) {
+        if (part.type === 'text') {
+          prompt += part.displayText ?? part.text;
+          previewReferences.push(...(part.previewReferences ?? []));
+        } else if (part.type === 'image') attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
+        else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
+      }
+      const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
+      return structuredClone({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const });
+    },
+    'threads.fork': async (params) => {
+      const source = ctx.thread(params.threadId);
+      if (source.agentSessionId || source.projectId === null) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a persistent agent session takes its work through Agents and cannot be forked', data: { threadId: source.id, field: 'threadId', expected: 'a conversation thread' } });
+      const at = source.messages.findIndex((message) => message.id === params.messageId);
+      const target = source.messages[at];
+      if (!target) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is not a message of thread ${source.id}`, data: { threadId: source.id, field: 'messageId', messageId: params.messageId, expected: 'a message of this thread' } });
+      if (target.state === 'streaming') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is still being written; fork once it is complete`, data: { threadId: source.id, field: 'messageId', messageId: params.messageId, expected: 'a finished message' } });
+      const project = ctx.projects.find((p) => p.id === source.projectId);
+      if (!project) throw ctx.notFound('project', source.projectId);
+      if (params.worktree === true && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id, field: 'worktree', expected: false } });
+      const title = `${source.title} (fork)`;
+      const placed = params.worktree === true ? fakeWorktree(project.path, title) : null;
+      if (placed) registerFakeWorktree(ctx, project.id, placed);
+      const now = ctx.now();
+      const id = `t-${++ctx.seq}`;
+      const turnIds = new Map<string, string>();
+      const messages: Message[] = source.messages.slice(0, at + 1).map((message) => {
+        if (!turnIds.has(message.turnId)) turnIds.set(message.turnId, `turn-${++ctx.seq}`);
+        return { ...structuredClone(message), id: `m-${++ctx.seq}`, threadId: id, turnId: turnIds.get(message.turnId) ?? message.turnId, state: message.state === 'streaming' ? 'complete' : message.state };
+      });
+      const turns: Turn[] = source.turns.filter((turn) => turnIds.has(turn.id)).map((turn) => ({
+        ...structuredClone(turn),
+        id: turnIds.get(turn.id) ?? turn.id,
+        threadId: id,
+        status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
+        startedAt: turn.startedAt ?? turn.queuedAt,
+        finishedAt: turn.finishedAt ?? now,
+        usage: null,
+      }));
+      const thread: Thread = {
+        id, projectId: source.projectId, title, titleSource: source.titleSource,
+        providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
+        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, permissionMode: source.permissionMode,
+        status: 'idle', unread: false, archived: false, pinned: false,
+        sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
+        createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
+      };
+      ctx.threads.set(id, thread);
+      ctx.emit('thread.created', structuredClone(toSummary(thread)));
+      return structuredClone(toSummary(thread));
     },
     'turns.stop': async (params) => {
       const thread = ctx.thread(params.threadId);

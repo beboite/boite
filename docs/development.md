@@ -163,7 +163,40 @@ repository, a missing git, a branch that already exists: each is refused by
 name and no thread is written. The git calls run under the thread's id, so
 they are in its trace. Archiving the thread leaves the worktree and the branch
 where they are: the branch may carry work nobody merged, and deleting it is a
-person's call, `git worktree remove` from the project.
+person's call, made through `worktrees.remove`.
+
+`worktrees.list { projectId }` reads `git worktree list` for the project's
+repository and returns every linked worktree, the core's own under
+`.boite-worktrees` and any made by hand, but never the main checkout or the
+project's own folder. Each entry says:
+
+- `dirty`: `git status --untracked-files=normal` lists something, untracked
+  files included.
+- `unmerged`: HEAD is on no local branch or remote-tracking ref other than the
+  worktree's own branch (`git for-each-ref --contains`), so removing the branch
+  would lose those commits. A branch with no commit of its own is not unmerged,
+  and a commit that also sits on another local branch is not either.
+- `missing`: git still lists the worktree but the directory is gone.
+- `threadId`, `threadTitle`, `threadArchived`: the thread whose `cwd` is that
+  folder or inside it, without case on Windows, a live thread before an
+  archived one.
+
+`worktrees.remove { projectId, path, force? }` refuses, naming the field: a path
+git does not list for the project, the main checkout, a worktree a thread that
+is not archived stands in (even with `force`), and, without `force`, a dirty or
+unmerged worktree ("This worktree has uncommitted changes.", "This worktree has
+commits on no other branch.", or both). It then runs `git worktree remove`
+(`--force` only when asked, since git refuses a dirty tree), `git branch -d` on
+the branch (`-D` with `force`) and `git worktree prune --expire 1.hour.ago`,
+never a bare prune: a folder in the middle of a rename would lose its
+registration. A missing directory only loses its registration. `branchDeleted`
+is false when git kept the branch, for example when its commits sit on a branch
+not merged into HEAD. Both methods are owner only and run git under the trace id
+`worktrees:<projectId>`.
+
+An archived thread whose worktree was removed keeps its `cwd`. Restored, its
+next `turns.start` or `threads.compact` is refused with the missing folder in
+the message and `field: 'cwd'`; nothing recreates the worktree.
 
 Archiving stops the thread's running turn, its pending questions and its child
 agents, so the sidebar menu, the header and the palette ask first when the thread
@@ -174,7 +207,96 @@ stopped work does not resume. The General page reads the list only on its
 button. The palette's Archived threads command and each project's `...` menu
 open the same card with the list already read, and the phone's page reads it
 when it opens. A restored row keeps its place with Open, which goes to the
-thread.
+thread. Under its rows, a project with archived threads shows a folded
+"N archived" line; opened, it reads that project's archived threads and
+restores one in a click. The fold is not remembered between sessions.
+
+Settings > General > Worktrees (owner only, also in each git project's `...`
+menu) lists every project's worktrees with what each would lose. "Remove the
+clean ones" takes those that are neither dirty nor unmerged and hold no live
+thread, without `force`. Files git ignores do not make a worktree dirty, as
+for `git worktree remove` itself: dependencies and build output an agent left
+there would otherwise mark every used worktree, and they go with it. Removing a dirty or unmerged one asks first, then
+passes `force`. A worktree a live thread stands in cannot be removed.
+
+`projects.archive { projectId, archived? }` flags a project archived (the
+default) or brings it back, and `project.updated` tells every client. It moves
+nothing else: the project's threads keep running and its worktrees stay. The
+sidebar lists it under "Archived projects" with Restore, the landing and the
+project pickers skip it, and a thread started in it brings it back. The drafts
+project is refused. Each project also carries `archivedThreads`, the count of
+its archived top-level threads, announced again with `project.updated` when a
+thread is archived or restored. A paired device may archive a project: it is a
+flag the owner undoes in one click.
+
+### Moving a thread
+
+A thread changes project from its row menu or its title menu ("Move to
+project", which opens a picker of the machine's other projects, archived ones
+marked), and on a desktop by dragging its row onto another project's section,
+which takes the accent outline while the row is over it. The phone reaches the
+same picker from the title's sheet. Only another project of the row's machine
+takes a drop; the recent view has no project sections to drop on.
+
+`threads.move { threadId, projectId, stopBackground? }` (`threads/move.ts`)
+moves the thread and its sub-threads and answers the thread's new row;
+`thread.updated` tells every client. What the core does:
+
+- The working directory becomes the target's folder. A thread that had a
+  worktree of its own (`branch` set) gets a new one in a target that is a git
+  repository, placed and named as `threads.create` with `worktree: {}` does; a
+  target that is no repository gives it the project folder, and the drafts
+  project a new dated folder. The old folder, worktree or branch is never
+  touched, so uncommitted changes in it are not a reason to refuse.
+- The session follows only where the agent's resume takes a new folder: Codex
+  (`thread/resume` carries `cwd`). Every other driver drops it, as an account
+  switch does: the next turn starts a fresh session seeded with the journal's
+  history (`continuation.ts`). Warm processes are keyed by folder in every
+  driver, so none started in the old folder is reused.
+- The next message carries a note the agent reads before the prompt ("This
+  thread moved from project A (old folder) to project B (new folder). Your
+  working directory is now ..."). It is kept in the journal (`move-note:<id>`)
+  until that message, survives a restart, skips a slash command and a compact,
+  keeps the first origin over several moves, and goes when the thread returns to
+  where it started. The prompt shows the accent marker "Move explained to the
+  agent", which opens on the note.
+- A thread whose own turn runs, is queued or waits is not moved under the
+  running process. The call returns at once with the row still in place and
+  `pendingMove { projectId, project, by, at }` set, and the move happens when
+  the turn ends, whether it finished, stopped or failed, through the same code
+  path as the agent's own move (`ThreadMove.applyWaiting`, called by the turn
+  runner). A turn queued behind it then runs in the new folder. Everything that
+  can be refused is checked when the move is asked for; a refusal that only
+  appears by the turn's end (the project removed meanwhile) leaves a system line
+  in the thread saying why. The confirm says the move happens when the current
+  turn ends; the row shows "Moves to <project> after this turn" in the accent,
+  and so does the header (only the mark on a phone). A second move replaces the
+  waiting one, "Cancel move" in the same menus drops it
+  (`threads.moveCancel { threadId }`, refused naming `threadId` when nothing
+  waits), and archiving the thread drops it too. The waiting move lives in the
+  core's memory only: a core restart before the turn ends forgets it. The
+  row stays draggable.
+- A sub-thread with a turn in flight is still refused with
+  `reason: 'turn-in-flight'` and `busyThreadId`: the parent's turn end is no
+  moment to move a thread whose child still runs. The menu entry is off with
+  that reason and the row cannot be dragged.
+- Background work (a monitor, a shell the agent left running) needs
+  `stopBackground`: without it the move is refused naming the field. The UI asks
+  "Stop monitors" or "Keep them". `true` stops it; `false` leaves it running in
+  the old folder until the next turn starts the agent in the new one. For a
+  move that waits for the turn, the choice applies when the move does; a move
+  asked for while no background work ran keeps any that started meanwhile.
+- A target project that is archived comes back, as a thread started in it does.
+- Refused by field: an unknown thread or project, the thread's own project, an
+  archived thread, a sub-thread (it moves with its parent), a persistent agent's
+  session, and a target whose folder is gone.
+
+A paired device may move a thread and cancel a waiting move: it names a
+project it already lists, never a path, and the core picks the folder
+(`packages/contracts/src/access.ts`). An agent moves its own thread with
+`boite thread move <project>` ([CLI](cli.md)), applied when its turn ends in
+the same way; its move skips the note and the "Move explained to the agent"
+marker, since the agent knows.
 
 ## Pending prompts, goals and loops
 

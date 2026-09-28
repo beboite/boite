@@ -408,11 +408,23 @@ export const strings = {
     copyPath: 'Copy path',
     copied: 'Copied',
     importSession: 'Import a Claude Code session',
+    /** Out of the list, not out of Boite: its threads keep running and a new one brings it back. */
+    archiveProject: 'Archive project',
+    refreshIcon: 'Refresh icon',
+    projectArchivedToast: 'Archived {project}',
+    archivedProjects: 'Archived projects ({count})',
+    restoreProject: 'Restore',
+    /** The drawer under a project's rows: its archived threads, opened for this session only. */
+    archivedThreadsOne: '1 archived',
+    archivedThreadsMany: '{count} archived',
+    restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     removeProjectTitle: 'Remove {project} from Boite?',
     removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',
     remove: 'Remove',
     threadMenu: 'Thread actions',
+    /** A pencil on a thread's row: something typed in its box and not sent. */
+    unsentDraft: 'Unsent draft',
     open: 'Open',
     rename: 'Rename',
     retitle: 'Regenerate title',
@@ -424,15 +436,57 @@ export const strings = {
       waiting: 'Needs you',
       error: 'Failed',
       done: 'Done',
-      queued: 'Queued'
+      queued: 'Queued',
+      /** The turn ended, the agent still watches something: a monitor it left going. */
+      monitoring: 'Monitoring',
+      monitoringFor: 'Monitoring for {elapsed}',
+      /** The turn ended, the agent still runs a shell, a subagent or a workflow. */
+      background: 'In background',
+      backgroundFor: 'In background for {elapsed}'
     },
+    /** A folded project's mark for the threads it hides: `2 threads: Needs you`. */
+    rollupOne: '1 thread: {state}',
+    rollupMany: '{count} threads: {state}',
     pin: 'Pin',
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
     archiveTitle: 'Archive this thread?',
+    /** The toast after an archive, with its way back: the button and Ctrl+Z. */
+    archivedToast: 'Archived "{title}"',
+    undo: 'Undo',
+    undoHint: 'Undo (Ctrl+Z)',
     archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
+  },
+
+  /** Moving a thread to another project: the menu entry, its project picker and the question about background work. */
+  threadMove: {
+    moveTo: 'Move to project',
+    /** A project put away, in the picker: moving a thread there brings it back. */
+    archivedProject: '{project} (archived)',
+    noOtherProject: 'No other project',
+    /** Why the entry is out while a sub-thread works: the parent's turn end is no time to move it. */
+    stopFirst: 'A sub-thread is working; stop it before moving this thread',
+    /** The confirm for a thread whose turn runs: the move waits for the turn to end. */
+    runningTitle: 'Move when this turn ends',
+    /** `{folder}` is the folder the thread leaves, `{project}` the one it goes to. */
+    runningBody: 'The agent is working in {folder}. The thread moves to {project} when the current turn ends.',
+    runningConfirm: 'Move after this turn',
+    /** Same, when the agent also runs something in the background: stop it with the move, or keep it running. */
+    runningBackgroundBody: 'The agent is working in {folder}. The thread moves to {project} when the current turn ends. Something it started keeps running in the background: stop it then, or keep it running there until the agent starts its next turn in {project}.',
+    /** Under the thread's title in the sidebar and the header until the move happens. */
+    pending: 'Moves to {project} after this turn',
+    cancelMove: 'Cancel move',
+    monitorsTitle: 'Monitors still running',
+    backgroundTitle: 'Work still running in the background',
+    /** `{folder}` is the folder the thread leaves, `{project}` the one it goes to. */
+    backgroundBody: 'The agent still runs something in {folder}. Stop it now, or keep it running there until the agent starts its next turn in {project}.',
+    stopMonitors: 'Stop monitors',
+    stopWork: 'Stop it',
+    keep: 'Keep them',
+    /** Said by a project while a thread is dragged over it. */
+    dropHere: 'Move the thread to {project}'
   },
 
   palette: {
@@ -640,6 +694,15 @@ export const strings = {
     /** The footer of a turn: `Working 12s`, then `Worked 4m 41s`. */
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
+    /** A finished answer's run of tool calls, folded into one line. */
+    /** The jump button once something arrived below the reader. */
+    newMessage: '1 new message',
+    newMessages: '{count} new messages',
+    findPlaceholder: 'Find in thread',
+    findNone: 'No match',
+    findCount: '{at} of {total}',
+    findPrevious: 'Previous match (Shift+Enter)',
+    findNext: 'Next match (Enter)',
     finishedAt: 'done {time}',
     /** `{what}` is a list of `backgroundOne` and `backgroundMany` joined by `backgroundJoin`. */
     backgroundRunning: '{what} still running',
@@ -681,6 +744,10 @@ export const strings = {
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
     diffHidden: '{count} unchanged lines',
+    diffIgnoreWhitespace: 'Ignore whitespace changes',
+    diffSideBySide: 'Old and new side by side',
+    /** A diff whose every change was spaces, with whitespace ignored. */
+    diffWhitespaceOnly: 'Only whitespace changed.',
     diffShowAll: 'Show all {count} lines',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
@@ -701,6 +768,12 @@ export const strings = {
     compactionNoPost: 'Context compacted from {pre} tokens',
     compactionUnknown: 'Context compacted',
     compactionManual: 'by hand',
+    /** The accent line on the first message after a move: the agent was told where it works now. */
+    moveExplained: 'Move explained to the agent',
+    moveShow: 'Show what the agent was told',
+    moveHide: 'Hide what the agent was told',
+    /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
+    movedByAgent: 'Moved by the agent to {project}',
     /** One of the user's own hooks ended the turn (`part.type === 'hook'`). */
     hookBlocked: 'A hook blocked this message',
     hookStopped: 'A hook stopped the turn',
@@ -722,6 +795,10 @@ export const strings = {
     },
     permissionTechnical: 'Technical details',
     turnFiles: 'Changed files',
+    showTurnDiff: 'Show diff',
+    hideTurnDiff: 'Hide diff',
+    /** Opens the Changes panel: everything the working tree changed since its last commit, all turns together. */
+    allChanges: 'All changes in this folder',
     expandFileFolders: 'Expand all folders',
     collapseFileFolders: 'Collapse all folders',
     fileCreated: 'New',
@@ -758,6 +835,21 @@ export const strings = {
     goToMessage: 'Go to message {number}: {text}',
     copy: 'Copy',
     copied: 'Copied',
+    /** Under a message, on hover: the whole message rather than one code block. */
+    /** The card an agent's proposed plan is read in, before it starts editing. */
+    plan: 'Plan',
+    planDownload: 'Download .md',
+    planSave: 'Save to folder',
+    planSaveHint: "Write the plan as a markdown file at the root of this thread's folder",
+    planSaved: 'Saved as {name}',
+    copyMessage: 'Copy message',
+    editMessage: 'Edit and send again from here',
+    retry: 'Retry this answer',
+    fork: 'Fork from here',
+    forkHere: 'Fork into a new thread',
+    forkWorktree: 'Fork into a new worktree',
+    /** A prompt's exact time, under its bubble: `Sent Tue 28 Sep 2026, 10:31:05`. */
+    sentAt: 'Sent {time}',
     error: 'Error'
   },
 
@@ -890,6 +982,9 @@ export const strings = {
   },
 
   composer: {
+    /** Above the box while a sent message is being edited. */
+    editing: 'Editing a sent message: sending replaces it and everything after it',
+    editingCancel: 'Stop editing (Esc)',
     switchTitle: 'Switch a {tokens} token thread to {provider}?',
     switchBody: '{provider} starts a new session and receives excerpts of the opening and of the most recent exchanges, about 20k tokens. The rest is lost to it. Compacting first changes nothing.',
     switchConfirm: 'Switch',
@@ -1336,6 +1431,11 @@ export const strings = {
     materialAcrylic: 'Acrylic',
     materialMica: 'Mica',
     materialSolid: 'Solid',
+    chatWidth: 'Chat width',
+    chatWidthHint: 'How wide the conversation and the composer run on this device.',
+    chatWidthComfortable: 'Comfortable',
+    chatWidthWide: 'Wide',
+    chatWidthFull: 'Full',
     connection: 'Connection',
     localCore: 'This app runs on the core it started on this computer.',
     coreAt: 'Connected to the core at {url}.',
@@ -1402,6 +1502,24 @@ export const strings = {
       restore: 'Restore',
       open: 'Open'
     },
+    /** The worktrees a thread leaves on disk, and their removal by hand. */
+    worktrees: {
+      heading: 'Worktrees',
+      intro: 'A thread started with its own worktree works on a boite/ branch beside the project. The worktree stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
+      show: 'Show worktrees',
+      noProject: 'No git project on this machine.',
+      empty: 'No worktree left.',
+      sweep: 'Remove the clean ones ({count})',
+      remove: 'Remove',
+      dirty: 'uncommitted changes',
+      unmerged: 'commits on no other branch',
+      missing: 'folder gone',
+      heldBy: 'used by "{title}"',
+      archivedThread: 'thread archived: "{title}"',
+      heldHint: 'A thread works here: archive it first',
+      forceTitle: 'Remove {name} anyway?',
+      forceBody: 'It has {reasons}. Removing it deletes the folder and its branch, and that work is lost.'
+    },
     pairing: {
       heading: 'Phones and other devices',
       intro: 'A pairing link opens Boite on another device with a key of its own. It works once and for ten minutes.',
@@ -1432,7 +1550,7 @@ export const strings = {
     heading: 'Shortcuts',
     intro: 'Click a shortcut and press the keys you want instead. The change applies at once, on every window of this machine.',
     search: 'Filter commands',
-    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', theme: 'Theme' },
+    groups: { general: 'General', surfaces: 'Side panel', thread: 'Thread and composer', jump: 'Go to a thread', theme: 'Theme' },
     record: 'Press the keys',
     change: 'Change the shortcut',
     reset: 'Back to the default',
@@ -1464,7 +1582,12 @@ export const strings = {
       closeSurface: 'Close the active surface',
       stash: 'Stash the composer text, or take it back',
       sendAndDraft: 'Send and open a new draft',
-      pin: 'Pin or unpin this thread'
+      pin: 'Pin or unpin this thread',
+      reopenThread: 'Reopen the thread archived last',
+      copyAnswer: 'Copy the last answer',
+      find: 'Find in this thread',
+      /** `Go to thread 3`: the third row of the sidebar, as drawn. */
+      thread: 'Go to thread {n}'
     }
   },
 

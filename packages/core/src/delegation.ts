@@ -6,6 +6,7 @@ import { invalidParams, messageOf, refused } from './errors.ts';
 import { checkEffort, checkModel } from './threads/selection.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
+import { withLoad } from './threads/records.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -205,7 +206,7 @@ export class Delegation {
     } catch (error) {
       const child = this.core.threads.require(id);
       this.core.journal.putThread({ ...child, status: 'error' });
-      this.core.bus.emit('thread.updated', { ...child, status: 'error' });
+      this.core.bus.emit('thread.updated', withLoad(this.core, { ...child, status: 'error' }));
       this.changed(parent.id);
       throw error;
     }

@@ -1,7 +1,7 @@
 import { spawn as spawnNodeChild } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import type { ProcessRecord, Settings, ThreadId, ThreadLoad, TraceCapability, Turn } from '@boite/contracts';
+import type { ProcessRecord, Settings, ThreadId, ThreadLoad, ThreadSummary, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
 import { processPlatform } from './platform/index.ts';
@@ -76,6 +76,12 @@ export interface ProcRegistryOptions {
   orphanGraceMs?: number;
   /** How long an idle thread is kept before it is forgotten. Tests shorten it. */
   forgetDelayMs?: number;
+  /**
+   * The row a load tick hands the clients. A client replaces its row with it,
+   * so it has to carry what the stored summary lacks (the running clock, the
+   * background work); the core passes its own builder.
+   */
+  summarize?: (thread: ThreadSummary) => ThreadSummary;
 }
 
 /**
@@ -103,6 +109,7 @@ export class ProcRegistry {
   private reapOrphans = true;
   private readonly orphanGraceMs: number;
   private readonly forgetDelayMs: number;
+  private readonly summarize: (thread: ThreadSummary) => ThreadSummary;
   private readonly stopListening: () => void;
   private closing: Promise<void> | null = null;
 
@@ -114,6 +121,7 @@ export class ProcRegistry {
   ) {
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
     this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
+    this.summarize = options.summarize ?? ((thread) => thread);
     this.stopListening = this.bus.onAny((name, payload) => {
       if (name === 'turn.started') {
         this.cancelSweep((payload as Turn).threadId);
@@ -671,7 +679,7 @@ export class ProcRegistry {
       const thread = this.journal.getThread(threadId);
       if (thread === null) continue;
       this.lastPushed.set(threadId, load);
-      this.bus.emit('thread.updated', { ...thread, load });
+      this.bus.emit('thread.updated', { ...this.summarize(thread), load });
     }
     for (const threadId of [...this.lastLoad.keys()]) {
       if ((this.live.get(threadId)?.size ?? 0) > 0) continue;

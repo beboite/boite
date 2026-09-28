@@ -12,7 +12,8 @@ import type {
 } from '@boite/contracts';
 import { ensureIndexes, migrate } from './journal/schema.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
-import type { AccountRow, MessageRow, ProcessRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
+import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
+import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
 
@@ -157,12 +158,51 @@ export class Journal {
 
   putProject(project: Project): void {
     this.db
-      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)')
-      .run(project.id, project.name, project.path, project.createdAt);
+      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at, archived) VALUES (?, ?, ?, ?, ?)')
+      .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0);
+  }
+
+  /** How many of a project's own threads are archived, sub-threads left out, per project id. */
+  archivedThreadCounts(): Map<string, number> {
+    const rows = this.db
+      .query('SELECT project_id, COUNT(*) AS count FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL GROUP BY project_id')
+      .all() as { project_id: string; count: number }[];
+    return new Map(rows.map((row) => [row.project_id, row.count]));
   }
 
   deleteProject(projectId: string): void {
     this.db.query('DELETE FROM projects WHERE id = ?').run(projectId);
+    this.db.query('DELETE FROM project_icons WHERE project_id = ?').run(projectId);
+  }
+
+  /** What every project's icon reads as, bytes left out: one small query per list. */
+  projectIcons(): Map<string, ProjectIconRow> {
+    const rows = this.db.query('SELECT project_id, kind, tech, version FROM project_icons').all() as (ProjectIconRow & { project_id: string })[];
+    return new Map(rows.map(({ project_id, ...row }) => [project_id, row]));
+  }
+
+  /** The stored image of a project, or null when its icon is not one. */
+  projectIconImage(projectId: string): { mime: string; data: Uint8Array; version: string } | null {
+    const row = this.db
+      .query("SELECT mime, data, version FROM project_icons WHERE project_id = ? AND kind = 'image'")
+      .get(projectId) as { mime: string | null; data: Uint8Array | null; version: string | null } | null;
+    if (row === null || row.mime === null || row.data === null || row.version === null) return null;
+    return { mime: row.mime, data: row.data, version: row.version };
+  }
+
+  putProjectIcon(projectId: string, icon: StoredProjectIcon, checkedAt: number): void {
+    this.db
+      .query('INSERT OR REPLACE INTO project_icons (project_id, kind, tech, mime, data, version, source, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        projectId,
+        icon.kind,
+        icon.kind === 'tech' ? icon.id : null,
+        icon.kind === 'image' ? icon.mime : null,
+        icon.kind === 'image' ? icon.bytes : null,
+        icon.kind === 'image' ? icon.version : null,
+        icon.kind === 'image' ? icon.source : null,
+        checkedAt,
+      );
   }
 
   getProject(projectId: string): Project | null {
@@ -181,8 +221,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -210,6 +250,7 @@ export class Journal {
         thread.parentThreadId ?? null,
         thread.promptCache ? JSON.stringify(thread.promptCache) : null,
         thread.agentSessionId ?? null,
+        thread.sessionResumeAt ?? null,
       );
   }
 
@@ -237,6 +278,7 @@ export class Journal {
       this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
     }
     this.db.query("DELETE FROM settings WHERE key IN (SELECT 'activity:' || id FROM threads WHERE project_id = ?)").run(projectId);
+    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'move-note:' || id FROM threads WHERE project_id = ?)").run(projectId);
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
     return rows.map((row) => row.id);
   }
@@ -277,8 +319,8 @@ export class Journal {
   putTurn(turn: Turn): void {
     this.db
       .query(
-        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO turns (id, thread_id, status, queued_at, started_at, finished_at, usage, error, execution, checkpoint)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         turn.id,
@@ -290,6 +332,7 @@ export class Journal {
         turn.usage === null ? null : JSON.stringify(turn.usage),
         turn.error,
         turn.execution === undefined ? null : JSON.stringify(turn.execution),
+        turn.checkpoint ? JSON.stringify(turn.checkpoint) : null,
       );
   }
 
@@ -465,6 +508,29 @@ export class Journal {
       .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
       .all(threadId, fromRowid, limit + 1) as MessageRow[];
     return rows.length > limit ? null : rows.map(toMessage);
+  }
+
+  /**
+   * Deletes the message at `fromRowid` and every later one of the thread, and
+   * the request keys of their turns, so a retried `clientRequestId` cannot
+   * hand back a turn that left the conversation. The turn rows stay: their
+   * usage was spent. Returns what went, oldest first. Run inside `append`.
+   */
+  truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
+    const removed = this.messageIdsFrom(threadId, fromRowid);
+    this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
+    for (const turnId of removed.turnIds) this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ?').run(threadId, turnId);
+    return removed;
+  }
+
+  /** The ids of the message at `fromRowid`, of every later one, and of their turns, oldest first. */
+  messageIdsFrom(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
+    this.flushDeltas();
+    this.persistMessages();
+    const rows = this.db
+      .query('SELECT id, turn_id FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid')
+      .all(threadId, fromRowid) as { id: string; turn_id: string }[];
+    return { messageIds: rows.map((row) => row.id), turnIds: [...new Set(rows.map((row) => row.turn_id))] };
   }
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {

@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, Pin, Plus, Settings } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import { projectName } from '../lib/format';
+  import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
   import { separator, type MenuItem } from '../lib/menu';
@@ -25,7 +26,7 @@
   /** With one machine its name says nothing, and a working connection needs no word either. */
   let several = $derived(machines.length > 1);
   let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
-  let project = $derived(store.openProject ?? store.projects[0]);
+  let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let entries = $derived(machines.flatMap(machine => {
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
     return machine.store.threads.filter(t => !t.archived).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
@@ -35,8 +36,8 @@
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
-  let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
-    id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '',
+  let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
+    id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);
 
@@ -103,7 +104,7 @@
     {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
       <div class="row">
         <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
-          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}</span><span class="detail">{several ? `${projectName(row.project)} · ${row.machine.label}` : projectName(row.project)}</span></span>
+          <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail">{several ? `${projectName(row.project)} · ${row.machine.label}` : projectName(row.project)}</span></span>
           <ThreadState thread={row.thread} {now} />
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
@@ -142,6 +143,7 @@
     .summary { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
     .title { font-size: var(--text-base); font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
     .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
+    .title .draft :global(svg) { margin: 0 0 0 6px; color: var(--color-accent); }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
     .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 52px; color: var(--color-muted-foreground); font-size: var(--text-xs); }

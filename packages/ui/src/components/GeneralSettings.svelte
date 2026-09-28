@@ -6,6 +6,7 @@
   import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
+  import WorktreesCard from './WorktreesCard.svelte';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -55,6 +56,7 @@
   </section>
 
   <ArchivedThreads {store} />
+  <WorktreesCard {store} />
 
   <section class="card" id="settings-app">
     <h2>{strings.settings.app}</h2>

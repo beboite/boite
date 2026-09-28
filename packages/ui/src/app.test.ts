@@ -569,7 +569,9 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Move to project', 'Archive']);
+  // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -1563,6 +1565,13 @@ test('a finished answer lists the files it changed, and a row opens one in the p
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
+  // Folded: the count and the lines added and removed, the list on a click.
+  const toggle = query<HTMLButtonElement>('[data-testid=turn-files-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.querySelector('[data-testid=turn-lines]')?.textContent).toBe('+2-1');
+  expect(document.querySelector('[data-testid=turn-file-folder]')).toBeNull();
+  toggle.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file-folder]') !== null);
   const folder = query<HTMLButtonElement>('[data-testid=turn-file-folder]');
   expect(folder.textContent).toContain('src');
   expect(folder.getAttribute('aria-expanded')).toBe('false');
@@ -2166,7 +2175,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   // The project's own menu: no Remove, and no transcript import behind it.
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
@@ -2193,7 +2202,7 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project', 'worktrees', 'refresh-icon', 'remove']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
@@ -2298,4 +2307,11 @@ test('sending waits for reconnect history to finish loading', async () => {
     await loading;
     expect(await sending).toBe(true);
   } finally { release(); spy.mockRestore(); }
+});
+
+test('the title counts the threads that wait on the user or finished unread', async () => {
+  await mountOnFake();
+  await waitFor(() => /^\(\d+\) /.test(document.title));
+  const waiting = document.querySelectorAll('[data-testid=sidebar] [data-state=waiting]').length;
+  expect(Number(/^\((\d+)\)/.exec(document.title)?.[1])).toBeGreaterThanOrEqual(Math.max(1, waiting));
 });

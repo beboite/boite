@@ -20,6 +20,7 @@ import { coordinationMethods, registerCore, unregisterCore } from './fake-client
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
+import { projectIconMethods } from './fake-client/project-icons';
 import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
 import { RELEASES } from './fake-client/providers';
@@ -31,8 +32,10 @@ import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { threadMethods } from './fake-client/threads';
+import { threadMoveMethods } from './fake-client/thread-move';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
+import { worktreeMethods } from './fake-client/worktrees';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -263,7 +266,9 @@ export class FakeClient implements ObservableClient {
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projectMethods(ctx),
+      ...projectIconMethods(ctx),
       ...threadMethods(ctx),
+      ...threadMoveMethods(ctx),
       ...activityMethods(ctx),
       ...requestMethods(ctx),
       ...providerCatalogMethods(ctx),
@@ -277,6 +282,7 @@ export class FakeClient implements ObservableClient {
       ...coordinationMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
+      ...worktreeMethods(ctx),
     };
   }
 }

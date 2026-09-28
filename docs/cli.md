@@ -47,6 +47,8 @@ token is read.
 
 ```
 boite where                      thread, title, project, cwd, branch, worktree, agent
+boite thread move <project>      move this thread to another project (name, id or
+                                 folder) when this turn ends
 boite attach <file>               publish a file snapshot in chat, at most 5 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
@@ -94,6 +96,34 @@ opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and
 `shown: no ...` when nobody was watching: the request still lands on the
 thread's panel and is there when the thread is next opened.
+
+`thread move` moves the calling thread, and only it, to another project the
+owner already added: `agent.move` holds the token to its own thread, and the
+project is named by its id, its name in any case, or its absolute folder. A
+name two projects share is refused with both ids. The agent's process cannot
+change folder in the middle of a turn, so the move waits for the turn to end
+and the CLI answers at once with what will happen:
+
+```
+Moves to notes (C:\src\notes) when this turn ends; the next turn starts in C:\src\notes.
+```
+
+A thread idle at the time (a script outside a turn) moves on the spot. The move
+is the same one the user makes from the thread menu (see
+[development](development.md#moving-a-thread)): a thread that had a worktree
+of its own gets a new one in a target that is a git repository, the old folder
+is left as it was, and background work the agent left running stops, since the
+agent asked to leave. The agent already knows about the move, so no note is
+added to its next prompt; the timeline shows "Moved by the agent to
+<project>". Refusals name the field and the expected value: an unknown project
+(`project`), the thread's own project (`projectId`), a sub-thread, or a
+sub-thread still working. A worktree with uncommitted changes is not refused:
+nothing in the old folder is touched. A move that became impossible by the
+turn's end (the project removed meanwhile) leaves a system line in the thread
+saying why. Until then the thread's row shows "Moves to <project> after this
+turn", and the user can cancel it or replace it with a move of their own, which
+waits for the same turn end. A pending move lives in memory: a core restart
+before the turn ends drops it.
 
 `attach` saves a copy in an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread

@@ -62,6 +62,7 @@
       ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
+      ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],

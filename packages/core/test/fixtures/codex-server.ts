@@ -9,7 +9,7 @@
  * Run as `bun <this file>`. `CODEX_FAKE_LOG` names a file it appends one line
  * per incoming request to: `initialize`, `initialized`,
  * `thread/start approvalPolicy=<p> sandbox=<s> model=<m>`,
- * `thread/resume <threadId> ...`, `turn/start model=<m> effort=<e>`,
+ * `thread/resume <threadId> ... cwd=<cwd>`, `turn/start model=<m> effort=<e>`,
  * `turn/interrupt <turnId>` and `model/list`. One `initialize` line per process,
  * so a test can count the agent processes a warm session did or did not save.
  * `CODEX_FAKE_LOST=1` makes every `thread/resume` fail the way a missing
@@ -502,7 +502,7 @@ function handle(method: string, raw: unknown): unknown {
       ephemeral = false;
       threadId = textOf(params['threadId']);
       log(
-        `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,
+        `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} cwd=${textOf(params['cwd'])}`,
       );
       const answer = (): unknown => {
         // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.

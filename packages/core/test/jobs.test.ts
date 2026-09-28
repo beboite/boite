@@ -104,6 +104,9 @@ describeWindows('windows job objects', () => {
     await until('a thread.updated carrying the load', () => loads.some((entry) => entry.load?.processes === 2), 3000);
     const pushed = loads.find((entry) => entry.load?.processes === 2);
     expect(pushed?.load?.memoryBytes).toBeGreaterThan(0);
+    // The turn waits on the ping: a client replaces its row with the push, so the push keeps the row's clock.
+    expect(pushed?.status).toBe('running');
+    expect(pushed?.runningSince).toEqual(expect.any(Number));
 
     const killed = await client.call('resources.killTree', { threadId });
     expect(killed.killed).toBe(2);

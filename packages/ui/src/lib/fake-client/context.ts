@@ -36,6 +36,7 @@ import {
   type TelemetryState,
   type Thread,
   type ThreadId,
+  type MoveNotice,
   type ThreadSummary,
   type Todo,
   type Turn,
@@ -56,6 +57,7 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
+import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
 export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
@@ -103,6 +105,12 @@ export class FakeContext {
   hooks: HooksStatus = seedHooks();
   telemetry: TelemetryState = { mode: 'basic', configured: true, pendingDeletion: false };
   projects: Project[] = [];
+  /** The image of each project whose icon is one, as `projects.icon` answers it. */
+  projectImages = new Map<string, { version: string; dataUrl: string }>();
+  /** What `git worktree list` would report for each project (`worktrees.ts`). */
+  worktrees: FakeWorktree[] = [];
+  /** The `pathKey` of each worktree `worktrees.remove` took, so a thread left in one is refused a turn. */
+  readonly removedWorktrees = new Set<string>();
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
   importable: (ImportableSession & { projectId: string })[] = [];
   providers: ProviderSummary[] = [];
@@ -126,6 +134,10 @@ export class FakeContext {
   readonly activityGenerations = new Map<string, number>();
   processes: ProcessRecord[] = [];
   readonly usage = new Map<ThreadId, Usage>();
+  /** The note each moved thread's next message carries, as the core's `move-note:` setting (`thread-move.ts`). */
+  readonly moveNotes = new Map<ThreadId, MoveNotice>();
+  /** Moves asked for during a turn, applied when it ends, as the core's `ThreadMove.waiting`. Memory only. */
+  readonly waitingMoves = new Map<ThreadId, { projectId: string; by: 'user' | 'agent'; stopBackground: boolean | undefined; at: number }>();
   /** Turns this session finished, added to the seeded ledger `usage.history` draws. */
   readonly finished: FakeFinishedTurn[] = [];
   usageSeeded = true;
@@ -324,6 +336,7 @@ export class FakeContext {
   setBackground(thread: Thread, tasks: BackgroundTask[]): void {
     thread.background = tasks;
     this.emit('thread.background', { threadId: thread.id, tasks: structuredClone(tasks) });
+    this.emit('thread.updated', structuredClone(toSummary(thread)));
   }
 
   publishActivity(thread: Thread): void {

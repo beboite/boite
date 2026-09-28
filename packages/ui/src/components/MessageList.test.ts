@@ -1,10 +1,11 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList from './MessageList.svelte';
 import { windowStats } from '../lib/message-window';
 import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
+import { findHits } from '../lib/find';
 import { Store } from '../lib/store.svelte';
 
 /**
@@ -338,6 +339,128 @@ test('a long thread renders a window of messages and carries the rest in the spa
   expect(below?.style.height).toBe(`${(500 - 266) * ESTIMATE}px`);
 });
 
+test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()).toBeNull();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 4_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(jumpButton()).not.toBeNull();
+
+  jumpButton()!.click();
+  await settle();
+  expect(timeline.scrollTop).toBe(messages.length * ESTIMATE);
+  expect(jumpButton()).toBeNull();
+});
+
+test('what arrives while the reader is scrolled up is counted on the way back, and the count clears at the bottom', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 0;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()?.textContent?.trim()).toBe('Jump to latest');
+
+  const last = messages.at(-1)!;
+  messages.push({ ...JSON.parse(JSON.stringify(last)), id: 'm-new-1' }, { ...JSON.parse(JSON.stringify(last)), id: 'm-new-2' });
+  scrollHeight = messages.length * ESTIMATE;
+  await settle();
+  expect(jumpButton()?.textContent?.trim()).toBe('2 new messages');
+
+  jumpButton()!.click();
+  await settle();
+  expect(jumpButton()).toBeNull();
+  live.detach();
+  client.close();
+});
+
+test('a thread reopened where the reader left it, above the bottom, counts what arrives after', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  live.readingPositions.set('t-long', { top: 0, pinned: false, heights: new Map() });
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()?.textContent?.trim()).toBe('Jump to latest');
+
+  messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-new-1' });
+  scrollHeight = messages.length * ESTIMATE;
+  await settle();
+  expect(jumpButton()?.textContent?.trim()).toBe('1 new message');
+  live.detach();
+  client.close();
+});
+
+test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async () => {
+  window.localStorage.clear();
+  // jsdom measures no range; the bar only reads one to decide whether to scroll.
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  live.findOpen = true;
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  // The bar loads on first use.
+  const input = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>('[data-testid=find-input]');
+    if (!found) throw new Error('the find bar is not drawn yet');
+    return found;
+  });
+  await settle();
+  expect(document.activeElement).toBe(input);
+
+  // The oldest message is far above the drawn window.
+  const first = messages[0]!;
+  expect(document.querySelector(`[data-mid="${first.id}"]`)).toBeNull();
+  const word = first.parts.flatMap((part) => (part.type === 'text' ? part.text.split(/\s+/) : [])).find((w) => /^[a-z]{6,}$/i.test(w))!;
+  const total = findHits(messages, word).length;
+  expect(total).toBeGreaterThan(0);
+  input.value = word;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  const count = () => document.querySelector('[data-testid=find-count]')!.textContent?.trim();
+  expect(count()).toBe(`${total} of ${total}`);
+
+  // One past the newest wraps to the oldest, which the window then draws.
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(count()).toBe(`1 of ${total}`);
+  expect(document.querySelector(`[data-mid="${findHits(messages, word)[0]!.messageId}"]`)).not.toBeNull();
+
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.findOpen).toBe(false);
+  expect(document.querySelector('[data-testid=find-bar]')).toBeNull();
+  live.detach();
+  client.close();
+});
+
 test('a short thread renders whole, with no spacer at all', async () => {
   const messages = thread(30);
   stubLayout(messages.length * ESTIMATE);
@@ -514,7 +637,7 @@ test('the second receipt waits for the first streamed character of the answer', 
   messages.push({ id: 'm-reply', threadId: 't-long', turnId: 'turn-ask', role: 'assistant', parts: [{ type: 'text', text: '' }], state: 'streaming', createdAt: Date.now() });
   running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
   await settle();
-  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=message-receipts] span:nth-child(2)');
+  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=receipt-responded]');
   expect(second()?.classList.contains('received')).toBe(false);
   const part = messages.at(-1)?.parts[0];
   if (part?.type !== 'text') throw new Error('the reply is a text part');

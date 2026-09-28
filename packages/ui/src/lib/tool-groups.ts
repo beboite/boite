@@ -1,4 +1,5 @@
 import type { MessagePart } from '@boite/contracts';
+import { planOf } from './plan';
 import { fill, strings } from './strings';
 import { describeTool, fileName, partialSummaryOf, summaryOf, type ToolFamily } from './tool-summary';
 
@@ -28,6 +29,7 @@ function standsAlone(part: ToolPart): boolean {
 /**
  * Splits the parts into runs. Thinking is drawn above the parts and a blank
  * text part draws nothing, so neither breaks a run of calls; anything else does.
+ * A proposed plan is read, not a call to fold: it is a part of its own.
  */
 export function partRuns(parts: readonly MessagePart[]): PartRun[] {
   const runs: PartRun[] = [];
@@ -35,7 +37,7 @@ export function partRuns(parts: readonly MessagePart[]): PartRun[] {
   parts.forEach((part, index) => {
     if (part.type === 'thinking') return;
     if (part.type === 'text' && part.text.trim() === '' && index < parts.length - 1) return;
-    if (part.type !== 'tool') {
+    if (part.type !== 'tool' || planOf(part.name, part.input) !== null) {
       open = null;
       runs.push({ kind: 'part', index });
       return;

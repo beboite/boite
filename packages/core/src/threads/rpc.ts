@@ -1,10 +1,36 @@
+import { stat } from 'node:fs/promises';
+import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { refused } from '../errors.ts';
 import { PullRequests } from '../pull-requests.ts';
+
+/**
+ * A turn in a folder that is gone is refused by that folder. An archived
+ * thread keeps its `cwd` when its worktree is removed; restored, its next turn
+ * would otherwise start an agent in nothing (the echo driver answered as if all
+ * were well). Checked off the event loop, so a share whose host is gone stalls
+ * this call only. An archived thread gets its own refusal from `startTurn`.
+ */
+async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
+  const thread = core.threads.require(threadId);
+  if (thread.archived) return;
+  const present = await stat(thread.cwd).then((found) => found.isDirectory(), () => false);
+  if (!present) {
+    throw refused(`the folder ${thread.cwd} this thread works in does not exist any more: its worktree was removed or the folder moved`, {
+      threadId, cwd: thread.cwd, field: 'cwd', expected: 'an existing folder',
+    });
+  }
+}
 
 export function registerThreadMethods(core: Core): void {
   const pullRequests = new PullRequests(core);
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
-  core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
+  core.router.register('threads.compact', async (params) => {
+    await requireCwd(core, params.threadId);
+    return core.threads.compact(params.threadId, params.expectedSelectionVersion);
+  });
+  core.router.register('threads.rewind', (params) => core.threads.rewind(params.threadId, params.messageId));
+  core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', (params) =>
     params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
@@ -16,7 +42,9 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),
   );
-  core.router.register('threads.pin', (params) => core.threads.pin(params.threadId, params.pinned !== false));
+  core.router.register('threads.move', (params) => core.threads.move(params.threadId, params.projectId, params.stopBackground));
+  core.router.register('threads.moveCancel', (params) => core.threads.moves.cancel(params.threadId));
+  core.router.register('threads.pin',(params) => core.threads.pin(params.threadId, params.pinned !== false));
   core.router.register('threads.markRead', (params) => {
     core.threads.markRead(params.threadId);
     return { ok: true } as const;
@@ -30,9 +58,10 @@ export function registerThreadMethods(core: Core): void {
     ctx.connection.subscriptions.delete(params.threadId);
     return { ok: true } as const;
   });
-  core.router.register('turns.start', (params) =>
-    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []),
-  );
+  core.router.register('turns.start', async (params) => {
+    await requireCwd(core, params.threadId);
+    return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []);
+  });
   core.router.register('turns.stop', (params) => {
     core.activity.pauseAll(params.threadId);
     return { stopped: core.threads.stopTurn(params.threadId) };

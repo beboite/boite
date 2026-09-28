@@ -21,6 +21,7 @@ import { registerTelemetry } from './telemetry.ts';
 import { registerCoordination } from './coordination.ts';
 import { registerTerminalMethods } from './terminals.ts';
 import { registerWorkflowMethods } from './workflows.ts';
+import { registerWorktreeMethods } from './worktree-sweep.ts';
 
 /** Adding a module is one file plus one line here. `hello` is the server's own. */
 export function registerModules(core: Core): void {
@@ -65,6 +66,7 @@ export function registerModules(core: Core): void {
   registerSessionMethods(core);
   registerImportMethods(core);
   registerTerminalMethods(core);
+  registerWorktreeMethods(core);
   // The agent's own door, and the thread surfaces a client shares with it.
   registerAgentMethods(core);
 }

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { Project, ProjectId } from '@boite/contracts';
+import { TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { notFound, refused } from './errors.ts';
@@ -10,6 +10,8 @@ import { FileIndex } from './files.ts';
 import { documentsDir } from './platform/folders.ts';
 import { threadTerminalId } from './terminals.ts';
 import type { FilesPage } from './files.ts';
+import type { ProjectIconRow } from './journal/rows.ts';
+import { detectProjectIcon, type DetectedIcon } from './project-icons.ts';
 
 /** How long a `.git` check may take before the last known answer stands. */
 export const GIT_PROBE_TIMEOUT_MS = 2_000;
@@ -35,6 +37,24 @@ export function hasGitMarker(folder: string, timeoutMs = GIT_PROBE_TIMEOUT_MS): 
   });
 }
 
+/** How long one icon detection may read the folder before it is given up. */
+export const ICON_DETECT_TIMEOUT_MS = 5_000;
+/** Detections running at once in the background. */
+const ICON_WORKERS = 2;
+
+/** What a client is told of a stored icon: an image's version or a stack's id, nothing for none. */
+function iconOf(row: ProjectIconRow | undefined): ProjectIcon | undefined {
+  if (row?.kind === 'image' && row.version !== null) return { kind: 'image', version: row.version };
+  if (row?.kind === 'tech' && (TECH_ICON_IDS as readonly string[]).includes(row.tech ?? '')) return { kind: 'tech', id: row.tech as TechIconId };
+  return undefined;
+}
+
+function rowOf(icon: DetectedIcon): ProjectIconRow {
+  if (icon.kind === 'image') return { kind: 'image', tech: null, version: icon.version };
+  if (icon.kind === 'tech') return { kind: 'tech', tech: icon.id, version: null };
+  return { kind: 'none', tech: null, version: null };
+}
+
 /** What two spellings of one folder share: the path itself, lowercased where the file system ignores case. */
 function pathKey(path: string): string {
   return process.platform === 'win32' ? path.toLowerCase() : path;
@@ -55,6 +75,15 @@ export class ProjectStore {
   gitProbe: (folder: string) => Promise<boolean | null> = probeGit;
   /** How long `projects.list` waits for the checks it starts; lowered by a test. */
   gitWaitMs = GIT_PROBE_TIMEOUT_MS;
+  /** Replaced by a test to count or hold detections. */
+  iconDetect: (folder: string) => Promise<DetectedIcon> = detectProjectIcon;
+  /** How long a detection may take; lowered by a test. */
+  iconWaitMs = ICON_DETECT_TIMEOUT_MS;
+  /** Projects waiting for a background detection, and every one queued since this core started. */
+  private readonly iconQueue: ProjectId[] = [];
+  private readonly iconQueued = new Set<ProjectId>();
+  private iconWorkers = 0;
+  private iconSweepDone = false;
 
   constructor(private readonly core: Core) {
     // The first `projects.list` after a start already has answers.
@@ -102,7 +131,9 @@ export class ProjectStore {
   }
 
   list(): Project[] {
-    return this.core.journal.listProjects().map((project) => this.described(project));
+    const counts = this.core.journal.archivedThreadCounts();
+    const icons = this.core.journal.projectIcons();
+    return this.core.journal.listProjects().map((project) => this.described(project, true, counts, icons));
   }
 
   /**
@@ -129,7 +160,88 @@ export class ProjectStore {
       clearTimeout(timer);
     }
     // Every folder was just checked or is still being checked: no second probe.
-    return this.core.journal.listProjects().map((project) => this.described(project, false));
+    const counts = this.core.journal.archivedThreadCounts();
+    const icons = this.core.journal.projectIcons();
+    const answer = this.core.journal.listProjects().map((project) => this.described(project, false, counts, icons));
+    // Icons come from the journal only. A project never checked, or checked
+    // with nothing found, is detected once per core in the background, after
+    // this answer has left: a client hears `project.updated` when one appears.
+    if (!this.iconSweepDone) {
+      this.iconSweepDone = true;
+      for (const project of answer) {
+        const row = icons.get(project.id);
+        if (!this.isDrafts(project) && (row === undefined || row.kind === 'none')) this.queueIcon(project.id);
+      }
+    }
+    return answer;
+  }
+
+  /**
+   * Detects a project's icon again, stores it and answers the project;
+   * `project.updated` follows when what clients see changed. Refused when the
+   * folder could not be read in time, the stored icon left as it was.
+   */
+  async refreshIcon(projectId: ProjectId): Promise<Project> {
+    const project = this.require(projectId);
+    const outcome = await this.detectIcon(projectId);
+    if (outcome === 'timeout') {
+      throw refused(`the project's folder could not be read within ${this.iconWaitMs} ms; its icon is unchanged`, { field: 'projectId', projectId, path: project.path });
+    }
+    return this.require(projectId);
+  }
+
+  /** The stored image of a project whose icon is one, as a data URL. Never reads the folder. */
+  iconImage(projectId: ProjectId): { version: string; dataUrl: string } {
+    this.require(projectId);
+    const image = this.core.journal.projectIconImage(projectId);
+    if (image === null) {
+      throw refused('projects.icon: this project has no image icon; its icon field says which kind it has', { field: 'projectId', projectId, expected: "a project whose icon.kind is 'image'" });
+    }
+    return { version: image.version, dataUrl: `data:${image.mime};base64,${Buffer.from(image.data).toString('base64')}` };
+  }
+
+  /** Queues a background detection, at most once per project per core. */
+  private queueIcon(projectId: ProjectId): void {
+    if (this.iconQueued.has(projectId)) return;
+    this.iconQueued.add(projectId);
+    this.iconQueue.push(projectId);
+    while (this.iconWorkers < ICON_WORKERS && this.iconWorkers < this.iconQueue.length) {
+      this.iconWorkers += 1;
+      void this.iconWorker();
+    }
+  }
+
+  private async iconWorker(): Promise<void> {
+    try {
+      // Off the caller's turn: an add or a list answers before any folder is read.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      for (let next = this.iconQueue.shift(); next !== undefined && !this.core.stopping; next = this.iconQueue.shift()) {
+        await this.detectIcon(next).catch(() => undefined);
+      }
+    } finally {
+      this.iconWorkers -= 1;
+    }
+  }
+
+  /** One detection, stored, and announced when what a client sees moved. */
+  private async detectIcon(projectId: ProjectId): Promise<'changed' | 'same' | 'timeout' | 'gone'> {
+    if (this.core.stopping) return 'gone';
+    const project = this.core.journal.getProject(projectId);
+    if (project === null) return 'gone';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), this.iconWaitMs);
+      timer.unref?.();
+    });
+    const found = await Promise.race([this.iconDetect(project.path).catch(() => null), deadline]);
+    clearTimeout(timer);
+    if (this.core.stopping || this.removing.has(projectId) || this.core.journal.getProject(projectId) === null) return 'gone';
+    if (found === null) return 'timeout';
+    const before = JSON.stringify(iconOf(this.core.journal.projectIcons().get(projectId)) ?? null);
+    this.core.journal.putProjectIcon(projectId, found, Date.now());
+    if (JSON.stringify(iconOf(rowOf(found)) ?? null) === before) return 'same';
+    this.announce(projectId);
+    return 'changed';
   }
 
   require(projectId: ProjectId | null): Project {
@@ -171,6 +283,35 @@ export class ProjectStore {
     });
     const answered = this.described(project, false);
     this.core.bus.emit('project.added', answered);
+    // Its icon is read after this answer, in the background; `project.updated` brings it.
+    if (!this.isDrafts(project)) this.queueIcon(project.id);
+    return answered;
+  }
+
+  /**
+   * Puts a project away or brings it back. Only the flag moves: its threads,
+   * their processes and its folder stay as they are, so a restore is exact.
+   */
+  archive(projectId: ProjectId, archived: boolean): Project {
+    const project = this.require(projectId);
+    if (typeof archived !== 'boolean') throw refused('projects.archive.archived must be a boolean', { field: 'archived', expected: 'true or false' });
+    if (archived && this.isDrafts(project)) {
+      throw refused('the drafts project cannot be archived: a thread with no folder lands in it', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
+    }
+    if ((project.archived === true) === archived) return project;
+    const next: Project = { id: project.id, name: project.name, path: project.path, createdAt: project.createdAt, ...(archived ? { archived: true } : {}) };
+    this.core.journal.append({ type: 'project.archived', threadId: null, version: 1, payload: { projectId, archived } }, () => {
+      this.core.journal.putProject(next);
+    });
+    return this.announce(projectId);
+  }
+
+  /** Tells every client how a project now reads, after anything its answer counts has moved. */
+  announce(projectId: ProjectId): Project {
+    const stored = this.core.journal.getProject(projectId);
+    if (stored === null) throw notFound(`unknown project ${projectId}`, { projectId });
+    const answered = this.described(stored, false);
+    this.core.bus.emit('project.updated', answered);
     return answered;
   }
 
@@ -202,6 +343,7 @@ export class ProjectStore {
       this.core.bus.emit('project.removed', { projectId });
       this.files.forget(project.path);
       this.git.delete(project.path);
+      this.iconQueued.delete(projectId);
     } finally {
       this.removing.delete(projectId);
     }
@@ -214,13 +356,24 @@ export class ProjectStore {
    * the disk here: each answer starts the next check in the background, so a
    * folder that gained or lost its `.git` shows it on the following answer
    * (`listFresh` waits for it instead). Before any check has answered,
-   * `repository` is left out.
+   * `repository` is left out. `archivedThreads` is counted here too, once
+   * per list when the caller hands the counts over, and the icon is the one
+   * stored by the last detection, read from the journal, never the folder.
    */
-  private described(project: Project, refresh = true): Project {
+  private described(
+    project: Project,
+    refresh = true,
+    counts = this.core.journal.archivedThreadCounts(),
+    icons = this.core.journal.projectIcons(),
+  ): Project {
     const flag = this.git.get(project.path);
     if (refresh) this.refreshGit(project.path);
+    const archivedThreads = counts.get(project.id) ?? 0;
+    const icon = iconOf(icons.get(project.id));
     return {
       ...project,
+      ...(archivedThreads > 0 ? { archivedThreads } : {}),
+      ...(icon === undefined ? {} : { icon }),
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
       ...(this.isDrafts(project) ? { kind: 'drafts' as const } : {}),
     };
@@ -268,6 +421,9 @@ export function registerProjectMethods(core: Core): void {
   core.router.register('projects.list', () => core.projects.listFresh());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
   core.router.register('projects.drafts', () => core.projects.drafts());
+  core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
+  core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));
+  core.router.register('projects.archive', (params) => core.projects.archive(params.projectId, params.archived ?? true));
   core.router.register('projects.remove', async (params) => {
     await core.projects.remove(params.projectId);
     return { ok: true } as const;

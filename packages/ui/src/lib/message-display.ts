@@ -161,3 +161,26 @@ export function currentThought(text: string): { title: string | null; text: stri
   const last = headings.at(-1);
   return { title: last?.[1]?.trim() ?? null, text: last ? text.slice(last.index) : text };
 }
+
+/** Everything the agent wrote in one turn, its tool cards left out: what a copy of the answer takes. */
+export function turnAnswer(messages: readonly Message[], turnId: string): string {
+  return messages
+    .filter((message) => message.turnId === turnId && message.role === 'assistant')
+    .flatMap((message) => message.parts.flatMap((part) => (part.type === 'text' ? [visibleAnswer(part.text).trim()] : [])))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** The newest turn's answer that has any text, or the empty string. */
+export function lastAnswer(messages: readonly Message[]): string {
+  // A turn with no text is read once, however many messages it spans.
+  const read = new Set<string>();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== 'assistant' || message.turnId === null || read.has(message.turnId)) continue;
+    read.add(message.turnId);
+    const text = turnAnswer(messages, message.turnId);
+    if (text) return text;
+  }
+  return '';
+}

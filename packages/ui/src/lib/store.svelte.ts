@@ -210,6 +210,10 @@ export class Store {
   set paletteOpen(value) { this.#ctx.layout.paletteOpen = value; }
   get renameRequested() { return this.#ctx.layout.renameRequested; }
   set renameRequested(value) { this.#ctx.layout.renameRequested = value; }
+  get findOpen() { return this.#ctx.layout.findOpen; }
+  set findOpen(value) { this.#ctx.layout.findOpen = value; }
+  get findRequest() { return this.#ctx.layout.findRequest; }
+  set findRequest(value) { this.#ctx.layout.findRequest = value; }
   get page() { return this.#ctx.layout.page; }
   set page(value) { this.#ctx.layout.page = value; }
   get settingsTab() { return this.#ctx.layout.settingsTab; }
@@ -378,6 +382,10 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
+  projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
+  loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }
+  refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }
   setDraftWorktree(...args: Parameters<Projects['setDraftWorktree']>) { return this.#ctx.projects.setDraftWorktree(...args); }
@@ -403,6 +411,8 @@ export class Store {
 
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
+  rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
+  fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
@@ -411,6 +421,8 @@ export class Store {
   rename(...args: Parameters<Threads['rename']>) { return this.#ctx.threads.rename(...args); }
   retitle(...args: Parameters<Threads['retitle']>) { return this.#ctx.threads.retitle(...args); }
   pin(...args: Parameters<Threads['pin']>) { return this.#ctx.threads.pin(...args); }
+  move(...args: Parameters<Threads['move']>) { return this.#ctx.threads.move(...args); }
+  cancelMove(...args: Parameters<Threads['cancelMove']>) { return this.#ctx.threads.cancelMove(...args); }
   archive(...args: Parameters<Threads['archive']>) { return this.#ctx.threads.archive(...args); }
   openImports(...args: Parameters<Imports['openImports']>) { return this.#ctx.imports.openImports(...args); }
   closeImports(...args: Parameters<Imports['closeImports']>) { return this.#ctx.imports.closeImports(...args); }
@@ -425,6 +437,8 @@ export class Store {
 
   registerComposerInsertion(...args: Parameters<Composer['registerComposerInsertion']>) { return this.#ctx.composer.registerComposerInsertion(...args); }
   editComposerText(...args: Parameters<Composer['editComposerText']>) { return this.#ctx.composer.editComposerText(...args); }
+  startEdit(...args: Parameters<Composer['startEdit']>) { return this.#ctx.composer.startEdit(...args); }
+  restoreDraft(...args: Parameters<Composer['restoreDraft']>) { return this.#ctx.composer.restoreDraft(...args); }
   addPreviewReference(...args: Parameters<Composer['addPreviewReference']>) { return this.#ctx.composer.addPreviewReference(...args); }
   revealPreviewReference(...args: Parameters<Composer['revealPreviewReference']>) { return this.#ctx.composer.revealPreviewReference(...args); }
   appendComposerText(...args: Parameters<Composer['appendComposerText']>) { return this.#ctx.composer.appendComposerText(...args); }
