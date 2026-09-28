@@ -29,9 +29,10 @@
     {name: strings.thread.contextCache, count: context.breakdown.cache, kind: 'cache'},
     {name: strings.thread.contextOutput, count: context.breakdown.output, kind: 'output'}
   ] : [{name: strings.thread.contextUsed, count: context?.tokens ?? 0, kind: 'input'}]);
-  // The prompt cache timer, behind its experiment. The clock only ticks while there is one to show.
+  // A running turn may refresh the cache. Hide the old timer until it finishes.
   let now = $state(Date.now());
-  const cache = $derived(experimentOn('prompt-cache') ? thread?.promptCache ?? null : null);
+  const activeTurn = $derived(thread?.status === 'queued' || thread?.status === 'running' || thread?.status === 'waiting');
+  const cache = $derived(experimentOn('prompt-cache') && !activeTurn ? thread?.promptCache ?? null : null);
   const cacheNow = $derived(cache && thread ? promptCacheState(cache, thread, now) : null);
   $effect(() => {
     if (!cache) return;
