@@ -26,7 +26,10 @@ thread's. A machine that has not connected yet keeps its layouts.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
-Appearance, Workspace changes it ([onboarding.md](onboarding.md)).
+Appearance, Workspace changes it ([onboarding.md](onboarding.md)). Settings,
+Appearance, Buttons, or a card's right click, takes a kind off the launcher and
+the new-surface menu; the palette, its keyboard shortcut and an agent still open
+it, and the menu's last row, Choose the buttons, leads back to the switches.
 
 ## Surfaces
 

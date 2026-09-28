@@ -4,13 +4,15 @@
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { controlMenu, CONTROLS_SECTION } from '../lib/controls';
+  import type { ControlId } from '../lib/work-prefs.svelte';
   import { separator } from '../lib/menu';
   import { closeTabs } from '../lib/panel-close';
   import { rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { offeredCards, available as availableTo, hiddenKind, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
+  import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
   import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
@@ -40,6 +42,8 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  /** The new-surface menu's last row, which no surface kind can be called. */
+  const CUSTOMIZE = 'customize';
 
   let tabs = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLElement | undefined>(undefined);
@@ -50,12 +54,6 @@
   let surfaces = $derived(panel.surfaces);
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
-
-  // Turning the developer switch off closes the trace tabs it no longer offers.
-  $effect(() => {
-    const hidden = surfaces.filter((surface) => hiddenKind(surface.kind));
-    if (hidden.length) untrack(() => { for (const surface of hidden) panel.close(surface.id); });
-  });
 
   /** A page needs a webview; everything else reads what only the owner may ask for. */
   function available(kind: SurfaceKind): boolean {
@@ -225,14 +223,22 @@
     launch(card.kind);
   }
 
-  let menuItems = $derived(
-    offeredCards().map((card) => ({
+  let menuItems = $derived([
+    ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable(card.kind) })
-    }))
-  );
+    })),
+    // The way back to a kind this device put away.
+    separator('sep-customize'),
+    { id: CUSTOMIZE, label: strings.controls.customize }
+  ]);
+
+  function pickNew(id: string): void {
+    if (id === CUSTOMIZE) store.showSettings('appearance', CONTROLS_SECTION);
+    else launch(id as SurfaceKind);
+  }
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
@@ -245,7 +251,7 @@
 ></button>
 
 <aside
-  class="panel"
+  class="panel framed"
   class:maximized={rightPanel.maximized}
   class:dragging
   class:closing
@@ -336,7 +342,7 @@
     {#if !empty}
       <Menu
         items={menuItems}
-        onpick={(id) => launch(id as SurfaceKind)}
+        onpick={pickNew}
         placement="bottom"
         align="end"
         variant="ghost"
@@ -398,7 +404,12 @@
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
     {:else}
-      <SurfaceLauncher {available} onlaunch={launch} />
+      <SurfaceLauncher
+        {available}
+        onlaunch={launch}
+        onmenu={(event, kind) => controlMenu(event, store, `panel.${kind}` as ControlId)}
+        oncustomize={() => store.showSettings('appearance', CONTROLS_SECTION)}
+      />
     {/if}
   </div>
 </aside>
@@ -412,8 +423,9 @@
     flex-direction: column;
     min-height: 0;
     min-width: 0;
-    border-left: 1px solid var(--color-border);
-    background: var(--color-surface);
+    /* A framed card whose resize handle hangs out into the gap beside it, so
+       the card itself does not clip: its body rounds the bottom corners. */
+    overflow: visible;
     /* Only the first open travels: a drag and a maximize are instant. */
     animation: panel-in var(--dur-3) var(--ease-out-quint);
   }
@@ -569,6 +581,13 @@
     flex-direction: column;
   }
 
+  @media (min-width: 721px) {
+    .body {
+      overflow: clip;
+      border-radius: 0 0 calc(var(--radius-frame) - 1px) calc(var(--radius-frame) - 1px);
+    }
+  }
+
   .sheet-scrim {
     display: none;
   }
@@ -578,9 +597,9 @@
     .panel,
     .panel.maximized {
       position: absolute;
-      right: 0;
+      right: var(--frame-gap);
       top: 0;
-      bottom: 0;
+      bottom: var(--frame-gap);
       z-index: 30;
       width: min(42vw, 448px);
       min-width: 320px;
@@ -608,7 +627,7 @@
       inset: 0;
       width: auto;
       min-width: 0;
-      border-left: none;
+      background: var(--color-surface);
       box-shadow: none;
       /* The sheet covers the whole screen, the status bar and the home indicator included. */
       box-sizing: border-box;

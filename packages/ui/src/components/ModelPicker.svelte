@@ -350,7 +350,7 @@
           {#each favorites as entry (`${entry.providerId}:${entry.accountId}:${entry.model.id}`)}
             <div class="model-entry">
               <button type="button" class="row model favorite-row" role="menuitem" data-row data-testid="favorite-model" disabled={favoritePending || !store.providerOf(entry.providerId)?.available} onclick={() => void pickFavorite(entry)}>
-                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
+                <ProviderLogo providerId={entry.providerId} size={16} /><span class="name">{store.modelsOf(entry.providerId, entry.accountId).find(m => m.id === entry.model.id)?.name ?? entry.model.name}{#if favorites.some(other => other.providerId === entry.providerId && other.model.id === entry.model.id && other.accountId !== entry.accountId)}<span class="account-label">{store.accountOf(entry.accountId)?.label}</span>{/if}</span>
               </button>
               <button type="button" class="favorite-button" aria-label={strings.composer.unfavorite} onclick={() => store.toggleFavorite(entry.providerId, entry.accountId, entry.model)}><Star size={14} fill="currentColor" /></button>
             </div>

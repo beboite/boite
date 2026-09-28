@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Command, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, Folder, List, Plus, Search, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -11,6 +11,9 @@
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { compareThreads } from '../lib/thread-order';
+  import { controlMenu } from '../lib/controls';
+  import { work } from '../lib/work-prefs.svelte';
+  import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import MachineIcon from './MachineIcon.svelte';
@@ -217,15 +220,18 @@
       {/each}
     {/if}
   </div>
-  {#if store.owner}
+  {#if store.owner && work.shows('sidebar.add-project')}
     <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
+      oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}
       ><Plus size={13} />{strings.sidebar.addProject}</button
     >
   {/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
-    <!-- The palette's only pointer and touch door: its chord is the tooltip. -->
-    <button class="ghost icon" aria-label={strings.keyboard.commands.palette} title={`${strings.keyboard.commands.palette}${store.keyHint('palette')}`} data-testid="nav-palette" onclick={() => (store.paletteOpen = true)}><Command size={16} /></button>
+    {#if work.shows('sidebar.limits')}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
+    {/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     <button
       class="ghost icon"
@@ -260,8 +266,6 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--color-surface);
-    border-right: 1px solid var(--color-border);
   }
 
   .top {
@@ -297,10 +301,13 @@
   .search input:focus {
     outline: none;
   }
+  /* The two rules of the sidebar stop short of its edges: on the
+     frame a full-width line would run into the window's edge. */
   .views {
     display: flex;
     gap: 3px;
-    padding: 2px 10px 10px;
+    margin: 0 10px;
+    padding: 2px 0 10px;
     border-bottom: 1px solid var(--color-border);
   }
   .views button {
@@ -413,8 +420,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 8px;
+    margin: 0 8px;
+    padding: 6px 0;
     border-top: 1px solid var(--color-border);
+  }
+  .control {
+    display: contents;
   }
   /* The machine button, when there is one, sits alone on the left. */
   .foot :global(.machines) {
@@ -431,10 +442,11 @@
       transform: translateY(4px);
     }
   }
+  /* Centred in the frame's gap between the sidebar and the chat card. */
   .resize {
     position: absolute;
     top: 0;
-    right: -3px;
+    right: calc(var(--frame-gap) / -2 - 3px);
     bottom: 0;
     width: 6px;
     height: auto;
@@ -456,6 +468,8 @@
   }
   @media (max-width: 720px) {
     .sidebar {
+      background: var(--color-surface);
+      border-right: 1px solid var(--color-border);
       position: fixed;
       inset: var(--titlebar) auto 0 0;
       z-index: 30;

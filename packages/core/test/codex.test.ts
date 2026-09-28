@@ -137,8 +137,18 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
     ...(effort === undefined ? {} : { effort }),
     ...(permissionMode === undefined ? {} : { permissionMode }),
   });
+  await keepTitle(client, thread.id);
   await client.call('threads.subscribe', { threadId: thread.id });
   return thread.id;
+}
+
+/**
+ * A title the user typed: no title call follows the first turn, so the
+ * app-servers, `initialize` and `thread/start` lines a test counts are the turns' own.
+ */
+async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
+  const thread = await client.call('threads.get', { threadId });
+  await client.call('threads.update', { threadId, title: thread.title });
 }
 
 describe('codex driver', () => {
@@ -686,6 +696,7 @@ describe('codex driver', () => {
       model: 'fake-codex',
       effort: 'low',
     });
+    await keepTitle(client, thread.id);
     await client.call('threads.subscribe', { threadId: thread.id });
     const counted = countProcesses(client, thread.id);
 
@@ -896,6 +907,33 @@ describe('codex driver', () => {
     expect(fakeLog()).toContain('thread/start approvalPolicy=on-request sandbox=workspace-write model=');
     expect(fakeLog()).toContain('turn/start model= effort=');
     expect(fakeLog()).not.toContain('model=default');
+  });
+
+  test('the first turn is titled on an ephemeral read-only thread, on the small model at low effort', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'remember the word pelican',
+      model: 'fake-codex',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const titled = client.next(
+      'thread.updated',
+      (summary) => summary.id === thread.id && summary.titleSource === 'agent',
+      20000,
+    );
+    await runTurn(client, thread.id, 'remember the word pelican');
+
+    // The core's one cleaning rule: quotes and the closing period go.
+    expect((await titled).title).toBe('Pelican notes');
+    // No small model was listed by a probe, so the first of Codex's picks goes out.
+    expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna ephemeral');
+    expect(fakeLog()).toContain('turn/start model=gpt-6-luna effort=low');
+    // Its app-server is gone with the answer, traced under the thread.
+    await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
   });
 
   /** How many lines of the fake log are exactly this one. */

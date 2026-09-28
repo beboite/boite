@@ -184,8 +184,8 @@
     padding-left: 8px;
     align-items: center;
     height: var(--titlebar);
-    background: var(--color-titlebar);
-    border-bottom: 1px solid var(--color-border);
+    /* It stands on the app's frame: no ground and no line of its own. */
+    background: transparent;
     user-select: none;
     -webkit-user-select: none;
     flex: none;
@@ -196,6 +196,7 @@
   .titlebar.browser { padding-right: 8px; }
   .sidebar-toggle { flex: none; }
   @media (max-width: 720px) {
+    .titlebar { background: var(--color-frame); border-bottom: 1px solid var(--color-border); }
     .titlebar.browser { background: var(--color-background); padding: 0 16px; }
     .browser .sidebar-toggle { display: none; }
   }

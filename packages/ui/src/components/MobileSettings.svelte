@@ -112,7 +112,7 @@
       {:else if page === 'voice'}
         <VoiceSettings {store} readOnly />
       {:else if page === 'appearance'}
-        <AppearancePage />
+        <AppearancePage {store} />
       {:else if page === 'usage'}
         <UsagePage {store} />
       {:else if page === 'limits'}

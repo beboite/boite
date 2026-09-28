@@ -7,7 +7,7 @@ import type { TitleContext } from '../types.ts';
 import { childEnv, STDERR_MAX } from './query.ts';
 import type { ClaudeDeps } from './query.ts';
 
-/** What writes a thread's title: the CLI's alias for its smallest current model. */
+/** What writes a thread's title when the core names no model: the CLI's alias for its smallest current model. */
 const TITLE_MODEL = 'haiku';
 /** How long one title call may take before its CLI is aborted. */
 const TITLE_TIMEOUT_MS = 30_000;
@@ -50,7 +50,7 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
       prompt: prompt(),
       options: {
         cwd: ctx.thread.cwd,
-        model: TITLE_MODEL,
+        model: ctx.model ?? TITLE_MODEL,
         maxTurns: 1,
         tools: [],
         allowedTools: [],

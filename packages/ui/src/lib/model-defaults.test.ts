@@ -94,7 +94,7 @@ test('the first draft probes its default and preserves a later explicit selectio
   store.prefs.accountId = account.id;
   store.startDraft();
   expect(store.defaultChoice()).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
-  expect(store.modelOf(store.defaultChoice())?.name).toBe('Claude Opus 5');
+  expect(store.modelOf(store.defaultChoice())?.name).toBe('Opus 5');
   expect(store.modelsOf(provider.id, account.id).map((model) => model.id)).toEqual(['default']);
   const call = vi.spyOn(client, 'call').mockResolvedValue({ models: [
     { id: 'claude-opus-5', name: 'Opus 5', effort: { levels, default: 'low' } }

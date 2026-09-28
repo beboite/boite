@@ -8,10 +8,11 @@
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import { work } from '../lib/work-prefs.svelte';
+  import { controlMenu } from '../lib/controls';
+  import { contextLevel, contextPercent } from '../lib/tokens';
   import type { Store } from '../lib/store.svelte';
   import ContextControl from './ContextControl.svelte';
   import Menu from './Menu.svelte';
-  import StatusMark from './StatusMark.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
   let project = $derived(store.openProject);
@@ -74,10 +75,16 @@
    */
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
-    const toggles: MenuItem[] = [{ id: 'agents', label: strings.delegation.heading, active: agentsOn }];
-    if (store.owner && work.current.developer) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
-    return [...toggles, separator('sep-toggles'), ...titleItems];
+    const toggles: MenuItem[] = [];
+    if (work.shows('header.agents')) toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
+    if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
+    return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
   });
+
+  /** A hidden gauge comes back on its own once the context is nearly full: a limit nobody can see is a trap. */
+  let showContext = $derived(
+    work.shows('header.context') || contextLevel(thread?.context ? contextPercent(thread.context) : null) === 'full'
+  );
 
   function titleAction(action: string) {
     const open = store.openThread;
@@ -97,9 +104,8 @@
 
 </script>
 
-<div class="thread-header" data-testid="thread-header">
+<div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
       {#if thread}
-        <StatusMark status={thread.status} testid="thread-status" />
         {#if renaming}
           <input
             class="rename"
@@ -136,9 +142,11 @@
 
       <span class="spacer"></span>
 
-      <!-- A draft names its project in the heading below, so the chip would say it twice. -->
-      {#if project && thread}
-        <span class="chip path" title={project.path}>{projectName(project)}</span>
+      <!-- A draft names its project in the heading below, so the chip would say it twice.
+           Each optional button's right click offers to put it away (Settings, Appearance). -->
+      {#if project && thread && work.shows('header.project')}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="chip path" title={project.path} data-testid="header-project" oncontextmenu={(event) => controlMenu(event, store, 'header.project')}>{projectName(project)}</span>
       {/if}
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
@@ -146,14 +154,18 @@
           {strings.delegation.parent}
         </button>
       {/if}
-      {#if thread?.branch}
-        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
+      {#if thread?.branch && work.shows('header.branch')}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
           <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
       {/if}
-      {#if thread}<ContextControl {store} />{/if}
-      {#if thread}
+      {#if thread && showContext}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></span>
+      {/if}
+      {#if thread && work.shows('header.agents')}
         <button
           type="button"
           class="ghost trace in-title-menu"
@@ -163,6 +175,7 @@
           aria-pressed={agentsOn}
           data-testid="agents-toggle"
           onclick={() => store.panel.toggleKind('agents')}
+          oncontextmenu={(event) => controlMenu(event, store, 'header.agents')}
         >
           <UsersRound size={16} strokeWidth={1.75} />
           <span class="label">{strings.delegation.heading}</span>
@@ -171,7 +184,7 @@
       <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
         {@const terminalKey = store.keyLabel('terminal')}
-        {#if work.current.developer}
+        {#if work.shows('header.terminal')}
         <button
           type="button"
           class="ghost trace in-title-menu"
@@ -181,6 +194,7 @@
           aria-pressed={store.terminalShown(thread.id)}
           data-testid="terminal-toggle"
           onclick={() => store.toggleTerminal()}
+          oncontextmenu={(event) => controlMenu(event, store, 'header.terminal')}
         >
           <SquareTerminal size={16} strokeWidth={1.75} />
         </button>
@@ -264,6 +278,7 @@
   }
 
 
+  .control { display: contents; }
   .title { min-width: 0; }
   .title-menu { display: none; }
   @media (max-width: 720px) {

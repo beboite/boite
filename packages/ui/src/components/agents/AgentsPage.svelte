@@ -157,7 +157,7 @@
 <section class="agents-page" class:detail-open={!!chosen || !!creating} class:empty={!!snapshot && !chats.length} data-testid="agents-page">
   <AgentsRail {view} {chats} {active} attention={attention.work.length + attention.review.length} onfocus={next => open(next)} oncreate={kind => { creating = { kind }; }} />
 
-  <main class="agents-main">
+  <main class="agents-main framed">
     {#if view.error || view.loadError}
       <div class="agent-error" role="alert">{view.error || view.loadError}<button type="button" class="ghost small" onclick={() => { view.error = ''; void view.refresh(); }}>{labels.retry}</button></div>
     {/if}

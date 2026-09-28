@@ -1,5 +1,6 @@
 import { checkSettingsPatch, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
+import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,6 +30,16 @@ export class SettingsStore {
     // Shared with the in-memory client: a pasted address is stored as its bare origin.
     const checked = checkSettingsPatch(patch);
     if (!checked.ok) throw invalidParams(checked.message, { field: checked.field });
+    const titleModel = checked.patch.titleModel;
+    if (titleModel !== undefined && titleModel !== null) {
+      const provider = this.core.providers.get(titleModel.providerId);
+      if (provider === undefined || !writesTitles(provider.protocol)) {
+        throw invalidParams(`titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, {
+          field: 'titleModel',
+          expected: 'a provider whose summary has titles: true',
+        });
+      }
+    }
     const next: Settings = { ...this.get(), ...checked.patch };
     this.core.journal.append({ type: 'settings.changed', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.setSetting('settings', next);

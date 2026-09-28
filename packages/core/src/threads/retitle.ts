@@ -1,10 +1,18 @@
-import type { Message, ThreadId, ThreadSummary, TurnId } from '@boite/contracts';
+import { defaultTitleModel } from '@boite/contracts';
+import type { Account, Message, ProviderDescriptor, ProviderId, ThreadId, ThreadSummary, TurnId } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { getDriver } from '../drivers/index.ts';
+import { getDriver, probedModelsOf, writesTitles } from '../drivers/index.ts';
 import { messageOf, refused } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
 import { cleanAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
 import { saveThread, withLoad } from './records.ts';
+
+/** Who writes a title: a provider, the account it runs under, and the model. */
+interface TitleWriter {
+  provider: ProviderDescriptor;
+  account: Account;
+  model: string | null;
+}
 
 /**
  * A thread's title written from its first prompt and answer, on request or
@@ -37,22 +45,22 @@ export class ThreadTitles {
     }
     if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId });
     const prompt = textOf(first);
-    const provider = this.core.providers.require(thread.providerId);
-    const account = this.core.accounts.require(thread.accountId);
-    const driver = getDriver(provider.protocol);
+    const writer = this.writer(thread);
 
     this.retitling.add(threadId);
     let agentTitle: string | null = null;
     try {
-      if (driver.title !== undefined) {
+      const driver = writer === null ? null : getDriver(writer.provider.protocol);
+      if (writer !== null && driver?.title !== undefined) {
         const raw = await driver.title({
           thread,
-          provider,
-          account,
-          accountEnv: this.core.accounts.accountEnv(account, provider),
+          provider: writer.provider,
+          account: writer.account,
+          accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider),
           prompt,
           answer: answer === undefined ? '' : textOf(answer),
-          spawnChild: this.threads.contexts.leasedSpawnChild(threadId, provider),
+          model: writer.model,
+          spawnChild: this.threads.contexts.leasedSpawnChild(threadId, writer.provider),
           log: (level, message) => {
             this.core.log(level, message);
           },
@@ -60,7 +68,7 @@ export class ThreadTitles {
         agentTitle = raw === null ? null : cleanAgentTitle(raw);
       }
     } catch (error) {
-      this.core.log('warn', `no title from ${provider.name} for thread ${threadId}: ${messageOf(error)}`);
+      this.core.log('warn', `no title from ${writer?.provider.name ?? thread.providerId} for thread ${threadId}: ${messageOf(error)}`);
     } finally {
       this.retitling.delete(threadId);
     }
@@ -80,19 +88,60 @@ export class ThreadTitles {
   }
 
   /**
-   * The first finished turn of a thread still called by its prompt gets the
-   * agent's title, when the driver writes one. Not awaited by the turn: the
-   * title lands as its own `thread.updated`, seconds later on a real agent.
+   * The first finished turn of a thread still called by its prompt gets an
+   * agent's title, when one can write it. Not awaited by the turn: the title
+   * lands as its own `thread.updated`, seconds later on a real agent.
    */
   autoTitle(threadId: ThreadId, turnId: TurnId): void {
     const thread = this.core.journal.getThread(threadId);
     if (thread === null || thread.archived || thread.titleSource !== 'prompt') return;
-    const provider = this.core.providers.get(thread.providerId);
-    if (provider === undefined || getDriver(provider.protocol).title === undefined) return;
+    if (this.writer(thread) === null) return;
     const done = this.core.journal.listTurns(threadId).filter((turn) => turn.status === 'done');
     if (done.length !== 1 || done[0]?.id !== turnId) return;
     void this.retitle(threadId).catch((error: unknown) => {
       this.core.log('warn', `no title for thread ${threadId}: ${messageOf(error)}`);
     });
+  }
+
+  /**
+   * The model Settings names, on its provider, under the thread's account when
+   * the provider is the thread's and that provider's first signed-in account
+   * otherwise. Without a choice, or while the chosen provider cannot run or
+   * write titles, the thread's own provider writes it on its small default.
+   * Null when that one cannot either: no title hook, not installed, or the
+   * thread's account signed out.
+   */
+  private writer(thread: ThreadSummary): TitleWriter | null {
+    const chosen = this.core.settings.get().titleModel ?? null;
+    if (chosen !== null) {
+      const provider = this.core.providers.get(chosen.providerId);
+      const account = provider === undefined ? undefined : this.accountOf(thread, provider.id);
+      if (provider !== undefined && account !== undefined && this.canWrite(provider)) {
+        return { provider, account, model: chosen.model };
+      }
+    }
+    const provider = this.core.providers.get(thread.providerId);
+    const account = provider === undefined ? undefined : this.accountOf(thread, provider.id);
+    if (provider === undefined || account === undefined || !this.canWrite(provider)) return null;
+    const models = probedModelsOf(provider.protocol, provider.id, account.id) ?? provider.models;
+    return { provider, account, model: defaultTitleModel(provider, models) };
+  }
+
+  /** A provider with a title hook that is installed here, the check a turn passes too. */
+  private canWrite(provider: ProviderDescriptor): boolean {
+    return writesTitles(provider.protocol) && this.core.providers.summary(provider.id)?.available === true;
+  }
+
+  /**
+   * The account a provider writes a title under: the thread's own when it is
+   * that provider's and not signed out, like `assertDriverRunnable` asks of a
+   * turn, else that provider's first account signed in.
+   */
+  private accountOf(thread: ThreadSummary, providerId: ProviderId): Account | undefined {
+    if (thread.providerId === providerId) {
+      const own = this.core.journal.getAccount(thread.accountId);
+      return own === null || own.status === 'unauthenticated' ? undefined : own;
+    }
+    return this.core.accounts.list().find((account) => account.providerId === providerId && account.status === 'ok');
   }
 }

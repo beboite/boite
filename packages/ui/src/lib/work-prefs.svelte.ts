@@ -1,52 +1,79 @@
 /*
- * How this device starts work: which composer options stay in the bar, where
- * a new conversation goes, and what an empty side panel opens on.
+ * How this device starts work: where a new conversation goes, what an empty
+ * side panel opens on, and which of the optional buttons it shows.
  *
  * The tour's question, developer or not, writes all of it at once. It is a
  * preset, not a mode: nothing reads the answer itself, only these settings,
- * and each one changes on its own afterwards (the Options menu's pins, the
- * Appearance page, the developer tools switch in General). Stored per device beside the other local preferences,
+ * and each one changes on its own afterwards (the Appearance page, or a
+ * button's own right click). Stored per device beside the other local preferences,
  * since a phone paired to the same core has its own screen and its own habits.
  */
 
 export type Profile = 'everyday' | 'developer';
-/** The composer options a pin can keep in the bar. The permission mode is never hidden. */
-export type PinId = 'effort' | 'worktree';
 /** Where the app opens: the drafts folder, or the last project. New thread always follows the project on screen. */
 export type StartIn = 'drafts' | 'project';
 /** What an empty side panel opens on: its launcher, or one surface directly. */
 export type PanelStart = 'launcher' | 'files' | 'changes';
 
+/**
+ * Every button a device may put away. Hiding one takes the button off the
+ * screen and nothing else: the palette and the shortcuts still reach what it
+ * opened, and whatever is open stays open.
+ */
+export const CONTROL_IDS = [
+  'header.project',
+  'header.branch',
+  'header.context',
+  'header.agents',
+  'header.terminal',
+  'sidebar.limits',
+  'sidebar.add-project',
+  'panel.agents',
+  'panel.workflow',
+  'panel.browser',
+  'panel.changes',
+  'panel.files',
+  'panel.tasks',
+  'panel.trace'
+] as const;
+export type ControlId = (typeof CONTROL_IDS)[number];
+
 export interface WorkPrefs {
   /** The last answer to the tour's question, kept only so the tour can show it. */
   profile: Profile | null;
-  pins: Record<PinId, boolean>;
   startIn: StartIn;
   panel: PanelStart;
-  /** The terminal and the process trace: tools a developer reaches for and nobody else needs to see. */
-  developer: boolean;
+  /** The buttons this device put away, in `CONTROL_IDS` order. A button added later shows until someone hides it. */
+  hidden: ControlId[];
 }
 
 export const WORK_STORAGE_KEY = 'boite.work';
 
-const PINS: readonly PinId[] = ['effort', 'worktree'];
 const STARTS: readonly StartIn[] = ['drafts', 'project'];
 const PANELS: readonly PanelStart[] = ['launcher', 'files', 'changes'];
 
+/** The terminal and the process trace: tools a developer reaches for and nobody else needs to see. */
+const DEVELOPER_CONTROLS: readonly ControlId[] = ['header.terminal', 'panel.trace'];
+
 /** What each answer writes. */
 export const PRESETS: Record<Profile, Omit<WorkPrefs, 'profile'>> = {
-  everyday: { pins: { effort: false, worktree: false }, startIn: 'drafts', panel: 'files', developer: false },
-  developer: { pins: { effort: true, worktree: true }, startIn: 'project', panel: 'changes', developer: true }
+  everyday: { startIn: 'drafts', panel: 'files', hidden: [...DEVELOPER_CONTROLS] },
+  developer: { startIn: 'project', panel: 'changes', hidden: [] }
 };
 
-/** A device that has not answered yet: the calm bar, the drafts first. */
+/** A device that has not answered yet: the drafts first. */
 export function freshWork(): WorkPrefs {
-  return { profile: null, ...PRESETS.everyday, pins: { ...PRESETS.everyday.pins } };
+  return { profile: null, ...PRESETS.everyday, hidden: [...PRESETS.everyday.hidden] };
 }
 
-/** An install that predates the question keeps every chip where it was, the panel's launcher and its tools. */
+/** An install that predates the question keeps opening on its project, the panel's launcher and every button. */
 export function migratedWork(): WorkPrefs {
-  return { profile: null, pins: { effort: true, worktree: true }, startIn: 'project', panel: 'launcher', developer: true };
+  return { profile: null, startIn: 'project', panel: 'launcher', hidden: [] };
+}
+
+/** Known ids only, each once, in the catalogue's order. */
+function cleanHidden(ids: readonly unknown[]): ControlId[] {
+  return CONTROL_IDS.filter((id) => ids.includes(id));
 }
 
 /** A stored record, or null when it is missing or does not read like one. */
@@ -54,21 +81,28 @@ export function parseWork(raw: string | null): WorkPrefs | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    const record = parsed as Partial<WorkPrefs>;
-    const pins = typeof record.pins === 'object' && record.pins !== null ? record.pins : null;
-    if (!pins) return null;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+    const record = parsed as Partial<WorkPrefs> & { developer?: unknown };
+    // A record from before the list had one switch for the developer's tools;
+    // before that, only the answer, and no answer was a working setup.
+    const developer = typeof record.developer === 'boolean' ? record.developer : record.profile !== 'everyday';
     return {
       profile: record.profile === 'everyday' || record.profile === 'developer' ? record.profile : null,
-      pins: Object.fromEntries(PINS.map((id) => [id, pins[id] === true])) as Record<PinId, boolean>,
       startIn: STARTS.includes(record.startIn as StartIn) ? (record.startIn as StartIn) : 'project',
       panel: PANELS.includes(record.panel as PanelStart) ? (record.panel as PanelStart) : 'launcher',
-      // A record from before the switch keeps what its answer meant; no answer was a working setup.
-      developer: typeof record.developer === 'boolean' ? record.developer : record.profile !== 'everyday'
+      hidden: Array.isArray(record.hidden) ? cleanHidden(record.hidden) : developer ? [] : [...DEVELOPER_CONTROLS]
     };
   } catch {
     return null;
   }
+}
+
+/** The preset whose buttons match these exactly, or null for a device that picked its own. */
+export function matchingPreset(hidden: readonly ControlId[]): Profile | null {
+  const same = (preset: readonly ControlId[]) => preset.length === hidden.length && preset.every((id) => hidden.includes(id));
+  if (same(PRESETS.developer.hidden)) return 'developer';
+  if (same(PRESETS.everyday.hidden)) return 'everyday';
+  return null;
 }
 
 function readStored(): WorkPrefs | null {
@@ -117,24 +151,31 @@ class Work {
 
   choose(profile: Profile): void {
     const preset = PRESETS[profile];
-    this.#write({ profile, pins: { ...preset.pins }, startIn: preset.startIn, panel: preset.panel, developer: preset.developer });
-  }
-
-  pin(id: PinId, on: boolean): void {
-    if (this.current.pins[id] === on) return;
-    this.#write({ ...this.current, pins: { ...this.current.pins, [id]: on } });
+    this.#write({ profile, startIn: preset.startIn, panel: preset.panel, hidden: [...preset.hidden] });
   }
 
   setStartIn(startIn: StartIn): void {
     if (this.current.startIn !== startIn) this.#write({ ...this.current, startIn });
   }
 
-  setDeveloper(developer: boolean): void {
-    if (this.current.developer !== developer) this.#write({ ...this.current, developer });
-  }
-
   setPanel(panel: PanelStart): void {
     if (this.current.panel !== panel) this.#write({ ...this.current, panel });
+  }
+
+  /** Whether this device shows a button. */
+  shows(id: ControlId): boolean {
+    return !this.current.hidden.includes(id);
+  }
+
+  show(id: ControlId, on: boolean): void {
+    if (this.shows(id) === on) return;
+    const hidden = on ? this.current.hidden.filter((one) => one !== id) : cleanHidden([...this.current.hidden, id]);
+    this.#write({ ...this.current, hidden });
+  }
+
+  /** One preset's buttons, the rest of the record untouched. */
+  showPreset(profile: Profile): void {
+    this.#write({ ...this.current, hidden: [...PRESETS[profile].hidden] });
   }
 }
 

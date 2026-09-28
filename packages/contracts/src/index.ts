@@ -341,6 +341,8 @@ export interface ProviderSummary {
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
   install: ProviderInstallState | null;
+  /** True when this provider's agent writes thread titles: what Settings offers for `titleModel`. Missing on older cores. */
+  titles?: boolean;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -616,6 +618,12 @@ export interface ThreadSummary {
   branch: string | null;
   permissionMode: PermissionMode;
   status: ThreadStatus;
+  /**
+   * When the turn now running started, what a sidebar row counts its time
+   * from. Also set while the turn waits on the user. Null when no turn runs;
+   * missing on older cores.
+   */
+  runningSince?: Timestamp | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
@@ -1112,6 +1120,21 @@ export interface Settings {
    * Missing on older cores, which read as on.
    */
   asyncQuestions?: boolean;
+  /**
+   * The model that writes every thread's title after its first answer. Null
+   * or missing: each thread's own provider on its small model
+   * (`defaultTitleModel`), under the thread's account. A provider that can no
+   * longer write one falls back to that too.
+   */
+  titleModel?: TitleModel | null;
+}
+
+/** One provider's model, picked in Settings to write thread titles. */
+export interface TitleModel {
+  /** A provider whose summary says `titles`. */
+  providerId: ProviderId;
+  /** A model id that provider lists. */
+  model: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1776,7 +1799,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'speech.cancel': { params: { requestId: string }; result: { ok: true } };
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
-  'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
+  'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
@@ -2073,8 +2096,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   };
   /**
    * A title written from the thread's first prompt and first answer. The
-   * agent's own driver writes it when it can (Claude on one short call to a
-   * small model, echo in memory), the core cuts the first line of the prompt
+   * model `Settings.titleModel` names writes it, else the thread's own agent
+   * on its small model when its driver can (Claude and Codex on one short
+   * call, echo in memory); the core cuts the first line of the prompt
    * otherwise. Refused by name on a thread that has no prompt yet, or while
    * a title is already being written for it. The answer is the thread as
    * saved, `titleSource` saying which of the two wrote it.
@@ -2194,6 +2218,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** The project's whole list, after any change. */
   'todos.updated': { projectId: ProjectId; todos: Todo[] };
   'quotas.updated': AccountQuota[];
+  /** Owner-only partial result, correlated with the caller's quotas.list request. */
+  'quotas.progress': { requestId: string; quota: AccountQuota };
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */
@@ -2346,6 +2372,19 @@ export const RpcErrorCode = {
   Unavailable: -32011,
 } as const;
 
+/**
+ * The `data` of the Refused error `turns.start` answers while the thread
+ * already has a turn queued or running, often one the core opened by itself
+ * (held answers to asynchronous questions, an agent resuming on its own). The
+ * prompt is not wrong, only early: `thread` is the row as the core has it, and
+ * a client keeps the prompt until that turn is over.
+ */
+export interface TurnInFlightData {
+  threadId: ThreadId;
+  reason: 'turn-in-flight';
+  thread: ThreadSummary;
+}
+
 /** WebSocket close codes the core uses. */
 export const RpcCloseCode = {
   Unauthorized: 4001,
@@ -2370,6 +2409,7 @@ export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
 export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
 import type { SpeechModelTier } from './speech-models.ts';

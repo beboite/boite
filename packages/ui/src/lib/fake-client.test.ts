@@ -447,7 +447,8 @@ test('fake refuses a second active turn and archived threads without adding mess
   await client.call('turns.start', { threadId: thread.id, prompt: '[permission]' });
   const before = await client.call('threads.get', { threadId: thread.id });
   await expect(client.call('turns.start', { threadId: thread.id, prompt: 'second' }))
-    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn' });
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+      data: { threadId: thread.id, reason: 'turn-in-flight', thread: { id: thread.id, status: 'running' } } });
   expect((await client.call('threads.get', { threadId: thread.id })).messages).toEqual(before.messages);
   await vi.runAllTimersAsync();
   await expect(client.call('turns.start', { threadId: thread.id, prompt: 'while waiting' })).rejects.toThrow(/in-flight/);

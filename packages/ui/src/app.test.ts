@@ -374,7 +374,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => store.draft !== null);
 
   // A draft opens on the first available provider, its default model.
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -399,7 +399,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
   query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5 · Second seat');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5 · Second seat');
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'On the second seat';
@@ -415,7 +415,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -459,7 +459,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -490,7 +490,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect((document.activeElement as HTMLElement).getAttribute('data-model')).toBe('anthropic/claude-sonnet-5');
   press('Enter');
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Sonnet 5');
 
   // A query nothing answers says so, and Escape clears it before it closes anything.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
@@ -521,7 +521,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
@@ -537,9 +537,9 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5');
-  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Xhigh');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
 
   // The dots are filled up to the one that is live, and no further.
   const filled = Array.from(document.querySelectorAll('[data-dot]')).filter((dot) => dot.classList.contains('on'));
@@ -550,7 +550,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
 
   // The draft carries the effort into the thread the first send creates.
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
   press('Escape');
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Think harder about the caps';
@@ -911,16 +911,58 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.querySelector('.command')?.textContent).toContain('claude');
 });
 
-test('turning the developer switch off closes an open trace tab', async () => {
+test('hiding the trace card takes it off the launcher and leaves an open trace tab alone', async () => {
   await mountOnFake();
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
   store.panel.open('trace');
   await waitFor(() => document.querySelector('[data-testid=trace-panel]') !== null);
-  work.setDeveloper(false);
-  await waitFor(() => document.querySelector('[data-testid=trace-panel]') === null);
-  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(false);
+  work.show('panel.trace', false);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.querySelector('[data-testid=trace-panel]')).not.toBeNull();
+
+  store.panel.closeAll();
+  store.togglePanel();
+  await waitFor(() => document.querySelector('[data-testid=panel-launcher]') !== null);
+  expect(document.querySelector('[data-testid=launch-trace]')).toBeNull();
+  expect(document.querySelector('[data-testid=launch-files]')).not.toBeNull();
+  work.show('panel.trace', true);
+  await waitFor(() => document.querySelector('[data-testid=launch-trace]') !== null);
+});
+
+test("a header button's right click hides it, and the Appearance page brings it back", async () => {
+  // The settings page scrolls to the card it was opened on; jsdom draws nothing to scroll.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  work.showPreset('developer');
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') !== null);
+
+  query('[data-testid=terminal-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=hide]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') === null);
+  expect(work.current.hidden).toEqual(['header.terminal']);
+
+  // The same button's menu, on another one, leads to the page that lists them all.
+  query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-buttons]') !== null);
+  expect(store.settingsTab).toBe('appearance');
+  const terminal = query<HTMLInputElement>('[data-testid="control-header.terminal"]');
+  expect(terminal.checked).toBe(false);
+  // Neither preset is lit once the buttons are the device's own.
+  expect(query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed')).toBe('false');
+  terminal.click();
+  expect(work.current.hidden).toEqual([]);
+  await waitFor(() => query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed') === 'true');
+  query<HTMLButtonElement>('[data-testid=controls-preset-everyday]').click();
+  expect(work.current.hidden).toEqual(['header.terminal', 'panel.trace']);
+  await waitFor(() => !query<HTMLInputElement>('[data-testid="control-header.terminal"]').checked);
 });
 
 test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
@@ -1735,20 +1777,23 @@ test('Import a Claude Code session in the project menu lists the transcripts and
   await waitFor(() => document.querySelector('[data-testid=import-dialog]') === null);
 });
 
-test('the chat header keeps the mark and the title, the status word riding the mark', async () => {
+test('the chat header keeps the title alone, and the rows say what each agent is doing', async () => {
   // The store is the singleton every test shares: a draft left open by another
   // one would keep the boot from opening a thread at all.
   store.draft = null;
   await mountOnFake();
 
-  // The word used to sit beside the title and repeat what the mark already says.
+  // The status is the row's to say: the header repeats neither a word nor a dot.
   expect(document.querySelector('[data-testid=thread-status-label]')).toBeNull();
-
-  const mark = query('[data-testid=thread-status]');
-  expect(mark.getAttribute('data-status')).toBe('idle');
-  expect(mark.getAttribute('title')).toBe('idle');
-  expect(mark.getAttribute('aria-label')).toBe('idle');
+  expect(document.querySelector('[data-testid=thread-header] .mark')).toBeNull();
+  expect(query('[data-testid=thread-header]').getAttribute('data-status')).toBe('idle');
   expect(query('[data-testid=thread-title]').textContent?.trim()).toBe(store.openThread?.title);
+
+  // No dot on any row; a thread waiting on the user says so in words.
+  expect(document.querySelector('[data-testid=thread-row] .mark')).toBeNull();
+  const waiting = query('[data-testid=thread-row][data-thread-id=t-scheduler] [data-testid=thread-state]');
+  expect(waiting.dataset['state']).toBe('waiting');
+  expect(waiting.textContent?.trim()).toBe('Needs you');
 });
 
 test('Add another account names the account itself and goes straight to the sign-in', async () => {

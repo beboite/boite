@@ -226,7 +226,7 @@ export const fr: Translation = {
     settingsPhone: 'Application et notifications',
     settingsBack: 'Retour aux réglages',
     navigation: 'Navigation', threads: 'Conversations', activity: 'Activité', project: 'Choisir un projet',
-    search: 'Trouver une conversation', unread: 'Non lu', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
+    search: 'Trouver une conversation', noActivity: "Aucun agent n'attend votre réponse.", noThreads: 'Aucune conversation ne correspond.'
   },
   machines: {
     heading: 'Machines', local: 'Ce PC', projects: 'Projets', recent: 'Récent',
@@ -424,6 +424,14 @@ export const fr: Translation = {
     rename: 'Renommer',
     retitle: 'Regénérer le titre',
     retitling: "Rédaction d'un titre",
+    state: {
+      working: 'En cours',
+      workingFor: 'Travaille depuis {elapsed}',
+      waiting: 'Vous attend',
+      error: 'Échec',
+      done: 'Terminé',
+      queued: 'En attente'
+    },
     pin: 'Épingler',
     unpin: 'Désépingler',
     pinned: 'Épinglée',
@@ -851,9 +859,6 @@ export const fr: Translation = {
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
     placeholderNew: 'Que voulez-vous faire ?',
-    moreOptions: 'Options',
-    pin: 'Garder {option} dans la barre',
-    unpinOption: 'Retirer {option} de la barre',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé à la fin du tour en cours',
@@ -1176,6 +1181,23 @@ export const fr: Translation = {
     failed: 'Lecture de la consommation impossible : {error}',
   },
 
+  controls: {
+    heading: 'Boutons',
+    headingHint: "Masquez les boutons qui ne vous servent pas. Ce qu'un bouton ouvre reste à portée : la palette de commandes et les raccourcis clavier y mènent toujours, et rien de ce qui est ouvert ne se ferme.",
+    preset: 'Préréglage',
+    everyday: "L'essentiel",
+    developer: 'Tout',
+    header: 'En-tête de la conversation',
+    sidebar: 'Barre latérale',
+    panel: 'Menu du panneau latéral',
+    project: 'Nom du projet',
+    branch: 'Branche',
+    context: 'Jauge de contexte',
+    hide: 'Masquer ce bouton',
+    customize: 'Choisir les boutons',
+    allHidden: 'Toutes les cartes sont masquées sur cet appareil.'
+  },
+
   settings: {
     heading: 'Réglages',
     modelDefaults: 'Modèles par défaut',
@@ -1205,8 +1227,6 @@ export const fr: Translation = {
     connectProvider: 'Connecter un fournisseur',
     conversations: 'Conversations',
     app: 'Application',
-    developer: 'Outils de développeur',
-    developerHint: 'Affiche le terminal et la trace des processus dans les conversations.',
     tourReplay: 'Revoir la présentation',
     execution: 'Exécution des agents',
     maxConcurrentTurnsHint: 'Nombre de tours exécutés en même temps, toutes conversations confondues. Les suivants attendent leur tour.',
@@ -1287,6 +1307,11 @@ export const fr: Translation = {
     reapOrphansHint: "Dix secondes après un tour, un processus dont le parent est sorti est arrêté, comme ceux qu'une commande interrompue laisse derrière elle. Windows seulement.",
     asyncQuestions: 'Laisser les agents poser des questions sans s’arrêter',
     asyncQuestionsHint: 'Les agents sans questions asynchrones propres apprennent la commande boite ask au début d’une session. Codex pose ses questions ainsi nativement.',
+    titleModel: 'Modèle des titres',
+    titleModelHint: 'Le modèle qui nomme une conversation après sa première réponse. Automatique prend l’agent de la conversation sur son petit modèle. Un choix écrit tous les titres avec ce modèle, sur son premier compte connecté.',
+    titleModelAuto: 'Automatique',
+    titleModelAutoHint: 'L’agent de la conversation, petit modèle',
+    titleModelSmall: 'petit',
     numberRange: 'Un nombre entier de {min} à {max}.',
     save: 'Enregistrer',
     saved: 'Enregistré',
@@ -1421,6 +1446,10 @@ export const fr: Translation = {
     providers: 'Gérer les fournisseurs',
     unavailable: 'Aucune lecture de quota disponible.',
     refresh: 'Actualiser les quotas',
+    glance: 'Limites des comptes',
+    allLimits: 'Page des limites',
+    readFailed: 'Lecture des limites impossible : {error}',
+    retry: 'Réessayer',
     quit: 'Quitter Boite',
   },
   harnessUpdates: {
@@ -1572,7 +1601,7 @@ export const fr: Translation = {
     low: 'Faible',
     medium: 'Moyen',
     high: 'Élevé',
-    xhigh: 'Très élevé',
+    xhigh: 'Xhigh',
     max: 'Max',
     ultra: 'Ultra',
     ultrathink: 'Ultrathink',
@@ -1639,10 +1668,10 @@ export const fr: Translation = {
     profile: {
       title: "D'abord, lequel êtes-vous ?",
       everyday: "Je ne suis pas dev ! Ne m'embrouillez pas avec du code et des commandes !",
-      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, la barre reste simple et l'agent demande avant d'agir.",
+      everydayHint: "Une nouvelle conversation attend dans Documents/Boite jusqu'à ce que vous lui donniez un dossier, et l'agent demande avant d'agir.",
       developer: 'Je suis dev, mettez-moi la totale.',
-      developerHint: "L'appli s'ouvre sur votre dernier projet, l'effort et le worktree restent dans la barre, le panneau s'ouvre sur les modifications.",
-      later: "Rien n'est retiré, dans un cas comme dans l'autre. Le menu Options du champ de message et les réglages changent tout ça."
+      developerHint: "L'appli s'ouvre sur votre dernier projet, les conversations montrent le terminal et la trace des processus, le panneau s'ouvre sur les modifications.",
+      later: "Rien n'est retiré, dans un cas comme dans l'autre. Réglages, Apparence affiche ou masque chaque bouton, un par un."
     },
 
     welcome: {
@@ -1653,7 +1682,7 @@ export const fr: Translation = {
     agents: {
       title: 'Une conversation qui suit votre travail',
       body: "Changez d'agent, dictez un message, relisez le résultat. Sans changer de conversation.",
-      demoModel: 'Claude Sonnet 5',
+      demoModel: 'Sonnet 5',
       demoEffort: 'Élevé',
       demoMode: 'Demander'
     },

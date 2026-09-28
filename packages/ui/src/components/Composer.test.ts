@@ -1,6 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
+import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
@@ -112,7 +114,7 @@ afterEach(() => {
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
-  // The device's pins are module state: the next test starts with no record.
+  // The device's work record is module state: the next test starts with no record.
   work.load();
   vi.restoreAllMocks();
 });
@@ -314,7 +316,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -355,7 +357,7 @@ test('the reasoning chip remembers the level a draft picks', async () => {
     model: 'claude-opus-5',
     effort: 'xhigh'
   });
-  await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
+  await waitFor(() => effortChip()?.textContent?.trim() === 'Xhigh');
 });
 
 test('the reasoning slider draws one dot per level and the arrows move it', async () => {
@@ -399,7 +401,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
-  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  // Haiku 4.5 is the one legacy model the descriptor gives no levels.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
@@ -408,73 +410,34 @@ test('a model with no reasoning scale gets no chip at all', async () => {
 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Haiku 4.5');
 });
 
-test('an install that already has conversations keeps every chip in the bar', async () => {
-  await mountOnFake();
-  // No record on this device, and the core has threads: the chips stay where they were.
-  expect(work.current.pins).toEqual({ effort: true, worktree: true });
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toMatchObject({ pins: { effort: true, worktree: true }, panel: 'launcher' });
-  await openDraft();
-  await waitFor(() => effortChip() !== null);
-  query('[data-testid=composer-worktree]');
-  expect(input().placeholder).toBe('What do you want to do?');
-
-  // Both are chips, so Options would only say them twice: it steps aside.
-  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
-  // The pin went with the chip: the effort popover carries it, pressed.
-  effortChip()!.click();
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
-  expect(query('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('true');
-  press('Escape');
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
-
-  // Unpinned there, effort goes back to Options, which comes back with it.
-  effortChip()!.click();
-  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
-  query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-testid=composer-pin-effort]').click();
-  await waitFor(() => effortChip() === null);
-  query<HTMLButtonElement>('[data-testid=composer-more]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
-  expect(query('[data-testid=composer-more-menu] [data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
-  // The worktree chip is still in the bar, so Options does not list it.
-  expect(document.querySelector('[data-testid=composer-options-worktree]')).toBeNull();
-  press('Escape');
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') === null);
-
-  // A chip with no popover of its own takes its pin on a right-click.
-  query('[data-testid=composer-worktree]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=pin]') !== null);
-  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=pin]').click();
-  await waitFor(() => work.current.pins.worktree === false);
-});
-
-test('a first run keeps effort and worktree in Options until pinned, and a worktree turned on stays in view', async () => {
+test('a first run shows the reasoning, mode and worktree chips at their defaults, with nothing to pin', async () => {
   window.localStorage.setItem(WORK_STORAGE_KEY, JSON.stringify(freshWork()));
   work.load();
   await mountOnFake();
-  // The record on the device wins over the threads the core holds.
-  expect(work.current.pins).toEqual({ effort: false, worktree: false });
   store.startDraft('p-boite');
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
-  expect(effortChip()).toBeNull();
-  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
-  // The permission mode is never hidden.
-  query('[data-testid=composer-mode]');
-
-  query<HTMLButtonElement>('[data-testid=composer-more]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-more-menu]') !== null);
-  expect(query('[data-testid=composer-pin-effort]').getAttribute('aria-pressed')).toBe('false');
-
-  // A worktree turned on is a choice away from the default: its chip shows, unpinned.
-  query<HTMLButtonElement>('[data-testid=composer-options-worktree]').click();
-  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
-  expect(work.current.pins.worktree).toBe(false);
-
-  query<HTMLButtonElement>('[data-testid=composer-pin-effort]').click();
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  // The calm preset hides nothing from the bar: every chip is there at the model's default.
   await waitFor(() => effortChip() !== null);
-  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null').pins).toEqual({ effort: true, worktree: false });
+  query('[data-testid=composer-mode]');
+  expect(query('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('false');
+  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
+
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(document.querySelector('[data-testid=composer-pin-effort]')).toBeNull();
+  // Opus 5 has a fast mode: its switch sits in the popover's heading, before the level.
+  const heading = query('[data-testid=composer-effort-menu] .heading');
+  expect(heading.firstElementChild?.getAttribute('data-testid')).toBe('effort-speed');
+  expect(document.querySelector('[data-testid=effort-fast-mark]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast');
+  // Switched on, the chip carries a bolt, so the choice shows with the popover shut.
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
+  query('[data-testid=effort-fast-mark]');
 });
 
 test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
@@ -1113,6 +1076,47 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
     .slice(-3)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
   expect(sent).toEqual(['P1', 'P2', 'P3']);
+});
+
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  // The core has just opened a turn by itself (held answers to an asynchronous
+  // question) and this client has not heard of it yet: it still shows idle.
+  let refusals = 2;
+  const rpc = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start' && refusals-- > 0) {
+      const thread = { ...store.threads.find((row) => row.id === 't-trace')!, status: 'running' as const };
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+        data: { threadId: 't-trace', reason: 'turn-in-flight', thread } }));
+    }
+    return call(method, params);
+  });
+
+  // Sent straight from the box: refused as early, so it waits in the queue.
+  await type('sent into a busy thread');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(input().value).toBe('');
+  expect(store.busy).toBe(true);
+  expect(store.error).toBeNull();
+
+  // That turn ends, the queue drains, and a second turn the core opened in
+  // between refuses it once more: it goes back at the head, still no error.
+  store.openThread!.status = 'idle';
+  await waitFor(() => refusals === 0 && store.busy);
+  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['sent into a busy thread']);
+  expect(store.composerStates['t-trace']!.paused).toBe(false);
+  expect(store.error).toBeNull();
+
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && store.openThread!.messages.some((m) => m.role === 'user'
+    && m.parts.some((p) => p.type === 'text' && p.text === 'sent into a busy thread')));
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(3);
+  expect(store.error).toBeNull();
 });
 
 test('the mention menu never opens on the project the composer just left', async () => {

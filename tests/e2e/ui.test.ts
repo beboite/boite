@@ -129,7 +129,7 @@ test(
       `document.querySelector('${testid('permission-card')}').dataset.decision === 'allow'`,
       30_000,
     );
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
     expect(assistant).toContain('browser thread');
@@ -243,7 +243,7 @@ test(
       `(() => { Array.from(document.querySelectorAll('${testid('thread-row')}')).find((row) => row.textContent.includes('Echo: browser thread')).click(); return null; })()`,
     );
     await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`);
   },
   TIMEOUT,
 );
@@ -268,7 +268,7 @@ test(
     await page.type(testid('composer-input'), 'now [tool-stream] please');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`document.querySelector('${testid('tool-card')}')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
     await page.evaluate<null>(`(() => { clearInterval(window.__toolTimer); return null; })()`);
 
     const samples = await page.evaluate<string[]>('window.__toolSamples');
@@ -301,7 +301,7 @@ test(
     await page.type(testid('composer-input'), 'now [diff] please');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`document.querySelector('${testid('tool-document-chip')}')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     // The folded card says what it carries, and only opening it draws the diff.
     expect(await page.text(testid('tool-document-chip'))).toBe('1 diff');
@@ -355,7 +355,7 @@ test(
       30_000,
     );
     expect(await page.text(testid('question-answer'))).toBe('Short: one line please');
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
     expect(assistant).toContain('answered short one line please');
@@ -397,7 +397,7 @@ test(
     await page.type(testid('composer-input'), 'what is this square');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('what is this square')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     // The strip is empty again, the echo names the image it was given, and the
     // user bubble carries the thumbnail as a part of the journalled message.
@@ -443,7 +443,7 @@ test(
     await page.type(testid('composer-input'), '/shout the square again');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('THE SQUARE AGAIN')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
   },
   TIMEOUT,
 );
@@ -775,7 +775,7 @@ test(
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('after the restart')`, RECONNECT_TIMEOUT_MS);
     await page.waitFor(
-      `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,
+      `document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`,
       RECONNECT_TIMEOUT_MS,
     );
   },
@@ -789,7 +789,7 @@ test('inline code stays literal at desktop and phone widths', async () => {
   await clickWhenEnabled(testid('composer-send'));
   const codes = `Array.from(document.querySelectorAll('[data-role=assistant] [data-testid=text-part] code'))`;
   await page.waitFor(`${codes}.some(node => node.textContent === '**literal**')`);
-  await page.waitFor(`document.querySelector('[data-testid=thread-status]').dataset.status === 'idle'`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-header][data-status]').dataset.status === 'idle'`);
   expect(await page.evaluate<boolean>(`${codes}.some(node => node.querySelector('strong, a'))`)).toBe(false);
   expect(await page.evaluate<boolean>(`${codes}.some(node => node.textContent === '[link](https://example.com)')`)).toBe(true);
   try {

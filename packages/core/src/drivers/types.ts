@@ -220,7 +220,9 @@ export interface ProbeResult {
  */
 export interface TitleContext {
   thread: ThreadSummary;
+  /** The provider that writes the title: the thread's own, or the one Settings names. */
   provider: ProviderDescriptor;
+  /** The thread's account when the provider is the thread's, else that provider's first signed-in one. */
   account: Account;
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
@@ -228,6 +230,12 @@ export interface TitleContext {
   prompt: string;
   /** The first answer of the thread, its text parts only. Empty when the agent wrote no text. */
   answer: string;
+  /**
+   * The model to write it with: the one Settings names, else the provider's
+   * small default. Null only for a provider with no small model on record,
+   * where the driver keeps its own choice.
+   */
+  model: string | null;
   /** Traced under the thread the title is for, like a turn's process. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
   log(level: 'info' | 'warn' | 'error', message: string): void;

@@ -1,4 +1,4 @@
-import type { Settings } from './index.ts';
+import type { Settings, TitleModel } from './index.ts';
 
 // Both supported hosts expose URL; contracts otherwise need no DOM or Node types.
 declare const URL: new (value: string) => {
@@ -6,6 +6,8 @@ declare const URL: new (value: string) => {
 };
 
 export const BROWSER_ORIGINS_MAX = 32;
+/** A model id is a name, never a paragraph. */
+const TITLE_MODEL_MAX = 200;
 
 const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb'] as const;
 const POSITIVE_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency'] as const;
@@ -84,6 +86,14 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
   for (const key of BOOLEAN_KEYS) {
     const value = patch[key];
     if (value !== undefined && typeof value !== 'boolean') return { ok: false, field: key, message: `${key} must be a boolean` };
+  }
+  if (patch.titleModel !== undefined && patch.titleModel !== null) {
+    const { providerId, model } = patch.titleModel as Partial<TitleModel>;
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    if (typeof patch.titleModel !== 'object' || text(providerId).length === 0 || text(model).length === 0 || text(model).length > TITLE_MODEL_MAX) {
+      return { ok: false, field: 'titleModel', message: `titleModel must be null or { providerId, model }, two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters` };
+    }
+    next.titleModel = { providerId: text(providerId), model: text(model) };
   }
   return { ok: true, patch: next };
 }

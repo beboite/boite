@@ -43,6 +43,8 @@ test('the limits and the effort chip read in French when the app speaks French, 
   flushSync();
   const chip = document.body.textContent ?? '';
   expect(chip).toContain('Élevé');
-  expect(chip).toContain('Rapide');
   expect(chip).not.toMatch(/High|Fast/);
+  // The chip carries the fast mode as a bolt; its name is the bolt's title.
+  const bolt = document.querySelector<HTMLElement>('[data-testid="effort-fast-mark"]')!;
+  expect(bolt.title).toBe('Rapide');
 });

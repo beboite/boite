@@ -24,13 +24,15 @@ test('clockTime gives the hour today, a weekday this week and a date beyond', ()
 
 test('durations, sizes, effort levels and quota windows follow the language the app speaks', async () => {
   expect(millis(38_000)).toBe('38.0 s');
-  expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Extra high');
+  // Xhigh reads as the providers spell it, whatever label the core sends.
+  expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Xhigh');
   await setLocaleSetting('fr');
   try {
     expect(millis(38_000)).toBe('38,0 s');
     expect(bytes(3.5 * 1024 ** 3)).toBe('3,5 Go');
     expect(levelName({ id: 'high', label: 'High' })).toBe('Élevé');
     expect(levelName({ id: 'fast', label: 'Fast' })).toBe('Rapide');
+    expect(levelName({ id: 'xhigh', label: 'Extra high' })).toBe('Xhigh');
     // A level the app has no word for keeps the provider's.
     expect(levelName({ id: 'turbo', label: 'Turbo' })).toBe('Turbo');
     expect(quotaWindowName('Weekly')).toBe('Hebdomadaire');

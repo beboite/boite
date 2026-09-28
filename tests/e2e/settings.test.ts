@@ -110,6 +110,7 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await page.click(id('nav-settings')); await page.click(id('settings-tab-limits'));
   await page.waitFor(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}')`);
   const opencode = `${id('limits-tracked')} [data-account-id="a-opencode"]`;
+  await page.waitFor(`document.querySelector('${opencode}')`);
   expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
   // The Antigravity CLI's own reading starts off, and the only switch that turns it on is here.
   expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} [data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
@@ -149,7 +150,7 @@ test('the compact quota page shows limits and reset times', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 460, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent&view=quotas`);
   await page.send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
-  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('progress')`);
+  await page.waitFor(`document.querySelectorAll('${id('quota-provider')}').length >= 4 && document.querySelector('[role="meter"]')`);
   // The popup window is opaque and square: the page paints the canvas to every corner and rounds nothing.
   expect(await page.evaluate(`getComputedStyle(document.querySelector('${id('quota-popup')}')).backgroundColor`)).not.toBe('rgba(0, 0, 0, 0)');
   expect(await page.evaluate(`getComputedStyle(document.body).clipPath`)).toBe('none');
@@ -164,7 +165,7 @@ test('the compact quota page shows limits and reset times', async () => {
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   // Unfolded, a provider lists each window with its own bar; there is nothing to set here.
   await page.click('[data-provider="claude"] .summary');
-  await page.waitFor(`document.querySelectorAll('#usage-claude progress').length === 3`);
+  await page.waitFor(`document.querySelectorAll('#usage-claude [role="meter"]').length === 3`);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').querySelector('input') === null`)).toBe(true);
   await capture('quota-popup-open.png');
   await page.click('[data-provider="claude"] .summary');

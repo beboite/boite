@@ -65,7 +65,7 @@
       { id: 'app', label: strings.settings.app },
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
-    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }],
+    appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],
     keyboard: [
       ...COMMAND_GROUPS.map((group) => ({ id: `keys-${group.id}`, label: strings.keyboard.groups[group.id] })),
       { id: 'keybinding-file', label: strings.keyboard.file }
@@ -98,6 +98,17 @@
     experiments: EXPERIMENT_IDS.map((id) => ({ id, label: experimentCopy()[id].title }))
   });
 
+  /**
+   * The pages whose sections the nav lists under their name: the ones several
+   * screens long. Every other page fits on about one screen, or lists rows
+   * whose names are already in view, and a sub-entry there only repeats a
+   * heading. The search still finds every section above.
+   */
+  const LONG_PAGES: SettingsTab[] = ['keyboard', 'usage'];
+  let toc = $derived<Partial<Record<SettingsTab, { id: string; label: string }[]>>>(
+    Object.fromEntries(LONG_PAGES.map((id) => [id, children[id] ?? []]))
+  );
+
   let tabs = $derived(all.filter((tab) => store.owner || !OWNER_TABS.includes(tab.id)));
   /** A tab this client has no nav entry for lands on Home rather than nowhere. */
   let tab = $derived(tabs.some((entry) => entry.id === store.settingsTab) ? store.settingsTab : 'home');
@@ -109,15 +120,18 @@
   let settingsWords = $derived<[SettingsTab, string | null, string][]>([
     ['general', 'conversations', strings.settings.notifications],
     ['general', 'conversations', strings.settings.asyncQuestions],
+    ['general', 'conversations', strings.settings.titleModel],
     // The switch lives in the shell's own card: a browser has no tray.
     ...(inShell ? [['general', 'app', strings.settings.closeToTray] as [SettingsTab, string, string]] : []),
-    ['general', 'app', strings.settings.developer],
     ['general', 'app', strings.onboarding.label],
     ['appearance', 'theme', strings.settings.accent],
     ['appearance', 'theme', strings.settings.material],
     ['appearance', 'theme', strings.settings.language],
     ['appearance', 'workspace', strings.settings.startIn],
     ['appearance', 'workspace', strings.settings.panelStart],
+    // The buttons people most often look for by name, the ones the old developer switch hid.
+    ['appearance', 'buttons', strings.terminal.title],
+    ['appearance', 'buttons', strings.rightPanel.trace],
     ['accounts', null, strings.settings.modelDefaults],
     ['accounts', null, strings.harnessUpdates.auto],
     ['resources', 'quiet', strings.settings.focusGuard],
@@ -177,7 +191,7 @@
   function spy(event: Event) {
     const page = event.target;
     if (!(page instanceof HTMLElement) || Date.now() - jumping < 900) return;
-    const sections = children[tab] ?? [];
+    const sections = toc[tab] ?? [];
     if (sections.length === 0) return;
     const top = page.getBoundingClientRect().top + 24;
     let current = '';
@@ -230,17 +244,17 @@
         class:active={tab === entry.id}
         data-testid="settings-tab-{entry.id}"
         aria-current={tab === entry.id ? 'page' : undefined}
-        aria-expanded={children[entry.id] ? tab === entry.id : undefined}
+        aria-expanded={toc[entry.id] ? tab === entry.id : undefined}
         onclick={() => { selectedSection = ''; store.showSettings(entry.id); }}
       >
         <Icon size={15} strokeWidth={1.75} />
         <span>{entry.label}</span>
-        {#if children[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'expanded' : ''} />{/if}
+        {#if toc[entry.id]}<ChevronRight size={14} class={tab === entry.id ? 'expanded' : ''} />{/if}
       </button>
-      {#if children[entry.id]}
+      {#if toc[entry.id]}
         <div class="subcategories" class:open={tab === entry.id} inert={tab !== entry.id}>
           <div>
-            {#each children[entry.id] ?? [] as child (child.id)}
+            {#each toc[entry.id] ?? [] as child (child.id)}
               <button class="ghost subsection" class:chosen={chosenSection === child.id} data-settings-section={child.id} title={child.label} onclick={() => jump(child.id)}>{child.label}</button>
             {/each}
           </div>
@@ -250,9 +264,9 @@
     {/each}
   </nav>
 
-  {#if children[tab]}
+  {#if toc[tab]}
     <div class="mobile-subcategories">
-      {#each children[tab] ?? [] as child (child.id)}
+      {#each toc[tab] ?? [] as child (child.id)}
         <button class="ghost" class:active={chosenSection === child.id} data-settings-section={child.id} onclick={() => jump(child.id)}>{child.label}</button>
       {/each}
     </div>
@@ -261,7 +275,7 @@
   <!-- The panel is keyed on the tab, so switching tabs fades the new page in
        rather than swapping it in one frame. -->
   {#key tab}
-    <section onscrollcapture={spy}>
+    <section class="framed" onscrollcapture={spy}>
       {#if tab === 'home'}
         <SettingsHome {store} tiles={tabs} {entries} onopen={open} />
       {:else if tab === 'brain'}
@@ -275,7 +289,7 @@
       {:else if tab === 'advanced'}
         <AdvancedSettings {store} />
       {:else if tab === 'appearance'}
-        <AppearancePage />
+        <AppearancePage {store} />
       {:else if tab === 'keyboard'}
         <KeyboardPage {store} />
       {:else if tab === 'accounts'}
@@ -329,8 +343,6 @@
     gap: 2px;
     padding: 20px 14px;
     overflow-y: auto;
-    border-right: 1px solid var(--color-border);
-    background: var(--color-surface);
   }
 
   .back {
@@ -378,7 +390,7 @@
       overflow-y: hidden;
       padding: 8px 12px;
       align-items: flex-start;
-      border-right: none;
+      background: var(--color-surface);
       border-bottom: 1px solid var(--color-border);
     }
 
