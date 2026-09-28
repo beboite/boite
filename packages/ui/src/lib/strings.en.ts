@@ -409,6 +409,15 @@ export const strings = {
     copyPath: 'Copy path',
     copied: 'Copied',
     importSession: 'Import a Claude Code session',
+    /** Out of the list, not out of Boite: its threads keep running and a new one brings it back. */
+    archiveProject: 'Archive project',
+    projectArchivedToast: 'Archived {project}',
+    archivedProjects: 'Archived projects ({count})',
+    restoreProject: 'Restore',
+    /** The drawer under a project's rows: its archived threads, opened for this session only. */
+    archivedThreadsOne: '1 archived',
+    archivedThreadsMany: '{count} archived',
+    restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     removeProjectTitle: 'Remove {project} from Boite?',
     removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',

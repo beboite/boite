@@ -54,7 +54,7 @@
           hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
           active: here && store.draftInDrafts
         },
-        ...machine.store.projects.filter((entry) => entry.id !== drafts?.id).map((entry) => ({
+        ...machine.store.projects.filter((entry) => entry.id !== drafts?.id && entry.archived !== true).map((entry) => ({
           id: JSON.stringify([machine.id, entry.id]),
           label: projectName(entry),
           hint: place ? `${place} · ${entry.path}` : entry.path,

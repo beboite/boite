@@ -2112,7 +2112,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   // The project's own menu: no Remove, and no transcript import behind it.
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
@@ -2139,7 +2139,7 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project', 'remove']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 

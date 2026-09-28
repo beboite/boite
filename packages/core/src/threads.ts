@@ -240,6 +240,8 @@ export class ThreadStore {
       this.core.journal.putThread(thread);
     });
     this.core.bus.emit('thread.created', thread);
+    // A thread started in a project put away says the project is in use again.
+    if (project.archived === true) this.core.projects.archive(project.id, false);
     return thread;
   }
 
@@ -437,7 +439,10 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    return this.save({ ...thread, archived }, 'thread.archived');
+    const saved = this.save({ ...thread, archived }, 'thread.archived');
+    // The sidebar counts a project's archived threads; a sub-thread is not one of them.
+    if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    return saved;
   }
 
   markRead(threadId: ThreadId): void {

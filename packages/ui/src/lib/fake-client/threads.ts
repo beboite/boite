@@ -5,6 +5,7 @@ import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from '
 import { RETITLE_DELAY_MS } from './providers';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
+import { announceProject, archiveProject } from './project-archive';
 import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
@@ -147,6 +148,8 @@ export function threadMethods(ctx: FakeContext) {
       };
       ctx.threads.set(thread.id, thread);
       ctx.emit('thread.created', structuredClone(toSummary(thread)));
+      // As the core: a thread started in a project put away brings the project back.
+      if (project.archived === true) archiveProject(ctx, project.id, false);
       return structuredClone(toSummary(thread));
     },
     'threads.get': async (params) => {
@@ -250,9 +253,12 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
+      const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) await putAway(ctx, thread);
-      return ctx.touch(thread);
+      const summary = ctx.touch(thread);
+      if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);
+      return summary;
     },
     'threads.pin': async (params) => {
       const thread = ctx.thread(params.threadId);

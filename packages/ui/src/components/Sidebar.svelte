@@ -13,7 +13,10 @@
   import { compareThreads } from '../lib/thread-order';
   import { projectRollup } from '../lib/thread-state';
   import { controlMenu } from '../lib/controls';
+  import { undo } from '../lib/undo.svelte';
   import { work } from '../lib/work-prefs.svelte';
+  import ArchivedDrawer from './ArchivedDrawer.svelte';
+  import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
@@ -31,7 +34,10 @@
   let shownFilter = $derived(machines.some((m) => m.id === filter) ? filter : null);
   let visible = $derived(machines.filter((m) => shownFilter === null || m.id === shownFilter));
   let needle = $derived(store.search.trim().toLowerCase());
-  let groups = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
+  let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
+  /** An archived project leaves the list for the fold under it; its threads keep running. */
+  let groups = $derived(all.filter(({ project }) => project.archived !== true));
+  let shelved = $derived(all.filter(({ project }) => project.archived === true));
   let recent = $derived(
     groups
       .flatMap(({ machine, project }) =>
@@ -42,7 +48,7 @@
       )
       .sort((a, b) => compareThreads(a.thread, b.thread))
   );
-  let target = $derived(store.openProject ?? store.projects[0]);
+  let target = $derived(store.openProject ?? store.projects.find((p) => p.archived !== true));
   let newLabel = $derived(
     target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread
   );
@@ -62,6 +68,7 @@
         { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
         // An archived thread leaves this list: its way back starts where it was.
         { id: 'archived', label: strings.settings.archived.heading },
+        ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject }]),
         ...(owner.owner
           ? [
               ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
@@ -77,6 +84,10 @@
           if (workspace.active !== owner) await workspace.select(owner);
           owner.showSettings('general', 'archived');
         }
+        if (action === 'archive-project' && (await owner.archiveProject(project.id, true)))
+          undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
+            await owner.archiveProject(project.id, false);
+          });
         if (action === 'import') {
           await workspace.select(owner);
           await owner.openImports(project.id);
@@ -219,10 +230,12 @@
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
                 </p>{/if}
+              <ArchivedDrawer store={owner} {project} />
             </div>
           </div>
         </section>
       {/each}
+      <ArchivedProjects entries={shelved} {multi} />
     {/if}
   </div>
   {#if store.owner && work.shows('sidebar.add-project')}

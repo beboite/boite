@@ -102,7 +102,8 @@ export class ProjectStore {
   }
 
   list(): Project[] {
-    return this.core.journal.listProjects().map((project) => this.described(project));
+    const counts = this.core.journal.archivedThreadCounts();
+    return this.core.journal.listProjects().map((project) => this.described(project, true, counts));
   }
 
   /**
@@ -129,7 +130,8 @@ export class ProjectStore {
       clearTimeout(timer);
     }
     // Every folder was just checked or is still being checked: no second probe.
-    return this.core.journal.listProjects().map((project) => this.described(project, false));
+    const counts = this.core.journal.archivedThreadCounts();
+    return this.core.journal.listProjects().map((project) => this.described(project, false, counts));
   }
 
   require(projectId: ProjectId | null): Project {
@@ -174,6 +176,33 @@ export class ProjectStore {
     return answered;
   }
 
+  /**
+   * Puts a project away or brings it back. Only the flag moves: its threads,
+   * their processes and its folder stay as they are, so a restore is exact.
+   */
+  archive(projectId: ProjectId, archived: boolean): Project {
+    const project = this.require(projectId);
+    if (typeof archived !== 'boolean') throw refused('projects.archive.archived must be a boolean', { field: 'archived', expected: 'true or false' });
+    if (archived && this.isDrafts(project)) {
+      throw refused('the drafts project cannot be archived: a thread with no folder lands in it', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
+    }
+    if ((project.archived === true) === archived) return project;
+    const next: Project = { id: project.id, name: project.name, path: project.path, createdAt: project.createdAt, ...(archived ? { archived: true } : {}) };
+    this.core.journal.append({ type: 'project.archived', threadId: null, version: 1, payload: { projectId, archived } }, () => {
+      this.core.journal.putProject(next);
+    });
+    return this.announce(projectId);
+  }
+
+  /** Tells every client how a project now reads, after anything its answer counts has moved. */
+  announce(projectId: ProjectId): Project {
+    const stored = this.core.journal.getProject(projectId);
+    if (stored === null) throw notFound(`unknown project ${projectId}`, { projectId });
+    const answered = this.described(stored, false);
+    this.core.bus.emit('project.updated', answered);
+    return answered;
+  }
+
   async remove(projectId: ProjectId): Promise<void> {
     const project = this.require(projectId);
     if (this.core.workforce.records.list('mission').some(mission => mission.projectId === projectId)
@@ -214,13 +243,16 @@ export class ProjectStore {
    * the disk here: each answer starts the next check in the background, so a
    * folder that gained or lost its `.git` shows it on the following answer
    * (`listFresh` waits for it instead). Before any check has answered,
-   * `repository` is left out.
+   * `repository` is left out. `archivedThreads` is counted here too, once
+   * per list when the caller hands the counts over.
    */
-  private described(project: Project, refresh = true): Project {
+  private described(project: Project, refresh = true, counts = this.core.journal.archivedThreadCounts()): Project {
     const flag = this.git.get(project.path);
     if (refresh) this.refreshGit(project.path);
+    const archivedThreads = counts.get(project.id) ?? 0;
     return {
       ...project,
+      ...(archivedThreads > 0 ? { archivedThreads } : {}),
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
       ...(this.isDrafts(project) ? { kind: 'drafts' as const } : {}),
     };
@@ -268,6 +300,7 @@ export function registerProjectMethods(core: Core): void {
   core.router.register('projects.list', () => core.projects.listFresh());
   core.router.register('projects.add', (params) => core.projects.add(params.path, params.name));
   core.router.register('projects.drafts', () => core.projects.drafts());
+  core.router.register('projects.archive', (params) => core.projects.archive(params.projectId, params.archived ?? true));
   core.router.register('projects.remove', async (params) => {
     await core.projects.remove(params.projectId);
     return { ok: true } as const;

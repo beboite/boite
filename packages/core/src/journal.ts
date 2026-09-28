@@ -157,8 +157,16 @@ export class Journal {
 
   putProject(project: Project): void {
     this.db
-      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)')
-      .run(project.id, project.name, project.path, project.createdAt);
+      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at, archived) VALUES (?, ?, ?, ?, ?)')
+      .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0);
+  }
+
+  /** How many of a project's own threads are archived, sub-threads left out, per project id. */
+  archivedThreadCounts(): Map<string, number> {
+    const rows = this.db
+      .query('SELECT project_id, COUNT(*) AS count FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL GROUP BY project_id')
+      .all() as { project_id: string; count: number }[];
+    return new Map(rows.map((row) => [row.project_id, row.count]));
   }
 
   deleteProject(projectId: string): void {

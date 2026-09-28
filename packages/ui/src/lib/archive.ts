@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import type { ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import type { ProjectId, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { focusComposer } from './focus';
 import { fill, strings } from './strings';
@@ -55,11 +55,11 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
   return true;
 }
 
-/** The archived threads of this machine, read when asked for and never at startup. */
-export async function archivedThreads(store: Store): Promise<ThreadSummary[]> {
+/** The archived threads of this machine, or of one project, read when asked for and never at startup. */
+export async function archivedThreads(store: Store, projectId?: ProjectId): Promise<ThreadSummary[]> {
   const client = store.client;
   if (!client) return [];
-  const all = await client.call('threads.list', { includeArchived: true });
+  const all = await client.call('threads.list', projectId ? { projectId, includeArchived: true } : { includeArchived: true });
   return all.filter((t) => t.archived && !t.parentThreadId).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 

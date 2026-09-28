@@ -42,6 +42,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'projects.files',
   // A phone starts a draft like the desktop: the core picks the folder, the device names no path.
   'projects.drafts',
+  // Putting a project away only hides it from the sidebar, like archiving a thread; nothing on disk moves.
+  'projects.archive',
   // What a thread needs to name its agent.
   'providers.list',
   'accounts.list',
@@ -92,7 +94,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   // Invalidation naming the subscribed root; workflows.list applies the read scope.
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
-  'project.added', 'project.removed',
+  'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
   'turn.started', 'turn.finished',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',

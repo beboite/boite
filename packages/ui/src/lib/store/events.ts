@@ -249,6 +249,8 @@ export function listen(ctx: StoreContext, client: Client): void {
     if (!s.projects.some((p) => p.id === project.id))
       s.projects = [...s.projects, project];
   });
+  // Archived or restored anywhere, or its count of archived threads moved.
+  on('project.updated', (project) => ctx.projects.upsertProject(project));
   on('project.removed', ({ projectId }) => {
     void ctx.projects.dropProject(projectId);
   });

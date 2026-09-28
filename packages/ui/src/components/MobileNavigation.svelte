@@ -26,7 +26,7 @@
   /** With one machine its name says nothing, and a working connection needs no word either. */
   let several = $derived(machines.length > 1);
   let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
-  let project = $derived(store.openProject ?? store.projects[0]);
+  let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
   let entries = $derived(machines.flatMap(machine => {
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
     return machine.store.threads.filter(t => !t.archived).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
@@ -36,7 +36,7 @@
   let rows = $derived((screen === 'activity' ? active : entries)
     .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
-  let projects = $derived([...machines.flatMap(m => m.store.projects.map(p => ({
+  let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '',
     active: m.store === store && p.id === project?.id
   }))), ...(store.owner ? [{ id: 'add-project', label: strings.sidebar.addProject, hint: '', active: false }] : [])]);

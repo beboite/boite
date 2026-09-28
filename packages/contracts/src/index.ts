@@ -519,6 +519,18 @@ export interface Project {
    * Absent on every other project and from a core older than this field.
    */
   kind?: 'drafts';
+  /**
+   * Put away with `projects.archive`: out of the sidebar, its threads and their
+   * processes left as they were. A new thread in it brings it back. Absent when
+   * false and from a core older than this field.
+   */
+  archived?: boolean;
+  /**
+   * How many of its own threads are archived, sub-threads left out, counted on
+   * every answer; `project.updated` carries the new count when one is archived
+   * or restored. Absent when none and from a core older than this field.
+   */
+  archivedThreads?: number;
 }
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
@@ -1947,6 +1959,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
+   * Put a project away, or bring it back with `archived: false`. Nothing else
+   * changes: its threads keep their state and a running one keeps running.
+   * Refused on the drafts project, which a thread with no folder lands in.
+   */
+  'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
+  /**
    * The drafts project: `Boite` in the Documents folder of the machine running
    * this core, or `BOITE_DRAFTS_DIR` when set. The folder and the project are
    * made on the first call and returned as they are on every later one, so a
@@ -2288,6 +2306,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
+  /** A project archived or restored, or one whose count of archived threads moved. */
+  'project.updated': Project;
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;

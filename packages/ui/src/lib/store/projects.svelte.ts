@@ -60,10 +60,10 @@ export class Projects {
   lastProject(): ProjectId | null {
     let stored: string | null = null;
     try { stored = localStorage.getItem(this.#lastProjectKey()); } catch { /* storage unavailable */ }
-    const known = this.projects.find((p) => p.id === stored);
+    const known = this.projects.find((p) => p.id === stored && p.archived !== true);
     if (known) return known.id;
-    const recent = this.ctx.store.threads.filter((t) => !t.archived && !t.parentThreadId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    return recent?.projectId ?? this.projects[0]?.id ?? null;
+    const recent = this.ctx.store.threads.filter((t) => !t.archived && !t.parentThreadId && !this.#inArchivedProject(t.projectId)).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return recent?.projectId ?? this.projects.find((p) => p.archived !== true)?.id ?? null;
   }
 
   /** Where the app opens: a new thread's draft in the last used project, as if New thread had been pressed. */
@@ -86,13 +86,13 @@ export class Projects {
     const s = this.ctx.store;
     if (!s.visible) return;
     if (s.openThread || this.draft) return;
-    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId);
+    const live = s.threads.filter((t) => !t.archived && !t.parentThreadId && !this.#inArchivedProject(t.projectId));
     const recent = [...live].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (recent) {
       await s.open(recent.id);
       return;
     }
-    this.#land(() => s.startDraft(this.projects[0]?.id ?? null));
+    this.#land(() => s.startDraft(this.projects.find((p) => p.archived !== true)?.id ?? null));
   }
 
   // -------------------------------------------------------------------------
@@ -193,6 +193,40 @@ export class Projects {
     } catch (error) {
       this.ctx.fail(error);
     }
+  }
+
+  /**
+   * Puts a project away or brings it back. Put away, the screen leaves it:
+   * the thread or draft that was open in it gives way to where the app lands.
+   */
+  async archiveProject(projectId: ProjectId, archived: boolean): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client) return false;
+    try {
+      this.upsertProject(await client.call('projects.archive', { projectId, archived }));
+    } catch (error) {
+      this.ctx.fail(error);
+      return false;
+    }
+    const s = this.ctx.store;
+    if (archived && (s.openThread?.projectId === projectId || this.draft?.projectId === projectId)) {
+      if (s.openThread?.projectId === projectId) s.openThread = null;
+      if (this.draft?.projectId === projectId) this.draft = null;
+      await s.openWhereLeft();
+    }
+    return true;
+  }
+
+  /** A project as the core now answers it, from this client's call or another's `project.updated`. */
+  upsertProject(project: Project): void {
+    const index = this.projects.findIndex((p) => p.id === project.id);
+    if (index >= 0) this.projects[index] = project;
+    else this.projects = [...this.projects, project];
+  }
+
+  /** Whether a thread's project is put away, so the landing never picks it. */
+  #inArchivedProject(projectId: ProjectId | null): boolean {
+    return projectId !== null && this.projects.some((p) => p.id === projectId && p.archived === true);
   }
 
   /** What a project going away costs the UI, whether this client removed it or another did. */
