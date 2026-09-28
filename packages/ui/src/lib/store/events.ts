@@ -147,6 +147,9 @@ export function listen(ctx: StoreContext, client: Client): void {
     for (const message of threads.messages(threadId, messageId)) message.state = state;
   });
 
+  // A rewind, from this client or another: the message and what follows it go.
+  on('message.truncated', ({ threadId, messageId }) => threads.truncate(threadId, messageId));
+
   on('permission.requested', (request) => {
     requests.mergePermissions([request], 'one');
     layout.notify('needs-you', request.threadId, null);

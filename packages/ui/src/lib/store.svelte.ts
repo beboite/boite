@@ -403,6 +403,8 @@ export class Store {
 
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
+  rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
+  fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }
   createThread(...args: Parameters<Threads['createThread']>) { return this.#ctx.threads.createThread(...args); }
