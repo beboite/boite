@@ -1,14 +1,13 @@
 /**
  * A thread's load on Linux, read from procfs: CPU time from `/proc/<pid>/stat`
  * and resident memory from `/proc/<pid>/status`, summed over the thread's
- * registered processes. Those are the direct children only, what the registry
- * knows off Windows; what they started is not counted. The same stat line also
+ * registered processes and their descendants. The same stat line also
  * says when a process started, which the data directory lock asks.
  *
  * No native code: the reader and the clock are given, so
  * `test/linux-load.test.ts` runs every case on fake files, on any platform.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import type { ProcessPlatform, ProcessSample } from './types.ts';
 
 /**
@@ -17,11 +16,12 @@ import type { ProcessPlatform, ProcessSample } from './types.ts';
  */
 export const USER_HZ = 100;
 
-/** A procfs file's text, or null when the process is gone or the file cannot be read. */
+/** File text or newline-separated directory entries; null when gone or unreadable. */
 export type ProcRead = (path: string) => string | null;
 
 function readProc(path: string): string | null {
   try {
+    if (path === '/proc' || path.endsWith('/task')) return readdirSync(path).join('\n');
     return readFileSync(path, 'utf8');
   } catch {
     return null;
@@ -78,6 +78,25 @@ export function residentBytes(status: string): number | null {
   return match === null ? null : Number(match[1]) * 1024;
 }
 
+function pidsIn(text: string): number[] {
+  return text.split(/\s+/).filter(value => /^\d+$/.test(value)).map(Number)
+    .filter(pid => Number.isSafeInteger(pid) && pid > 0);
+}
+
+/** Older kernels omit task children files. Scan parent pids once per sample. */
+function procChildren(read: ProcRead): Map<number, number[]> {
+  const children = new Map<number, number[]>();
+  for (const pid of pidsIn(read('/proc') ?? '')) {
+    const stat = read(`/proc/${pid}/stat`);
+    const parent = stat === null ? null : statField(stat, 4);
+    if (parent === null) continue;
+    const siblings = children.get(parent) ?? [];
+    siblings.push(pid);
+    children.set(parent, siblings);
+  }
+  return children;
+}
+
 export class LinuxLoad {
   readonly #pids = new Map<string, Set<number>>();
   /** The thread's CPU ticks at its previous sample, per pid, and when that was. */
@@ -118,9 +137,11 @@ export class LinuxLoad {
     if (pids === undefined) return null;
     const ticks = new Map<number, number>();
     let memoryBytes = 0;
-    const workingSets: { pid: number; bytes: number }[] = [];
+    const workingSets: NonNullable<ProcessSample['workingSets']> = [];
     let processes = 0;
-    for (const pid of pids) {
+    const pending = new Set(pids);
+    let fallback: Map<number, number[]> | undefined;
+    for (const pid of pending) {
       const stat = this.read(`/proc/${pid}/stat`);
       const used = stat === null ? null : cpuTicks(stat);
       if (used === null) continue;
@@ -128,8 +149,19 @@ export class LinuxLoad {
       ticks.set(pid, used);
       const status = this.read(`/proc/${pid}/status`);
       const bytes = status === null ? null : residentBytes(status);
-      if (bytes !== null) workingSets.push({ pid, bytes });
+      const exe = this.read(`/proc/${pid}/comm`)?.trim();
+      if (bytes !== null) workingSets.push({ pid, bytes, ...(exe ? { exe } : {}) });
       memoryBytes += bytes ?? 0;
+      const tasks = pidsIn(this.read(`/proc/${pid}/task`) ?? String(pid));
+      for (const tid of tasks) {
+        const children = this.read(`/proc/${pid}/task/${tid}/children`);
+        if (children === null) {
+          fallback ??= procChildren(this.read);
+          for (const child of fallback.get(pid) ?? []) pending.add(child);
+        } else {
+          for (const child of pidsIn(children)) pending.add(child);
+        }
+      }
     }
     if (processes === 0) return null;
 

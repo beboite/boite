@@ -689,6 +689,7 @@ export class ProcRegistry {
     for (const measured of sample.workingSets ?? []) {
       const entry = this.live.get(threadId)?.get(measured.pid);
       if (entry !== undefined) memory?.push({ threadId, pid: measured.pid, exe: entry.record.exe, bytes: measured.committedBytes ?? measured.bytes, root: entry.root });
+      else if (this.capability().os !== 'windows') memory?.push({ threadId, pid: measured.pid, exe: measured.exe ?? 'process', bytes: measured.bytes, root: false });
     }
     return { processes, cpuPercent: sample.cpuPercent, memoryBytes: sample.memoryBytes };
   }
@@ -713,9 +714,10 @@ export class ProcRegistry {
     }
     this.memory.sample(processes.reduce((sum, process) => sum + process.bytes, 0), processes, (victim) => {
       const entry = this.live.get(victim.threadId)?.get(victim.pid);
-      if (entry === undefined || entry.root) return false;
-      if (this.capability().os === 'windows') return this.platform.terminateProcess(victim.threadId, victim.pid);
+      if (entry?.root) return false;
+      if (this.capability().os === 'windows') return entry !== undefined && this.platform.terminateProcess(victim.threadId, victim.pid);
       try {
+        if (entry === undefined) return process.kill(victim.pid, 'SIGKILL');
         const stop = entry.kill();
         if (stop !== undefined) this.trackStop(stop);
         return true;

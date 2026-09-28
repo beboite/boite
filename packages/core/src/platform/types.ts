@@ -18,7 +18,7 @@ export interface ProcessSample {
   cpuPercent: number;
   memoryBytes: number;
   /** Working set for the UI; private commit for the Windows governor. */
-  workingSets?: { pid: number; bytes: number; committedBytes?: number }[];
+  workingSets?: { pid: number; bytes: number; committedBytes?: number; exe?: string }[];
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */

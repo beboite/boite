@@ -4,7 +4,7 @@ import type { ProcessPlatform } from './types.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
- * also measures CPU and reads start times from procfs. macOS supplies resident
+ * also samples descendants and reads start times from procfs. macOS supplies resident
  * memory through libproc when the platform entry loads its native backend.
  */
 export function createPosixPlatform(
