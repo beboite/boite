@@ -8,7 +8,7 @@
  */
 
 import { realpath, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { Project, ProjectId, ThreadSummary, WorktreeEntry } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -48,12 +48,23 @@ function keyOf(path: string): string {
   return process.platform === 'win32' ? full.toLowerCase() : full;
 }
 
-/** The real path's key when the folder exists, so an 8.3 alias or a junction matches git's long form. */
+/**
+ * The real path's key, so an 8.3 alias or a junction matches git's long form.
+ * A folder already deleted resolves through its nearest parent that exists:
+ * `/var/...` still meets git's `/private/var/...` on macOS.
+ */
 async function realKey(path: string): Promise<string> {
-  try {
-    return keyOf(await realpath(path));
-  } catch {
-    return keyOf(path);
+  let head = resolve(path);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return keyOf(join(await realpath(head), ...tail));
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return keyOf(path);
+      tail.unshift(basename(head));
+      head = parent;
+    }
   }
 }
 

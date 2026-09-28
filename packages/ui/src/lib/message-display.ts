@@ -173,9 +173,12 @@ export function turnAnswer(messages: readonly Message[], turnId: string): string
 
 /** The newest turn's answer that has any text, or the empty string. */
 export function lastAnswer(messages: readonly Message[]): string {
+  // A turn with no text is read once, however many messages it spans.
+  const read = new Set<string>();
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
-    if (message.role !== 'assistant' || message.turnId === null) continue;
+    if (message.role !== 'assistant' || message.turnId === null || read.has(message.turnId)) continue;
+    read.add(message.turnId);
     const text = turnAnswer(messages, message.turnId);
     if (text) return text;
   }

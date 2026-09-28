@@ -106,16 +106,23 @@ describe('turnDiffs', () => {
   });
 });
 
-test('lines added and removed add up per file, whichever separator the agent used, and in all', () => {
+test('lines added and removed add up per file, however the agent spelled its path, and in all', () => {
   const diff = (path: string, oldText: string, newText: string) => ({ kind: 'diff', path, oldText, newText }) as TurnDiff;
-  const { total, byPath } = turnLineCounts([
-    diff('C:\\w\\src\\a.ts','one\ntwo\n', 'one\n2\nthree\n'),
-    diff('C:/w/src/a.ts', 'x\n', ''),
-    diff('b.ts', '', 'new\n')
+  const diffs = [
+    diff('C:\\w\\src\\a.ts', 'one\ntwo\n', 'one\n2\nthree\n'),
+    diff('c:/w/src/a.ts', 'x\n', ''),
+    diff('src/a.ts', 'y\n', 'y\nz\n'),
+    diff('b.ts', '', 'new\n'),
+    diff('D:\\elsewhere\\c.ts', '', 'far\n')
+  ];
+  const { total, byPath } = turnLineCounts(diffs, 'C:\\w');
+  expect(total).toEqual({ added: 5, removed: 2 });
+  // The rows the card draws, one per file, each with the counts of every spelling.
+  const files = turnFiles(diffs.map((document) => ({ type: 'tool', toolId: document.path, name: 'Edit', input: {}, status: 'done', documents: [document] }) as MessagePart), 'C:\\w');
+  expect(files.map((file) => [file.relative ?? file.path, countsOf(byPath, file)])).toEqual([
+    ['src/a.ts', { added: 3, removed: 2 }],
+    ['b.ts', { added: 1, removed: 0 }],
+    ['D:\\elsewhere\\c.ts', { added: 1, removed: 0 }]
   ]);
-  expect(total).toEqual({ added: 3, removed: 2 });
-  const file = (path: string) => ({ path, relative: null, absolute: null, name: '', folder: '', change: 'changed' as const });
-  expect(countsOf(byPath, file('C:/w/src/a.ts'))).toEqual({ added: 2, removed: 2 });
-  expect(countsOf(byPath, file('b.ts'))).toEqual({ added: 1, removed: 0 });
-  expect(countsOf(byPath, file('c.ts'))).toBeNull();
+  expect(countsOf(byPath, { path: 'd.ts', relative: 'd.ts', absolute: null, name: '', folder: '', change: 'changed' })).toBeNull();
 });

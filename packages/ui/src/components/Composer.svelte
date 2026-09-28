@@ -502,10 +502,12 @@
    * A sent prompt back in the box. On a thread at rest it comes back as the
    * message to edit, pictures and files included: sending replaces it and
    * what followed. A running thread only recalls the words, to queue again.
+   * Edit mode asks what `MessageList`'s `branchable` asks, the rules of a rewind.
    */
   function recallPrompt(prompt: SentPrompt) {
     const state = stateForInput();
-    const edit = !store.busy && store.openThread !== null;
+    const thread = store.openThread;
+    const edit = !store.busy && thread !== null && !thread.agentSessionId && thread.projectId !== null;
     restorePrompt(prompt.text, prompt.previewReferences);
     if (edit) state.attachments = prompt.attachments;
     else if (state.editing) state.attachments = [];

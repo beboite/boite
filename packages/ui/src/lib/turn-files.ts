@@ -116,13 +116,18 @@ function touched(part: Extract<MessagePart, { type: 'tool' }>): { path: string; 
   return [];
 }
 
+/** One file's identity in an answer: relative to the thread's directory when inside it, else its absolute form. */
+function fileKey(cwd: string, path: string): string {
+  return relativeTo(cwd, path) ?? normal(path);
+}
+
 export function turnFiles(parts: readonly MessagePart[], cwd: string): TurnFile[] {
   const byPath = new Map<string, TurnFile>();
   for (const part of parts) {
     if (part.type !== 'tool' || part.status !== 'done') continue;
     for (const { path, change } of touched(part)) {
       const relative = relativeTo(cwd, path);
-      const key = relative ?? normal(path);
+      const key = fileKey(cwd, path);
       const before = byPath.get(key);
       // Made then edited is still new; changed then deleted is gone.
       const merged = before?.change === 'created' && change === 'changed' ? 'created' : change;
@@ -161,22 +166,18 @@ export interface LineCounts {
   removed: number;
 }
 
-/** A path as the agent may spell it twice: one separator. */
-function pathKey(path: string): string {
-  return path.replace(/\\/g, '/');
-}
-
 /**
- * Lines added and removed, per file and in all, from the answer's own diffs.
- * A file with no diff document (a shell `rm`, a write the tool did not draw)
- * has no entry: its row shows no count rather than a false zero.
+ * Lines added and removed, per file and in all, from the answer's own diffs,
+ * keyed as `turnFiles` keys its rows: in `C:\w`, `src/a.ts` and `C:\w\src\a.ts`
+ * are one file. A file with no diff document (a shell `rm`, a write the tool
+ * did not draw) has no entry: its row shows no count rather than a false zero.
  */
-export function turnLineCounts(diffs: readonly TurnDiff[]): { total: LineCounts; byPath: Map<string, LineCounts> } {
+export function turnLineCounts(diffs: readonly TurnDiff[], cwd: string): { total: LineCounts; byPath: Map<string, LineCounts> } {
   const byPath = new Map<string, LineCounts>();
   const total = { added: 0, removed: 0 };
   for (const doc of diffs) {
     const { added, removed } = diffCounts(diffRows(doc.oldText, doc.newText));
-    const key = pathKey(doc.path);
+    const key = fileKey(cwd, doc.path);
     const seen = byPath.get(key) ?? { added: 0, removed: 0 };
     byPath.set(key, { added: seen.added + added, removed: seen.removed + removed });
     total.added += added;
@@ -186,5 +187,5 @@ export function turnLineCounts(diffs: readonly TurnDiff[]): { total: LineCounts;
 }
 
 export function countsOf(counts: Map<string, LineCounts>, file: TurnFile): LineCounts | null {
-  return counts.get(pathKey(file.path)) ?? (file.absolute ? counts.get(pathKey(file.absolute)) : undefined) ?? null;
+  return counts.get(file.relative ?? normal(file.path)) ?? null;
 }

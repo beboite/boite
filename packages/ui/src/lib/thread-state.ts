@@ -28,8 +28,8 @@ export function threadState(thread: Pick<ThreadSummary, 'status' | 'unread' | 'b
   }
 }
 
-/** What a folded project says for the threads it hides, most urgent first: the user's turn, a failure, work, then news. */
-const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'working', 'monitoring', 'background', 'done'];
+/** What a folded project says for the threads it hides, most urgent first: the user's turn, a failure, work, work waiting for a slot, then news. */
+const ROLLUP_ORDER: ThreadState[] = ['waiting', 'error', 'working', 'monitoring', 'background', 'queued', 'done'];
 
 /** The most urgent state among a project's threads and how many threads are in it; null when every one is at rest. */
 export function projectRollup(threads: readonly Pick<ThreadSummary, 'status' | 'unread' | 'backgroundWork'>[]): { kind: ThreadState; count: number } | null {

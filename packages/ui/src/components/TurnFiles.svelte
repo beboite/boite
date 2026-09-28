@@ -15,11 +15,11 @@
    * the whole thread changed is the working tree against its last commit: the
    * Changes panel, one click away for whoever can read the repository.
    */
-  let { store, files, diffs = [] }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[] } = $props();
+  let { store, files, diffs = [], cwd }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[]; /** The directory `files` were read against. */ cwd: string } = $props();
   let showDiff = $state(false);
   /** Folded by default: the count and the lines added and removed say enough until the list is wanted. */
   let open = $state(false);
-  let lines = $derived(turnLineCounts(diffs));
+  let lines = $derived(turnLineCounts(diffs, cwd));
   let repository = $derived(store.owner && store.openProject?.repository === true);
   let tree = $derived(turnFileTree(files));
   let expanded = $state<Record<string, boolean>>({});

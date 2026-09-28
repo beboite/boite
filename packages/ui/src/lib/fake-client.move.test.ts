@@ -55,6 +55,20 @@ test('a moved thread works in the target folder, drops its session, and tells th
   expect(textOf(later, second.id, 'assistant')).toBe('and again');
 });
 
+test('editing the prompt that carried the note puts it back for the resent one', async () => {
+  const client = await fake();
+  await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });
+  const first = await client.call('turns.start', { threadId: PLAIN, prompt: 'carry on' });
+  await finished(client, PLAIN, first.id);
+  const carrier = (await client.call('threads.get', { threadId: PLAIN })).messages.find((m) => m.turnId === first.id && m.role === 'user')!;
+
+  await client.call('threads.rewind', { threadId: PLAIN, messageId: carrier.id });
+  const resent = await client.call('turns.start', { threadId: PLAIN, prompt: 'carry on, edited' });
+  await finished(client, PLAIN, resent.id);
+  const messages = (await client.call('threads.get', { threadId: PLAIN })).messages;
+  expect(messages.find((m) => m.turnId === resent.id && m.role === 'user')?.parts[0]).toMatchObject({ moved: { to: { projectId: 'p-boite' } } });
+});
+
 test('moving back to where the thread started leaves nothing to explain', async () => {
   const client = await fake();
   await client.call('threads.move', { threadId: PLAIN, projectId: 'p-boite' });

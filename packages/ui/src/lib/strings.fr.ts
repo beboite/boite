@@ -1441,7 +1441,7 @@ export const fr: Translation = {
     },
     worktrees: {
       heading: 'Worktrees',
-      intro: 'Une conversation lancée dans un projet git travaille dans son propre worktree, sur une branche boite/. Il reste sur le disque une fois la conversation archivée. Supprimez ceux dont vous n’avez plus besoin : le dossier et sa branche partent.',
+      intro: 'Une conversation lancée avec son propre worktree travaille sur une branche boite/ à côté du projet. Le worktree reste sur le disque une fois la conversation archivée. Supprimez ceux dont vous n’avez plus besoin : le dossier et sa branche partent.',
       show: 'Afficher les worktrees',
       noProject: 'Aucun projet git sur cette machine.',
       empty: 'Plus aucun worktree.',

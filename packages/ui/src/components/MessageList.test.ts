@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
 import MessageList from './MessageList.svelte';
@@ -403,8 +403,13 @@ test('Ctrl+F counts matches in messages the window has not drawn, walks to them,
   stubLayout(messages.length * ESTIMATE);
   live.findOpen = true;
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  // The bar loads on first use.
+  const input = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>('[data-testid=find-input]');
+    if (!found) throw new Error('the find bar is not drawn yet');
+    return found;
+  });
   await settle();
-  const input = document.querySelector<HTMLInputElement>('[data-testid=find-input]')!;
   expect(document.activeElement).toBe(input);
 
   // The oldest message is far above the drawn window.

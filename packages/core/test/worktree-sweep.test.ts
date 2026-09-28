@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { WorktreeEntry } from '@boite/contracts';
 import { parseWorktreeList } from '../src/worktree-sweep.ts';
@@ -58,8 +58,24 @@ async function echoAccount(): Promise<string> {
   return account.id;
 }
 
+/**
+ * A path as git reports it: resolved through its nearest existing folder, so
+ * the temp directory's `/var` meets `/private/var` on macOS and an 8.3 alias
+ * its long name on Windows.
+ */
+function realKey(path: string): string {
+  let head = resolve(path);
+  const tail: string[] = [];
+  while (!existsSync(head) && dirname(head) !== head) {
+    tail.unshift(basename(head));
+    head = dirname(head);
+  }
+  const full = join(realpathSync.native(head), ...tail);
+  return process.platform === 'win32' ? full.toLowerCase() : full;
+}
+
 function byPath(entries: WorktreeEntry[], path: string): WorktreeEntry {
-  const found = entries.find((entry) => entry.path.toLowerCase() === path.toLowerCase());
+  const found = entries.find((entry) => realKey(entry.path) === realKey(path));
   if (found === undefined) throw new Error(`${path} not listed in ${entries.map((entry) => entry.path).join(', ')}`);
   return found;
 }
@@ -89,9 +105,9 @@ describe('worktrees.list', () => {
 
     const entries = await client.call('worktrees.list', { projectId: project.id });
     expect(entries).toHaveLength(7);
-    expect(entries.some((entry) => entry.path.toLowerCase() === project.path.toLowerCase())).toBe(false);
+    expect(entries.some((entry) => realKey(entry.path) === realKey(project.path))).toBe(false);
     expect(byPath(entries, clean)).toEqual({
-      path: clean, branch: 'boite/clean', dirty: false, unmerged: false, missing: false,
+      path: expect.any(String), branch: 'boite/clean', dirty: false, unmerged: false, missing: false,
       threadId: null, threadTitle: null, threadArchived: false,
     });
     expect(byPath(entries, modified)).toMatchObject({ dirty: true, unmerged: false });
@@ -222,6 +238,18 @@ describe('worktrees.remove', () => {
     rmSync(gone, { recursive: true, force: true });
     expect(await client.call('worktrees.remove', { projectId: project.id, path: gone })).toEqual({ ok: true, branchDeleted: true });
     expect(git(project.path, 'worktree', 'list', '--porcelain')).not.toContain('boite/gone');
+    expect(branches(project)).not.toContain('boite/gone');
+  });
+
+  test('a missing directory named through a link still matches the path git lists', async () => {
+    const project = await repoProject();
+    const gone = addWorktree(project, 'gone');
+    rmSync(gone, { recursive: true, force: true });
+    // What a temp path under /var or an 8.3 alias is to git: another name for the same folder.
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(harness.dataDir, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const named = join(alias, relative(harness.dataDir, gone));
+    expect(await client.call('worktrees.remove', { projectId: project.id, path: named })).toEqual({ ok: true, branchDeleted: true });
     expect(branches(project)).not.toContain('boite/gone');
   });
 

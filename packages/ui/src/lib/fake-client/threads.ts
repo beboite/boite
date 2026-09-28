@@ -353,6 +353,9 @@ export function threadMethods(ctx: FakeContext) {
       if (!message) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is not a message of thread ${thread.id}`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, expected: 'a user message of this thread' } });
       if (message.role !== 'user') throw new RpcFailure({ code: RpcErrorCode.Refused, message: `message ${params.messageId} is a ${message.role} message; only a message the user sent can be edited`, data: { threadId: thread.id, field: 'messageId', messageId: params.messageId, role: message.role, expected: 'user' } });
       const removed = thread.messages.splice(at);
+      // The note to the agent went with a removed message: it waits for the next one again.
+      const moved = removed.flatMap((entry) => entry.parts).find((part) => part.type === 'text' && part.moved !== undefined);
+      if (moved?.type === 'text' && moved.moved && !ctx.moveNotes.has(thread.id)) ctx.moveNotes.set(thread.id, moved.moved);
       const gone = new Set(removed.map((entry) => entry.turnId));
       thread.turns = thread.turns.filter((turn) => !gone.has(turn.id));
       thread.sessionId = null;

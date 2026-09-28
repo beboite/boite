@@ -85,6 +85,21 @@ export class Composer {
     state.editing = message.id;
   }
 
+  /**
+   * A prompt that already left the thread back in its box as a plain draft:
+   * a retry whose resend failed after the rewind took the message away.
+   */
+  restoreDraft(threadId: string, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[]): void {
+    const restored = restorePreviewMentions(prompt, previewReferences);
+    this.composerStates[threadId] ??= { text: '', attachments: [], queued: [], sending: false, paused: false };
+    const state = this.composerStates[threadId]!;
+    state.text = restored.text;
+    state.previewReferences = restored.references;
+    state.attachments = attachments;
+    state.selection = { start: restored.text.length, end: restored.text.length };
+    state.editing = null;
+  }
+
   addPreviewReference(threadId: string, reference: PreviewReference): boolean {
     const s = this.ctx.store;
     if (previewReferencesError([reference])) { s.error = strings.previewComments.failed; return false; }

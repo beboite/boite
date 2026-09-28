@@ -243,8 +243,13 @@ export class Projects {
       const answer = await client.call('projects.icon', { projectId: project.id });
       // Another machine took this Store meanwhile: project ids can collide between machines.
       if (this.ctx.client !== client || !answer.dataUrl.startsWith('data:image/')) return;
-      this.iconUrls = { ...this.iconUrls, [`${project.id}:${answer.version}`]: answer.dataUrl };
+      // The list may name an older version than the core now holds: the current
+      // image answers for it too, or the tile would ask again for a key never filled.
+      this.iconUrls = { ...this.iconUrls, [key]: answer.dataUrl, [`${project.id}:${answer.version}`]: answer.dataUrl };
     } catch {
+      /* the initial stands */
+    } finally {
+      // Never left in flight: a refused or dropped answer is asked again by the next tile.
       this.#iconLoads.delete(key);
     }
   }

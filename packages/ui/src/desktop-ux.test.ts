@@ -398,3 +398,15 @@ test('retry sits on the last finished turn only and sends its prompt again in pl
   expect(userTexts()).toEqual(before);
   expect(store.openThread!.turns.some((turn) => turn.id === answered)).toBe(false);
 });
+
+test('a retry whose resend fails leaves its prompt in the box', async () => {
+  await openIdleThread();
+  const before = userTexts();
+  const sending = vi.spyOn(store, 'send').mockResolvedValue(false);
+  const summaries = document.querySelectorAll('[data-testid=turn-summary]');
+  (summaries[summaries.length - 1]!.querySelector('[data-testid=message-retry]') as HTMLButtonElement).click();
+  const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  await waitFor(() => sending.mock.calls.length === 1 && box.value === before.at(-1));
+  expect(userTexts()).toEqual(before.slice(0, -1));
+  expect(document.querySelector('[data-testid=composer-editing]')).toBeNull();
+});

@@ -15,7 +15,6 @@
   import MoveMarker from './MoveMarker.svelte';
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
-  import FindBar from './FindBar.svelte';
   import { focusComposer } from '../lib/focus';
   import { TurnProgress } from '../lib/turn-progress.svelte';
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
@@ -27,6 +26,11 @@
     threadId,
     messages
   }: { store: Store; threadId: string; messages: Message[] } = $props();
+  /** The find bar is its own chunk, fetched the first time it opens. A failed fetch tries again on the next open. */
+  let FindBar = $state.raw<typeof import('./FindBar.svelte').default>();
+  $effect(() => {
+    if (store.findOpen && !FindBar) void import('./FindBar.svelte').then((module) => { FindBar = module.default; }).catch(() => { store.findOpen = false; });
+  });
   const coordination = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   const delegation = $derived(store.delegation && (store.delegation.rootThreadId === threadId || store.delegation.agents.some(agent => agent.thread.id === threadId)) ? store.delegation : null);
   const letters = $derived([
@@ -462,7 +466,7 @@
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[] }>();
+    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[]; cwd: string }>();
     if (!thread || thread.id !== threadId) return result;
     const parts = new Map<string, Message['parts']>();
     for (const message of messages) {
@@ -473,7 +477,7 @@
       if (turn.status === 'running' || turn.status === 'queued') continue;
       const own = parts.get(turn.id) ?? [];
       const files = turnFiles(own, thread.cwd);
-      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own) });
+      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own), cwd: thread.cwd });
     }
     return result;
   });
@@ -516,7 +520,9 @@
     if (!prompt) return;
     const rewound = await store.rewind(prompt.id);
     if (!rewound) return;
-    await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
+    const sent = await store.send(rewound.prompt, threadId, rewound.attachments, rewound.previewReferences);
+    // The rewind already took the prompt away: a failed send leaves it in the box, not nowhere.
+    if (!sent) store.restoreDraft(threadId, rewound.prompt, rewound.attachments, rewound.previewReferences);
   }
 
   function toggleImage(id: string): void {
@@ -525,7 +531,7 @@
 </script>
 
 <div class="timeline-wrap">
-  {#if store.findOpen}
+  {#if store.findOpen && FindBar}
     <FindBar {messages} {viewport} request={store.findRequest} jump={(id) => jumpToMessage(id)} onclose={() => (store.findOpen = false)} />
   {/if}
   <MessageOutline {messages} active={activePrompt} jump={id => void jumpToMessage(id)}

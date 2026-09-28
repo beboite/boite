@@ -110,4 +110,7 @@ test('a folded project names its most urgent state and how many threads share it
   expect(projectRollup([{ status: 'running', unread: false }, { status: 'error', unread: false }])).toEqual({ kind: 'error', count: 1 });
   expect(projectRollup([{ status: 'error', unread: false }, { status: 'waiting', unread: false }])).toEqual({ kind: 'waiting', count: 1 });
   expect(projectRollup([{ status: 'idle', unread: true, backgroundWork: { kinds: ['monitor'], since: NOW } }, { status: 'idle', unread: true }])).toEqual({ kind: 'monitoring', count: 1 });
+  // Threads waiting for a slot are work to come: they show, after work under way and before news.
+  expect(projectRollup([{ status: 'queued', unread: false }, { status: 'queued', unread: false }])).toEqual({ kind: 'queued', count: 2 });
+  expect(projectRollup([{ status: 'queued', unread: false }, { status: 'idle', unread: true }])).toEqual({ kind: 'queued', count: 1 });
 });

@@ -209,6 +209,30 @@ describe('threads.move', () => {
     expect(seen.at(-1)?.prompt).toContain('This thread moved');
   });
 
+  test('editing the prompt that carried the note puts it back, and does not resume a checkpoint from the old folder', async () => {
+    const { seen } = recordingEcho();
+    const alpha = await folderProject('alpha');
+    const beta = await folderProject('beta');
+    const moving = await thread(alpha.id);
+    const first = await run(moving.id, 'the widgets are blue');
+    // A checkpoint taken in alpha, as a Claude turn reports one.
+    const turn = h.core.journal.getTurn(first)!;
+    h.core.journal.putTurn({ ...turn, checkpoint: { sessionId: 'native-1', entry: 'entry-1' } });
+    await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
+    await run(moving.id, 'what colour');
+    const carrier = h.core.threads.get(moving.id).messages.filter((message) => message.role === 'user').at(-1)!;
+
+    const rewound = await client.call('threads.rewind', { threadId: moving.id, messageId: carrier.id });
+    expect(rewound.session).toBe('seeded');
+    expect(rewound.thread.sessionResumeAt ?? null).toBeNull();
+    expect(h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${moving.id}`)).toMatchObject({ from: { cwd: alpha.path }, to: { cwd: beta.path } });
+
+    await run(moving.id, 'what colour, again');
+    expect(seen.at(-1)?.prompt).toContain(`This thread moved from project alpha (${alpha.path}) to project beta (${beta.path}).`);
+    expect(seen.at(-1)?.prompt).not.toContain('in the same working directory');
+    expect(h.core.journal.getSetting(`${MOVE_NOTE_PREFIX}${moving.id}`)).toBeUndefined();
+  });
+
   test('refuses what cannot move, naming the field', async () => {
     recordingEcho();
     const alpha = await folderProject('alpha');

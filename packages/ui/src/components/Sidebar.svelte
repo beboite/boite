@@ -448,6 +448,7 @@
   .rollup.waiting { color: var(--color-live); }
   .rollup.error { color: var(--color-danger); }
   .rollup.done { color: var(--color-success); }
+  .rollup.queued { color: var(--color-muted-foreground); }
   .rollup.monitoring .dot, .rollup.background .dot { animation: rollup-pulse 1.6s var(--ease-out-quint) infinite; }
   .rollup :global(.spinner) { animation: rollup-spin 1s linear infinite; }
   @keyframes rollup-spin { to { transform: rotate(360deg); } }

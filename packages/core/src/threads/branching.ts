@@ -2,6 +2,7 @@ import type {
   Attachment,
   Message,
   MessageId,
+  MoveNotice,
   PreviewReference,
   ThreadId,
   ThreadRewind,
@@ -14,6 +15,7 @@ import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
+import { MOVE_NOTE_PREFIX, pendingMove } from './move.ts';
 import { withLoad } from './records.ts';
 
 type SessionPlan = Pick<ThreadSummary, 'sessionId' | 'sessionResumeAt'> & { session: ThreadRewind['session'] };
@@ -64,8 +66,13 @@ export class ThreadBranching {
 
     // A user message opens its turn, so what stays ends on a whole turn.
     const kept = this.core.journal.listMessagePage(threadId, { beforeRowid: rowid, limit: 1 }).messages[0] ?? null;
-    const plan = kept === null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
     const removed = this.core.journal.messageIdsFrom(threadId, rowid);
+    // The thread moved after the kept turn: its checkpoint belongs to the old
+    // folder, and the note that told the agent goes with the removed message,
+    // so it waits again for the next one.
+    const moved = firstMove(removed.messageIds.map((id) => this.core.journal.getMessage(id)));
+    const restoreNote = moved !== null && pendingMove(this.core, threadId) === null;
+    const plan = kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
     const next: ThreadSummary = {
       ...thread,
       sessionId: plan.sessionId,
@@ -103,6 +110,7 @@ export class ThreadBranching {
       () => {
         this.core.journal.truncateMessages(threadId, rowid);
         this.core.journal.putThread(next);
+        if (restoreNote) this.core.journal.setSetting(`${MOVE_NOTE_PREFIX}${threadId}`, moved);
       },
     );
     this.core.bus.emit('message.truncated', { threadId, messageId });
@@ -247,6 +255,16 @@ export class ThreadBranching {
     if (turn.execution?.accountId !== thread.accountId || turn.execution.providerId !== thread.providerId) return null;
     return { sessionId: checkpoint.sessionId, sessionResumeAt: checkpoint.entry, session: 'native' };
   }
+}
+
+/** The earliest move notice the messages carry, a user's prompt or an agent's own line. */
+function firstMove(messages: (Message | null)[]): MoveNotice | null {
+  for (const message of messages) {
+    for (const part of message?.parts ?? []) {
+      if (part.type === 'text' && part.moved !== undefined) return part.moved;
+    }
+  }
+  return null;
 }
 
 function fresh(): SessionPlan {

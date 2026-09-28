@@ -1505,7 +1505,7 @@ export const strings = {
     /** The worktrees a thread leaves on disk, and their removal by hand. */
     worktrees: {
       heading: 'Worktrees',
-      intro: 'A thread started in a git project works in a worktree of its own, on a boite/ branch. It stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
+      intro: 'A thread started with its own worktree works on a boite/ branch beside the project. The worktree stays on disk after the thread is archived. Remove the ones you are done with: the folder and its branch go.',
       show: 'Show worktrees',
       noProject: 'No git project on this machine.',
       empty: 'No worktree left.',
