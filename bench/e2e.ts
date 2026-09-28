@@ -75,4 +75,4 @@ const result = {
 };
 writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n');
 console.log(`${mode}: ${result.seconds.toFixed(2)} s, ${result.tests} passed, ${result.assertions} assertions; ${join(output, 'result.json')}`);
-process.exit(results.some((group) => group.exitCode !== 0 || group.cases.length === 0) ? 1 : 0);
+process.exit(results.some((group) => group.exitCode !== 0 || group.cases.length === 0 || group.skipped !== 0) ? 1 : 0);
