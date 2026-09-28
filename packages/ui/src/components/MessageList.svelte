@@ -6,7 +6,7 @@
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
-  import { turnFiles, type TurnFile } from '../lib/turn-files';
+  import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
   import ForwardedAgentMessage from './ForwardedAgentMessage.svelte';
   import DelegationActivity from './DelegationActivity.svelte';
@@ -429,7 +429,7 @@
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
-    const result = new Map<string, TurnFile[]>();
+    const result = new Map<string, { files: TurnFile[]; diffs: TurnDiff[] }>();
     if (!thread || thread.id !== threadId) return result;
     const parts = new Map<string, Message['parts']>();
     for (const message of messages) {
@@ -438,8 +438,9 @@
     }
     for (const turn of thread.turns) {
       if (turn.status === 'running' || turn.status === 'queued') continue;
-      const files = turnFiles(parts.get(turn.id) ?? [], thread.cwd);
-      if (files.length > 0) result.set(turn.id, files);
+      const own = parts.get(turn.id) ?? [];
+      const files = turnFiles(own, thread.cwd);
+      if (files.length > 0) result.set(turn.id, { files, diffs: turnDiffs(own) });
     }
     return result;
   });
@@ -529,7 +530,7 @@
             <AssistantMessage {store} {threadId} {message} {progress} {signedOut} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
-            <TurnFiles {store} files={filesByTurn.get(turn.id)!} />
+            <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
             <TurnSummary

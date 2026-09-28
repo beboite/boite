@@ -1,4 +1,4 @@
-import type { MessagePart } from '@boite/contracts';
+import type { MessagePart, ToolDocument } from '@boite/contracts';
 import { describeTool, fileName } from './tool-summary';
 
 /**
@@ -139,4 +139,18 @@ export function turnFiles(parts: readonly MessagePart[], cwd: string): TurnFile[
     }
   }
   return [...byPath.values()];
+}
+
+export type TurnDiff = Extract<ToolDocument, { kind: 'diff' }>;
+
+/**
+ * Every change one answer drew as a diff, call after call in the order they
+ * ran: an edit made twice to one file shows both, which is what happened.
+ */
+export function turnDiffs(parts: readonly MessagePart[]): TurnDiff[] {
+  return parts.flatMap((part) =>
+    part.type === 'tool' && part.status === 'done'
+      ? (part.documents ?? []).filter((document): document is TurnDiff => document.kind === 'diff')
+      : []
+  );
 }

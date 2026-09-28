@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { MAX_EDITS, diffCounts, diffRows } from './diff';
+import { MAX_EDITS, diffCounts, diffRows, splitRows } from './diff';
 
 test('a changed middle line is one remove and one add between the context lines', () => {
   const rows = diffRows('one\ntwo\nthree\n', 'one\nTWO\nthree\n');
@@ -123,4 +123,30 @@ test('random edits give a shortest diff whose rows point at the right lines', ()
       }
     }
   }
+});
+
+test('ignoring whitespace keeps a reindented line as context, in its new spacing', () => {
+  const before = 'if (a) {\n  run();\n}\nend\n';
+  const after = 'if (a) {\n    run();\n}\nEND\n';
+  expect(diffCounts(diffRows(before, after))).toEqual({ added: 2, removed: 2 });
+  const rows = diffRows(before, after, { ignoreWhitespace: true });
+  expect(diffCounts(rows)).toEqual({ added: 1, removed: 1 });
+  expect(rows.find((row) => row.kind === 'context' && row.text.includes('run'))).toEqual({ kind: 'context', text: '    run();', oldLine: 2, newLine: 2 });
+  expect(rows.at(-1)).toEqual({ kind: 'add', text: 'END', newLine: 4 });
+  expect(diffRows('a  b\n', 'a b\n', { ignoreWhitespace: true })).toEqual([]);
+});
+
+test('side by side faces each removal run with the additions after it', () => {
+  const rows = diffRows('keep\nold 1\nold 2\ntail\n', 'keep\nnew 1\ntail\nmore\n');
+  const split = splitRows(rows);
+  expect(split.map((row) => row.kind === 'gap' ? 'gap' : `${row.left?.text ?? '-'} | ${row.right?.text ?? '-'}`)).toEqual([
+    'keep | keep',
+    'old 1 | new 1',
+    'old 2 | -',
+    'tail | tail',
+    '- | more'
+  ]);
+  const far = splitRows(diffRows(Array.from({ length: 20 }, (_, i) => `l${i}`).join('\n'), Array.from({ length: 20 }, (_, i) => i === 10 ? 'x' : `l${i}`).join('\n')));
+  expect(far[0]).toEqual({ kind: 'gap', hidden: 7 });
+  expect(far.at(-1)).toEqual({ kind: 'gap', hidden: 6 });
 });

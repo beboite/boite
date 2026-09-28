@@ -3,13 +3,21 @@
   // file in the side panel, which already reads text, shows pictures and offers
   // a download for the rest. "Show in folder" hands the path to the system file
   // manager, only in the shell on its own core, and never opens the file itself.
-  import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePenLine, FilePlus2, FileMinus2, Folder, FolderOpen } from '@lucide/svelte';
+  import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileDiff, FilePenLine, FilePlus2, FileMinus2, Folder, FolderOpen, GitCompareArrows } from '@lucide/svelte';
   import { revealFile } from '../lib/links';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import { turnFileTree, type TurnFile, type TurnFileNode } from '../lib/turn-files';
+  import { turnFileTree, type TurnDiff, type TurnFile, type TurnFileNode } from '../lib/turn-files';
+  import DiffView from './DiffView.svelte';
 
-  let { store, files }: { store: Store; files: TurnFile[] } = $props();
+  /**
+   * `diffs` is what the answer's own calls changed, shown here on demand. What
+   * the whole thread changed is the working tree against its last commit: the
+   * Changes panel, one click away for whoever can read the repository.
+   */
+  let { store, files, diffs = [] }: { store: Store; files: TurnFile[]; diffs?: TurnDiff[] } = $props();
+  let showDiff = $state(false);
+  let repository = $derived(store.owner && store.openProject?.repository === true);
   let tree = $derived(turnFileTree(files));
   let expanded = $state<Record<string, boolean>>({});
   let allExpanded = $state(false);
@@ -53,8 +61,26 @@
         {#if allExpanded}<ChevronsDownUp size={14} />{:else}<ChevronsUpDown size={14} />{/if}
       </button>
     {/if}
+    <span class="tools">
+      {#if diffs.length > 0}
+        <button type="button" class="ghost small" data-testid="turn-diff-toggle" aria-expanded={showDiff} onclick={() => (showDiff = !showDiff)}>
+          <FileDiff size={14} />{showDiff ? strings.chat.hideTurnDiff : strings.chat.showTurnDiff}
+        </button>
+      {/if}
+      {#if repository}
+        <button type="button" class="ghost small icon" data-testid="turn-all-changes" title={strings.chat.allChanges} aria-label={strings.chat.allChanges}
+          onclick={() => store.panel.openChanges()}><GitCompareArrows size={14} /></button>
+      {/if}
+    </span>
   </header>
   <div class="tree">{@render branch(tree, 0)}</div>
+  {#if showDiff}
+    <div class="diffs" data-testid="turn-diff">
+      {#each diffs as doc, index (index)}
+        <DiffView path={doc.path} oldText={doc.oldText} newText={doc.newText} />
+      {/each}
+    </div>
+  {/if}
 </section>
 
 {#snippet fileIcon(file: TurnFile)}
@@ -148,8 +174,12 @@
     font-variant-numeric: tabular-nums;
     font-weight: 400;
   }
-  .expand { margin-left: auto; }
+  .expand, .tools { margin-left: auto; }
+  .expand ~ .tools { margin-left: 0; }
+  .tools { display: flex; align-items: center; gap: 2px; }
+  .tools button:not(.icon) { display: inline-flex; align-items: center; gap: 6px; }
   .tree { padding: 0 6px 6px; }
+  .diffs { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
 
   ul {
     list-style: none;

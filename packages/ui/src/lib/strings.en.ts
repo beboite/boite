@@ -675,6 +675,10 @@ export const strings = {
     /** An image the user sent with the prompt, when it came with no name. */
     imagePart: 'Image sent with the prompt',
     diffHidden: '{count} unchanged lines',
+    diffIgnoreWhitespace: 'Ignore whitespace changes',
+    diffSideBySide: 'Old and new side by side',
+    /** A diff whose every change was spaces, with whitespace ignored. */
+    diffWhitespaceOnly: 'Only whitespace changed.',
     diffShowAll: 'Show all {count} lines',
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
@@ -716,6 +720,10 @@ export const strings = {
     },
     permissionTechnical: 'Technical details',
     turnFiles: 'Changed files',
+    showTurnDiff: 'Show diff',
+    hideTurnDiff: 'Hide diff',
+    /** Opens the Changes panel: everything the working tree changed since its last commit, all turns together. */
+    allChanges: 'All changes in this folder',
     expandFileFolders: 'Expand all folders',
     collapseFileFolders: 'Collapse all folders',
     fileCreated: 'New',

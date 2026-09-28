@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePart } from '@boite/contracts';
-import { relativeTo, turnFiles, turnFileTree } from './turn-files';
+import { relativeTo, turnDiffs, turnFiles, turnFileTree } from './turn-files';
 
 function tool(name: string, input: unknown, extra: Partial<Extract<MessagePart, { type: 'tool' }>> = {}): MessagePart {
   return { type: 'tool', toolId: `${name}-${Math.random()}`, name, input, output: null, status: 'done', ...extra };
@@ -89,5 +89,19 @@ describe('turnFileTree', () => {
     expect(tree.find((node) => node.name === 'D:\\outside')).toMatchObject({ count: 1, children: [{ file: files[3] }] });
     expect(tree.at(-1)).toMatchObject({ kind: 'file', file: files[2] });
     expect(turnFileTree([])).toEqual([]);
+  });
+});
+
+describe('turnDiffs', () => {
+  it('lists every diff a finished call drew, in order, and nothing from a failed one', () => {
+    const first = { kind: 'diff' as const, path: 'a.ts', oldText: 'a', newText: 'b' };
+    const second = { kind: 'diff' as const, path: 'a.ts', oldText: 'b', newText: 'c' };
+    expect(turnDiffs([
+      tool('Edit', {}, { documents: [first] }),
+      tool('Edit', {}, { status: 'error', documents: [{ kind: 'diff', path: 'x.ts', oldText: '', newText: 'x' }] }),
+      tool('Shot', {}, { documents: [{ kind: 'markdown', title: null, text: 'note' }] }),
+      { type: 'text', text: 'done' },
+      tool('Edit', {}, { documents: [second] })
+    ])).toEqual([first, second]);
   });
 });
