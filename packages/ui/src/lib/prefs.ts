@@ -89,7 +89,7 @@ export function writeLayout(layout: LayoutPrefs): void {
 }
 
 /**
- * What Ctrl+S puts aside: one text per thread, so a prompt written and not sent
+ * What the stash chord puts aside: one text per thread, so a prompt written and not sent
  * survives a reload. A draft has no thread id yet and stashes under
  * `DRAFT_STASH_KEY`.
  */

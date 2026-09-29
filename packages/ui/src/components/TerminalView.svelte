@@ -41,7 +41,7 @@
 
   /**
    * Chords the app leaves alone while a text field has the focus. The shell
-   * takes them: Ctrl+W deletes a word there, Ctrl+S and Ctrl+Enter are its own.
+   * takes them: Ctrl+W deletes a word there; stash and send-and-draft stay with it.
    */
   const SHELL_CHORDS = new Set(['close-surface', 'stash', 'send-and-draft']);
 
