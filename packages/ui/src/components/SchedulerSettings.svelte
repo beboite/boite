@@ -8,14 +8,12 @@
   let { store }: { store: Store } = $props();
   const uid = $props.id();
 
-  type NumberKey = 'maxConcurrentTurns' | 'perAccountConcurrency' | 'warmProcessMinutes';
+  type NumberKey = 'warmProcessMinutes';
   /** The ranges the inputs offer, checked here so a bad value never reaches the core as a raw refusal. */
   const FIELDS: { key: NumberKey; min: number; max: number }[] = [
-    { key: 'maxConcurrentTurns', min: 1, max: 64 },
-    { key: 'perAccountConcurrency', min: 1, max: 32 },
     { key: 'warmProcessMinutes', min: 0, max: 120 }
   ];
-  const DEFAULTS: Record<NumberKey, number> = { maxConcurrentTurns: 6, perAccountConcurrency: 2, warmProcessMinutes: 5 };
+  const DEFAULTS: Record<NumberKey, number> = { warmProcessMinutes: 5 };
 
   let values = $state<Record<NumberKey, number | null | undefined>>({ ...DEFAULTS });
   let dirty = $state(false);
@@ -28,7 +26,7 @@
     const settings = store.settings;
     if (!settings) return;
     untrack(() => {
-      if (!dirty) values = { maxConcurrentTurns: settings.maxConcurrentTurns, perAccountConcurrency: settings.perAccountConcurrency, warmProcessMinutes: settings.warmProcessMinutes };
+      if (!dirty) values = { warmProcessMinutes: settings.warmProcessMinutes };
     });
   });
 
@@ -43,9 +41,7 @@
     return strings.settings[key];
   }
 
-  const HINTS: Record<NumberKey, 'maxConcurrentTurnsHint' | 'perAccountConcurrencyHint' | 'warmProcessMinutesHint'> = {
-    maxConcurrentTurns: 'maxConcurrentTurnsHint',
-    perAccountConcurrency: 'perAccountConcurrencyHint',
+  const HINTS: Record<NumberKey, 'warmProcessMinutesHint'> = {
     warmProcessMinutes: 'warmProcessMinutesHint'
   };
 
@@ -53,8 +49,6 @@
     if (!allValid || saving) return;
     saving = true;
     const ok = await store.saveSettings({
-      maxConcurrentTurns: values.maxConcurrentTurns!,
-      perAccountConcurrency: values.perAccountConcurrency!,
       warmProcessMinutes: values.warmProcessMinutes!
     });
     saving = false;

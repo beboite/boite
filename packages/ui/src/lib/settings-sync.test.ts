@@ -27,8 +27,8 @@ async function end(client: Client): Promise<SyncEnd> {
 test('the target takes the portable settings, the keybindings and the brain switches, and keeps what is its own', async () => {
   const from = await machine();
   const to = await machine();
-  await from.call('settings.set', { maxConcurrentTurns: 7, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
-  await to.call('settings.set', { maxConcurrentTurns: 2, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
+  await from.call('settings.set', { warmProcessMinutes: 7, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
+  await to.call('settings.set', { warmProcessMinutes: 2, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
   await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
   await to.call('keybindings.set', { command: 'theme-light', chord: 'mod+alt+t' });
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, globalInstructions: false, boiteGuide: false });

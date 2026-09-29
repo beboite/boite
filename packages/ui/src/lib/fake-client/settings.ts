@@ -60,11 +60,6 @@ export function settingsMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `titleModel names ${titleModel.providerId}, which is not a loaded provider that writes titles`, data: { field: 'titleModel' } });
       }
       ctx.settings = { ...ctx.settings, ...checked.patch };
-      ctx.scheduler = {
-        ...ctx.scheduler,
-        maxConcurrentTurns: ctx.settings.maxConcurrentTurns,
-        perAccountConcurrency: ctx.settings.perAccountConcurrency
-      };
       ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
       ctx.emit('settings.updated', { ...ctx.settings });
       return { ...ctx.settings };

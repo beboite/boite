@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MemoryEvent } from '@boite/contracts';
 import { memoryNotice } from '../src/memory-guard.ts';
 import { processPlatform } from '../src/platform/index.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { holdAccountTurns, echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let harness: TestCore;
 let threadId: string;
@@ -25,10 +25,10 @@ afterEach(async () => {
 });
 
 describe('memory events and admission', () => {
-  test('a queued turn starts under critical pressure when its concurrency slot opens', async () => {
+  test('a queued turn starts under critical pressure when its account login hold ends', async () => {
     const core = harness.core;
-    core.settings.set({ maxConcurrentTurns: 1 });
     const running = core.threads.startTurn(threadId, '[sleep:60000]');
+    const release = holdAccountTurns(harness);
     const second = await echoThread(harness, await harness.connect(), 'queued');
     const queued = core.threads.startTurn(second.threadId, 'started');
     expect(core.scheduler.state().queued).toMatchObject([{ turnId: queued.id }]);
@@ -38,6 +38,7 @@ describe('memory events and admission', () => {
     expect(core.scheduler.state().queued[0]).not.toHaveProperty('reason');
     expect(core.journal.getTurn(running.id)?.status).toBe('running');
     await core.scheduler.stopAndWait(threadId);
+    release();
     await waitFor(() => core.journal.getTurn(queued.id)?.status === 'done');
     expect(core.procs.memory.state).toBe('critical');
     expect(core.scheduler.state().queued).toEqual([]);

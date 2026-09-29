@@ -33,7 +33,7 @@ export class Layout {
   settingsSection = $state<{ id: string; request: number } | null>(null);
   /** The phone drawer. */
   sidebarOpen = $state(false);
-  /** The desktop sidebar, folded with Ctrl+B. */
+  /** The desktop sidebar's remembered folded state. */
   sidebarCollapsed = $state(false);
   sidebarWidth = $state(SIDEBAR_DEFAULT);
   /** A folder is being dragged over the window. */

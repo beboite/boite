@@ -13,6 +13,7 @@ export function experimentCopy(): Record<ExperimentId, { title: string; hint: st
     'prompt-cache': strings.experiments.promptCache,
     'chat-artifacts': strings.experiments.chatArtifacts,
     'preview-comments': strings.experiments.previewComments,
-    'resident-agents': strings.experiments.residentAgents
+    'resident-agents': strings.experiments.residentAgents,
+    whip: strings.experiments.whip
   };
 }
