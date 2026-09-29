@@ -285,6 +285,9 @@ export const fr: Translation = {
   },
 
   appUpdate: {
+    released: 'Sortie {time}',
+    changelog: 'Changelog sur GitHub',
+    hideReminder: 'Masquer le rappel',
     heading: "Mises à jour de l'application",
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
@@ -314,12 +317,11 @@ export const fr: Translation = {
     retry: 'Réessayer',
     download: 'Télécharger',
     install: 'Installer et redémarrer',
-    readyAction: 'Installer la mise à jour',
-    detailsAction: 'Détails',
+    readyAction: 'Mise à jour',
+    dismissNotice: 'Masquer cette notification de mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
     installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
-    readyTitlebar: 'Installer la mise à jour prête',
-    detailsTitlebar: 'Ouvrir les détails de la mise à jour'
+    detailsNotice: 'Ouvrir les détails de la mise à jour'
   },
 
   connection: {
@@ -397,6 +399,13 @@ export const fr: Translation = {
   },
 
   sidebar: {
+    allProjects: 'Tous les projets',
+    filterProject: 'Filtrer par projet',
+    recentOrder: 'Activité récente',
+    customOrder: 'Ordre personnel',
+    toggleOrder: 'Cliquer à nouveau pour changer le tri des projets',
+    moveProjectUp: 'Monter le projet',
+    moveProjectDown: 'Descendre le projet',
     search: 'Rechercher une conversation',
     newThread: 'Nouvelle conversation',
     newThreadIn: 'Nouvelle conversation dans {project}',
@@ -412,6 +421,9 @@ export const fr: Translation = {
     settings: 'Réglages',
     projectMenu: 'Actions du projet',
     copyPath: 'Copier le chemin',
+    manageProject: 'Gérer le projet',
+    backToProjectMenu: 'Retour',
+    viewArchivedThreads: 'Voir les conversations archivées',
     copied: 'Copié',
     importSession: 'Importer une session Claude Code',
     archiveProject: 'Archiver le projet',
@@ -587,7 +599,7 @@ export const fr: Translation = {
   permissionMode: {
     default: 'Demander',
     acceptEdits: 'Modifier librement',
-    bypassPermissions: 'Sans confirmation',
+    bypassPermissions: 'Autonome',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },
@@ -635,7 +647,7 @@ export const fr: Translation = {
     trace: 'Trace',
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
-    panelHint: "L'établi à côté de cette conversation",
+    panelHint: 'Navigateur, fichiers et outils de cette conversation',
     terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',
@@ -997,6 +1009,9 @@ export const fr: Translation = {
     attachReadError: '{name} est illisible.',
     attachRemove: 'Retirer {name}',
     attachAlt: 'Image jointe',
+    imageReference: '[Image {number}]',
+    imagePreview: 'Aperçu de {image}',
+    imagePreviewClose: "Fermer l'aperçu de l'image",
     attachPending: 'Recharger pour récupérer',
     attachUnnamed: "l'image collée",
     attachFormat: '{name} est en {type}, or une image doit être de type {formats}.',
@@ -1298,6 +1313,7 @@ export const fr: Translation = {
     everyday: "L'essentiel",
     developer: 'Tout',
     header: 'En-tête de la conversation',
+    composer: 'Barre de saisie',
     sidebar: 'Barre latérale',
     panel: 'Menu du panneau latéral',
     project: 'Nom du projet',

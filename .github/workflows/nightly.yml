@@ -64,7 +64,7 @@ jobs:
   # The tag is taken once the checks pass: the release tags ruleset keeps a tag
   # from being deleted, so one taken before them outlived every failed build.
   reserve:
-    needs: [revision, verify]
+    needs: [revision, verify, image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -78,22 +78,32 @@ jobs:
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
 
   image:
-    needs: [revision, reserve]
+    needs: revision
+    if: needs.revision.outputs.changed == 'true'
     uses: ./.github/workflows/server.yml
     permissions:
       contents: read
       packages: write
     with:
       publish: true
+      defer-manifest: true
       channel: dev
       version: ${{ needs.revision.outputs.version }}
+
+  publish-image:
+    needs: [revision, reserve, image]
+    uses: ./.github/workflows/server-manifest.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
       tags: |
         nightly
         ${{ needs.revision.outputs.tag }}
         sha-${{ github.sha }}
 
   release:
-    needs: [revision, verify, image]
+    needs: [revision, verify, publish-image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

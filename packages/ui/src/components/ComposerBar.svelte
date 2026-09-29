@@ -13,6 +13,10 @@
   import ModelPicker from './ModelPicker.svelte';
   import Dictation from './Dictation.svelte';
   import ComposerOptions from './ComposerOptions.svelte';
+  import ContextControl from './ContextControl.svelte';
+  import { work } from '../lib/work-prefs.svelte';
+  import { controlMenu } from '../lib/controls';
+  import { contextLevel, contextPercent } from '../lib/tokens';
 
   /**
    * The row under the composer's box: the model, effort, mode and worktree
@@ -52,6 +56,8 @@
   let bar = $state<HTMLDivElement | undefined>(undefined);
 
   let bound = $derived(store.openThread !== null);
+  // Keep the stored visibility preference and reveal a nearly full context.
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(provider !== null && provider !== undefined);
 
@@ -70,7 +76,6 @@
       // One word per row: what the mode allows is said on hover, not printed three times over.
       title: modeHint(mode, provider),
       glyph: modeIcon(mode),
-      live: mode === 'bypassPermissions',
       active: displayedMode === mode
     }))
   );
@@ -193,9 +198,9 @@
     {/if}
 
     {#if modes.length > 0}
-      <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end">
+      <Menu items={modeItems} onpick={pickMode} label={strings.composer.mode} testid="composer-mode" align="end" variant="ghost">
         {@const ModeIcon = modeIcon(displayedMode)}
-        <span class="mode-icon" class:open-mode={displayedMode === 'bypassPermissions'}><ModeIcon size={14} strokeWidth={1.75} /></span>
+        <span class="mode-icon"><ModeIcon size={14} strokeWidth={1.75} /></span>
         {modeLabel(displayedMode, provider)}
       </Menu>
     {/if}
@@ -221,6 +226,10 @@
 
 
 
+  {#if bound && showContext}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
+  {/if}
   {#if store.busy}
     <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
       <Square size={12} strokeWidth={2.5} />
@@ -277,10 +286,9 @@
   .attach {
     padding: 0 7px;
   }
+  .context-control { flex: none; }
 
-  /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
   .mode-icon { display: inline-flex; }
-  .open-mode { color: var(--color-live); }
   .chip.signed-out { color: var(--color-live); }
 
   .worktree.on {
@@ -318,6 +326,20 @@
   .chips :global(.trigger) {
     border-color: var(--color-edge);
     background: var(--color-surface);
+    color: var(--color-foreground);
+  }
+
+  .chips :global(.trigger.ghost) {
+    width: auto;
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-muted-foreground);
+    font-weight: 400;
+  }
+
+  .chips :global(.trigger.ghost:hover),
+  .chips :global(.trigger.ghost[aria-expanded='true']) {
+    background: var(--color-hover);
     color: var(--color-foreground);
   }
 

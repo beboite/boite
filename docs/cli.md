@@ -10,6 +10,12 @@ Boite 2 has no MCP server, on purpose. A CLI on the PATH costs the agent
 nothing until it is called, needs no tool schema in the prompt, and works the
 same for every provider, including one that has no MCP client.
 
+Every new native agent session receives a compact CLI guide before its first
+request, even without a connected brain. Enabled coordination and delegation
+add their commands and current limits; workflow syntax is loaded on demand
+through `boite workflow help`. The guide never creates a file in the brain or
+project. [Brain settings](brain.md#boite-guide) describes its switch.
+
 ## How an agent finds the core
 
 Every process a thread launches, the agent and whatever it spawns, carries

@@ -135,10 +135,17 @@ test(
     expect(assistant).toContain('browser thread');
     expect(assistant).toContain('allowed');
 
-    // The context meter the echo agent reported at the end of the turn: the
-    // prompt's characters over a floor of 100, on a window of 2000.
-    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '6'`);
-    expect((await page.text(testid('context-meter'))).trim()).toBe('6%');
+    // Session guidance contributes to context too; compare the UI with the core's report.
+    const client = await connect(core.url, core.token);
+    let percent: number;
+    try {
+      const [thread] = await client.call('threads.list', {});
+      expect(thread?.context?.tokens).toBeGreaterThan(0);
+      expect(thread?.context?.window).toBeGreaterThan(0);
+      percent = Math.round(thread!.context!.tokens / thread!.context!.window! * 100);
+    } finally { client.close(); }
+    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '${percent}'`);
+    expect((await page.text(testid('context-trigger'))).trim()).toBe('');
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
@@ -201,6 +208,8 @@ test(
     const openProjectMenu = `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`;
     await page.evaluate<null>(openProjectMenu);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=copy]')`);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=back]')`);
     expect(await page.evaluate<boolean>(`document.querySelector('${testid('context-menu')} [data-value=import]') === null`)).toBe(true);
     await page.evaluate<null>(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return null; })()`);
     await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
@@ -214,6 +223,7 @@ test(
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
 
     await page.evaluate<null>(openProjectMenu);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=import]')`);
     await page.click(`${testid('context-menu')} [data-value=import]`);
     await page.waitFor(`document.querySelectorAll('${testid('import-row')}').length === 1`);
@@ -283,7 +293,7 @@ test(
       'false',
     );
     expect(await page.evaluate<string>(`document.querySelector('${testid('tool-card')} .line').textContent`)).toBe(
-      'echo streamed',
+      'Ran 1 command',
     );
     await page.click(testid('tool-toggle'));
     await page.waitFor(`document.querySelector('${testid('tool-input')}')`);

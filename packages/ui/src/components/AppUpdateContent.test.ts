@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import AppUpdateCard from './AppUpdateCard.svelte';
+import AppUpdateContent from './AppUpdateContent.svelte';
 import { AppUpdater, type AppUpdateBackend, type UpdateSnapshot } from '../lib/app-update.svelte';
 import { confirm } from '../lib/confirm.svelte';
 
@@ -13,7 +13,7 @@ afterEach(() => {
   confirm.answer(false);
 });
 
-test('shows channel mismatch, versions, safe release notes and the ready action', async () => {
+test('shows the release link, age, installed channel and ready action', async () => {
   const ready: UpdateSnapshot = {
     phase: 'ready',
     currentVersion: '2.0.0',
@@ -38,18 +38,20 @@ test('shows channel mismatch, versions, safe release notes and the ready action'
   const stop = updater.start();
   await updater.settled();
 
-  mounted = mount(AppUpdateCard, { target: document.body, props: { updater } });
+  mounted = mount(AppUpdateContent, { target: document.body, props: { updater, beforeInstall: () => undefined } });
   const text = document.body.textContent ?? '';
-  expect(text).toContain('Installed channel');
+  expect(text).toContain('Installed version: Boite 2.0.0');
   expect(text).toContain('Boite');
   expect(text).toContain('Boite Nightly');
   expect(text).toContain('2.0.0-nightly.8');
-  expect(text).toContain('Update downloads resume correctly');
+  expect(text).not.toContain('Update downloads resume correctly');
+  expect(document.querySelector<HTMLAnchorElement>('[data-testid=app-update-changelog]')?.href).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
+  expect(document.querySelector('[data-testid=app-update-published]')?.textContent).toContain('Released');
   expect(document.querySelector('[data-testid=app-update-install]')).not.toBeNull();
   stop();
 });
 
-test('the check button stays on the card, disabled, while a check runs', async () => {
+test('the check button stays in the popup, disabled, while a check runs', async () => {
   const current: UpdateSnapshot = {
     phase: 'current',
     currentVersion: '2.0.0-nightly.7',
@@ -82,7 +84,7 @@ test('the check button stays on the card, disabled, while a check runs', async (
   const updater = new AppUpdater(native, undefined, () => true);
   const stop = updater.start();
   await updater.settled();
-  mounted = mount(AppUpdateCard, { target: document.body, props: { updater } });
+  mounted = mount(AppUpdateContent, { target: document.body, props: { updater, beforeInstall: () => undefined } });
   const button = () => document.querySelector<HTMLButtonElement>('[data-testid=app-update-check]');
 
   expect(button()?.disabled).toBe(false);
@@ -129,7 +131,7 @@ test('prevents duplicate install dialogs and refuses a stale confirmed selection
   const stop = updater.start();
   await updater.settled();
   await Promise.resolve();
-  mounted = mount(AppUpdateCard, { target: document.body, props: { updater } });
+  mounted = mount(AppUpdateContent, { target: document.body, props: { updater, beforeInstall: () => undefined } });
 
   const ask = vi.spyOn(confirm, 'ask');
   const button = document.querySelector<HTMLButtonElement>('[data-testid=app-update-install]')!;

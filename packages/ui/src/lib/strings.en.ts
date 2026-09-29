@@ -278,6 +278,9 @@ export const strings = {
   },
 
   appUpdate: {
+    released: 'Released {time}',
+    changelog: 'Changelog on GitHub',
+    hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
@@ -307,12 +310,11 @@ export const strings = {
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
-    readyAction: 'Install update',
-    detailsAction: 'Details',
+    readyAction: 'Update',
+    dismissNotice: 'Dismiss this update notification',
     installTitle: 'Install the Boite update?',
     installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
-    readyTitlebar: 'Install the ready app update',
-    detailsTitlebar: 'Open app update details'
+    detailsNotice: 'Open app update details'
   },
 
   connection: {
@@ -391,6 +393,13 @@ export const strings = {
   },
 
   sidebar: {
+    allProjects: 'All projects',
+    filterProject: 'Filter by project',
+    recentOrder: 'Recent activity',
+    customOrder: 'Custom order',
+    toggleOrder: 'Click again to switch project order',
+    moveProjectUp: 'Move project up',
+    moveProjectDown: 'Move project down',
     search: 'Search threads',
     newThread: 'New thread',
     newThreadIn: 'New thread in {project}',
@@ -406,6 +415,9 @@ export const strings = {
     settings: 'Settings',
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
+    manageProject: 'Manage project',
+    backToProjectMenu: 'Back',
+    viewArchivedThreads: 'View archived threads',
     copied: 'Copied',
     importSession: 'Import a Claude Code session',
     /** Out of the list, not out of Boite: its threads keep running and a new one brings it back. */
@@ -602,7 +614,7 @@ export const strings = {
   permissionMode: {
     default: 'Ask',
     acceptEdits: 'Edit freely',
-    bypassPermissions: 'No confirmation',
+    bypassPermissions: 'Autonomous',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },
@@ -652,7 +664,7 @@ export const strings = {
     traceHint: 'Processes this thread launched',
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
-    panelHint: 'The workbench beside this thread',
+    panelHint: 'Browser, files and tools beside this conversation',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',
@@ -1049,6 +1061,9 @@ export const strings = {
     attachReadError: '{name} could not be read.',
     attachRemove: 'Remove {name}',
     attachAlt: 'Attached file',
+    imageReference: '[Image {number}]',
+    imagePreview: 'Preview {image}',
+    imagePreviewClose: 'Close image preview',
     attachPending: 'Reload to recover',
     attachUnnamed: 'the attachment',
     attachFormat: '{name} is {type}, and an image must be one of {formats}.',
@@ -1359,6 +1374,7 @@ export const strings = {
     everyday: 'Essentials',
     developer: 'Everything',
     header: 'Conversation header',
+    composer: 'Message bar',
     sidebar: 'Sidebar',
     panel: 'Side panel menu',
     project: 'Project name',

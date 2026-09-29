@@ -65,6 +65,9 @@ async function prepare(): Promise<void> {
 
 try {
   await prepare();
+  // Vite can retain handles after every preparation step has completed.
+  // This standalone script has awaited the build and closed its server.
+  process.exit(0);
 } catch (error) {
   console.error(error);
   // A failed Vite operation may still own handles. This is a standalone script.

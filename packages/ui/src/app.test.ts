@@ -711,6 +711,9 @@ test('removing a project asks first, and Cancel keeps it', async () => {
   const head = query('[data-project-id="p-notes"][data-testid=project-row]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=remove]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=remove]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
   expect(document.querySelector('[data-testid=confirm-dialog]')?.textContent).toContain('notes');
@@ -843,14 +846,16 @@ test('the guided connection signs OpenCode in from a terminal too, then hands it
   expect(store.accountOf('a-opencode')?.status).toBe('ok');
 });
 
-test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
+test('the composer wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');
 
   // 31k of 200k, just compacted: the ring reads 16 percent and the divider says what went.
   await waitFor(() => document.querySelector('[data-testid=context-meter]') !== null);
   const meter = query('[data-testid=context-meter]');
-  expect(meter.textContent?.trim()).toBe('16%');
+  expect(meter.closest('[data-testid=composer]')).not.toBeNull();
+  expect(query('[data-testid=context-trigger]').textContent?.trim()).toBe('');
+  expect(meter.dataset.percent).toBe('16');
   expect(meter.dataset.level).toBe('low');
   query<HTMLButtonElement>('[data-testid=context-trigger]').click();
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
@@ -1546,7 +1551,7 @@ test('a tool card shows the input as the model types it, then switches to the pa
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
   expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
-  expect(card.querySelector('.line')?.textContent).toBe('echo streamed');
+  expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
   await waitFor(() => card.querySelector('[data-testid=tool-input]') !== null);
@@ -1801,6 +1806,8 @@ test('the project menu carries no import until the session-import experiment is 
   const head = query<HTMLElement>('[data-testid=project-row][data-project-id="p-boite"]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=copy]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=back]') !== null);
   expect(document.querySelector('[data-testid=context-menu] [data-value=import]')).toBeNull();
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -1808,6 +1815,8 @@ test('the project menu carries no import until the session-import experiment is 
   // The switch on the Experiments page is what puts the row in, no reload.
   setExperiment('session-import', true);
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
 });
 
@@ -1819,6 +1828,8 @@ test('Import a Claude Code session in the project menu lists the transcripts and
 
   const head = query<HTMLElement>('[data-testid=project-row][data-project-id="p-boite"]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=import]').click();
 
@@ -1844,6 +1855,8 @@ test('Import a Claude Code session in the project menu lists the transcripts and
 
   // Escape closes the dialog when it is open again.
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=import]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=import-row]').length === 2);
@@ -2017,6 +2030,50 @@ async function emptyCore(): Promise<void> {
   await store.openWhereLeft();
 }
 
+test('the phone cannot manage an unrelated project from a draft without a folder', async () => {
+  await mountOnFake();
+  expect(store.projects.length).toBeGreaterThan(0);
+  store.startDraft(null);
+  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+  store.startDraft('p-boite');
+  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
+  await store.open('t-trace');
+  if (!store.openThread) throw new Error('the thread did not open');
+  store.openThread.projectId = null;
+  flushSync();
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+});
+
+test('the phone cannot archive an already archived project or offer a misleading undo', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const project = store.openProject!;
+  const archive = vi.spyOn(store, 'archiveProject');
+  const openManagement = async () => {
+    query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+    await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+    query<HTMLButtonElement>('[data-value=manage]').click();
+    await waitFor(() => document.querySelector('[data-value=archive-project]') !== null);
+  };
+  try {
+    await openManagement();
+    // Another client can archive the project while this menu stays open.
+    store.projects = store.projects.map(p => p.id === project.id ? { ...p, archived: true } : p);
+    flushSync();
+    query<HTMLButtonElement>('[data-value=archive-project]').click();
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+    expect(archive).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid=undo-toast]')).toBeNull();
+    await openManagement();
+    expect(query<HTMLButtonElement>('[data-value=archive-project]').disabled).toBe(true);
+  } finally {
+    archive.mockRestore();
+  }
+});
+
 test('first run opens a draft in the drafts, and the first send makes them', async () => {
   await mountOnFake();
   await emptyCore();
@@ -2172,10 +2229,13 @@ test('a paired device is offered none of the affordances the core refuses it', a
   for (const id of OWNER_ONLY_COMMANDS) expect(commands).not.toContain(id);
   store.paletteOpen = false;
 
-  // The project's own menu: no Remove, and no transcript import behind it.
-  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  // The phone's project menu: no Remove, and no transcript import behind it.
+  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
+  expect(menuValues()).toEqual(['back', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
@@ -2202,7 +2262,13 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'archive-project', 'worktrees', 'refresh-icon', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
+  expect(menuValues()).toEqual(['back', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 

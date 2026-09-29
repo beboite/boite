@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CircleArrowDown, PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import { PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
   import { strings } from '../lib/strings';
   import { projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
-  import { appUpdater, showAppUpdateUi } from '../lib/app-update.svelte';
-  import { appUpdateInstall } from '../lib/app-update-install.svelte';
+  import { work } from '../lib/work-prefs.svelte';
+  import { controlMenu } from '../lib/controls';
+  import ProjectTile from './ProjectTile.svelte';
 
   let { store }: { store: Store } = $props();
 
@@ -101,13 +102,10 @@
   /** The dev install runs beside the stable one, so the bar has to say which is open. */
   let dev = $derived(store.core?.channel === 'dev');
 
-  function openUpdate(): void {
-    store.showSettings('general', 'app-update');
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<header class="titlebar" class:browser={!inShell} {onmousedown} data-testid="titlebar">
+<header style:--project-width={`${store.sidebarCollapsed ? 156 : store.sidebarWidth - 40}px`} class="titlebar" class:browser={!inShell} {onmousedown} data-testid="titlebar">
   {#if store.page === 'chat' && store.booted}
     <button type="button" class="ghost icon sidebar-toggle"
       aria-label={expanded ? strings.sidebar.collapse : strings.sidebar.expand}
@@ -116,6 +114,14 @@
       {#if expanded}<PanelLeftClose size={17} strokeWidth={1.75} />{:else}<PanelLeftOpen size={17} strokeWidth={1.75} />{/if}
     </button>
   {/if}
+  {#if threadHeader && store.openProject && work.shows('header.project')}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="project-heading" data-testid="header-project" title={store.openProject.path}
+      oncontextmenu={(event) => controlMenu(event, store, 'header.project')}>
+      <ProjectTile project={store.openProject} {store} size={18} />
+      <span>{projectName(store.openProject)}</span>
+    </div>
+  {/if}
   {#if threadHeader}
     {#key store}<ThreadHeader {store} />{/key}
   {:else}
@@ -123,28 +129,6 @@
   {/if}
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
-  {/if}
-  {#if showAppUpdateUi() && appUpdater.ready}
-    <button
-      type="button"
-      class="small update-ready"
-      title={strings.appUpdate.readyTitlebar}
-      aria-label={strings.appUpdate.readyTitlebar}
-      disabled={appUpdateInstall.preparing}
-      onclick={() => void appUpdateInstall.request()}
-      data-testid="titlebar-update-ready"
-    >
-      <CircleArrowDown size={14} strokeWidth={1.75} />
-      <span>{strings.appUpdate.readyAction}</span>
-    </button>
-    <button
-      type="button"
-      class="ghost small update-details"
-      title={strings.appUpdate.detailsTitlebar}
-      aria-label={strings.appUpdate.detailsTitlebar}
-      onclick={openUpdate}
-      data-testid="titlebar-update-details"
-    >{strings.appUpdate.detailsAction}</button>
   {/if}
   {#if inShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
@@ -193,6 +177,19 @@
   /* In the shell the caption buttons end the bar at its edge. */
   .titlebar.browser { padding-right: 8px; }
   .sidebar-toggle { flex: none; }
+  .project-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: var(--project-width);
+    flex: none;
+    min-width: 0;
+    padding-right: 12px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .project-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 720px) { .project-heading { display: none; } }
   @media (max-width: 720px) {
     .titlebar { background: var(--color-frame); border-bottom: 1px solid var(--color-border); }
     .titlebar.browser { background: var(--color-background); padding: 0 16px; }
@@ -215,13 +212,6 @@
     background: var(--color-surface-3);
     color: var(--color-muted-foreground);
   }
-
-  .update-ready {
-    flex: none;
-    gap: 5px;
-  }
-
-  .update-details { flex: none; }
 
   .controls {
     display: flex;

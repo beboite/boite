@@ -14,7 +14,8 @@ export async function attachFiles(
   store: Store,
   files: File[],
   state: { attachments: Attachment[] },
-  attachmentProvider: ProviderSummary | null | undefined
+  attachmentProvider: ProviderSummary | null | undefined,
+  onimage?: () => void
 ): Promise<void> {
   for (const file of files) {
     if (file.size > ATTACHMENT_MAX_BYTES) {
@@ -38,6 +39,7 @@ export async function attachFiles(
       const { accepted, refused } = acceptAttachments(state.attachments, [attachment]);
       state.attachments = accepted;
       if (refused !== null) store.error = refused;
+      else if (attachment.kind === 'image') onimage?.();
     } catch {
       store.error = fill(strings.composer.attachReadError, { name: file.name });
     }

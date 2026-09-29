@@ -7,16 +7,12 @@
   import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
-  import { projectName } from '../lib/format';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
-  import { contextLevel, contextPercent } from '../lib/tokens';
   import type { Store } from '../lib/store.svelte';
-  import ContextControl from './ContextControl.svelte';
   import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
-  let project = $derived(store.openProject);
   let renaming = $state(false);
   let renameText = $state('');
 
@@ -99,11 +95,6 @@
     return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
   });
 
-  /** A hidden gauge comes back on its own once the context is nearly full: a limit nobody can see is a trap. */
-  let showContext = $derived(
-    work.shows('header.context') || contextLevel(thread?.context ? contextPercent(thread.context) : null) === 'full'
-  );
-
   function titleAction(action: string) {
     const open = store.openThread;
     if (!open) return;
@@ -175,12 +166,6 @@
 
       <span class="spacer"></span>
 
-      <!-- A draft names its project in the heading below, so the chip would say it twice.
-           Each optional button's right click offers to put it away (Settings, Appearance). -->
-      {#if project && thread && work.shows('header.project')}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <span class="chip path" title={project.path} data-testid="header-project" oncontextmenu={(event) => controlMenu(event, store, 'header.project')}>{projectName(project)}</span>
-      {/if}
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
@@ -193,10 +178,6 @@
           <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
-      {/if}
-      {#if thread && showContext}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></span>
       {/if}
       {#if thread && hasTeam && work.shows('header.agents')}
         <button
@@ -238,16 +219,15 @@
       {#if thread}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost icon"
           class:on={store.panelOpen}
           title={`${strings.thread.panelHint}${store.keyHint('panel')}`}
-          aria-label={strings.thread.panel}
+          aria-label={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
           <PanelRight size={16} strokeWidth={1.75} />
-          <span class="label">{strings.thread.panel}</span>
         </button>
       {/if}
 </div>
@@ -323,7 +303,6 @@
   .pending :global(svg) { flex: none; }
   .pending-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .control { display: contents; }
   .title { min-width: 0; }
   .title-menu { display: none; }
   @media (max-width: 720px) {

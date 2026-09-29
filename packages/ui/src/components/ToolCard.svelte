@@ -3,7 +3,7 @@
   import type { ToolDocument, ToolStatus } from '@boite/contracts';
   import { elapsed, json } from '../lib/format';
   import { fill, strings } from '../lib/strings';
-  import { familyOf, toolLine, type ToolPart } from '../lib/tool-groups';
+  import { familyOf, liveLabel, runSummary, toolLine, type ToolPart } from '../lib/tool-groups';
   import { describeTool, fileName } from '../lib/tool-summary';
   import { diffCounts, diffRows } from '../lib/diff';
   import DiffView from './DiffView.svelte';
@@ -25,7 +25,8 @@
     documents = [],
     startedAt = null,
     finishedAt = null,
-    background = false
+    background = false,
+    nested = false
   }: {
     name: string;
     input: unknown;
@@ -38,6 +39,8 @@
     finishedAt?: number | null;
     /** The work this call started still runs in the background. */
     background?: boolean;
+    /** Inside an expanded group, show the individual command rather than another summary. */
+    nested?: boolean;
   } = $props();
 
   let now = $state(Date.now());
@@ -83,6 +86,7 @@
   let line = $derived(toolLine(part));
   let family = $derived(familyOf(part));
   let failed = $derived(status === 'error' || status === 'denied');
+  let errorPreview = $derived(failed ? output?.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '' : '');
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
   let Glyph = $derived(ICONS[family]);
 
@@ -100,6 +104,8 @@
     return change ? [{ kind: 'diff', ...change }] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
+  let compact = $derived(!nested && !streaming && !failed && documents.length === 0 && diffs.length === 0);
+  let label = $derived(compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
   let counts = $derived(diffs.reduce((sum, doc) => {
     const one = diffCounts(diffRows(doc.oldText, doc.newText));
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
@@ -143,7 +149,7 @@
     onclick={() => (toggled = !shown)}
   >
     <span class="glyph" class:failed><Glyph size={15} strokeWidth={1.75} /></span>
-    <span class="line" class:mono={line.mono} title={diffs[0]?.path ?? line.title}>{line.text}</span>
+    <span class="line" class:mono={!compact && line.mono} class:live={status === 'running'} title={diffs[0]?.path ?? line.title}>{label}</span>
     {#if counts.added > 0 || counts.removed > 0}
       <span class="counts" data-testid="tool-diff-counts">
         {#if counts.added > 0}<span class="added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>{/if}
@@ -166,6 +172,10 @@
     {/if}
     <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
   </button>
+
+  {#if failed && !shown && errorPreview}
+    <p class="error-preview" data-testid="tool-error-preview">{errorPreview}</p>
+  {/if}
 
   <div class="fold" class:open={shown} inert={!shown}>
     <div class="clip">
@@ -234,14 +244,15 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--activity-gap);
     width: 100%;
-    min-height: 26px;
+    min-height: var(--control);
     height: auto;
-    padding: 1px 4px 1px 2px;
+    padding: var(--activity-padding);
     border-radius: var(--radius-sm);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
+    font-weight: 400;
     justify-content: flex-start;
   }
 
@@ -259,7 +270,7 @@
   .glyph {
     display: inline-flex;
     flex: none;
-    width: 20px;
+    width: var(--activity-glyph);
     justify-content: center;
     color: var(--color-subtle);
   }
@@ -283,11 +294,14 @@
     font-size: var(--text-xs);
   }
 
+  .line.live { color: var(--color-accent); }
+  .error-preview { margin: 2px 0 6px var(--activity-indent); color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+
   .caret {
     display: inline-flex;
     flex: none;
     color: var(--color-subtle);
-    opacity: 0;
+    opacity: 1;
     transition:
       transform var(--dur-2) var(--ease-out-quint),
       opacity var(--dur-2) var(--ease-out-quint);
@@ -391,7 +405,7 @@
 
   /* The body sits under the line's words, past the glyph. */
   .body {
-    padding: 4px 0 8px 28px;
+    padding: 4px var(--activity-padding) 8px var(--activity-indent);
     display: flex;
     flex-direction: column;
     gap: 4px;

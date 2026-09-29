@@ -2,8 +2,6 @@
   import InfoTip from './InfoTip.svelte';
   import TitleModelSetting from './TitleModelSetting.svelte';
   import ShellSettings from './ShellSettings.svelte';
-  import AppUpdateCard from './AppUpdateCard.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
@@ -12,7 +10,7 @@
   import type { Store } from '../lib/store.svelte';
 
   /**
-   * What the app does for the person in front of it: updates, how a thread
+   * What the app does for the person in front of it: how a thread
    * reaches them, the archive, the window and the tour. Where agents run and
    * how many at once live under Machines and Advanced.
    */
@@ -31,8 +29,6 @@
   <header>
     <h1>{strings.settings.tabs.general}</h1>
   </header>
-
-  {#if showAppUpdateUi()}<AppUpdateCard />{/if}
 
   <section class="card" id="settings-conversations">
     <h2>{strings.settings.conversations}</h2>

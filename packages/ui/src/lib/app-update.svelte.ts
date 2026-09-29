@@ -49,6 +49,12 @@ export interface AppUpdateTestFixture {
 
 const FIRST_CHECK_MS = 8_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+const DISMISSED_UPDATE_KEY = 'boite.app-update-dismissed';
+
+function readDismissedUpdate(): string | null {
+  try { return window.localStorage.getItem(DISMISSED_UPDATE_KEY); }
+  catch { return null; }
+}
 
 const idleSnapshot: UpdateSnapshot = {
   phase: 'idle',
@@ -159,6 +165,7 @@ export function showAppUpdateUi(): boolean {
 export class AppUpdater {
   snapshot = $state.raw<UpdateSnapshot>({ ...idleSnapshot });
   lastCheckedAt = $state<number | null>(null);
+  #dismissedUpdate = $state<string | null>(readDismissedUpdate());
 
   #backend: AppUpdateBackend;
   #clock: UpdateClock;
@@ -184,6 +191,21 @@ export class AppUpdater {
 
   get ready(): boolean {
     return this.snapshot.supported && this.snapshot.phase === 'ready';
+  }
+
+  get announceReady(): boolean {
+    return this.ready && this.#dismissedUpdate !== this.#offerKey;
+  }
+
+  get #offerKey(): string {
+    return `${this.snapshot.channel}:${this.snapshot.version}`;
+  }
+
+  dismiss(): void {
+    if (!this.ready) return;
+    this.#dismissedUpdate = this.#offerKey;
+    try { window.localStorage.setItem(DISMISSED_UPDATE_KEY, this.#dismissedUpdate); }
+    catch { /* Keep the dismissal for this session when storage is unavailable. */ }
   }
 
   get busy(): boolean {

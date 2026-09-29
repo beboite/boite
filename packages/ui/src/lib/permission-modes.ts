@@ -1,5 +1,5 @@
 import type { Component } from 'svelte';
-import { FilePen, ShieldAlert, ShieldCheck } from '@lucide/svelte';
+import { Bot, FilePen, ShieldCheck } from '@lucide/svelte';
 import type { PermissionMode, ProviderSummary } from '@boite/contracts';
 import { strings } from './strings';
 
@@ -42,9 +42,9 @@ export function modeHint(mode: PermissionMode, provider: ProviderSummary | null 
   return strings.permissionModeLong[mode];
 }
 
-/** One icon per mode, the chip's and the menu row's: the open one reads as a warning. */
+/** One icon per mode, shared by the chip and the menu row. */
 export function modeIcon(mode: PermissionMode): Component<{ size?: number; strokeWidth?: number }> {
-  if (mode === 'bypassPermissions') return ShieldAlert as Component<{ size?: number; strokeWidth?: number }>;
+  if (mode === 'bypassPermissions') return Bot as Component<{ size?: number; strokeWidth?: number }>;
   if (mode === 'acceptEdits') return FilePen as Component<{ size?: number; strokeWidth?: number }>;
   return ShieldCheck as Component<{ size?: number; strokeWidth?: number }>;
 }

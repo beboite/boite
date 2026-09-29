@@ -5,7 +5,6 @@ import type { BrainConfig, BrainEntry, BrainStatus } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
 import { BrainLinks, type BrainProfiles, type OwnedBrainLink } from './brain-links.ts';
-import BOITE_GUIDE from './boite.md' with { type: 'text' };
 
 const FILE_LIMIT = 64 * 1024;
 const ENTRY_LIMIT = 500;
@@ -260,18 +259,8 @@ export class BrainStore {
     return status;
   }
 
-  /** Whether a new agent session gets Boite's guide, which then also teaches `boite ask`. */
-  guides(): boolean {
-    const { path, enabled, boiteGuide } = this.config();
-    return enabled && !!path && boiteGuide !== false;
-  }
-
-  /**
-   * Included in normal turns across all drivers, including already warm sessions.
-   * Boite's guide follows the brain's instructions only when `fresh`, the first
-   * turn of an agent session: the session keeps it after that.
-   */
-  instructions(providerId?: string, fresh = false): string {
+  /** Included in normal turns across all drivers, including already warm sessions. */
+  instructions(providerId?: string): string {
     const { path, enabled } = this.config();
     if (!enabled || !path) return '';
     const { entries, texts } = this.current(path);
@@ -280,15 +269,11 @@ export class BrainStore {
       if (entry.error) throw refused(entry.error);
       blocks.push(`Instructions from ${entry.path}:\n${texts.get(entry.path) ?? read(path, join(path, entry.path))}`);
     }
-    if (fresh && this.guides()) {
-      const asks = this.core.settings.get().asyncQuestions !== false;
-      blocks.push(BOITE_GUIDE.trim().split('\n').filter(line => asks || !line.includes('`boite ask')).join('\n'));
-    }
     const skills = entries.filter(entry => entry.kind === 'skill' && !entry.error);
     if (skills.length) blocks.push('Available skills. Read the named SKILL.md before using a skill.\n' + skills.map(entry => `${entry.name}: ${entry.description}\nFile: ${join(path, entry.path)}`).join('\n'));
     const text = blocks.join('\n\n');
     if (Buffer.byteLength(text) > INSTRUCTIONS_LIMIT) throw refused(`Brain instructions and skill catalog exceed ${INSTRUCTIONS_LIMIT} bytes; reduce the entry files or catalog`);
-    return `${text}\n\nUser request:\n`;
+    return `${text}\n\n`;
   }
 
   /**

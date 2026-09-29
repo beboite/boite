@@ -219,8 +219,15 @@ thread. Under its rows, a project with archived threads shows a folded
 "N archived" line; opened, it reads that project's archived threads and
 restores one in a click. The fold is not remembered between sessions.
 
-Settings > General > Worktrees (owner only, also in each git project's `...`
-menu) lists every project's worktrees with what each would lose. "Remove the
+The project menu keeps New thread, Copy path, View archived threads and Manage
+project, with distinct icons. The phone opens the same menu from the project's
+header action button. Manage project opens a second menu with Back,
+worktrees, icon refresh, session import when enabled, archive and removal.
+Actions keep their owner restrictions; project archiving stays available to
+paired devices. Copy path shows the path on hover.
+
+Settings > General > Worktrees (owner only, also under each git project's
+Manage project menu) lists every project's worktrees with what each would lose. "Remove the
 clean ones" takes those that are neither dirty nor unmerged and hold no live
 thread, without `force`. Files git ignores do not make a worktree dirty, as
 for `git worktree remove` itself: dependencies and build output an agent left
@@ -493,6 +500,10 @@ for the Bun version running it and keeps it under `node_modules/.cache`
 
 ## Captures
 
+On desktop, the selected project sits above the sidebar and the conversation
+title starts above the chat. Folding or resizing the sidebar adjusts the header;
+the phone keeps its existing project navigation and conversation title.
+
 `tests/e2e/header.test.ts` checks the shared header, sidebar folding and saved
 state, project groups, machine menu ordering, and prompt navigation through a
 paged, virtualized conversation. It captures desktop, phone and light-theme
@@ -726,8 +737,8 @@ panel end-to-end tests cover card spacing, folded drafts and phone controls.
 
 `bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process
 panel, paragraph buffering, reasoning replacement, goal display and command
-highlighting through the fake client. It writes desktop, phone and light-theme
-captures under `tests/e2e/.artifacts/`.
+highlighting, compact tool calls and answered questions through the fake client.
+It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
 Scheduled goal and loop prompts journal the command and objective in `text`, with
 activity kind and iteration metadata. The core builds the execution instructions
@@ -742,17 +753,28 @@ and disabled for reduced motion. Finished turns show a check and elapsed time;
 usage totals remain in Usage settings. Context details open separately from
 compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
 
-Tool calls read as a work log. A run of calls with
+Tool calls read as a work log. A single completed call uses a count-based
+summary, with its full input and output available on expansion. A run of calls with
 nothing between them folds under one sentence ("Ran 4 commands, read 1 file and
 searched the code once"): one clause per kind, in the order the kinds first
 ran, with edits counted by file. While a call runs, the folded line says what
-runs ("Running git") with a light passing over it. Each call is a plain line: a
-command as the command it ran, with the pwsh, cmd or bash wrapper taken off
+runs ("Running git"). While that activity is visible, the turn does not add
+a second working indicator unless it needs an answer or has background work.
+Inside an expanded group, each call is a plain line: a command as the command
+it ran, with the pwsh, cmd or bash wrapper taken off
 (`lib/tool-groups.ts`), anything else as a short sentence ("Read app.css"). A
 call that produced a diff stands alone, shows its `+N -M` and opens on the
 diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
 in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
-edit with its diff.
+edit with its diff. Failed and denied calls stay outside groups, with an
+output preview that remains visible when the call is closed.
+
+Answered questions collapse to the actual answer. Expanding restores the
+question and the full answer without enabling another submission. Thinking
+uses one stable label; its current heading remains in the expanded detail.
+These disclosures share the activity spacing tokens in `app.css`: 4 px row
+padding, an 8 px icon gap, 30 px desktop rows and 44 px phone touch targets.
+Text blocks stay 12 px away from activity rows.
 
 ### Faces and zoom
 
@@ -802,6 +824,17 @@ existing tools. Reading a format depends on the agent's tools and permissions;
 Boite does not extract archives or execute uploads. Copies persist with the core
 data directory so resumed sessions can still read them. They are not currently
 removed when a conversation is archived or a project is removed.
+
+Image attachments insert numbered `[Image 1]` references at the composer caret.
+Hovering or focusing a reference highlights its thumbnail. Clicking either
+opens an inline preview above the input, which stays editable. Escape or the
+close button dismisses the preview, as does a click outside the image and composer.
+Removing an image updates the remaining
+references to match attachment order. `bun test tests/e2e/composer-images.test.ts`
+checks this flow and captures desktop and phone layouts.
+An image accepted during a pending send stays in the next draft without keeping
+already-sent content. A refused send keeps the original prompt and attachments;
+text edited by the user while sending remains intact.
 
 The timeline shows downloadable file cards with names and sizes. Images retain
 thumbnails. `bun test tests/e2e/attachments.test.ts` checks owner desktop and
