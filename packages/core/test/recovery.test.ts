@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Message, Turn } from '@boite/contracts';
-import { echoThread, removeDir, startTestCore } from './harness.ts';
+import { holdAccountTurns, echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
 
@@ -78,8 +78,8 @@ describe('crash recovery', () => {
   });
 
   test('a turn left queued by a dead core is an error on the next start', async () => {
-    // One turn at a time, so the second one never leaves the queue.
-    const harness = await startTestCore({ settings: { maxConcurrentTurns: 1 } });
+    // Account login admission keeps the second turn queued until the crash.
+    const harness = await startTestCore();
     const client = await harness.connect();
     const running = await echoThread(harness, client, 'running thread');
     const waiting = await echoThread(harness, client, 'queued thread');
@@ -88,6 +88,7 @@ describe('crash recovery', () => {
     await client.call('turns.start', { threadId: running.threadId, prompt: '[sleep:60000] never lands' });
     await started;
 
+    holdAccountTurns(harness);
     const turn = await client.call('turns.start', { threadId: waiting.threadId, prompt: 'waits in the queue' });
     expect(turn.status).toBe('queued');
     expect((await client.call('threads.get', { threadId: waiting.threadId })).status).toBe('queued');

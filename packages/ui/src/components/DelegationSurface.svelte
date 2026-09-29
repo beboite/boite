@@ -49,11 +49,6 @@
     void store.configureDelegation({ ...config, ...patch });
   }
 
-  function limit(value: number, patch: (value: number) => Partial<DelegationConfig>): void {
-    if (!Number.isSafeInteger(value)) return;
-    save(patch(value));
-  }
-
   function addProfile(): void {
     const choice = store.defaultChoice();
     if (!choice?.model) return;
@@ -123,9 +118,9 @@
     </div>
     {#if view}
       <div class="usage" title={strings.delegation.usage}>
-        <strong>{view.agents.length}/{config.maxAgents}</strong> {strings.delegation.agentsShort}
+        <strong>{view.agents.length}</strong> {strings.delegation.agentsShort}
         <span>·</span>
-        <strong>{view.turnsUsed}/{config.maxTurns}</strong> {strings.delegation.turnsShort}
+        <strong>{view.turnsUsed}</strong> {strings.delegation.turnsShort}
         <span>·</span>
         <strong>{formatTokens(totalTokens)}</strong> {strings.units.tokens}
       </div>
@@ -167,12 +162,6 @@
             {/each}
           </div>
 
-          <div class="limits">
-            <label>{strings.delegation.maxAgents}<input type="number" min="1" max="8" value={config.maxAgents} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxAgents: value, maxConcurrent: Math.min(config.maxConcurrent, value) }))} /></label>
-            <label>{strings.delegation.maxConcurrent}<input type="number" min="1" max="8" value={config.maxConcurrent} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxConcurrent: value }))} /></label>
-            <label>{strings.delegation.maxTurns}<input type="number" min="1" max="100" value={config.maxTurns} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxTurns: value }))} /></label>
-            <label>{strings.delegation.maxMinutes}<input type="number" min="1" max="120" value={config.maxMinutes} onchange={(event) => limit(event.currentTarget.valueAsNumber, value => ({ maxMinutes: value }))} /></label>
-          </div>
           {#if config.enabled}
             <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
               {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
@@ -196,14 +185,11 @@
           {/each}
         </div>
         <textarea rows="2" maxlength="12000" bind:value={task} placeholder={strings.delegation.taskPlaceholder} data-testid="delegation-task"></textarea>
-        <button type="button" class="primary" disabled={!task.trim() || !selectedProfile || launching || view.agents.length >= config.maxAgents} data-testid="delegation-spawn" onclick={() => void launch()}><Plus size={14} />{launching ? strings.delegation.launching : strings.delegation.launch}</button>
+        <button type="button" class="primary" disabled={!task.trim() || !selectedProfile || launching} data-testid="delegation-spawn" onclick={() => void launch()}><Plus size={14} />{launching ? strings.delegation.launching : strings.delegation.launch}</button>
       </div>
       </details>
     {/if}
 
-    {#if view.turnsUsed >= config.maxTurns}
-      <p class="limit" role="status" data-testid="delegation-limit-reached">{strings.delegation.limitReached}</p>
-    {/if}
 
     <div class="team" class:detail={selected !== null}>
       <div class="members" aria-label={strings.delegation.team}>
@@ -281,9 +267,6 @@
   .profiles { margin-top: 7px; display: grid; gap: 5px; }
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
-  .limits { margin-top: 12px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-  .limits label { display: grid; gap: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .limits input { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
   .pause { margin-top: 10px; }
   .launch { flex: none; padding: 10px 16px; display: grid; grid-template-columns: 1fr auto; gap: 7px; border-bottom: 1px solid var(--color-border); }
   .launch-section { flex: none; }
@@ -322,14 +305,12 @@
   .delivery { flex: none; margin: -4px 10px 7px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .empty, .notice, .error { margin: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
-  .limit { flex: none; margin: 8px 16px; padding: 8px 10px; border-left: 2px solid var(--color-live); background: var(--color-surface-2); color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .error { color: var(--color-danger); }
   @container (max-width: 520px) {
     .surface-head { display: block; }
     .usage { margin-top: 6px; justify-content: flex-start; }
     .profile { grid-template-columns: minmax(0, 1fr) auto; }
     .profile > :global(.picker) { grid-column: 1 / -1; }
-    .limits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .launch { grid-template-columns: 1fr; }
     .launch textarea { min-height: 64px; }
     .launch .primary { min-height: var(--control); }

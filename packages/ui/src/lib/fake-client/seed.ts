@@ -226,8 +226,6 @@ export function seed(ctx: FakeContext): void {
   });
 
   ctx.scheduler = {
-    maxConcurrentTurns: ctx.settings.maxConcurrentTurns,
-    perAccountConcurrency: ctx.settings.perAccountConcurrency,
     running: [{ turnId: 'turn-seed-2', threadId: 't-scheduler', startedAt: T0 + 170_500 }],
     queued: [
       { turnId: 'turn-seed-3', threadId: 't-bench', position: 1, queuedAt: T0 + 200_000 }

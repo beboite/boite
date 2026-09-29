@@ -44,11 +44,11 @@ function scripted(reply: (ctx: TurnContext) => Reply) {
 }
 
 async function setup(patch: Partial<DelegationConfig> = {}) {
-  const h = await startTestCore({ settings: { maxConcurrentTurns: 8, perAccountConcurrency: 8 } }); cores.push(h);
+  const h = await startTestCore(); cores.push(h);
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner, 'Parent');
   const thread = h.core.threads.require(threadId);
-  const config: DelegationConfig = { ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxAgents: 8, maxConcurrent: 8, maxTurns: 100, profiles: [
+  const config: DelegationConfig = { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [
     { id: 'fast', name: 'Fast', providerId: 'echo', accountId: thread.accountId, model: thread.model!, effort: null },
     { id: 'reviewer', name: 'Reviewer', providerId: 'echo', accountId: thread.accountId, model: thread.model!, effort: null },
   ], ...patch };
@@ -99,7 +99,7 @@ test('a plan runs as child threads: output feeds a fan-out, a false condition sk
   expect(review.instances[1]!.task).toBe('Review b.ts (1)');
   expect(done.nodes.find(n => n.id === 'fix')!.status).toBe('skipped');
   expect(done.nodes.find(n => n.id === 'report')!.instances[0]!.task).toContain('"bugs": []');
-  // Steps are ordinary children, held to the team's turn budget, and never mail the parent.
+  // Steps are ordinary children, using the team's profiles, and never mail the parent.
   const child = h.core.threads.require(review.instances[0]!.threadId!);
   expect(child.parentThreadId).toBe(threadId);
   expect(h.core.delegation.get(threadId).agents).toHaveLength(0);
@@ -353,8 +353,10 @@ test('a paused run lets its running steps end, and is done once every step is', 
   await waitFor(() => h.core.workflows.get(threadId, two.id).nodes[0]!.status === 'done');
   const paused = h.core.workflows.get(threadId, two.id);
   expect([paused.status, paused.nodes[1]!.status]).toEqual(['paused', 'waiting']);
+  await owner.call('delegation.configure', { threadId, config: h.core.delegation.config(threadId) });
   await Bun.sleep(20);
   expect(held.size).toBe(0);
+  expect(h.core.workflows.get(threadId, two.id).status).toBe('paused');
   await owner.call('workflows.control', { threadId, runId: two.id, action: 'stop' });
 
   const one = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
@@ -364,18 +366,28 @@ test('a paused run lets its running steps end, and is done once every step is', 
   expect((await settled(h, threadId, one.id)).status).toBe('done');
 });
 
-test('a summary held by the spent turn budget says why, and goes once the owner raises it', async () => {
-  const { prompts } = scripted(ctx => ctx.thread.parentThreadId ? 'step done' : 'noted');
-  const { h, owner, threadId, config } = await setup({ maxTurns: 1 });
+test('completed steps keep their summary while the team is paused and deliver once resumed', async () => {
+  const { prompts, held: running } = scripted(() => ({ hold: true }));
+  const { h, owner, threadId, config } = await setup();
   const run = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
-  await settled(h, threadId, run.id);
-  await waitFor(() => !!h.core.workflows.get(threadId, run.id).deliveryError);
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'running');
+  await owner.call('delegation.configure', { threadId, config: { ...config, paused: true } });
+  [...running.values()][0]!('Step done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done');
+  h.core.bus.emit('delegation.changed', { threadId });
+  await Bun.sleep(20);
   const held = h.core.workflows.get(threadId, run.id);
-  expect([held.status, held.delivered, held.deliveryError]).toEqual(['done', false, 'delegation turn budget reached; the owner can increase it in Agents']);
-  await owner.call('delegation.configure', { threadId, config: { ...config, maxTurns: 5 } });
+  expect([held.status, held.delivered]).toEqual(['paused', false]);
+  expect(held.deliveryError ?? null).toBeNull();
+  expect(held.error).toContain('Delegation is paused');
+  await owner.call('delegation.configure', { threadId, config });
+  await settled(h, threadId, run.id);
   await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
   expect(h.core.workflows.get(threadId, run.id).deliveryError).toBeNull();
   await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.includes('Boite workflow done')));
+  await owner.call('delegation.configure', { threadId, config });
+  await Bun.sleep(20);
+  expect(prompts.filter(p => p.threadId === threadId && p.prompt.includes('Boite workflow done'))).toHaveLength(1);
 });
 
 test('an agent saves new templates but never replaces a saved one', async () => {
