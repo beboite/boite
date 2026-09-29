@@ -93,8 +93,9 @@ function writeLateDialogAgent(dataDir: string): string {
   writeFileSync(
     path,
     [
-      "import { appendFileSync } from 'node:fs';",
+      "import { appendFileSync, existsSync } from 'node:fs';",
       "const LOG = process.env.PI_FAKE_LOG ?? '';",
+      `const READY = ${JSON.stringify(join(dataDir, 'pi-late-dialog-ready'))};`,
       "function log(line) { if (LOG.length > 0) appendFileSync(LOG, line + '\\n', 'utf8'); }",
       "function send(payload) { process.stdout.write(JSON.stringify(payload) + '\\n'); }",
       'const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,',
@@ -105,10 +106,12 @@ function writeLateDialogAgent(dataDir: string): string {
       "  send({ type: 'agent_settled' });",
       '  // The extension finishes its own work after the run, so the driver has no',
       '  // turn to draw a card on and the agent still blocks on the answer.',
-      '  setTimeout(() => {',
+      '  const ready = setInterval(() => {',
+      '    if (!existsSync(READY)) return;',
+      '    clearInterval(ready);',
       "    send({ type: 'extension_ui_request', id: 'late-1', method: 'confirm',",
       "      title: 'Late', message: 'after the run' });",
-      '  }, 30);',
+      '  }, 10);',
       '}',
       'function handle(message) {',
       "  if (message.type === 'extension_ui_response') {",
@@ -512,13 +515,18 @@ describe('pi driver', () => {
     const client = await startCore({ warmProcessMinutes: 5 });
     const threadId = await threadOnAgent(client, writeLateDialogAgent(harness?.dataDir ?? ''));
     const logs = collectLogs(client);
+    const refusal = client.next('core.log', (entry) => entry.message.includes('confirm dialog late-1 is refused'));
 
     await runTurn(client, threadId, 'first');
+    // Raise the late dialog after final stats and turn cleanup have finished.
+    writeFileSync(join(harness!.dataDir, 'pi-late-dialog-ready'), 'ready');
 
     // The process stays warm, so the extension's dialog lands with no turn to
     // draw a card on. Unanswered, it blocks that extension for the life of the
     // process and the agent waits on an id nobody holds.
     await settle(() => fakeLog().includes('late-answer'));
+    // The child can write its answer before the socket delivers the warning.
+    await refusal;
     expect(fakeLog()).toContain('late-answer late-1 cancelled=true');
     expect(logs.some((line) => line.includes('confirm') && line.includes('late-1'))).toBe(true);
   });

@@ -96,8 +96,12 @@ describe('terminals', () => {
     const spy = spyOn(procs, 'spawnTerminal').mockImplementation((threadId, cmd, args, opts) => spawn(threadId, cmd, args, {
       ...opts,
       onData: (bytes) => {
-        chunks += 1;
-        opts.onData(bytes);
+        // PTY reads vary by OS and runner load. Deliver the real bytes in
+        // small chunks so this always exercises the output batching.
+        for (let at = 0; at < bytes.length; at += 64) {
+          chunks += 1;
+          opts.onData(bytes.subarray(at, at + 64));
+        }
       },
     }));
     try {

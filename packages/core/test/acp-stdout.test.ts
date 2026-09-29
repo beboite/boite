@@ -45,8 +45,7 @@ function pulledOneAtATime(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let next = 0;
   return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    pull(controller) {
       const chunk = chunks[next];
       next += 1;
       // Left open past the last chunk: the protocol line must come out on its own.
@@ -55,23 +54,14 @@ function pulledOneAtATime(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
-/** The first line the filtered stream gives, or `stalled` when none comes within 3 s. */
+/** The first line while the source stays open; the test deadline catches a stalled pull. */
 async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let text = '';
-  const deadline = Date.now() + 3000;
   try {
     while (!text.includes('\n')) {
-      let timer: Timer | undefined;
-      const next = await Promise.race([
-        reader.read(),
-        new Promise<'stalled'>((resolve) => {
-          timer = setTimeout(() => resolve('stalled'), Math.max(1, deadline - Date.now()));
-        }),
-      ]);
-      clearTimeout(timer);
-      if (next === 'stalled') return 'stalled';
+      const next = await reader.read();
       if (next.done) return `done ${text}`;
       text += decoder.decode(next.value, { stream: true });
     }
