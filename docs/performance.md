@@ -8,9 +8,11 @@ a fresh run of the bench that covers it, with the command and the date.
 
 The [2026-09-29 audit](../bench/results/2026-09-29-resources.md) compares the
 streaming journal, team refreshes, process sampling and idle core against
-`606bc56d`. On the tested Linux workloads, journal CPU fell 95.6% and sampled
-peak RSS fell 60.6%; sampling 64 processes used 60.8% less CPU. The idle core
-stayed at about 61 MiB and 0.7% of one CPU core. These are scoped measurements,
+`606bc56d`. On the tested Linux workloads, journal CPU fell from 8,863 to 379 ms and
+sampled peak RSS from 253.24 to 109.21 MiB. Sampling 64 processes with the real
+clock used 964 to 458 ms CPU and 94.97 to 82.13 MiB peak RSS. Team updates used
+348 to 116 ms CPU, with 128 snapshots reduced to one. The idle core stayed at
+about 60 MiB and 0.4% of one CPU core. These are scoped measurements,
 not a 30% to 50% reduction in the whole application or its provider processes.
 
 Message reads overlay current buffered parts only for the selected rows. They
@@ -21,7 +23,8 @@ history. Semantic changes coalesce per team, and the client permits one active
 refresh plus one pending refresh. Navigation and client identity isolate old
 responses.
 
-Linux sampling shares stat lines and parent links across threads for 500 ms.
+Linux sampling shares parent links across threads for 500 ms. Stat lines are
+reused at their capture timestamp; later samples read fresh per-PID CPU ticks.
 Ordinary samples avoid each process's task directories when the global procfs
 scan is available. Killing a tree still takes a fresh scan and reads task
 children. Windows samples the PIDs already assigned to each job rather than
@@ -34,7 +37,8 @@ The offline benchmarks use fresh temporary journals and no provider login:
 bun bench/streaming-load.ts 128 32
 bun bench/delegation-load.ts 8 16
 bun bench/process-load.ts
-bun bench/process-load.ts --live --roots 64 # Linux procfs; sleeping fixtures
+bun bench/process-load.ts --live --roots 64 # Linux procfs; forced scan each tick
+bun bench/process-load.ts --live --roots 64 --wall-clock # real clock, no sleeps
 bun bench/core-idle.ts 10
 ```
 
