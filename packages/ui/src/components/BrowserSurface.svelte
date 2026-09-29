@@ -2,10 +2,11 @@
   import { untrack } from 'svelte';
   import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2 } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
+  import { watchBrowserBounds } from '../lib/browser-bounds';
   import { openExternal } from '../lib/links';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { focusComposer } from '../lib/focus';
-  import { ZOOM_DEFAULT, currentZoom, stepZoom, zoomKey } from '../lib/zoom';
+  import { ZOOM_DEFAULT, stepZoom, zoomKey } from '../lib/zoom';
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -16,6 +17,23 @@
 
   let request = $state<string | null>(null);
   let notice = $state('');
+  let loading = $state(false);
+  let problem = $state('');
+  $effect(() => {
+    const surfaceId = id;
+    loading = untrack(() => !!url && !browserBridge.isReady(surfaceId));
+    problem = '';
+    return browserBridge.on(event => {
+      if (event.id !== surfaceId) return;
+      if (event.type === 'loading') {
+        loading = event.loading;
+        if (loading) problem = '';
+      } else if (event.type === 'failed') {
+        loading = false;
+        problem = fill(strings.browser.failed, { reason: event.reason });
+      }
+    });
+  });
   let selectionOwner: { store: Store; threadId: string; client: Store['client']; machineId: string } | null = null;
   const enabled = $derived(experimentOn('preview-comments'));
 
@@ -97,48 +115,17 @@
       if (zoom !== ZOOM_DEFAULT) browserBridge.setZoom(surfaceId, zoom);
     });
 
-    // The slot moves for more reasons than it resizes: the sidebar folds, the
-    // panel is dragged or maximized, a sheet slides in, the window is resized.
-    // A `ResizeObserver` misses every move that keeps the size, so the frame is
-    // what drives this. One `getBoundingClientRect` per frame, and the bridge
-    // only hears about a rectangle that actually changed.
-    // jsdom without a visual pretence has no frames; the surface still renders.
-    const framed = typeof requestAnimationFrame === 'function';
-    let last = '';
-    let frame = 0;
-    const report = (): void => {
-      const rect = node.getBoundingClientRect();
-      // The interface zoom is in the key: the bridge scales the rectangle by
-      // it, and the page lays out at a new zoom a frame or more before the
-      // factor changes here (`lib/zoom.ts`), so the last new rectangle can go
-      // out scaled by the old one.
-      const key = `${rect.x},${rect.y},${rect.width},${rect.height},${currentZoom()}`;
-      if (key !== last) {
-        last = key;
-        browserBridge.setBounds(surfaceId, {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        });
-      }
-      if (framed) frame = requestAnimationFrame(report);
-    };
-    report();
-
-    return () => {
-      if (framed && frame !== 0) cancelAnimationFrame(frame);
-      // The tab lives on; it is only this surface that stopped showing.
-      browserBridge.setBounds(surfaceId, null);
-    };
+    return watchBrowserBounds(node, rect => browserBridge.setBounds(surfaceId, rect));
   });
 
   function submit(event: Event): void {
     event.preventDefault();
     const next = normalizeUrl(draft ?? '');
+    if (!next) { problem = strings.browser.invalidUrl; return; }
+    problem = '';
+    loading = true;
     draft = null;
     leaveField();
-    if (!next) return;
     browserBridge.navigate(id, next);
     panel.update(id, { url: next });
   }
@@ -209,7 +196,7 @@
       data-testid="browser-reload"
       onclick={() => browserBridge.reload(id)}
     >
-      <RotateCw size={13} strokeWidth={1.75} />
+      <RotateCw size={13} strokeWidth={1.75} class={loading ? 'spin' : ''} />
     </button>
 
     <form class="address" onsubmit={submit}>
@@ -223,6 +210,9 @@
         data-testid="browser-url"
         spellcheck="false"
         autocomplete="off"
+        autocapitalize="none"
+        inputmode="url"
+        aria-invalid={problem !== ''}
         oninput={(event) => (draft = event.currentTarget.value)}
         onfocus={(event) => {
           draft = event.currentTarget.value;
@@ -243,6 +233,11 @@
         <ExternalLink size={13} strokeWidth={1.75} />
       </button>
     </form>
+    {#if zoom !== ZOOM_DEFAULT}
+      <button type="button" class="ghost small zoom" data-testid="browser-zoom"
+        title={strings.browser.resetZoom} aria-label={strings.browser.resetZoom}
+        onclick={() => { browserBridge.setZoom(id, ZOOM_DEFAULT); panel.update(id, { zoom: ZOOM_DEFAULT }); }}>{Math.round(zoom * 100)}%</button>
+    {/if}
     {#if enabled}
       <button type="button" class="ghost small icon" title={previewStrings.annotate}
         aria-label={previewStrings.annotate} aria-pressed={!!request}
@@ -251,6 +246,9 @@
       </button>
     {/if}
   </div>
+
+  {#if loading}<span class="loading" role="status" aria-label={strings.browser.loading} data-testid="browser-loading"></span>{/if}
+  {#if problem}<p class="problem" role="alert" data-testid="browser-error">{problem}</p>{/if}
 
   {#if enabled && (request || notice)}
     <p class="annotation-notice" role="status">{request ? previewStrings.picking : notice}</p>
@@ -267,6 +265,7 @@
   .annotation-notice { margin: 0; padding: 8px 12px; font-size: var(--text-sm); color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border); }
   .chrome button[aria-pressed="true"] { color: var(--color-accent); background: var(--color-accent-soft); }
   .browser-surface {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -338,4 +337,12 @@
     font-size: var(--text-sm);
     max-width: 260px;
   }
+
+  .loading { position: absolute; top: 42px; left: 0; right: 0; height: 2px; z-index: 1; background: var(--color-accent); }
+  .problem { margin: 0; padding: 8px 12px; color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .zoom { flex: none; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .chrome :global(.spin) { animation: reload-spin 1s linear infinite; }
+  @keyframes reload-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .chrome :global(.spin) { animation: none; } }
+  @media (hover: none) { .external { opacity: 1; } }
 </style>

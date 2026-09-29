@@ -241,6 +241,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
+  delete env.BOITE_UI_DIR;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_CORE_RESIDENT = resident ? '1' : '0';
   env.BOITE_DATA_DIR = ownDataDir;
@@ -400,6 +401,32 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    // A closed popup must not clamp moves before its next opening chooses a monitor.
+    if (process.platform === 'win32') {
+      const { dlopen, FFIType, ptr } = await import('bun:ffi');
+      const user32 = dlopen('user32.dll', {
+        FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+        GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
+        IsWindowVisible: { args: [FFIType.ptr], returns: FFIType.bool },
+        SetWindowPos: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.bool },
+      });
+      try {
+        const resting = await ownPage.evaluate<{ x: number; y: number }>(`window.__TAURI_INTERNALS__.invoke('plugin:window|current_monitor', {label:'quotas'}).then(m => m.workArea.position)`);
+        const title = new Uint16Array(Array.from('Boite quotas\0', c => c.charCodeAt(0)));
+        const owner = new Uint32Array(1);
+        let hwnd = user32.symbols.FindWindowExW(null, null, null, ptr(title));
+        while (hwnd) {
+          user32.symbols.GetWindowThreadProcessId(hwnd, ptr(owner));
+          if (owner[0] === ownPid) break;
+          hwnd = user32.symbols.FindWindowExW(null, hwnd, null, ptr(title));
+        }
+        expect(Boolean(hwnd)).toBe(true);
+        expect(user32.symbols.IsWindowVisible(hwnd)).toBe(false);
+        // NOSIZE | NOZORDER | NOACTIVATE: this moves only our hidden test popup.
+        expect(user32.symbols.SetWindowPos(hwnd, null, resting.x, resting.y, 0, 0, 0x15)).toBe(true);
+        await ownPage.waitFor(`window.__TAURI_INTERNALS__.invoke('plugin:window|outer_position', {label:'quotas'}).then(p => p.x === ${resting.x} && p.y === ${resting.y})`, 1000);
+      } finally { user32.close(); }
+    }
     await popup.close(); popup = undefined;
     // A popup left hidden gives its renderer back (BOITE_QUOTA_IDLE_MS), and
     // the next show builds it again.
@@ -498,11 +525,16 @@ afterAll(async () => {
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',
-  () => {
+  async () => {
     expect(coreFile?.port).toBeGreaterThan(0);
     expect(coreFile?.pid).toBeGreaterThan(0);
     expect(startToHealthMs).toBeGreaterThan(0);
     expect(startToHealthMs).toBeLessThan(READY_TIMEOUT_MS);
+    const index = readFileSync(join(ROOT, 'packages', 'ui', 'dist', 'index.html'), 'utf8');
+    const script = /<script[^>]+type="module"[^>]+src="([^"]+\.js)"/.exec(index)?.[1];
+    expect(script).toBeDefined();
+    await page!.waitFor(`document.querySelector('script[type="module"][src]')`);
+    expect(await page!.evaluate(`document.querySelector('script[type="module"][src]').getAttribute('src').split('/').at(-1)`)).toBe(basename(script!));
   },
   TIMEOUT,
 );

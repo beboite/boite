@@ -30,6 +30,7 @@ function handleCount(): number {
 
 const FORGET_MS = 100;
 const SPAWNS = 20;
+const LEAK_TEST = 'an id minted per call leaves no Job Object behind once the registry forgets it';
 
 describeWindows('thread jobs of forgotten threads', () => {
   let directory: string;
@@ -53,7 +54,21 @@ describeWindows('thread jobs of forgotten threads', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  test('an id minted per call leaves no Job Object behind once the registry forgets it', async () => {
+  test(LEAK_TEST, async () => {
+    // GetProcessHandleCount includes every concurrent test in this process.
+    // Keep the kernel assertion in a child that runs only this scenario.
+    if (process.env.BOITE_JOB_HANDLE_PROBE !== '1') {
+      const child = procs.spawn('handle-probe', process.execPath, ['test', import.meta.filename, '--test-name-pattern', LEAK_TEST], {
+        env: { BOITE_JOB_HANDLE_PROBE: '1' },
+      });
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.proc.stdout).text(),
+        new Response(child.proc.stderr).text(),
+        child.exited,
+      ]);
+      expect(code, stdout + stderr).toBe(0);
+      return;
+    }
     const ids: string[] = [];
     const waitForState = async (label: string, predicate: () => boolean): Promise<void> => {
       try { await waitFor(predicate, 5000); }

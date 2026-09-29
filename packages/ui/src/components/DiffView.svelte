@@ -3,6 +3,7 @@
   import { diffCounts, diffRows, splitRows, type DiffRow } from '../lib/diff';
   import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
+  import { codeLanguage, highlightCode } from '../lib/code-highlight';
 
   let {
     path,
@@ -30,6 +31,25 @@
   let splittable = $derived(width >= SPLIT_MIN_WIDTH);
   let split = $derived(splittable && diffPrefs.split);
   let pairs = $derived(split ? splitRows(shown) : []);
+  const language = $derived(codeLanguage(path));
+  let oldCode = $state.raw<string[] | null>(null);
+  let newCode = $state.raw<string[] | null>(null);
+
+  $effect(() => {
+    const before = oldText;
+    const after = newText;
+    const grammar = language;
+    oldCode = newCode = null;
+    let cancelled = false;
+    void Promise.all([highlightCode(before, grammar), highlightCode(after, grammar)]).then(([oldLines, newLines]) => {
+      if (!cancelled) { oldCode = oldLines; newCode = newLines; }
+    }).catch(() => { /* The plain diff remains available if a grammar cannot load. */ });
+    return () => { cancelled = true; };
+  });
+
+  function codeOf(row: Exclude<DiffRow, { kind: 'gap' }>): string | undefined {
+    return row.kind === 'remove' ? oldCode?.[row.oldLine - 1] : newCode?.[row.newLine - 1];
+  }
 
   /** The gutter of a row: what a patch puts in its first column. */
   function sign(kind: string): string {
@@ -39,7 +59,7 @@
   }
 </script>
 
-<div class="diff" data-testid="diff-view" data-path={path} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
+<div class="diff code-syntax" data-testid="diff-view" data-path={path} data-language={language ?? 'text'} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
   {#if !headless}
     <div class="head">
       <span class="path mono" title={path}>{path}</span>
@@ -81,7 +101,7 @@
           <div class="row {row.kind}" data-kind={row.kind} data-testid="diff-row">
             <span class="num">{row.kind === 'remove' ? row.oldLine : row.newLine}</span>
             <span class="gutter">{sign(row.kind)}</span>
-            <span class="text">{row.text}</span>
+            <span class="text">{@render code(row)}</span>
           </div>
         {/if}
       {/each}
@@ -102,6 +122,12 @@
   </div>
 {/snippet}
 
+{#snippet code(row: Exclude<DiffRow, { kind: 'gap' }>)}
+  {@const html = codeOf(row)}
+  <!-- highlightCode escapes source text before adding its token spans. -->
+  {#if html !== undefined}{@html html}{:else}{row.text}{/if}
+{/snippet}
+
 {#snippet side(row: Exclude<DiffRow, { kind: 'gap' }> | null, which: 'old' | 'new')}
   {#if row === null}
     <div class="row empty"><span class="num"></span><span class="gutter"></span><span class="text"></span></div>
@@ -109,7 +135,7 @@
     <div class="row {row.kind}" data-kind={row.kind}>
       <span class="num">{row.kind === 'context' ? (which === 'old' ? row.oldLine : row.newLine) : row.kind === 'remove' ? row.oldLine : row.newLine}</span>
       <span class="gutter">{sign(row.kind)}</span>
-      <span class="text">{row.text}</span>
+      <span class="text">{@render code(row)}</span>
     </div>
   {/if}
 {/snippet}
@@ -235,6 +261,7 @@
   /* The family has no green or red surface token, so both tints are the status
      colour mixed into the well's own fill rather than a new hex. */
   .row.add {
+    color: var(--color-success);
     background: color-mix(in srgb, var(--color-success) 14%, var(--color-surface-2));
   }
 
@@ -243,12 +270,18 @@
   }
 
   .row.remove {
+    color: var(--color-danger);
     background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface-2));
   }
 
   .row.remove .gutter {
     color: var(--color-danger);
   }
+
+  .row.add .num,
+  .row.remove .num { color: inherit; opacity: 0.75; }
+  .row.add :global(.text span),
+  .row.remove :global(.text span) { color: inherit; }
 
   .row.gap {
     color: var(--color-subtle);

@@ -556,6 +556,7 @@ describe('echo driver', () => {
 
     const started: RpcEvents['process.started'][] = [];
     client.on('process.started', (record) => {
+      // Capture native descendants too; identify the direct child separately.
       if (record.threadId === threadId) started.push(record);
     });
     const exited = client.next('process.exited', (record) => record.threadId === threadId && record.parentPid === process.pid, 10000);

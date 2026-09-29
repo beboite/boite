@@ -12,7 +12,7 @@ const phone = (matches: boolean) => Object.defineProperty(window, 'matchMedia', 
 describe('mobileOverlay', () => {
   let original: typeof window.matchMedia;
   beforeEach(() => { original = window.matchMedia; phone(true); });
-  afterEach(async () => { window.matchMedia = original; await settle(); });
+  afterEach(async () => { vi.restoreAllMocks(); window.matchMedia = original; await settle(); });
 
   test('Back closes the top overlay only, then the one under it', async () => {
     const closed: string[] = [];
@@ -31,18 +31,21 @@ describe('mobileOverlay', () => {
   });
 
   test('closing by a button pops its own entry, and a push made meanwhile survives the pop', async () => {
+    const back = history.back.bind(history);
+    vi.spyOn(history, 'back').mockImplementationOnce(() => { setTimeout(back, 50); });
     const closed: string[] = [];
     const sheet = mobileOverlay(() => closed.push('sheet'));
     const depth = history.state?.boiteDepth;
+    const sheetBack = landed();
     sheet();
     // The list opens a conversation before the sheet's pop has landed.
     const conversation: () => void = mobileOverlay(() => { closed.push('conversation'); conversation(); });
-    await settle();
+    await sheetBack;
     expect(history.state?.boiteDepth).toBe(depth);
     expect(closed).toEqual([]);
-    const back = landed();
+    const nextBack = landed();
     history.back();
-    await back;
+    await nextBack;
     expect(closed).toEqual(['conversation']);
   });
 
