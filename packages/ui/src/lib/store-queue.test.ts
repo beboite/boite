@@ -2,6 +2,8 @@ import { expect, test, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
+import { RpcErrorCode } from '@boite/contracts';
+import { RpcFailure } from './client';
 
 async function ready() {
   const store = new Store();
@@ -60,4 +62,30 @@ test('paused, archived and detached queues never send automatically', async () =
     expect(store.composerStates['t-descriptors']!.queued).toHaveLength(1);
     expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
   } finally { store.detach(); client.close(); }
+});
+
+test('a late refusal from the former client cannot populate the replacement session', async () => {
+  const { store, client } = await ready();
+  const replacement = new FakeClient({ delayMs: 0 });
+  let rejectSend!: (error: unknown) => void;
+  const pending = new Promise<never>((_resolve, reject) => { rejectSend = reject; });
+  const call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
+    method === 'turns.start' ? pending : call(method, params));
+  const replacementCalls = vi.spyOn(replacement, 'call');
+  try {
+    const formerThread = { ...store.threads.find(row => row.id === 't-trace')!, status: 'running', title: 'Former session' };
+    store.composerStates['t-trace'] = queued('Former session prompt');
+    const formerState = store.composerStates['t-trace']!;
+    await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1));
+    store.composerStates = {};
+    store.attach(replacement);
+    await store.connect();
+    rejectSend(new RpcFailure({ code: RpcErrorCode.Refused, message: 'Turn in flight',
+      data: { reason: 'turn-in-flight', thread: formerThread } }));
+    await vi.waitFor(() => expect(formerState.sending).toBe(false));
+    expect(store.composerStates).toEqual({});
+    expect(store.threads.find(row => row.id === 't-trace')?.title).not.toBe('Former session');
+    expect(replacementCalls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  } finally { store.detach(); client.close(); replacement.close(); }
 });
