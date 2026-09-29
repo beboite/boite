@@ -264,7 +264,8 @@ gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 
 The workflow reserves the version tag against the exact commit once the checks
-pass, before it publishes the server image and the prerelease. The `release tags`
+and server builds pass, before it publishes the server channel tags and the
+prerelease. The `release tags`
 ruleset keeps a tag from being deleted, so a build that fails its checks takes
 none, and the next build takes the same number. A build that fails while
 publishing keeps its tag and reuses that version on retry, even on a later day.
@@ -276,9 +277,20 @@ the in-app update selector to move between stable and nightly. Local Boite Dev
 builds remain isolated. The server uses the `dev` channel; use a separate Compose
 project for nightly volumes. Nightly publication
 never changes the stable Docker `latest` tag or GitHub's latest stable release.
-Nightly verification skips the stable Docker job. Its publication job builds,
-smoke-tests and pushes the development image once per architecture after the
-other checks pass.
+Nightly verification skips the stable Docker job. The development images build
+and run smoke tests alongside verification, once per architecture. Tested images
+are pushed under run-specific staging tags, and their digests are saved as
+artifacts. Only after verification, both image builds and version reservation
+succeed does `server-manifest.yml` promote those digests to `nightly`, the version
+tag and the commit tag. A failed check leaves the published channel unchanged;
+an unchanged commit skips both verification and image builds. Ordinary server
+publication uses the same manifest workflow immediately after its builds.
+
+On 2026-09-29, `gh run view 36531647917 --json jobs` showed verification's last
+build finishing at 06:44:34 UTC and the server build starting at 06:44:48. The
+slowest server build took 4 min 27 s. Overlapping it with verification removes
+that serial build phase; the resulting total duration still needs a GitHub run
+to measure runner availability and cache effects.
 
 ## Pull request reviews
 
