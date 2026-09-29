@@ -1,12 +1,14 @@
 # The context meter
 
 A thread's summary carries `context`, what the agent's last request held and
-how much room the model gives it, and the header draws it as a ring with the
-percentage beside it. When the agent compacts its conversation mid-turn, the
+how much room the model gives it. The message bar draws a ring beside its send
+controls; the percentage appears in the detail panel. When the agent compacts its conversation mid-turn, the
 timeline gets a divider saying how many tokens went. Both come from the agent
 itself: the core never estimates a context size, and a provider whose protocol
 says nothing shows an unfilled ring. Hovering, focusing or tapping the ring
-opens exact counts and a separate manual compaction button. Behind the
+opens exact counts and a separate manual compaction button. The panel opens
+above the message bar, using the available height, and scrolls on short screens.
+Behind the
 `prompt-cache` experiment the meter also carries the
 [prompt cache timer](prompt-cache.md).
 
@@ -20,8 +22,8 @@ opens exact counts and a separate manual compaction button. Behind the
   the next turn starts from. It is not the turn's total usage: a turn of ten
   tool calls makes ten requests, and only the last one is the reading.
 - `window` is the model's context window when the agent names it, else null.
-  With a window the header shows a percentage and the ring; without one it
-  shows the count alone.
+  With a window the ring shows how full it is and the detail panel includes a
+  percentage; without one the ring stays unfilled and the panel shows the count.
 - `at` is when the core wrote it.
 - `breakdown`, when available, contains disjoint input, cached-input and output
   counts. The UI displays a single segmented bar and exact counts. Providers

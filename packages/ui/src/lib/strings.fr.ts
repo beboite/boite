@@ -1298,6 +1298,7 @@ export const fr: Translation = {
     everyday: "L'essentiel",
     developer: 'Tout',
     header: 'En-tête de la conversation',
+    composer: 'Barre de saisie',
     sidebar: 'Barre latérale',
     panel: 'Menu du panneau latéral',
     project: 'Nom du projet',

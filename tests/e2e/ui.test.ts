@@ -138,7 +138,7 @@ test(
     // The context meter the echo agent reported at the end of the turn: the
     // prompt's characters over a floor of 100, on a window of 2000.
     await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '6'`);
-    expect((await page.text(testid('context-meter'))).trim()).toBe('6%');
+    expect((await page.text(testid('context-trigger'))).trim()).toBe('');
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);

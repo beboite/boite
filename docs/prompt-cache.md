@@ -8,7 +8,7 @@ bills a new cache write on top. The timer shows how long the current thread
 has before that happens, so you can decide whether to answer now or later.
 
 It is an experiment: Settings, Experiments, `Prompt cache timer`. When it is
-on, the context meter in the thread header gains a clock with the minutes left,
+on, the context meter in the message bar gains a clock with the minutes left,
 and its popup gets a Prompt cache section with the lifetime and its source.
 While a turn is queued, running or waiting for an answer, the clock is hidden.
 It returns when the turn ends, using the latest cache record.
@@ -51,7 +51,7 @@ turn whose driver names a lifetime, and keeps it in the journal
 | Grok, Antigravity, Antigravity CLI, Muse Code, other vendors | none | no published lifetime |
 | echo | 5 minutes | fixed, for tests |
 
-When the lifetime is unknown the header shows no clock. Showing a guessed one
+When the lifetime is unknown the message bar shows no clock. Showing a guessed one
 would be worse than showing nothing.
 
 ### Claude

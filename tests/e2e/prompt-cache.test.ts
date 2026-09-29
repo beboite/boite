@@ -51,6 +51,9 @@ test('a warm Claude cache counts down beside the context meter', async () => {
   expect(await page.evaluate<string>(`document.querySelector('${CHIP}').dataset.state`)).toBe('warm');
   expect(await page.text(CHIP)).toContain('31 min');
   await capture(page, 'prompt-cache-desktop');
+  expect(await page.evaluate<boolean>(`(() => { const popup = document.querySelector('[data-testid="context-popup"]'); return popup.scrollHeight <= popup.clientHeight; })()`)).toBe(true);
+  expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid="composer"] [data-testid="context-trigger"]')`)).toBe(true);
+  expect(await page.text('[data-testid="context-trigger"]')).not.toContain('%');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('31 min left');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('1 h · API');
 }, 90_000);
@@ -98,6 +101,11 @@ test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French
   await capture(page, 'prompt-cache-phone-fr');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('peut-être · 23 h');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('30 min à 24 h');
+  expect(await page.evaluate<boolean>(`(() => { const popup = document.querySelector('[data-testid="context-popup"]'); return popup.scrollHeight <= popup.clientHeight; })()`)).toBe(true);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
+  expect(await page.evaluate<boolean>(`(() => { const trigger = document.querySelector('[data-testid="composer"] [data-testid="context-trigger"]'); const r = trigger.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'prompt-cache-phone-bar.png'));
 }, 90_000);
 
 test('another model reads cold, and the experiment off draws nothing', async () => {
