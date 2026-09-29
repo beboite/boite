@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
+  import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -14,6 +15,7 @@
   import { fill, strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
+  import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
   import ComposerQueue from './ComposerQueue.svelte';
   import MentionMenu from './MentionMenu.svelte';
@@ -45,6 +47,8 @@
   let inputWidth = $state(0);
   let inputScroll = $state(0);
   let toolbar = $state<ReturnType<typeof ComposerBar> | undefined>(undefined);
+  let attachmentStrip = $state<ReturnType<typeof ComposerAttachments> | undefined>();
+  let highlightedImage = $state<Attachment | null>(null);
   /** Where ArrowUp stands in this thread's sent prompts, or null outside recall. */
   let recall = $state<number | null>(null);
   /** The box has the keyboard: one of the two things that open the slash menu. */
@@ -247,9 +251,13 @@
   $effect(() => {
     const element = box;
     if (!element) return;
-    const observer = new ResizeObserver(syncInput);
+    let resizeFrame = 0;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth !== inputWidth) { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
+      else syncInput();
+    });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); cancelAnimationFrame(resizeFrame); };
   });
 
   $effect(() => {
@@ -388,9 +396,11 @@
       return;
     }
     state.sending = true;
+    const finishImageSend = trackImageSend(state, prompt, images);
     const accepted = await (nextDraft
       ? store.submitAndDraft(prompt, choice, images, references)
       : store.submit(prompt, choice, images, references));
+    finishImageSend(accepted);
     if (accepted) {
       // Text typed and images attached while the RPC was pending belong to the
       // next prompt: only what went out is cleared.
@@ -413,9 +423,13 @@
     if (files.length === 0) return;
     const state = stateForInput();
     const attachmentProvider = provider;
+    const inputKey = key;
+    const inputStore = store;
     readingFiles += 1;
     try {
-      await attachFiles(store, files, state, attachmentProvider);
+      await attachFiles(inputStore, files, state, attachmentProvider, () => {
+        if (inputStore.composerStates[inputKey] === state) insertImageReference(inputStore, inputKey);
+      });
     } finally { readingFiles -= 1; }
   }
 
@@ -447,6 +461,7 @@
 
   function removeAttachment(at: number) {
     const state = stateForInput();
+    removeImageReferences(store, key, at);
     state.attachments = state.attachments.filter((_, index) => index !== at);
     box?.focus();
   }
@@ -676,7 +691,12 @@
   }
 </script>
 
-<div class="composer-wrap" class:centered>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="composer-wrap" class:centered onkeydowncapture={(event) => {
+  if (!event.isComposing && event.key === 'Escape' && !mentionOpen && !slashOpen && attachmentStrip?.closePreview()) {
+    event.preventDefault(); event.stopPropagation();
+  }
+}}>
   <ThreadActivity {store} />
   {#if composer && composer.queued.length > 0}
     <ComposerQueue queued={composer.queued}
@@ -697,19 +717,19 @@
     {/if}
 
     {#if attachments.length > 0}
-      <ComposerAttachments {attachments} onremove={removeAttachment} />
+      {#key composer}<ComposerAttachments bind:this={attachmentStrip} {attachments} highlighted={highlightedImage} onremove={removeAttachment} onfocus={() => box?.focus()} />{/key}
     {/if}
 
     <div class="input-wrap">
-    {#if painted || previewReferences.length}
-      <div class="input-highlight" aria-hidden={previewReferences.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
-        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}>{#if previewReferences.length}<PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} onreference={(reference) => {
+    {#if painted || previewReferences.length || attachments.some(item => item.kind === 'image')}
+      <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
+        <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} command={commandToken || undefined} onreference={(reference) => {
           if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
-        }} />{:else}<span aria-hidden="true">{#each segments as segment, index (index)}{#if segment.kind === 'command'}<span class="command-token" data-testid="command-highlight">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}</span>{/if}{'\n'}</div>
+        }}>{#snippet paint(parts)}<ComposerImageReferences segments={parts} {attachments} onopen={(attachment) => attachmentStrip?.open(attachment)} onhover={(attachment) => highlightedImage = attachment} />{/snippet}</PreviewReferences>{'\n'}</div>
       </div>
     {/if}
     <textarea
-      class:highlighted={painted || previewReferences.length > 0}
+      class:highlighted={painted || previewReferences.length > 0 || attachments.some(item => item.kind === 'image')}
       bind:this={box}
       value={text}
       onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
@@ -836,7 +856,6 @@
     color: var(--color-foreground);
   }
 
-  .command-token { color: var(--color-accent); }
   textarea.highlighted { color: transparent; caret-color: var(--color-foreground); }
   textarea.highlighted::selection { background: var(--color-accent-soft); }
 
