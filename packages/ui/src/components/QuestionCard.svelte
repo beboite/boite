@@ -47,7 +47,7 @@
   }
 
   async function send(): Promise<void> {
-    if (!ready || sent) return;
+    if (!pending || !ready || sent) return;
     sent = true;
     if ((await submit(picked, typed.trim())) === false) sent = false;
   }
@@ -132,6 +132,12 @@
         <input
           type="text"
           bind:value={typed}
+          onkeydown={(event) => {
+            if (event.key !== 'Enter' || event.isComposing) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void send();
+          }}
           placeholder={strings.chat.questionTextPlaceholder}
           data-testid="question-text-input"
           disabled={!pending || sent}
