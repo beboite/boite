@@ -611,6 +611,18 @@ that do today. A question is
 not a permission mode and is never gated by one: an agent whose approvals are
 off can still ask.
 
+### Codex startup
+
+If Codex exits with code 1 while `initialize` is pending and its stderr reports
+`failed to initialize sqlite state runtime`, Boite retries startup twice, after
+500 ms and 1,000 ms. Each attempt uses the same account and configuration.
+The native thread is created or resumed only after initialization succeeds;
+the prompt is sent once. Stop cancels the retry wait. Other startup failures
+and failures after initialization end the turn without an automatic retry.
+Each retry is logged, and a third failure keeps the agent's exit error visible.
+An initialization RPC error waits up to 2 seconds for process closure and remaining
+stderr before the retry decision, so a process that stays alive cannot stall it.
+
 ### Codex task tracking
 
 Boite enables `tools.update_plan.enabled` through the per-thread configuration
