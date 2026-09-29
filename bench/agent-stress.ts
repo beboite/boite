@@ -127,6 +127,24 @@ try {
     for (const thread of watched) await reader.call('threads.subscribe', { threadId: thread.id });
   }
 
+  const cancelLoad = async (phase: 'cold' | 'warm'): Promise<void> => {
+    const interrupted = await Promise.all(created.map(t => owner.call('turns.start', {
+      threadId: t.id, prompt: '[sleep:3600000] must be stopped',
+    })));
+    const busy = await owner.call('scheduler.get', {});
+    assert.equal(busy.running.length, count);
+    assert.equal(busy.queued.length, 0);
+    const stopStart = performance.now();
+    const stops = await Promise.all(created.map(t => owner.call('turns.stop', { threadId: t.id })));
+    assert(stops.every(s => s.stopped));
+    await until(() => interrupted.every(t => watchers[0]!.finished.get(t.id)?.status === 'stopped'), 'mass cancellation');
+    const settled = await owner.call('scheduler.get', {});
+    assert.equal(settled.running.length + settled.queued.length, 0);
+    record({ scenario: 'mass cancellation', phase, stopped: interrupted.length, wallMs: performance.now() - stopStart });
+  };
+  // First-use startup is a separate failure path from stopping already-used threads.
+  await cancelLoad('cold');
+
   for (const concurrency of [...new Set([6, cap])]) {
     let maxRunning = 0, maxQueued = 0, schedulerBytes = 0;
     const violations: string[] = [];
@@ -217,16 +235,7 @@ try {
   assert.equal(text(complete.messages.filter(m => m.turnId === reconnectTurns[0]!.id)), reconnectPrompt);
   record({ scenario: 'reader reconnect', uninterruptedTurns: reconnectTurns.length, incrementalSnapshot: catchUp.messagesFrom === firstDelta.messageId });
 
-  const interrupted = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] must be stopped' })));
-  const busy = await owner.call('scheduler.get', {});
-  assert.equal(busy.running.length, count);
-  assert.equal(busy.queued.length, 0);
-  const stopStart = performance.now();
-  const stops = await Promise.all(created.map(t => owner.call('turns.stop', { threadId: t.id })));
-  assert(stops.every(s => s.stopped));
-  await until(() => interrupted.every(t => watchers[0]!.finished.get(t.id)?.status === 'stopped'), 'mass cancellation');
-  assert.equal((await owner.call('scheduler.get', {})).queued.length, 0);
-  record({ scenario: 'mass cancellation', stopped: interrupted.length, wallMs: performance.now() - stopStart });
+  await cancelLoad('warm');
 
   const lost = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] interrupted by crash' })));
   const beforeCrash = await owner.call('scheduler.get', {});
@@ -249,6 +258,7 @@ try {
     // Earlier completed turns must survive the recovery unchanged.
     assert.equal(thread.turns.filter(t => t.status === 'done').length,
       new Set([6, cap]).size + (reconnectThreads.some(t => t.id === thread.id) ? 1 : 0));
+    assert.equal(thread.turns.filter(t => t.status === 'stopped').length, 2, 'earlier cancellations survived the crash');
   }
   const last = recovered.next('turn.finished', t => t.threadId === created[0]!.id);
   await recovered.call('turns.start', { threadId: created[0]!.id, prompt: 'usable after recovery' });

@@ -17,6 +17,7 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
   });
   let page: BrowserPage | undefined;
   let failed = false;
+  const cleanupErrors: unknown[] = [];
   try {
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
     await client.call('settings.set', { asyncQuestions: false });
@@ -114,8 +115,9 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     client.close();
     const cleanup = await Promise.allSettled([page?.close(), core.stop()]);
     for (const result of cleanup) if (result.status === 'rejected') {
-      if (!failed) throw result.reason;
-      console.error('UI stress cleanup failed:', result.reason);
+      if (failed) console.error('UI stress cleanup failed:', result.reason);
+      else cleanupErrors.push(result.reason);
     }
   }
+  if (cleanupErrors.length > 0) throw new AggregateError(cleanupErrors, 'UI stress cleanup failed');
 }, 120_000);

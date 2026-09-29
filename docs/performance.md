@@ -17,7 +17,8 @@ checks every streamed answer and persisted turn, workload concurrency, mass
 cancellation, a reader reconnect and recovery after killing the core. It runs
 both six turns at a time and the requested concurrency, bounded by the load
 generator rather than scheduler quotas. Cancellation and crash scenarios start
-all 1,000 long-running turns together. Additional readers
+all 1,000 long-running turns together. Mass cancellation covers both cold and
+already-used threads, and verifies their stopped history after recovery. Additional readers
 alternate local connections with compressed, paced remote connections.
 An independent process probes HTTP health, so parsing the load generator's
 WebSocket frames cannot delay the observer.
@@ -36,6 +37,9 @@ asynchronous work. The queue retains at most 4,096 frames or 64 MiB of text,
 including active requests; overflow closes the requesting connection with a
 reconnect reason. Disconnect and shutdown discard work that has not started.
 The prompt and its queued status commit together before its driver starts.
+Synchronous driver startup writes share a second transaction. The finished
+turn and final thread state also commit together; awaited driver work and
+pending moves stay outside these transactions.
 
 Scheduler notifications publish the newest snapshot in each 16-millisecond
 window. Turn, message and permission events keep their immediate delivery.
@@ -56,6 +60,18 @@ launch limits were retired:
 | Same run, scheduler payloads at 64 concurrent turns | 7.0 MiB of decoded JSON on the owner connection |
 | Same run, mass cancellation and crash recovery | All 1,000 turns cancelled in 19.5 s; 64 running and 936 queued turns recovered after an 8.1 s restart |
 | Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.99 s, typing in 3.7 ms and maximum timer lag 36 ms; desktop and phone checked |
+
+After launch limits were retired, the same command with 12 additional readers
+passed on 2026-09-29 after grouping synchronous startup and completion writes:
+
+| Scenario | Observed result |
+| --- | --- |
+| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 46.0/25.6 s |
+| Independent HTTP health | Zero timeouts; p95 57/164 ms and maximum 1.33/2.07 s at six/64 concurrent turns |
+| Scheduler payloads at 64 concurrent turns | 1.19 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
+| All 1,000 turns running together, cold then already used | Cancellation in 7.8/7.7 s with the 30-second RPC deadline unchanged |
+| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 17.0 s restart |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.54 s, typing in 2.6 ms and maximum timer lag 40 ms; desktop and phone checked |
 
 Background machine load was not controlled. These single runs establish
 failures and reproducible checks. They do not
