@@ -569,6 +569,8 @@ export class Workflows {
 
   /** A held summary goes again once the owner enables or resumes the team. */
   private redeliver(rootId: string): void {
+    const config = this.core.delegation.config(rootId);
+    if (!config.enabled || config.paused) return;
     const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0", rootId)
       .filter(run => run.status === 'paused'
         ? run.nodes.every(node => node.status === 'done' || node.status === 'skipped')

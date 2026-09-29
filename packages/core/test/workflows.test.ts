@@ -374,8 +374,11 @@ test('completed steps keep their summary while the team is paused and deliver on
   await owner.call('delegation.configure', { threadId, config: { ...config, paused: true } });
   [...running.values()][0]!('Step done');
   await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done');
+  h.core.bus.emit('delegation.changed', { threadId });
+  await Bun.sleep(20);
   const held = h.core.workflows.get(threadId, run.id);
   expect([held.status, held.delivered]).toEqual(['paused', false]);
+  expect(held.deliveryError ?? null).toBeNull();
   expect(held.error).toContain('Delegation is paused');
   await owner.call('delegation.configure', { threadId, config });
   await settled(h, threadId, run.id);
