@@ -54,21 +54,29 @@ export interface BrowserBridge {
 }
 
 /** A url the field can be handed to: a scheme it already has, or a host to prefix. */
+/** Classify the canonical hostname returned by URL, including its IPv4 interpretation. */
+function isLocalHost(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '[::1]') return true;
+  const ipv4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(hostname);
+  const first = Number(ipv4?.[1]), second = Number(ipv4?.[2]);
+  return ipv4 !== null && (first === 127 || first === 10 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168) || (first === 169 && second === 254));
+}
+
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (text === '') return null;
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(?::\d+)?(?:[/?#]|$)/.exec(text);
-  const first = Number(ipv4?.[1]), second = Number(ipv4?.[2]);
-  const lan = ipv4 !== null && (first === 10 || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 168) || (first === 169 && second === 254));
-  const local = lan || /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
+  const local = /^(?:localhost|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
   const host = /^(?:[\w-]+\.)+[\w-]+(?::\d+)?(?:[/?#]|$)/.test(text);
   const scheme = /^[a-z][a-z0-9+.-]*:\S*$/i.test(text);
-  const candidate = local ? `http://${text}` : host ? `https://${text}` : scheme ? text : null;
+  const unqualified = local || host;
+  const candidate = unqualified ? `https://${text}` : scheme ? text : null;
   if (candidate === null) return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
   try {
     const url = new URL(candidate);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    // Parse from the original input again so a port that HTTPS considered default is retained.
+    return unqualified && isLocalHost(url.hostname) ? new URL(`http://${text}`).href : url.href;
   } catch {
     return null;
   }

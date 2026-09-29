@@ -11,6 +11,11 @@ test('addresses distinguish local dev servers, public hosts and search queries',
   expect(normalizeUrl('169.254.0.8:5173')).toBe('http://169.254.0.8:5173/');
   expect(normalizeUrl('172.32.0.8:5173')).toBe('https://172.32.0.8:5173/');
   expect(normalizeUrl('https://192.168.0.8:5173')).toBe('https://192.168.0.8:5173/');
+  expect(normalizeUrl('0172.16.0.8:5173')).toBe('https://122.16.0.8:5173/');
+  expect(normalizeUrl('010.0.0.8:5173')).toBe('https://8.0.0.8:5173/');
+  expect(normalizeUrl('012.0.0.8:5173')).toBe('http://10.0.0.8:5173/');
+  expect(normalizeUrl('localhost:443')).toBe('http://localhost:443/');
+  expect(normalizeUrl('example.com:80')).toBe('https://example.com:80/');
   expect(normalizeUrl('example.com/path')).toBe('https://example.com/path');
   expect(normalizeUrl('how to write svelte')).toBe('https://www.google.com/search?q=how%20to%20write%20svelte');
   expect(normalizeUrl('error: cannot find module')).toBe('https://www.google.com/search?q=error%3A%20cannot%20find%20module');
