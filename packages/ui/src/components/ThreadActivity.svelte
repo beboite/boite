@@ -58,10 +58,11 @@
   let history = $derived([...(loop?.history ?? [])].reverse());
   const detailsId = $props.id();
 
-  // Reserve the visible dock's measured height, including folded activity.
+  // Task details overlay the reading position; folded rows and questions reserve room.
   let height = $state(0);
+  let readingHeight = $state(0);
   $effect(() => {
-    dockRoom.height = visible ? height : 0;
+    dockRoom.height = visible ? readingHeight : 0;
     dockRoom.clearance = visible ? height : 0;
   });
   $effect(() => () => {
@@ -77,7 +78,11 @@
     let frame = 0;
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => (height = node.offsetHeight));
+      frame = requestAnimationFrame(() => {
+        height = node.offsetHeight;
+        const details = node.querySelector<HTMLElement>(':scope > .task-disclosure');
+        readingHeight = height - (details?.offsetHeight ?? 0);
+      });
     });
     observer.observe(node);
     return {
@@ -85,6 +90,7 @@
         observer.disconnect();
         cancelAnimationFrame(frame);
         height = 0;
+        readingHeight = 0;
       }
     };
   }

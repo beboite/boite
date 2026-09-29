@@ -8,9 +8,9 @@ export const questionDock = $state<{ focus: string | null; nonce: number }>({ fo
 
 /*
  * How tall the dock above the composer stands. It floats over the end of the
- * timeline. The timeline reserves its measured height while visible, so the
- * last answer stays readable without leaving room for an absent dock.
- * The same height keeps the return button above every visible row.
+ * timeline. Folded rows and open questions reserve reading room while visible;
+ * task details overlay it without moving the reading position. Clearance uses
+ * the full measured height to keep the return button above every visible row.
  */
 export const dockRoom = $state<{ height: number; clearance: number }>({ height: 0, clearance: 0 });
 

@@ -450,11 +450,11 @@
     }
   });
 
-  /** The dock over the timeline's end growing, a question opening in it, lifts a pinned tail with it. */
+  /** Lift a pinned tail for the dock without moving a history being read from its top. */
   $effect(() => {
     void dockRoom.height;
     const box = viewport;
-    if (!box || !pinned) return;
+    if (!box || !pinned || box.scrollTop === 0) return;
     box.scrollTop = box.scrollHeight;
     scrollTop = box.scrollTop;
   });
