@@ -2,6 +2,14 @@
 const DATABASE = 'boite-unsent-v1';
 let database: Promise<IDBDatabase> | null = null;
 
+function abortPending(transaction: IDBTransaction | null): void {
+  try { transaction?.abort(); }
+  catch (error) {
+    // Commit can precede the completion event, leaving its timeout queued.
+    if (!(error instanceof DOMException && error.name === 'InvalidStateError')) throw error;
+  }
+}
+
 function open(): Promise<IDBDatabase> {
   return database ??= new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE, 1);
@@ -10,7 +18,7 @@ function open(): Promise<IDBDatabase> {
     const close = () => {
       leaving = true;
       clearTimeout(timer);
-      request.transaction?.abort();
+      abortPending(request.transaction);
       try { request.result.close(); } catch { /* The database is still opening. */ }
       database = null;
     };
@@ -34,7 +42,7 @@ export async function readDraftJournal(key: string): Promise<unknown> {
   const db = await open();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readonly');
-    const timer = setTimeout(() => transaction.abort(), 3000);
+    const timer = setTimeout(() => abortPending(transaction), 3000);
     const request = transaction.objectStore('drafts').get(key);
     transaction.oncomplete = () => { clearTimeout(timer); resolve(request.result); };
     transaction.onabort = () => { clearTimeout(timer); reject(transaction.error); };
@@ -46,7 +54,7 @@ export async function writeDraftJournal(key: string, value: unknown): Promise<vo
   const db = await open();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('drafts', 'readwrite', { durability: 'strict' });
-    const timer = setTimeout(() => transaction.abort(), 3000);
+    const timer = setTimeout(() => abortPending(transaction), 3000);
     transaction.objectStore('drafts').put(value, key);
     transaction.oncomplete = () => { clearTimeout(timer); resolve(); };
     transaction.onabort = () => { clearTimeout(timer); reject(transaction.error ?? new Error('Draft journal write aborted or timed out')); };
