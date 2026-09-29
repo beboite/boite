@@ -5,9 +5,12 @@ import { renderMarkdown } from './markdown';
 test('rich markdown supports local paths, spaces, line numbers, file URIs and balanced URL parentheses', () => {
   expect(chatLink('C:\\project\\file.ts:12:3')).toEqual({ kind: 'file', target: 'C:/project/file.ts', line: 12 });
   expect(chatLink('file:///C:/project/report%20one.pdf')).toEqual({ kind: 'file', target: 'C:/project/report one.pdf' });
+  expect(chatLink('/D:/project/session.ts:12')).toEqual({ kind: 'file', target: 'D:/project/session.ts', line: 12 });
+  expect(chatLink('/D%3A/project/report%20one.pdf#L5')).toEqual({ kind: 'file', target: 'D:/project/report one.pdf', line: 5 });
   expect(chatLink('src/file.ts#L5')).toEqual({ kind: 'file', target: 'src/file.ts', line: 5 });
   const html = renderMarkdown('[PDF](<docs/report one.pdf>) [source](/project/main.ts:3) [web](https://example.test/a_(b)) https://example.test/page. `src/main.ts:8`', true);
   expect(html).toContain('data-file-path="docs/report one.pdf"');
+  expect(renderMarkdown('[source](/D:/project/session.ts:12)', true)).toContain('data-file-path="D:/project/session.ts" data-file-line="12"');
   expect(html).toContain('data-file-line="3"');
   expect(html).toContain('href="https://example.test/a_(b)"');
   expect(html).toContain('href="https://example.test/page"');

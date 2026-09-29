@@ -67,6 +67,13 @@ echo turn with a fresh data directory. It does not exercise native desktop contr
 The WebView2 shell end-to-end suite remains Windows-only.
 Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
 second architecture of each only after a merge and on a release.
+Core changes run the core tests on all five runners before a merge: Windows,
+Linux x64 and ARM64, and macOS ARM64 and Intel. The portable desktop jobs do
+not repeat those tests after a merge.
+
+Artifact uploads retry once through the shared upload action. A failed first
+attempt can leave an artifact name reserved, so the retry replaces that name.
+If the retry fails too, the job fails. Tests and builds are not retried.
 
 ## Build cost
 
