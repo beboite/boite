@@ -778,7 +778,11 @@ Text blocks stay 12 px away from activity rows.
 
 ### Theme colours
 
-Settings, Appearance offers five palette previews and five editable colours:
+Settings, Appearance offers OLED, Catppuccin (Mocha/Latte), Tokyo Night
+(Night/Day), Nord, Gruvbox and Amethyst, with conversation previews showing
+their panels, code, selection and diff colours. OLED switches to dark appearance
+and uses pure black for the conversation, sidebar and code background.
+Choose Customize colours to reveal five editable colours:
 background, sidebar and frame, panels and messages, text, and accent. Click a
 preview element or a colour row to edit it with the colour field, hue slider
 or hex input. The field supports touch and arrow keys; Shift takes larger steps.
@@ -788,10 +792,13 @@ appearance to its original palette.
 Light and dark palettes are stored separately on this device under
 `boite.theme-colors.v1`. System follows the operating system and selects the
 matching palette; Grain uses the dark colours. Secondary text and borders are
-derived from the main colours. Low text contrast offers a correction, measured
+part of each preset; editing a main colour makes its dependent colours follow
+automatically. Low text contrast offers a correction, measured
 against the solid surfaces. Window transparency can change that contrast.
 Vite generates the prepaint script from the same validation and colour math
 as the runtime, so reloads restore the colours before the UI mounts.
+Community palette sources and license notices ship in
+`packages/ui/public/theme-licenses.txt`.
 
 `bun test tests/e2e/theme-colors.test.ts` exercises palette selection, custom
 colours, reloads, separate appearances, contrast correction, undo and phone

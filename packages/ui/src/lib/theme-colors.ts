@@ -1,30 +1,14 @@
-import { accentHex, colorTools, paletteTokens, type Palette } from './color-math';
+import { accentHex, colorTools, detailTokens, normalizeHex, paletteTokens, parseColorState, type ColorState, type Palette, type PaletteDetails, type ColorRole } from './color-math';
+export { parseColorState } from './color-math';
 
 export type ColorMode = 'dark' | 'light';
-export type PaletteId = 'default' | 'ocean' | 'forest' | 'sand' | 'plum';
-export const PALETTES: PaletteId[] = ['default', 'ocean', 'forest', 'sand', 'plum'];
+export type PaletteId = 'default' | 'oled' | 'catppuccin' | 'tokyo-night' | 'nord' | 'gruvbox' | 'amethyst';
+export const PALETTES: PaletteId[] = ['default', 'oled', 'catppuccin', 'tokyo-night', 'nord', 'gruvbox', 'amethyst'];
 export const COLORS_KEY = 'boite.theme-colors.v1';
 export const COLORS_EVENT = 'boite-colors-changed';
-type SavedPalette = Omit<Palette, 'accent'> & { accent?: string };
-type ColorState = { version: 1; dark?: SavedPalette; light?: SavedPalette };
 let volatile: ColorState | undefined;
-
-// Only these colour roles cross into CSS. Also used by the prepaint script.
-export function parseColorState(value: unknown): ColorState {
-  const empty: ColorState = { version: 1 };
-  if (!value || typeof value !== 'object' || (value as ColorState).version !== 1) return empty;
-  for (const mode of ['dark', 'light'] as const) {
-    const p = (value as ColorState)[mode];
-    if (!p || typeof p !== 'object') continue;
-    const keys = ['background', 'frame', 'surface', 'foreground'] as const;
-    if (!keys.every(key => typeof p[key] === 'string' && /^#[\da-f]{6}$/i.test(p[key]))) continue;
-    if (p.accent !== undefined && (typeof p.accent !== 'string' || !/^#[\da-f]{6}$/i.test(p.accent))) continue;
-    empty[mode] = Object.fromEntries([...keys, ...(p.accent ? ['accent'] as const : [])].map(key => [key, p[key]!.toLowerCase()])) as SavedPalette;
-  }
-  return empty;
-}
 function state(): ColorState {
-  if (volatile) return volatile;
+  if (volatile) return parseColorState(volatile);
   try { return parseColorState(JSON.parse(localStorage.getItem(COLORS_KEY) ?? 'null')); }
   catch { return { version: 1 }; }
 }
@@ -37,16 +21,23 @@ function hue(): number {
   } catch { return 260; }
 }
 export function presetPalette(id: PaletteId, mode: ColorMode): Palette {
+  if (id === 'oled') mode = 'dark';
   const css = getComputedStyle(document.documentElement);
-  const role = (name: keyof Palette) => css.getPropertyValue(`--palette-${mode}-${id}-${name}`).trim();
-  return { background: role('background'), frame: role('frame'), surface: role('surface'), foreground: role('foreground'), accent: id === 'default' ? accentHex(hue()) : role('accent') };
+  const role = (name: ColorRole) => normalizeHex(css.getPropertyValue(`--palette-${mode}-${id}-${name}`).trim()) ?? '';
+  const details: PaletteDetails = {};
+  for (const key of Object.keys(detailTokens) as (keyof PaletteDetails)[]) {
+    const suffix = key === 'surfaceLow' ? 'surface-low' : key === 'surfaceHigh' ? 'surface-high' : detailTokens[key].slice('--color-'.length);
+    const value = normalizeHex(css.getPropertyValue(`--palette-${mode}-${id}-${suffix}`).trim());
+    if (value) details[key] = value;
+  }
+  return { background: role('background'), frame: role('frame'), surface: role('surface'), foreground: role('foreground'), accent: id === 'default' ? accentHex(hue()) : role('accent'), ...(Object.keys(details).length ? { details } : {}) };
 }
 export function readPalette(mode = colorMode()): Palette {
   const saved = state()[mode];
   return saved ? { ...saved, accent: saved.accent ?? accentHex(hue()) } : presetPalette('default', mode);
 }
 export function hasCustomColors(mode = colorMode()): boolean { return !!state()[mode]; }
-const TOKEN_NAMES = ['--color-background', '--color-frame', '--color-surface', '--color-surface-2', '--color-surface-3', '--color-foreground', '--color-muted-foreground', '--color-subtle', '--color-on-foreground', '--color-border', '--color-edge', '--color-frame-edge', '--color-hover', '--color-active', '--color-selection', '--color-accent', '--color-accent-ink', '--color-reasoning-on', '--accent-hue'];
+const TOKEN_NAMES = ['--color-background', '--color-frame', '--color-surface-2', '--color-foreground', '--color-on-foreground', '--color-accent', '--color-accent-ink', '--color-reasoning-on', '--accent-hue', '--color-danger-hover', '--color-on-danger', ...Object.values(detailTokens)];
 export function applyColors(mode = colorMode()): void {
   const root = document.documentElement;
   for (const name of TOKEN_NAMES) root.style.removeProperty(name);
@@ -78,7 +69,7 @@ export function resetColors(mode = colorMode()): void {
 export function resetAccentColor(): void {
   const next = state();
   const p = next[colorMode()];
-  if (p) { delete p.accent; save(next); }
+  if (p) { delete p.accent; if (p.details) delete p.details.accentSoft; save(next); }
 }
 export function startColors(): () => void {
   const onstorage = (event: StorageEvent) => {
@@ -95,8 +86,7 @@ export function startColors(): () => void {
 export function colorsBootScript(): string {
   return `try {
     var colorTools = (${colorTools.toString()})();
-    var parseColors = (${parseColorState.toString()});
-    var savedColors = parseColors(JSON.parse(localStorage.getItem('${COLORS_KEY}') || 'null'));
+    var savedColors = colorTools.parseColorState(JSON.parse(localStorage.getItem('${COLORS_KEY}') || 'null'));
     var palette = savedColors[document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'];
     if (palette) {
       var tokens = colorTools.paletteTokens(palette);

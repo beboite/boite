@@ -514,6 +514,8 @@ shellTest(
     await page?.waitFor(`document.querySelector('${testid('sidebar')}')`);
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-appearance'));
+    await page?.waitFor(`document.querySelector('${testid('colors-customize')}')`);
+    await page?.click(testid('colors-customize'));
     await page?.waitFor(`document.querySelector('${testid('accent-300')}')`);
     await page?.click(testid('accent-300'));
     expect(await page?.evaluate(`document.documentElement.style.getPropertyValue('--accent-hue')`)).toBe('300');

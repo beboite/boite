@@ -9,6 +9,7 @@
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
   import { readTheme, setTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
+  import { COLORS_EVENT } from '../lib/theme-colors';
   import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
   import ThemeColors from './ThemeColors.svelte';
@@ -145,7 +146,9 @@
       if (event.key === THEME_STORAGE_KEY || event.key === null) theme = readTheme();
     };
     window.addEventListener('storage', followFaces);
-    return () => { stopZoom(); stopExperiments(); window.removeEventListener('storage', followFaces); };
+    const followTheme = () => { theme = readTheme(); };
+    window.addEventListener(COLORS_EVENT, followTheme);
+    return () => { stopZoom(); stopExperiments(); window.removeEventListener('storage', followFaces); window.removeEventListener(COLORS_EVENT, followTheme); };
   });
 
   function pickMaterial(next: Glass) {

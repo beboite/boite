@@ -1,8 +1,45 @@
-export type Palette = { background: string; frame: string; surface: string; foreground: string; accent: string };
-export type ColorRole = keyof Palette;
+export type PaletteDetails = Partial<Record<'surfaceLow' | 'surfaceHigh' | 'muted' | 'subtle' | 'border' | 'edge' | 'frameEdge' | 'hover' | 'active' | 'selection' | 'accentSoft' | 'codeBackground' | 'codeForeground' | 'success' | 'danger' | 'live', string>>;
+export type Palette = { background: string; frame: string; surface: string; foreground: string; accent: string; details?: PaletteDetails };
+export type ColorRole = Exclude<keyof Palette, 'details'>;
+export type SavedPalette = Omit<Palette, 'accent'> & { accent?: string };
+export type ColorState = { version: 1; dark?: SavedPalette; light?: SavedPalette };
 
 // Self-contained so the prepaint script uses the same math as the mounted app.
 export function colorTools() {
+  const detailTokens = {
+    surfaceLow: '--color-surface', surfaceHigh: '--color-surface-3',
+    muted: '--color-muted-foreground', subtle: '--color-subtle',
+    border: '--color-border', edge: '--color-edge', frameEdge: '--color-frame-edge',
+    hover: '--color-hover', active: '--color-active', selection: '--color-selection',
+    accentSoft: '--color-accent-soft', codeBackground: '--color-code-background', codeForeground: '--color-code-foreground',
+    success: '--color-success', danger: '--color-danger', live: '--color-live'
+  } as const satisfies Record<keyof PaletteDetails, string>;
+  // The mounted app and prepaint script accept the same bounded colour data.
+  function parseColorState(value: unknown): ColorState {
+    const empty: ColorState = { version: 1 };
+    if (!value || typeof value !== 'object' || (value as ColorState).version !== 1) return empty;
+    for (const mode of ['dark', 'light'] as const) {
+      const p = (value as ColorState)[mode];
+      if (!p || typeof p !== 'object') continue;
+      const keys = ['background', 'frame', 'surface', 'foreground'] as const;
+      const valid = (color: unknown): color is string => typeof color === 'string' && /^#[\da-f]{6}$/i.test(color);
+      if (!keys.every(key => valid(p[key])) || (p.accent !== undefined && !valid(p.accent))) continue;
+      const saved: SavedPalette = {
+        background: p.background.toLowerCase(), frame: p.frame.toLowerCase(),
+        surface: p.surface.toLowerCase(), foreground: p.foreground.toLowerCase(),
+        ...(p.accent ? { accent: p.accent.toLowerCase() } : {})
+      };
+      if (p.details && typeof p.details === 'object') {
+        const details: PaletteDetails = {};
+        for (const key of Object.keys(detailTokens) as (keyof PaletteDetails)[]) {
+          if (valid(p.details[key])) details[key] = p.details[key]!.toLowerCase();
+        }
+        if (Object.keys(details).length) saved.details = details;
+      }
+      empty[mode] = saved;
+    }
+    return empty;
+  }
   function normalizeHex(value: string): string | undefined {
     const hex = value.trim().replace(/^#?([\da-f]{3}|[\da-f]{6})$/i, '#$1').toLowerCase();
     if (/^#[\da-f]{6}$/.test(hex)) return hex;
@@ -61,24 +98,46 @@ export function colorTools() {
     const blue = .0259040371 * l + .7827717662 * m - .808675766 * s;
     return (Math.atan2(blue, a) * 180 / Math.PI + 360) % 360;
   }
-  function paletteTokens(p: Omit<Palette, 'accent'> & { accent?: string }): Record<string, string> {
-    const surface3 = mixColor(p.surface, p.foreground, .055);
-    const grounds = [p.background, p.frame, p.surface, surface3];
-    const muted = readable(mixColor(p.foreground, p.background, .3), grounds);
-    const subtle = readable(mixColor(p.foreground, p.background, .45), grounds);
+  function paletteTokens(p: SavedPalette): Record<string, string> {
+    const d = p.details ?? {};
+    const surface = d.surfaceLow ?? mixColor(p.background, p.surface, .45);
+    const surface3 = d.surfaceHigh ?? mixColor(p.surface, p.foreground, .055);
+    const grounds = [p.background, p.frame, surface, p.surface, surface3];
+    const muted = readable(d.muted ?? mixColor(p.foreground, p.background, .3), grounds);
+    const subtle = readable(d.subtle ?? mixColor(p.foreground, p.background, .45), grounds);
     const tokens: Record<string, string> = {
       '--color-background': p.background, '--color-frame': p.frame,
-      '--color-surface': mixColor(p.background, p.surface, .45), '--color-surface-2': p.surface,
+      '--color-surface': surface, '--color-surface-2': p.surface,
       '--color-surface-3': surface3, '--color-foreground': p.foreground,
       '--color-muted-foreground': muted, '--color-subtle': subtle,
       '--color-on-foreground': readable(p.background, [p.foreground]),
-      '--color-border': mixColor(p.background, p.foreground, .12),
-      '--color-edge': mixColor(p.background, p.foreground, .24),
-      '--color-frame-edge': mixColor(p.background, p.foreground, .18),
-      '--color-hover': mixColor(p.frame, p.foreground, .06),
-      '--color-active': mixColor(p.frame, p.foreground, .11),
-      '--color-selection': mixColor(p.background, p.foreground, .22)
+      '--color-border': d.border ?? mixColor(p.background, p.foreground, .12),
+      '--color-edge': d.edge ?? mixColor(p.background, p.foreground, .24),
+      '--color-frame-edge': d.frameEdge ?? mixColor(p.background, p.foreground, .18),
+      '--color-hover': d.hover ?? mixColor(p.frame, p.foreground, .06),
+      '--color-active': d.active ?? mixColor(p.frame, p.foreground, .11),
+      '--color-selection': d.selection ?? mixColor(p.background, p.foreground, .22),
+      '--color-code-background': d.codeBackground ?? p.surface,
+      '--color-code-foreground': readable(d.codeForeground ?? p.foreground, [d.codeBackground ?? p.surface])
     };
+    if (d.accentSoft) tokens['--color-accent-soft'] = d.accentSoft;
+    for (const key of ['success', 'danger', 'live'] as const) {
+      if (!d[key]) continue;
+      const original = d[key]!;
+      const score = (candidate: string) => Math.min(...grounds.map(ground => contrast(candidate, ground)));
+      const target = score('#000000') > score('#ffffff') ? '#000000' : '#ffffff';
+      for (let step = 0; step <= 100; step++) {
+        const candidate = mixColor(original, target, step / 100);
+        tokens[detailTokens[key]] = candidate;
+        if (grounds.every(ground => contrast(candidate, ground) >= 4.5 && contrast(candidate, mixColor(ground, candidate, .14)) >= 4.5)) break;
+      }
+    }
+    if (tokens['--color-danger']) {
+      const danger = tokens['--color-danger']!;
+      const hover = mixColor(danger, p.foreground, .1);
+      tokens['--color-danger-hover'] = hover;
+      tokens['--color-on-danger'] = readable(p.background, [danger, hover]);
+    }
     if (p.accent) {
       tokens['--color-accent'] = p.accent;
       tokens['--accent-hue'] = String(accentHue(p.accent));
@@ -87,19 +146,43 @@ export function colorTools() {
     }
     return tokens;
   }
-  return { normalizeHex, mixColor, luminance, contrast, readable, hexToHsv, hsvToHex, accentHex, paletteTokens };
+  return { detailTokens, parseColorState, normalizeHex, mixColor, luminance, contrast, readable, hexToHsv, hsvToHex, accentHex, paletteTokens };
 }
 
-export const { normalizeHex, mixColor, luminance, contrast, readable, hexToHsv, hsvToHex, accentHex, paletteTokens } = colorTools();
+export const { detailTokens, parseColorState, normalizeHex, mixColor, luminance, contrast, readable, hexToHsv, hsvToHex, accentHex, paletteTokens } = colorTools();
+
+/** Editing a main role lets its dependent colours follow it again. */
+export function editPalette(palette: Palette, role: ColorRole, value: string): Palette {
+  const details = { ...palette.details };
+  const dependencies: Record<ColorRole, (keyof PaletteDetails)[]> = {
+    background: ['surfaceLow', 'border', 'edge', 'frameEdge', 'selection'],
+    frame: ['frameEdge', 'hover', 'active'],
+    surface: ['surfaceLow', 'surfaceHigh', 'codeBackground'],
+    foreground: ['muted', 'subtle', 'border', 'edge', 'frameEdge', 'hover', 'active', 'selection', 'codeForeground'],
+    accent: ['accentSoft']
+  };
+  for (const key of dependencies[role]) delete details[key];
+  return { ...palette, [role]: value, ...(palette.details ? { details } : {}) };
+}
 
 export function improvePaletteContrast(palette: Palette): Palette {
   const foreground = readable(palette.foreground, [palette.background], 7);
-  const next = { ...palette, foreground };
+  const next = editPalette(palette, 'foreground', foreground);
   for (const key of ['frame', 'surface'] as const) {
     for (let step = 0; step <= 100; step++) {
       const candidate = mixColor(palette[key], palette.background, step / 100);
       const raised = key === 'surface' ? mixColor(candidate, foreground, .055) : candidate;
       if (contrast(foreground, raised) >= 5) { next[key] = candidate; break; }
+    }
+  }
+  if (next.details) {
+    for (const key of ['surfaceLow', 'surfaceHigh'] as const) {
+      const ground = next.details[key];
+      if (!ground) continue;
+      for (let step = 0; step <= 100; step++) {
+        const candidate = mixColor(ground, palette.background, step / 100);
+        if (contrast(foreground, candidate) >= 5) { next.details[key] = candidate; break; }
+      }
     }
   }
   return next;
