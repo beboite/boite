@@ -377,7 +377,11 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=mobile-settings]');
     await page.click('[data-testid=settings-tab-appearance]');
+    await page.waitFor(`document.querySelector('[data-testid=colors-customize]')`);
+    expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
+    await page.click('[data-testid=colors-customize]');
     await page.waitFor(`document.querySelector('[data-accent-swatch]')`);
+    await capture('mobile-theme-controls-touch.png');
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
   } finally {
     await page.send('Emulation.setTouchEmulationEnabled', { enabled: false });
