@@ -4,12 +4,14 @@ import { expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, startCore } from './lib/core.ts';
+import { ensureProductionUi, UI_DIST } from './lib/prod-ui';
 
 const selector = (id: string): string => `[data-testid="${id}"]`;
 const artifacts = join(import.meta.dir, '.artifacts');
 
 test('queued prompts keep their thread, and browser project and account actions work', async () => {
-  const core = await startCore();
+  await ensureProductionUi();
+  const core = await startCore({ env: { BOITE_UI_DIR: UI_DIST } });
   const client = await connect(core.url, core.token);
   let page: BrowserPage | undefined;
   try {
@@ -27,17 +29,34 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.type(selector('composer-input'), 'queued only for A');
     await page.evaluate('document.querySelector("[data-testid=composer-input]").dispatchEvent(new KeyboardEvent("keydown", {key:"Enter", bubbles:true}))');
     await page.waitFor('document.querySelector("[data-testid=composer-queued]")');
+    for (const [index, prompt] of ['second queued for A', 'third queued for A'].entries()) {
+      await page.type(selector('composer-input'), prompt);
+      await page.waitFor(`document.querySelector('[data-testid="composer-input"]').value === ${JSON.stringify(prompt)}`);
+      await page.evaluate('document.querySelector("[data-testid=composer-input]").dispatchEvent(new KeyboardEvent("keydown", {key:"Enter", bubbles:true}))');
+      await page.waitFor(`document.querySelectorAll('[data-testid="composer-queued"] .queued-bubble').length === ${index + 2}`);
+    }
     await page.screenshot(join(artifacts, 'composer-queued.png'));
     await page.click(`[data-thread-id="${b.id}"]`);
     await page.waitFor('document.querySelector("[data-testid=thread-title]")?.textContent.trim() === "Thread B"');
     const permission = (await client.call('permissions.list', { threadId: a.id }))[0]!;
     const firstDone = client.next('turn.finished', (turn) => turn.threadId === a.id);
+    const queuedDone = client.next('turn.finished', (turn) => turn.threadId === a.id && turn.id !== permission.turnId);
     await client.call('permissions.answer', { requestId: permission.id, decision: 'allow' });
     await firstDone;
+    await queuedDone;
+    expect(await page.evaluate('document.querySelector("[data-testid=thread-title]")?.textContent.trim()')).toBe('Thread B');
+    await page.screenshot(join(artifacts, 'composer-queue-background.png'));
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
     await page.click(`[data-thread-id="${a.id}"]`);
     await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message][data-role=assistant]")).some(el => el.textContent.includes("queued only for A"))');
     await page.waitFor('document.querySelector("[data-testid=thread-header][data-status]")?.dataset.status === "idle"');
+    const userMessages = (await client.call('threads.get', { threadId: a.id })).messages.filter(message => message.role === 'user');
+    expect(userMessages.map(message => message.parts)).toEqual([
+      [{ type: 'text', text: 'hold here [permission]' }],
+      [{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A' }]
+    ]);
+    expect(userMessages.at(-1)?.parts).toEqual([{ type: 'text', text: 'queued only for A\n\nsecond queued for A\n\nthird queued for A' }]);
+    await page.screenshot(join(artifacts, 'composer-queued-batch.png'));
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
 
     await page.send('Emulation.setDeviceMetricsOverride', { width: 420, height: 860, deviceScaleFactor: 1, mobile: true });

@@ -17,7 +17,7 @@ export function chatLink(raw: string): ChatLink | null {
     try {
       const url = new URL(target);
       if (url.hostname && url.hostname !== 'localhost') return null;
-      target = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1');
+      target = decodeURIComponent(url.pathname);
     } catch { return null; }
   } else {
     // Accept drive letters, reject executable and unknown URI schemes.
@@ -25,9 +25,11 @@ export function chatLink(raw: string): ChatLink | null {
     try { target = decodeURIComponent(target); } catch { return null; }
   }
   if (/^[\\/]{2}/.test(target)) return null;
+  // Markdown links can use the same leading slash as a Windows file URI.
+  target = target.replaceAll('\\', '/').replace(/^\/([A-Za-z]:\/)/, '$1');
   const line = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?(?:-L?\d+)?)$/.exec(target);
   if (line) target = target.slice(0, line.index);
-  return { kind: 'file', target: target.replaceAll('\\', '/'), ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
+  return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
 export function fileLike(text: string): boolean {

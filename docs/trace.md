@@ -46,6 +46,18 @@ after spawn, and `windowsHide: true` is set on every one of them. Thirty seconds
 after a thread's last process exits, the registry forgets the thread and its job
 is closed, unless the job still reports a process in it.
 
+Codex initialization temporarily runs its thread job at normal priority so a
+busy machine can schedule its session hooks and tool servers. The driver restores
+below-normal priority when the session opens, fails or is stopped. The registry
+also restores it when the agent exits or after 30 seconds without a ready signal.
+CPU and memory caps apply throughout, including when settings change during
+initialization. Other threads retain below-normal priority. Warm sessions reuse
+their process without another priority window. A refused native downgrade is
+retried every 250 ms until it succeeds or the job closes. The boost is withheld
+if global-job assignment or CPU-cap application fails, or the CPU cap is disabled
+(0 or 100 percent). This applies only on Windows;
+Linux and macOS retain their existing scheduling behavior.
+
 A completion port on the job reports every process that enters or leaves it,
 grandchildren included, and a Worker drains it. The Worker is built when a turn
 starts or on the first traced pid, whichever comes first, never at core start:

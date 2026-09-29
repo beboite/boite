@@ -11,6 +11,7 @@
 
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
+  import WhipButton from './components/WhipButton.svelte';
   import { Closing } from './lib/closing.svelte';
   import { runCommand } from './lib/commands.svelte';
   import { confirm } from './lib/confirm.svelte';
@@ -263,6 +264,7 @@
     // once, so a reload during the boot does not jump there again.
     const requestedThread = new URLSearchParams(location.search).get('thread');
     if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    const stopSettingsSync = workspace.settingsSync.start();
     void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
@@ -274,6 +276,7 @@
       return () => {
         stopTheme();
         stopToasts();
+        stopSettingsSync();
         workspace.close();
       };
     }
@@ -307,6 +310,7 @@
       stopTheme();
       stopToasts();
       quitHold?.dispose();
+      stopSettingsSync();
       workspace.close();
     };
   });
@@ -443,7 +447,7 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:whip-enabled={store.booted && experimentOn('whip')} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -544,6 +548,9 @@
     </div>
   {/if}
   <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  {#if store.booted && experimentOn('whip')}
+    <WhipButton onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  {/if}
 </div>
 
 <ContextMenu />
@@ -706,6 +713,8 @@
 
   @media (max-width: 720px) {
     .app:not(.shell) { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
+    .app:not(.shell).whip-enabled { grid-template-rows: auto auto minmax(0, 1fr) calc(var(--touch-target) + 24px) auto; }
+    .app:not(.shell).whip-enabled :global(.mobile-navigation) { grid-row: 5; }
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }

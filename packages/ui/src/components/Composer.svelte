@@ -8,7 +8,7 @@
   import { attachFiles } from '../lib/composer-attachments';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
-  import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
+  import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -105,22 +105,12 @@
     }
   });
 
-  /** A new draft or thread gets the keyboard, and the recall starts over. */
+  /** A new draft or thread gets the keyboard; reloading the same thread preserves focus. */
   $effect(() => {
-    store.openThread?.id;
+    key;
     store.draft;
     recall = null;
     box?.focus();
-  });
-
-  /** Only this thread's next prompt goes out, after the previous turn ends. */
-  $effect(() => {
-    const state = composer;
-    const threadId = store.openThread?.id;
-    if (store.connection === 'ready' && !store.busy && threadId && state &&
-        state.queued.length > 0 && !state.sending && !state.paused) {
-      untrack(() => void drainQueue(store, threadId, state));
-    }
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
@@ -229,8 +219,8 @@
   /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
-  /** Boite's own under them: the palette's list plus the three the composer runs itself. */
-  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(store, inShell, CHIP_COMMANDS));
+  /** Boite's prompt controls follow the agent's own commands. */
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
@@ -489,10 +479,8 @@
   );
 
   /**
-   * Send now: the oldest pending prompt goes instead of waiting for the turn
-   * to end. The turn is stopped, the way Escape stops it, and the queue's own
-   * drain sends that prompt once the thread is idle; the ones behind it still
-   * wait for its turn. A queue a refusal held is resumed too.
+   * Send now stops the current turn and sends all queued prompts together once
+   * the thread is idle. A queue held after a refusal is resumed too.
    */
   function sendQueuedNow() {
     const state = composer;
@@ -579,7 +567,7 @@
     stateForInput().previewReferences = restored.references;
   }
 
-  /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
+  /** The stash chord sets text aside for this thread; an empty composer takes it back. */
   function stash() {
     if (previewReferences.length) { store.error = strings.previewComments.stashUnsupported; return; }
     const key = store.threadKey(store.openThread?.id ?? DRAFT_STASH_KEY);
@@ -805,8 +793,7 @@
     padding: 0 20px;
   }
 
-  /* The one raised object in the column: it floats over the timeline instead of
-     repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
+  /* A translucent surface with a top reflection; focus only changes its hairline. */
   .composer {
     position: relative;
     display: flex;
@@ -814,19 +801,18 @@
     width: 100%;
     max-width: var(--content);
     margin: 0 auto;
-    background: var(--color-surface-2);
+    background: var(--composer-glaze) var(--color-composer-surface);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
     border: 1px solid var(--color-border);
+    border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-e2), var(--shadow-e1);
+    box-shadow: var(--shadow-composer);
     transition: border-color var(--dur-2) var(--ease-out-quint);
   }
 
   .composer:focus-within {
-    border-color: var(--color-edge);
-    box-shadow:
-      var(--shadow-e2),
-      var(--shadow-e1),
-      0 0 0 2px color-mix(in srgb, var(--color-foreground) 22%, transparent);
+    border-color: var(--color-composer-focus);
   }
 
   /* Editing a sent message: one quiet line above the box, the way out on its right. */
@@ -879,8 +865,7 @@
   }
 
   @media (max-width: 720px) {
-    .composer { box-shadow: none; border-radius: var(--radius-xl); }
-    .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
+    .composer { box-shadow: var(--shadow-e1); border-radius: var(--radius-xl); }
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }

@@ -96,8 +96,12 @@ describe('terminals', () => {
     const spy = spyOn(procs, 'spawnTerminal').mockImplementation((threadId, cmd, args, opts) => spawn(threadId, cmd, args, {
       ...opts,
       onData: (bytes) => {
-        chunks += 1;
-        opts.onData(bytes);
+        // PTY reads vary by OS and runner load. Deliver the real bytes in
+        // small chunks so this always exercises the output batching.
+        for (let at = 0; at < bytes.length; at += 64) {
+          chunks += 1;
+          opts.onData(bytes.subarray(at, at + 64));
+        }
       },
     }));
     try {
@@ -124,6 +128,7 @@ describe('terminals', () => {
       expect(events).toBeLessThan(chunks / 2);
       const again = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
       expect(again.output).toBe(text.slice(-HISTORY_CHARS));
+      expect(again.sequence).toBe(events);
     } finally {
       spy.mockRestore();
     }

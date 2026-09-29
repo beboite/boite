@@ -64,6 +64,32 @@ test('the archived projects fold lists them and restores one in one click', () =
   expect(document.querySelector('[data-testid=archived-project-restore]')).toBeNull();
   toggle.click();
   flushSync();
+  expect(document.querySelector('[data-testid=archived-projects] li')!.textContent).toContain('This machine');
   document.querySelector<HTMLButtonElement>('[data-testid=archived-project-restore]')!.click();
   expect(archiveProject).toHaveBeenCalledWith('p-1', false);
+});
+
+test('archived projects with matching ids show their machines and restore on the owning machine', () => {
+  const localRestore = vi.fn(async () => true);
+  const remoteRestore = vi.fn(async () => true);
+  running = mount(ArchivedProjects, {
+    target: document.body,
+    props: {
+      entries: [
+        { machine: { id: 'local', label: 'Workstation', store: { archiveProject: localRestore } } as never, project: project({ archived: true }) },
+        { machine: { id: 'remote', label: 'Build server', store: { archiveProject: remoteRestore } } as never, project: project({ archived: true }) }
+      ],
+      multi: true
+    }
+  });
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[data-testid=archived-projects-toggle]')!.click();
+  flushSync();
+  const rows = document.querySelectorAll('[data-testid=archived-projects] li');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]!.textContent).toContain('Workstation');
+  expect(rows[1]!.textContent).toContain('Build server');
+  rows[1]!.querySelector<HTMLButtonElement>('button')!.click();
+  expect(remoteRestore).toHaveBeenCalledWith('p-1', false);
+  expect(localRestore).not.toHaveBeenCalled();
 });

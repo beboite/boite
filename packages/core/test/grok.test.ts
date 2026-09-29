@@ -203,14 +203,14 @@ describe('grok', () => {
     // Unlike an ACP `thought_level`, the scale is the model's own.
     expect(result.models[1]?.effort).toEqual({
       levels: [
-        { id: 'xhigh', label: 'Extra High Effort', description: 'Highest effort' },
-        { id: 'high', label: 'High Effort', description: 'Extensive reasoning' },
-        { id: 'medium', label: 'Medium Effort', description: 'Balanced' },
         { id: 'low', label: 'Low Effort', description: 'Quick' },
+        { id: 'medium', label: 'Medium Effort', description: 'Balanced' },
+        { id: 'high', label: 'High Effort', description: 'Extensive reasoning' },
+        { id: 'xhigh', label: 'Extra High Effort', description: 'Highest effort' },
       ],
       default: 'high',
     });
-    expect(result.models[2]?.effort?.levels.map((level) => level.id)).toEqual(['high', 'medium', 'low']);
+    expect(result.models[2]?.effort?.levels.map((level) => level.id)).toEqual(['low', 'medium', 'high']);
     expect(result.models[2]?.effort?.default).toBe('high');
     expect(result.probedAt).toBeGreaterThan(0);
     expect((await probed).models.map((model) => model.id)).toEqual(['default', 'grok-4.6', 'grok-4.5']);

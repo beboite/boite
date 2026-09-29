@@ -241,6 +241,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
+  delete env.BOITE_UI_DIR;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_CORE_RESIDENT = resident ? '1' : '0';
   env.BOITE_DATA_DIR = ownDataDir;
@@ -400,6 +401,32 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    // A closed popup must not clamp moves before its next opening chooses a monitor.
+    if (process.platform === 'win32') {
+      const { dlopen, FFIType, ptr } = await import('bun:ffi');
+      const user32 = dlopen('user32.dll', {
+        FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+        GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
+        IsWindowVisible: { args: [FFIType.ptr], returns: FFIType.bool },
+        SetWindowPos: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.u32], returns: FFIType.bool },
+      });
+      try {
+        const resting = await ownPage.evaluate<{ x: number; y: number }>(`window.__TAURI_INTERNALS__.invoke('plugin:window|current_monitor', {label:'quotas'}).then(m => m.workArea.position)`);
+        const title = new Uint16Array(Array.from('Boite quotas\0', c => c.charCodeAt(0)));
+        const owner = new Uint32Array(1);
+        let hwnd = user32.symbols.FindWindowExW(null, null, null, ptr(title));
+        while (hwnd) {
+          user32.symbols.GetWindowThreadProcessId(hwnd, ptr(owner));
+          if (owner[0] === ownPid) break;
+          hwnd = user32.symbols.FindWindowExW(null, hwnd, null, ptr(title));
+        }
+        expect(Boolean(hwnd)).toBe(true);
+        expect(user32.symbols.IsWindowVisible(hwnd)).toBe(false);
+        // NOSIZE | NOZORDER | NOACTIVATE: this moves only our hidden test popup.
+        expect(user32.symbols.SetWindowPos(hwnd, null, resting.x, resting.y, 0, 0, 0x15)).toBe(true);
+        await ownPage.waitFor(`window.__TAURI_INTERNALS__.invoke('plugin:window|outer_position', {label:'quotas'}).then(p => p.x === ${resting.x} && p.y === ${resting.y})`, 1000);
+      } finally { user32.close(); }
+    }
     await popup.close(); popup = undefined;
     // A popup left hidden gives its renderer back (BOITE_QUOTA_IDLE_MS), and
     // the next show builds it again.
@@ -498,11 +525,16 @@ afterAll(async () => {
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',
-  () => {
+  async () => {
     expect(coreFile?.port).toBeGreaterThan(0);
     expect(coreFile?.pid).toBeGreaterThan(0);
     expect(startToHealthMs).toBeGreaterThan(0);
     expect(startToHealthMs).toBeLessThan(READY_TIMEOUT_MS);
+    const index = readFileSync(join(ROOT, 'packages', 'ui', 'dist', 'index.html'), 'utf8');
+    const script = /<script[^>]+type="module"[^>]+src="([^"]+\.js)"/.exec(index)?.[1];
+    expect(script).toBeDefined();
+    await page!.waitFor(`document.querySelector('script[type="module"][src]')`);
+    expect(await page!.evaluate(`document.querySelector('script[type="module"][src]').getAttribute('src').split('/').at(-1)`)).toBe(basename(script!));
   },
   TIMEOUT,
 );
@@ -683,6 +715,41 @@ shellTest('voice capture loads its packaged worklet under the native content sec
     }
   }
 }, 30_000);
+
+shellTest('the Whip button moves the native window and restores its position', async () => {
+  if (!page) throw new Error('the shell page is missing');
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  await page.click(testid('nav-settings'));
+  await page.click(testid('settings-tab-experiments'));
+  await page.click(testid('experiment-whip'));
+  await page.click(testid('settings-back'));
+  await page.waitFor(`document.querySelector('[data-testid=whip-button]')`);
+  const result = await page.evaluate<{ origin: { x: number; y: number }; final: { x: number; y: number }; moved: boolean }>(`(async () => {
+    const position = () => window.__TAURI_INTERNALS__.invoke('plugin:window|outer_position', { label: 'main' });
+    const origin = await position();
+    const button = document.querySelector('[data-testid=whip-button]');
+    button.click();
+    await Promise.resolve();
+    let moved = false;
+    const deadline = Date.now() + 5000;
+    do {
+      const sample = await position();
+      moved ||= sample.x !== origin.x || sample.y !== origin.y;
+      await new Promise(resolve => setTimeout(resolve, 15));
+    } while (button.disabled && Date.now() < deadline);
+    if (button.disabled) throw new Error('Whip did not finish within five seconds');
+    return { origin, final: await position(), moved };
+  })()`);
+  expect(result.moved).toBe(true);
+  expect(result.final).toEqual(result.origin);
+  expect(await page.evaluate(`document.querySelector('[data-testid=error-toast]') === null`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'shell-whip.png'));
+  await page.click(testid('nav-settings'));
+  await page.click(testid('settings-tab-experiments'));
+  await page.click(testid('experiment-whip'));
+  await page.click(testid('settings-back'));
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
+}, TIMEOUT);
 
 shellTest('window controls draw maximize and restore without a second status indicator', async () => {
   // Exercise the component's resize subscription without maximizing a hidden
@@ -952,12 +1019,14 @@ shellTest('native preview references attach to the composer and highlight from s
     await page.click(testid('preview-annotate'));
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
     // Even while the data-only picker is armed, a page gets no host commands.
-    const refused = await child.evaluate<string>(`(async () => {
-      if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
-      try { await window.__TAURI_INTERNALS__.invoke('core_endpoint'); return 'allowed'; }
-      catch { return 'refused'; }
+    const refused = await child.evaluate<string[]>(`(async () => {
+      if (!window.__TAURI_INTERNALS__?.invoke) throw new Error('Tauri invoke bridge unavailable');
+      return Promise.all(['core_endpoint', 'whip_window'].map(async command => {
+        try { await window.__TAURI_INTERNALS__.invoke(command); return 'allowed'; }
+        catch { return 'refused'; }
+      }));
     })()`);
-    expect(refused).not.toBe('allowed');
+    expect(refused).toEqual(['refused', 'refused']);
     await child.click('#native-preview-target');
     await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
     expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');

@@ -4,6 +4,14 @@ Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.
 
+## Whip
+
+Shows a Whip button at the bottom left, above the sidebar footer or phone tabs.
+Each hit shakes the native Boite window and returns it to its original position.
+Maximized and fullscreen windows, browsers, phones and window managers that
+ignore positioning shake the whole interface instead. Hits do not overlap. Turning the experiment off removes the button
+immediately. Reduced motion disables the shake.
+
 ## Chat files and previews
 
 An agent can run `boite attach "reports/review.pdf"` to deliver a file in its
@@ -75,6 +83,10 @@ the core. The end-to-end tests `artifacts.test.ts` and
 `preview-comments.test.ts` cover desktop and phone-sized interfaces. Preview
 unit tests cover owning-machine boundaries and selection validation.
 No live provider login is required.
+
+`whip.test.ts` covers the toggle, persistence, desktop and phone layout, whole
+interface movement, cancellation and reduced motion. `shell.test.ts` verifies
+native window movement and restoration, and refusal from a browser child webview.
 
 The opt-in `codex.live.test.ts` attachment case asks a real Codex process to
 discover file publication through `boite --help`. It checks the inherited CLI,

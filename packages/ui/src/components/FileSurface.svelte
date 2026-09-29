@@ -11,6 +11,7 @@
   import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { codeLanguage, highlightCode } from '../lib/code-highlight';
 
   let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
 
@@ -33,6 +34,21 @@
   let saving = $state(false);
   let area = $state<HTMLTextAreaElement | undefined>(undefined);
   let offset = $state(0);
+  let horizontal = $state(0);
+  let colored = $state.raw<string[] | null>(null);
+
+  $effect(() => {
+    const text = content?.kind === 'text' ? draft : null;
+    const grammar = language;
+    colored = null;
+    if (text === null || grammar === null) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void highlightCode(text, grammar).then(lines => { if (!cancelled) colored = lines; })
+        .catch(() => { /* Keep the editable plain text when a grammar cannot load. */ });
+    }, 100);
+    return () => { cancelled = true; clearTimeout(timer); };
+  });
 
   // The image viewer
   let natural = $state<{ width: number; height: number } | null>(null);
@@ -45,6 +61,7 @@
 
   let threadId = $derived(store.openThread?.id ?? null);
   let path = $derived(surface.path ?? null);
+  const language = $derived(codeLanguage(path ?? '', content?.kind === 'text' ? content.language : null));
   let dirty = $derived(content?.kind === 'text' && draft !== stored);
   let readOnly = $derived(content?.kind === 'text' && (content.truncated || !store.owner));
   let lineCount = $derived(content?.kind === 'text' ? draft.split('\n').length : 0);
@@ -134,6 +151,13 @@
 
   /** Tab writes two spaces rather than leaving the editor for the next control. */
   function onEditorKey(event: KeyboardEvent): void {
+    if (!readOnly && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+      // Saving belongs to the focused editor; elsewhere Ctrl+S folds the sidebar.
+      event.preventDefault();
+      event.stopPropagation();
+      void save();
+      return;
+    }
     if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
     const node = area;
     if (!node || readOnly) return;
@@ -142,15 +166,6 @@
     const end = node.selectionEnd;
     edit(`${draft.slice(0, start)}  ${draft.slice(end)}`);
     void tick().then(() => node.setSelectionRange(start + 2, start + 2));
-  }
-
-  /** The platform's save chord, while this surface is the one showing. */
-  function onWindowKey(event: KeyboardEvent): void {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-    if (event.key.toLowerCase() !== 's') return;
-    if (content?.kind !== 'text' || readOnly) return;
-    event.preventDefault();
-    void save();
   }
 
   function clamp(value: number): number {
@@ -260,7 +275,6 @@
   });
 </script>
 
-<svelte:window onkeydown={onWindowKey} />
 
 <div class="file-surface" data-testid="file-panel" data-path={path ?? ''} data-kind={content?.kind ?? ''}>
   <div class="bar">
@@ -321,8 +335,8 @@
       {/if}
     {/if}
 
-    {#if content?.kind === 'text' && content.language}
-      <span class="meta" data-testid="file-language">{content.language}</span>
+    {#if content?.kind === 'text' && (content.language || language)}
+      <span class="meta" data-testid="file-language">{content.language ?? language}</span>
     {/if}
     <span class="meta" data-testid="file-size">{bytes(content?.bytes ?? null)}</span>
 
@@ -381,7 +395,15 @@
           style="top: calc(var(--pad) + {(highlight - 1) * LINE - offset}px)"
         ></div>
       {/if}
-      <textarea
+      <div class="editor" class:colored={colored !== null}>
+        {#if colored !== null}
+          <div class="paint" aria-hidden="true">
+            <!-- highlightCode escapes the file and emits only token spans. -->
+            <pre class="code-syntax" data-testid="file-syntax" data-language={language}
+              style:transform={`translate(${-horizontal}px, ${-offset}px)`}>{@html colored.join('\n')}<br /></pre>
+          </div>
+        {/if}
+        <textarea
         class="text mono"
         wrap="off"
         spellcheck="false"
@@ -391,8 +413,9 @@
         bind:this={area}
         bind:value={() => draft, edit}
         onkeydown={onEditorKey}
-        onscroll={() => (offset = area?.scrollTop ?? 0)}
+        onscroll={() => { offset = area?.scrollTop ?? 0; horizontal = area?.scrollLeft ?? 0; }}
       ></textarea>
+      </div>
     </div>
   {:else if content.kind === 'image'}
     <!-- The picture is placed by hand: `object-fit` would hide the numbers the
@@ -597,7 +620,17 @@
     overflow: auto;
     resize: none;
     z-index: 1;
+    width: 100%;
+    height: 100%;
+    tab-size: 2;
   }
+
+  .editor { position: relative; flex: 1; min-width: 0; min-height: 0; }
+  .paint { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .paint pre { margin: 0; padding: var(--pad) 10px; width: max-content; min-width: 100%;
+    font: inherit; line-height: inherit; white-space: pre; tab-size: 2; }
+  .colored .text { color: transparent; caret-color: var(--color-foreground); }
+  .colored .text::selection { color: transparent; background: color-mix(in srgb, var(--color-accent) 25%, transparent); }
 
   .text:focus-visible {
     outline: none;

@@ -292,7 +292,7 @@
   .chip.signed-out { color: var(--color-live); }
 
   .worktree.on {
-    background: var(--color-active);
+    background: var(--control-glaze) var(--color-active);
     border-color: var(--color-active);
     color: var(--color-foreground);
   }
@@ -325,7 +325,7 @@
 
   .chips :global(.trigger) {
     border-color: var(--color-edge);
-    background: var(--color-surface);
+    background: var(--control-glaze) var(--color-control-surface);
     color: var(--color-foreground);
   }
 
@@ -351,7 +351,7 @@
   }
 
   .chips :global(.trigger:hover) {
-    background: var(--color-surface-3);
+    background: var(--control-glaze) var(--color-control-hover);
   }
 
 

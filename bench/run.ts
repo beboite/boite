@@ -39,7 +39,7 @@ interface Raw {
     coreIdleRssBytes: number | null;
     compiledCoreIdleRssBytes?: number | null;
     threads: IdleThreads | null;
-    echoAtDefault: EchoRun | null;
+    echoAtSix: EchoRun | null;
     echoAtFifty: EchoRun | null;
     shell: ShellRun | null;
     claude: ClaudeRun | null;
@@ -97,8 +97,8 @@ async function measure(): Promise<Raw> {
     compiledCoreIdleRss(),
   );
   const threads = await step<IdleThreads>('boite2 idle threads', () => idleThreads());
-  const echoAtDefault = await step<EchoRun>('boite2 50 echo turns at cap 6', () => echoTurns(6));
-  const echoAtFifty = await step<EchoRun>('boite2 50 echo turns at cap 50', () => echoTurns(50));
+  const echoAtSix = await step<EchoRun>('boite2 50 echo turns at client concurrency 6', () => echoTurns(6));
+  const echoAtFifty = await step<EchoRun>('boite2 50 echo turns at client concurrency 50', () => echoTurns(50));
   const shell = await step<ShellRun | null>('boite2 shell exe', () => shellRun());
 
   let claude: ClaudeRun | null = null;
@@ -142,7 +142,7 @@ async function measure(): Promise<Raw> {
       coreIdleRssBytes,
       compiledCoreIdleRssBytes,
       threads,
-      echoAtDefault,
+      echoAtSix,
       echoAtFifty,
       shell,
       claude,
@@ -154,7 +154,7 @@ async function measure(): Promise<Raw> {
 
 function buildRows(raw: Raw): Row[] {
   const rows: Row[] = [];
-  const { coldStart, coreIdleRssBytes, threads, echoAtDefault, echoAtFifty, shell, claude } = raw.boite2;
+  const { coldStart, coreIdleRssBytes, threads, echoAtSix, echoAtFifty, shell, claude } = raw.boite2;
   const entry = raw.boite2.coreEntry ?? 'packages/core/src/main.ts';
   const compiledIdle = raw.boite2.compiledCoreIdleRssBytes ?? null;
   const claudeFrom = raw.boite2.claudeFrom ?? null;
@@ -215,13 +215,13 @@ function buildRows(raw: Raw): Row[] {
     'the Boite 2 figure is negative because the core working set fell over the run: a thread is a journal row and costs no measurable memory. A legacy thread is a PTY, a cmd.exe and its conhost.exe, ten of them measured',
   );
 
-  const addEcho = (run: EchoRun | null, cap: number): void => {
-    const label = `50 echo turns at cap ${cap}`;
+  const addEcho = (run: EchoRun | null, clientConcurrency: number): void => {
+    const label = `50 echo turns at client concurrency ${clientConcurrency}`;
     add(
       `${label}, wall time`,
       run === null ? NONE : ms(run.wallMs),
       NONE,
-      'fifty threads each sent one 300 word prompt at the same moment, perAccountConcurrency raised to the same cap',
+      'fifty threads each sent one 300 word prompt; the benchmark client controls how many run at once',
     );
     add(
       `${label}, first delta median`,
@@ -245,7 +245,7 @@ function buildRows(raw: Raw): Row[] {
       run === null ? '' : `highest queued count of the run: ${run.maxQueued}`,
     );
   };
-  addEcho(echoAtDefault, 6);
+  addEcho(echoAtSix, 6);
   addEcho(echoAtFifty, 50);
 
   add(

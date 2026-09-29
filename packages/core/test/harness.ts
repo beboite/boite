@@ -23,6 +23,17 @@ export interface TestCoreOptions {
   helloTimeoutMs?: number;
   settings?: Partial<Settings>;
   boiteGuide?: boolean;
+  onShutdown?: () => void;
+}
+
+/** Hold admission as an account login would, without limiting unrelated work. */
+export function holdAccountTurns(harness: TestCore, accountId?: string): () => void {
+  const blocksAccount = harness.core.plugins.blocksAccount;
+  harness.core.plugins.blocksAccount = id => accountId === undefined || id === accountId || blocksAccount.call(harness.core.plugins, id);
+  return () => {
+    harness.core.plugins.blocksAccount = blocksAccount;
+    harness.core.scheduler.onSettingsChanged();
+  };
 }
 
 /** Scripted SDK tests need an available executable, never a real CLI install. */
@@ -49,7 +60,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, ...options.settings });

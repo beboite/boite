@@ -142,7 +142,7 @@ test('paired fake clients can inspect, message and stop delegation but cannot co
   } finally { phone.close(); }
 });
 
-test('fake delegation promotes queued work with the same turn and returns current idempotent state', async () => {
+test('fake delegation starts independent children together and returns current idempotent state', async () => {
   const client = new FakeClient({ delayMs: 2 });
   await client.connect();
   try {
@@ -153,16 +153,17 @@ test('fake delegation promotes queued work with the same turn and returns curren
     await client.call('delegation.configure', { threadId: 't-trace', config });
     const firstParams = { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'spawn-first' };
     const first = await client.call('delegation.spawn', firstParams);
-    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Second queued task', requestId: 'spawn-second' });
-    expect(second.lastTurn?.status).toBe('queued');
-    const queuedTurnId = second.lastTurn!.id;
+    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Second parallel task', requestId: 'spawn-second' });
+    expect(first.lastTurn?.status).toBe('running');
+    expect(second.lastTurn?.status).toBe('running');
+    const secondTurnId = second.lastTurn!.id;
 
     await vi.waitFor(async () => {
       const view = await client.call('delegation.get', { threadId: 't-trace' });
       expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.status).toBe('done');
     }, { timeout: 3000 });
     const view = await client.call('delegation.get', { threadId: 't-trace' });
-    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.id).toBe(queuedTurnId);
+    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.id).toBe(secondTurnId);
     expect(view.turnsUsed).toBe(2);
     const retried = await client.call('delegation.spawn', firstParams);
     expect(retried.thread.status).toBe('idle');
@@ -178,7 +179,7 @@ test('fake delegation promotes queued work with the same turn and returns curren
   } finally { client.close(); }
 });
 
-test('child manual turns consume the shared budget without double-counting queued promotion', async () => {
+test('child manual turns update usage without a turn budget or duplicate retry', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
   try {
@@ -193,7 +194,27 @@ test('child manual turns consume the shared budget without double-counting queue
     await client.call('turns.start', manual);
     expect((await client.call('delegation.get', { threadId: child.thread.id })).turnsUsed).toBe(2);
     await expect(client.call('turns.start', manual)).resolves.toMatchObject({ threadId: child.thread.id });
-    await expect(client.call('turns.start', { threadId: child.thread.id, prompt: 'Over budget', clientRequestId: 'manual_02' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: child.thread.id })).status).toBe('idle'));
+    await client.call('turns.start', { threadId: child.thread.id, prompt: 'Another follow-up', clientRequestId: 'manual_02' });
+    expect((await client.call('delegation.get', { threadId: child.thread.id })).turnsUsed).toBe(3);
+  } finally { client.close(); }
+});
+
+test('fake delegation launches thirty children despite legacy quotas from an older client', async () => {
+  const client = new FakeClient({ delayMs: 2 });
+  await client.connect();
+  try {
+    const config = { ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxAgents: 1, maxConcurrent: 1, maxTurns: 1, maxMinutes: 1,
+      profiles: [{ id: 'echo', name: 'Echo', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }] };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    for (let index = 0; index < 30; index++) await client.call('delegation.spawn', {
+      threadId: 't-trace', profileId: 'echo', task: 'Independent work', requestId: `parallel-${index}`
+    });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.agents).toHaveLength(30);
+    expect(view.agents.every(agent => agent.thread.status === 'running')).toBe(true);
+    expect(view.turnsUsed).toBe(30);
+    for (const field of ['maxAgents', 'maxConcurrent', 'maxTurns', 'maxMinutes']) expect(view.config).not.toHaveProperty(field);
   } finally { client.close(); }
 });
 
@@ -410,16 +431,17 @@ test.each(['remove', 'complete'] as const)('fake %s invalidates a goal before it
   client.close();
 });
 
-test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settings reject invalid %s atomically', async (field) => {
+test('fake settings ignore retired launch limits from older clients', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
-  const before = await client.call('settings.get', {});
-  for (const value of [0, -1, 1.5, NaN, Infinity]) {
-    await expect(client.call('settings.set', { [field]: value, warmProcessMinutes: 99 }))
-      .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer` });
-    expect(await client.call('settings.get', {})).toEqual(before);
-  }
-  expect((await client.call('settings.set', { [field]: 3 }))[field]).toBe(3);
+  const legacy = { maxConcurrentTurns: 1, perAccountConcurrency: 1, warmProcessMinutes: 3 };
+  const settings = await client.call('settings.set', legacy);
+  expect(settings.warmProcessMinutes).toBe(3);
+  expect(settings).not.toHaveProperty('maxConcurrentTurns');
+  expect(settings).not.toHaveProperty('perAccountConcurrency');
+  const scheduler = await client.call('scheduler.get', {});
+  expect(scheduler).not.toHaveProperty('maxConcurrentTurns');
+  expect(scheduler).not.toHaveProperty('perAccountConcurrency');
   client.close();
 });
 

@@ -1,19 +1,7 @@
-<script module lang="ts">
-  import type { SyncReport } from '../lib/settings-sync';
-
-  /**
-   * The last copy onto each machine, with the name of the one it came from.
-   * It outlives the page: the report points at the target's Providers page,
-   * and coming back from there, or turning a phone, draws the page anew.
-   */
-  const synced = $state<Record<string, { source: string; report: SyncReport }>>({});
-</script>
-
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { Plus, ArrowUpRight, Copy, RefreshCw, Trash2, X } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
-  import { SyncFailure, syncSettings } from '../lib/settings-sync';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { fill, strings } from '../lib/strings';
@@ -33,49 +21,10 @@
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
   let linkInput = $state<HTMLInputElement | null>(null);
-  /** The machine whose settings are being written, one at a time. */
-  let syncing = $state<string | null>(null);
-
-  /** The machine the settings pages speak for: what a copy starts from. */
-  let source = $derived(workspace.machines.find((machine) => machine.store === workspace.active) ?? null);
-
-  /** Both ends must be connected with full control: a copy reads one core's settings and writes the other's. */
-  const canSync = (machine: Machine): boolean =>
-    source !== null && machine.store !== source.store
-    && machine.store.owner && machine.store.connection === 'ready' && machine.store.client !== null
-    && source.store.owner && source.store.connection === 'ready' && source.store.client !== null;
-
-  async function sync(machine: Machine) {
-    const from = source;
-    if (!from || syncing !== null || !canSync(machine)) return;
-    const ok = await confirm.ask({
-      title: fill(strings.machines.syncTitle, { source: from.label, target: machine.label }),
-      body: fill(strings.machines.syncBody, { source: from.label, target: machine.label }),
-      confirmLabel: strings.machines.syncConfirm,
-      cancelLabel: strings.common.cancel
-    });
-    if (!ok || !from.store.client || !machine.store.client) return;
-    syncing = machine.id;
-    delete synced[machine.id];
-    try {
-      const report = await syncSettings(
-        { client: from.store.client, providers: from.store.providers, accounts: from.store.accounts },
-        { client: machine.store.client, providers: machine.store.providers, accounts: machine.store.accounts }
-      );
-      machine.store.settings = report.settings;
-      if (report.keybindings) machine.store.keybindings = report.keybindings;
-      synced[machine.id] = { source: from.label, report };
-    } catch (error) {
-      // What reached the target before the failure stays there, and its events
-      // have already brought this window's copy of it up to date.
-      const message = error instanceof Error ? error.message : String(error);
-      machine.store.error = error instanceof SyncFailure
-        ? fill(strings.machines.syncStopped, { stage: strings.machines.syncStages[error.stage], error: message })
-        : message;
-    } finally {
-      syncing = null;
-    }
-  }
+  let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
+  const sync = workspace.settingsSync;
+  const canSync = (machine: Machine): boolean => source !== null && source !== machine
+    && source.store.owner && machine.store.owner && sync.canEnable(source, machine);
 
   /** Sign-ins happen on the machine that keeps them: its own Providers page. */
   async function openProviders(machine: Machine) {
@@ -93,7 +42,7 @@
     });
     if (!ok) return;
     await workspace.remove(machine.id);
-    delete synced[machine.id];
+
   }
   function startAdding() {
     adding = true;
@@ -205,11 +154,6 @@
             {#if machine.store !== primary}
               <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
             {/if}
-            {#if canSync(machine)}
-              <button class="ghost small" data-testid="machine-sync" disabled={syncing !== null} onclick={() => void sync(machine)}
-                ><Copy size={13} />{syncing === machine.id ? strings.machines.syncing : fill(strings.machines.syncFrom, { source: source?.label ?? '' })}</button
-              >
-            {/if}
             <!-- The machine already open has nowhere to go. -->
             {#if machine.store !== workspace.active}
               <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
@@ -227,8 +171,18 @@
             </div>
           </div>
         </div>
-        {#if synced[machine.id]}
-          {@const done = synced[machine.id]!}
+        {#if sync.enabled(machine) || canSync(machine)}
+          <label class="sync-option">
+            <input type="checkbox" data-testid="machine-sync" checked={sync.enabled(machine)}
+              onchange={(event) => sync.set(machine, event.currentTarget.checked ? source : null)} />
+            <span>{fill(strings.machines.syncFrom, { source: sync.source(machine)?.label ?? source?.label ?? '' })}</span>
+            <InfoTip topic={strings.machines.syncConfirm} text={strings.machines.syncHint} />
+          </label>
+          {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}
+        {/if}
+        {#if sync.reports[machine.id]}
+
+          {@const done = sync.reports[machine.id]!}
           <div class="sync-report" role="status" data-testid="machine-sync-report">
             <p>{fill(strings.machines.synced, { source: done.source })}</p>
             {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
@@ -449,6 +403,15 @@
     cursor: pointer;
   }
   /* What the copy did, under the card it wrote to, and what is left to do there. */
+  .sync-option {
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+    margin: 10px 0 2px 52px;
+    min-height: var(--control);
+  }
+  .sync-option input { width: auto; flex: none; }
+  .sync-progress { margin: 6px 0 2px 52px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
   .sync-report {
     display: grid;
     justify-items: start;
@@ -493,7 +456,9 @@
       justify-content: flex-end;
     }
     .icon-choices,
-    .sync-report {
+    .sync-report,
+    .sync-option,
+    .sync-progress {
       padding-left: 0;
       margin-left: 0;
     }

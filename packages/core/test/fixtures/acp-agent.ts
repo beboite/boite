@@ -49,12 +49,13 @@ import type {
   Usage,
 } from '@agentclientprotocol/sdk';
 
-const DIRECTIVE = /\[(tool|documents|big-image|huge-tool|permission|question|thought|usage|slow|deaf|refuse|crash|noise|big-glog)\]/g;
+const DIRECTIVE = /\[(agents|tool|documents|big-image|huge-tool|permission|question|thought|usage|slow|deaf|refuse|crash|noise|big-glog)\]/g;
 /** `[mode-switch <id>]`: the agent changes mode on its own before it answers. */
 const MODE_SWITCH = /\[mode-switch ([\w-]+)\]/g;
 const CHUNKS = 3;
 
 type Directive =
+  | 'agents'
   | 'tool'
   | 'documents'
   | 'big-image'
@@ -330,6 +331,10 @@ const app = agent({ name: 'acp-fake' })
     let usage: Usage | null = null;
     for (const directive of directives) {
       switch (directive) {
+        case 'agents':
+          await send({ sessionUpdate: 'tool_call', toolCallId: 'native-acp', name: 'task', title: 'Review parser boundaries', kind: 'other', status: 'in_progress', rawInput: { subagent_type: 'reviewer', prompt: 'Review parser boundaries' } });
+          await send({ sessionUpdate: 'tool_call_update', toolCallId: 'native-acp', status: 'completed', rawOutput: 'Parser checked' });
+          break;
         case 'tool':
           await send({
             sessionUpdate: 'tool_call',

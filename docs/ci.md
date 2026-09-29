@@ -67,6 +67,13 @@ echo turn with a fresh data directory. It does not exercise native desktop contr
 The WebView2 shell end-to-end suite remains Windows-only.
 Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
 second architecture of each only after a merge and on a release.
+Core changes run the core tests on all five runners before a merge: Windows,
+Linux x64 and ARM64, and macOS ARM64 and Intel. The portable desktop jobs do
+not repeat those tests after a merge.
+
+Artifact uploads retry once through the shared upload action. A failed first
+attempt can leave an artifact name reserved, so the retry replaces that name.
+If the retry fails too, the job fails. Tests and builds are not retried.
 
 ## Build cost
 
@@ -92,6 +99,12 @@ stay isolated. The whole core suite took 189 s serially and 35 s with 16
 workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
 when a failure needs a quiet run.
+
+Process-wide kernel handle assertions run in a dedicated child through
+`procs.spawn`: a reused test worker can retain handles from earlier files.
+The child still checks the real handle count and Job Object cleanup.
+Mobile history tests wait for `popstate` before issuing the next Back; a fixed
+delay can finish before the traversal it was meant to await.
 
 Where the time goes, from `gh run view` on the 23 finished `ci` runs before
 2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows
@@ -136,6 +149,8 @@ French strings and community license notices. The Windows desktop jobs measured
 524,773 / 3,393,503 bytes on `main` at `c26a03a` and 533,773 / 3,450,644 bytes
 with the themes at `bedd795`. The UI limits moved to 588,000 and 3,796,000 bytes,
 about 10% above the combined build; the core limit stayed at 817,600 bytes.
+The later account connection changes raised the core limit to 904,000 bytes
+([measurements](performance.md)).
 Timings are not
 gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.

@@ -1,17 +1,37 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR'];
+
+test('native collaboration is journalled and appears in Team with delegation disabled', async () => {
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: '[agents]' });
+  expect((await finished).status).toBe('done');
+  const thread = await client.call('threads.get', { threadId });
+  expect(JSON.stringify(thread.messages)).not.toContain('Private child work');
+  expect(JSON.stringify(thread.messages)).not.toContain('Private command output');
+  expect(thread.messages.flatMap(m => m.parts).filter(p => p.type === 'tool' && p.name === 'Agent')).toHaveLength(4);
+  const team = await client.call('delegation.get', { threadId });
+  expect(team.config.enabled).toBe(false);
+  expect(team.agents).toHaveLength(0);
+  expect(team.nativeAgents).toEqual([
+    expect.objectContaining({ id: 'native-reviewer', task: 'Review parser boundaries', model: 'fake-smart', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ id: 'native-other', name: '/root/research', status: 'done' }),
+  ]);
+});
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -152,6 +172,162 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('an initialize RPC error waits for late SQLite stderr and exit before retrying', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Sent once' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(2);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+  });
+
+  test('an initialize RPC error from a live process fails within a bounded wait', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'live';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    await waitFor(() => fakeLog().includes('initialize RPC error'), 20000);
+    const waiting = performance.now();
+    expect((await finished).status).toBe('error');
+    expect(performance.now() - waiting).toBeLessThan(4000);
+    expect(countLines('initialize')).toBe(1);
+    expect(fakeLog()).not.toContain('turn/start');
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('late messages and close from a failed initialization cannot affect the recovered turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    const procs = harness!.core.procs;
+    const spawn = procs.spawnChild.bind(procs);
+    let releaseClose: (() => void) | undefined;
+    let sendLateMessages: (() => void) | undefined;
+    let first = true;
+    const intercepted = spyOn(procs, 'spawnChild').mockImplementation((...args) => {
+      const child = spawn(...args);
+      if (!first) return child;
+      first = false;
+      sendLateMessages = () => {
+        child.stdout.emit('data', `${JSON.stringify({ id: 'stale-approval', method: 'item/commandExecution/requestApproval', params: { command: 'echo stale', reason: 'old startup' } })}\n`);
+        child.stdout.emit('data', `${JSON.stringify({ method: 'item/agentMessage/delta', params: { itemId: 'stale-output', delta: 'stale startup output' } })}\n`);
+      };
+      const emit = child.emit.bind(child);
+      child.emit = (event: string | symbol, ...values: unknown[]) => {
+        if (event !== 'close') return emit(event, ...values);
+        // The process has exited and stderr is drained, but another inherited
+        // pipe can defer close after an initialize error response was received.
+        releaseClose = () => { releaseClose = undefined; child.emit = emit; emit(event, ...values); };
+        queueMicrotask(() => child.stdout.emit('data', '{"id":1,"error":{"code":-32603,"message":"SQLite initialization failed"}}\n'));
+        return true;
+      };
+      return child;
+    });
+    try {
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt: '[slow]' });
+      await waitFor(() => fakeLog().includes('waiting for interrupt'), 20000);
+      expect(releaseClose).toBeDefined();
+      sendLateMessages!();
+      expect(await client.call('permissions.list', { threadId })).toEqual([]);
+      releaseClose!();
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      expect(countLines('initialize')).toBe(2);
+      expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+      expect(harness!.core.journal.listMessages(threadId).flatMap(message => message.parts).some(part => part.type === 'text' && part.text.includes('stale startup output'))).toBe(false);
+    } finally {
+      releaseClose?.();
+      intercepted.mockRestore();
+    }
+  });
+
+  test('SQLite initialization retries before sending a prompt and keeps the recovered session warm', async () => {
+    const client = await startCore({ warmProcessMinutes: 1 });
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'First' });
+    expect((await finished).status).toBe('done');
+    const second = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Second' });
+    expect((await second).status).toBe('done');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(2);
+    expect(fakeLog().match(/^thread\/start /gm)).toHaveLength(1);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(2);
+    expect(harness!.core.journal.listMessages(threadId).filter(message => message.role === 'assistant').some(message => message.parts.some(part => part.type === 'error'))).toBe(false);
+  });
+
+  test.each(['close', 'RPC error'])('SQLite initialization gives up after three attempts without sending a prompt: %s', async failure => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    if (failure === 'RPC error') process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    const turn = await finished;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('database is locked');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(3);
+    expect(fakeLog()).not.toContain('thread/start');
+    expect(fakeLog()).not.toContain('turn/start');
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('other initialization failures are not retried', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    process.env['CODEX_FAKE_INIT_ERROR'] = 'invalid configuration';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    expect((await finished).status).toBe('error');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+    expect(fakeLog()).not.toContain('turn/start');
+  });
+
+  test('stopping during SQLite initialization backoff prevents another process and prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    const core = harness!.core;
+    let stopped = false;
+    const unsubscribe = core.bus.onAny((name, payload) => {
+      if (name === 'core.log' && (payload as RpcEvents['core.log']).message.includes('retrying SQLite initialization')) {
+        stopped = core.threads.stopTurn(threadId);
+      }
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    try {
+      await client.call('turns.start', { threadId, prompt: 'Never sent' });
+      expect((await finished).status).toBe('stopped');
+      expect(stopped).toBe(true);
+      expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+      expect(fakeLog()).not.toContain('turn/start');
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test('a SQLite error after sending the prompt is not retried', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_CRASH_ERROR'] = 'failed to initialize sqlite state runtime under test-home';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[crash]' });
+    const turn = await finished;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('failed to initialize sqlite state runtime');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
   test('an asynchronous question draws a card without waiting, and its answer steers the running turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -595,11 +771,16 @@ describe('codex driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
     await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
     await waitFor(() => fakeLog().includes('thread/start'));
+    if (process.platform === 'win32') {
+      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     const done = await finished;
     expect(done.status).toBe('stopped');
     expect(done.error).toBeNull();
     expect(fakeLog()).not.toContain('turn/start');
+    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
     // The thread the agent opened is kept for the next turn.
     expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
@@ -667,9 +848,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();
@@ -726,6 +909,14 @@ describe('codex driver', () => {
     await runTurn(client, threadId, 'second');
     await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
     expect(countLines('initialize')).toBe(2);
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+
+    // One startup fails before a third prompt resumes the same native thread.
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '3';
+    await runTurn(client, threadId, 'third');
+    expect(countLines('initialize')).toBe(4);
+    expect(countLines('turn/start model=fake-codex effort=')).toBe(3);
+    expect(fakeLog().split('\n').filter(line => line.startsWith(`thread/resume ${sessionId} `))).toHaveLength(2);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
   });
 

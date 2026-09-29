@@ -119,19 +119,18 @@ impl CoreState {
         }
     }
 
-    /// Stops the local core before an installer replaces its files, and keeps
-    /// it stopped: the window notices the lost core within seconds and asks for
-    /// it again, which would otherwise start the old executable and lock it.
-    /// An error leaves the core running and the hold released.
-    pub(crate) fn stop_for_install(&self) -> Result<(), String> {
+    /// Waits for startup before holding reconnects, then asks for an idle-only stop.
+    /// Busy work remains usable. Cancellation never stops the core.
+    pub(crate) fn wait_for_install(&self, control: &Mutex<crate::update_stop::InstallState>, committed: impl Fn()) -> Result<bool, String> {
+        current_endpoint(self)?;
         self.held.store(true, Ordering::SeqCst);
-        let stopped = resident::stop_local_core(&self.launch.directory, resident::GRACE);
+        let stopped = crate::update_stop::stop_when_idle(&self.launch.directory, control, committed);
         // The stop leaves the exit of a core this shell started to its `Child`.
         reap_child(self);
-        if stopped.is_err() {
+        if !matches!(stopped, Ok(true)) {
             self.release_hold();
         }
-        stopped.map(|_| ())
+        stopped
     }
 
     /// The install did not happen: the next caller starts the core again.

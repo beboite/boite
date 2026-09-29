@@ -266,3 +266,84 @@ test('a nightly build calls itself boite (de nuit)', () => {
     appUpdater.snapshot = before;
   }
 });
+
+test('waiting blocks checks and cancels without waiting for the install invocation', async () => {
+  const ready = snapshot({ phase: 'ready', version: '2.1.0' });
+  let publish!: (value: UpdateSnapshot) => void;
+  let finish!: () => void;
+  let confirmCancel!: (value: boolean) => void;
+  const native = backend({
+    status: vi.fn(async () => ready),
+    listen: vi.fn(async (handler) => { publish = handler; return () => undefined; }),
+    install: vi.fn(() => new Promise<void>((resolve) => { finish = resolve; })),
+    cancelInstall: vi.fn(() => new Promise<boolean>((resolve) => { confirmCancel = resolve; }))
+  });
+  const clock = new FakeClock();
+  const updater = new AppUpdater(native, clock, () => true);
+  const stop = updater.start();
+  await updater.settled();
+  updater.install();
+  expect(updater.snapshot.phase).toBe('waiting');
+  expect(updater.busy).toBe(true);
+  updater.check('nightly');
+  clock.runTimeouts();
+  const cancelled = updater.cancelInstall();
+  expect(native.cancelInstall).toHaveBeenCalledOnce();
+  expect(updater.snapshot.phase).toBe('waiting');
+  confirmCancel(true);
+  expect(await cancelled).toBe(true);
+  expect(updater.snapshot.phase).toBe('waiting');
+  publish(ready);
+  finish();
+  await updater.settled();
+  expect(updater.snapshot).toEqual(ready);
+  expect(native.check).not.toHaveBeenCalled();
+  stop();
+});
+
+test('a cancellation rejected after idle admission cannot restore ready', async () => {
+  let finishCancel!: (value: boolean) => void;
+  const native = backend({ cancelInstall: vi.fn(() => new Promise<boolean>((resolve) => { finishCancel = resolve; })) });
+  const updater = new AppUpdater(native, new FakeClock(), () => true);
+  updater.snapshot = snapshot({ phase: 'waiting', version: '2.1.0' });
+  const cancelled = updater.cancelInstall();
+  updater.snapshot = { ...updater.snapshot, phase: 'installing' };
+  finishCancel(false);
+  expect(await cancelled).toBe(false);
+  expect(updater.snapshot.phase).toBe('installing');
+  expect(await updater.cancelInstall()).toBe(false);
+  expect(native.cancelInstall).toHaveBeenCalledOnce();
+});
+
+test('native waiting discards a channel selection queued behind startup status', async () => {
+  let publish!: (value: UpdateSnapshot) => void;
+  let finishStatus!: (value: UpdateSnapshot) => void;
+  const ready = snapshot({ phase: 'ready', version: '2.1.0' });
+  const native = backend({
+    status: vi.fn(() => new Promise<UpdateSnapshot>((resolve) => { finishStatus = resolve; })),
+    listen: vi.fn(async (handler) => { publish = handler; return () => undefined; })
+  });
+  const updater = new AppUpdater(native, new FakeClock(), () => true);
+  const stop = updater.start();
+  publish(ready);
+  updater.check('nightly');
+  const waiting = { ...ready, phase: 'waiting' as const };
+  publish(waiting);
+  finishStatus(waiting);
+  await updater.settled();
+  publish(ready);
+  await updater.settled();
+  expect(native.check).not.toHaveBeenCalled();
+  expect(updater.snapshot.channel).toBe('stable');
+  stop();
+});
+
+test('a failed cancellation keeps installation waiting and reports the error', async () => {
+  const native = backend({ cancelInstall: vi.fn(async () => { throw new Error('native request failed'); }) });
+  const updater = new AppUpdater(native, new FakeClock(), () => true);
+  updater.snapshot = snapshot({ phase: 'waiting', version: '2.1.0' });
+  expect(await updater.cancelInstall()).toBe(false);
+  expect(updater.snapshot).toMatchObject({ phase: 'waiting', error: 'native request failed' });
+  expect(updater.cancelling).toBe(false);
+  expect(updater.busy).toBe(true);
+});

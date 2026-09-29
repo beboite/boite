@@ -927,6 +927,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
+      nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
       /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
@@ -1175,8 +1177,6 @@ export interface TraceCapability {
 // ---------------------------------------------------------------------------
 
 export interface SchedulerState {
-  maxConcurrentTurns: number;
-  perAccountConcurrency: number;
   running: { turnId: TurnId; threadId: ThreadId; startedAt: Timestamp }[];
   queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
@@ -1220,8 +1220,6 @@ export interface Settings {
   browserOrigins?: string[];
   /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
   publicUrl?: string | null;
-  maxConcurrentTurns: number;
-  perAccountConcurrency: number;
   /** Minutes a Claude process stays warm after a turn. 0 releases it at once. */
   warmProcessMinutes: number;
   /** Bind the RPC to every interface so a phone on the LAN can pair. */
@@ -1832,17 +1830,10 @@ export interface DelegationProfile {
 export interface DelegationConfig {
   enabled: boolean;
   paused: boolean;
-  maxAgents: number;
-  maxConcurrent: number;
-  /** Total child turns and automatic parent wake turns across this team's lifetime. */
-  maxTurns: number;
-  /** Deadline for child turns and automatic parent wakes, including time awaiting an answer. */
-  maxMinutes: number;
   profiles: DelegationProfile[];
 }
 export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
-  enabled: false, paused: false, maxAgents: 4, maxConcurrent: 2,
-  maxTurns: 12, maxMinutes: 30, profiles: [],
+  enabled: false, paused: false, profiles: [],
 };
 export interface DelegatedAgent {
   thread: ThreadSummary;
@@ -1856,10 +1847,26 @@ export interface DelegationView {
   rootThreadId: ThreadId;
   config: DelegationConfig;
   agents: DelegatedAgent[];
+  /** Native children reported by this conversation's provider, including earlier message pages. */
+  nativeAgents: NativeAgent[];
   messages: AgentLetter[];
   turnsUsed: number;
   usage: Usage;
 }
+
+export interface NativeAgentUpdate {
+  id: string;
+  name?: string;
+  task?: string;
+  model?: string;
+  status: 'running' | 'done' | 'error' | 'stopped' | 'unknown';
+  result?: string;
+}
+export interface NativeAgent extends NativeAgentUpdate {
+  toolId: string;
+  startedAt: Timestamp;
+}
+export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {
@@ -1971,6 +1978,8 @@ export interface TerminalState {
   cwd: string;
   /** What it printed lately, so a client that attaches late draws the same screen. */
   output: string;
+  /** Last output event included in this snapshot; absent on older cores. */
+  sequence?: number;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
@@ -2654,7 +2663,9 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
   /** What a shell printed, as it printed it. */
-  'terminal.output': { id: string; data: string };
+  'terminal.output': { id: string; data: string; sequence?: number };
+  /** Portable brain switches changed. The folder stays on its host. */
+  'brain.configured': BrainConfig;
   /** The shell ended: typed `exit`, closed, or killed with its thread. */
   'terminal.exited': { id: string; exitCode: number | null };
 }

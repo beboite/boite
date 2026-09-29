@@ -78,7 +78,7 @@
   let hasTeam = $derived.by(() => {
     if (agentsOn || thread?.parentThreadId) return true;
     const team = store.delegation;
-    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0);
+    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0 || (team.nativeAgents?.length ?? 0) > 0);
   });
 
   /**
@@ -221,7 +221,7 @@
           type="button"
           class="ghost icon"
           class:on={store.panelOpen}
-          title={strings.thread.panelHint}
+          title={`${strings.thread.panelHint}${store.keyHint('panel')}`}
           aria-label={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"

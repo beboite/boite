@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { TerminalState } from '@boite/contracts';
+  import type { TerminalState, RpcEvents } from '@boite/contracts';
   import '@xterm/xterm/css/xterm.css';
   import { openExternal } from '../lib/links';
   import type { Store } from '../lib/store.svelte';
@@ -41,7 +41,7 @@
 
   /**
    * Chords the app leaves alone while a text field has the focus. The shell
-   * takes them: Ctrl+W deletes a word there, Ctrl+S and Ctrl+Enter are its own.
+   * takes them: Ctrl+W deletes a word there; stash and send-and-draft stay with it.
    */
   const SHELL_CHORDS = new Set(['close-surface', 'stash', 'send-and-draft']);
 
@@ -91,8 +91,19 @@
 
       // Everything printed before the snapshot is in it, so only what follows is drawn.
       let attached = false;
+      let pending: RpcEvents['terminal.output'][] = [];
+      const draw = (state: TerminalState) => {
+        term.write(state.output);
+        for (const event of pending) {
+          if (state.sequence === undefined || event.sequence === undefined || event.sequence > state.sequence) term.write(event.data);
+        }
+        pending = [];
+        attached = true;
+      };
       cleanups.push(client.on('terminal.output', (event) => {
-        if (attached && event.id === id) term.write(event.data);
+        if (event.id !== id) return;
+        if (attached) term.write(event.data);
+        else pending.push(event);
       }));
       cleanups.push(client.on('terminal.exited', (event) => {
         if (event.id === id) onexit?.(event.exitCode);
@@ -104,8 +115,7 @@
         onexit?.(null);
         return;
       }
-      term.write(state.output);
-      attached = true;
+      draw(state);
       const input = term.onData((data) => store.writeTerminal(id, data));
       const resize = term.onResize(({ cols, rows }) => store.resizeTerminal(id, cols, rows));
       cleanups.push(() => { input.dispose(); resize.dispose(); });
@@ -122,6 +132,7 @@
 
       reattach = () => {
         attached = false;
+        pending = [];
         void start(term.cols, term.rows).then((again) => {
           if (disposed) return;
           if (again === null) {
@@ -129,8 +140,7 @@
             return;
           }
           term.reset();
-          term.write(again.output);
-          attached = true;
+          draw(again);
         });
       };
     })();

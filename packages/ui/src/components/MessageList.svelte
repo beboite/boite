@@ -450,7 +450,7 @@
     }
   });
 
-  /** The dock over the timeline's end growing, a question opening in it, lifts a pinned tail with it. */
+  /** Lift a pinned tail for the dock, including a short history that previously fit. */
   $effect(() => {
     void dockRoom.height;
     const box = viewport;
@@ -538,7 +538,7 @@
   }
 </script>
 
-<div class="timeline-wrap">
+<div class="timeline-wrap" style:--dock-room="{dockRoom.height}px" style:--dock-clearance="{dockRoom.clearance}px">
   {#if store.findOpen && FindBar}
     <FindBar {messages} {viewport} request={store.findRequest} jump={(id) => jumpToMessage(id)} onclose={() => (store.findOpen = false)} />
   {/if}
@@ -546,7 +546,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} style:--dock-room="{dockRoom.height}px" data-testid="timeline">
+  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -628,10 +628,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* A fixed reading margin keeps the last answer above the compact activity
-       overlay without moving the viewport when tasks appear or update. A dock
-       taller than that, a question open in it, widens it to its own height. */
-    padding: 20px 20px max(132px, calc(var(--dock-room, 0px) + 20px)) var(--outline-room);
+    /* Reserve only the space occupied by the activity overlay. Queued prompts
+       already take their own space in the composer below this viewport. */
+    padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
   }
 
@@ -670,8 +669,10 @@
   .jump {
     position: absolute;
     left: 50%;
-    bottom: 12px;
-    transform: translateX(-50%);
+    bottom: calc(var(--dock-clearance, 0px) + 12px);
+    /* The entrance animates transform; centering must survive every frame. */
+    translate: -50% 0;
+    max-width: calc(100% - 24px);
     padding: 0 10px 0 8px;
     border-radius: 999px;
     background: var(--color-surface-2);

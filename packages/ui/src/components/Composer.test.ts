@@ -11,7 +11,7 @@ import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
  * sends and opens the next draft, ArrowUp walks this thread's sent prompts, and
- * Ctrl+S puts the text aside and takes it back. Then the reasoning chip, which
+ * Ctrl+Shift+S puts the text aside and takes it back. Then the reasoning chip, which
  * carries the level the picker used to hide.
  */
 
@@ -70,7 +70,7 @@ test('preview references survive queuing and a failed drain, and stashing refuse
   const reference = store.composerStates['t-trace']!.previewReferences![0]!;
   await waitFor(() => input().value.endsWith('@Save'));
   input().focus();
-  press('s', { ctrlKey: true });
+  press('s', { ctrlKey: true, shiftKey: true });
   expect(store.error).toContain('cannot be stashed');
   expect(input().value).toBe('Change the selected control @Save');
   expect(store.composerStates['t-trace']?.previewReferences).toEqual([reference]);
@@ -268,14 +268,19 @@ test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back',
   expect(input().value).toBe('the newer one');
 });
 
-test('Ctrl+S stashes the composer under the thread, and an empty one takes it back', async () => {
+test('Ctrl+S folds the sidebar without stashing, and Ctrl+Shift+S stashes and restores the composer', async () => {
   await mountOnFake();
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
 
   await type('a prompt I am not ready to send');
   input().focus();
+  const collapsed = store.sidebarCollapsed;
   expect(press('s', { ctrlKey: true })).toBe(false);
+  expect(store.sidebarCollapsed).toBe(!collapsed);
+  expect(input().value).toBe('a prompt I am not ready to send');
+  expect(window.localStorage.getItem(STASH_STORAGE_KEY)).toBeNull();
+  expect(press('s', { ctrlKey: true, shiftKey: true })).toBe(false);
 
   expect(input().value).toBe('');
   expect(JSON.parse(window.localStorage.getItem(STASH_STORAGE_KEY) ?? 'null')).toEqual({
@@ -284,14 +289,14 @@ test('Ctrl+S stashes the composer under the thread, and an empty one takes it ba
 
   // The empty composer takes it back, and the stash is spent.
   input().focus();
-  press('s', { ctrlKey: true });
+  press('s', { ctrlKey: true, shiftKey: true });
   expect(input().value).toBe('a prompt I am not ready to send');
   expect(input().selectionStart).toBe('a prompt I am not ready to send'.length);
   expect(window.localStorage.getItem(STASH_STORAGE_KEY)).toBeNull();
 
   // The browser's own save dialog stays shut wherever the focus is.
   input().blur();
-  expect(press('s', { ctrlKey: true })).toBe(false);
+  expect(press('s', { ctrlKey: true, shiftKey: true })).toBe(false);
 });
 
 /** The reasoning chip of the composer bar, or null while the model offers no scale. */
@@ -539,7 +544,7 @@ test('Escape stops the running turn and sends pending input next', async () => {
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
 });
 
-test('Enter in the emptied composer sends the oldest pending prompt now, and the next one waits for its turn', async () => {
+test('Enter in the emptied composer sends all pending prompts together now', async () => {
   await mountOnFake();
   await store.open('t-trace');
   await type('Hold on [permission]');
@@ -554,9 +559,9 @@ test('Enter in the emptied composer sends the oldest pending prompt now, and the
   expect(query('[data-testid=composer-queued]').textContent).toContain('Now please');
   press('Enter');
   await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
-  const prompts = store.openThread!.messages.filter((message) => message.role === 'user').slice(-2)
+  const prompts = store.openThread!.messages.filter((message) => message.role === 'user').slice(-1)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
-  expect(prompts).toEqual(['Now please', 'After that']);
+  expect(prompts).toEqual(['Now please\n\nAfter that']);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
 });
 
@@ -574,7 +579,7 @@ test('Enter with text still queues, and Send now under the pending bubbles stops
   await waitFor(() => store.composerStates['t-trace']?.queued.length === 2);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
   query<HTMLButtonElement>('[data-testid=composer-send-now]').click();
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
   await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
 });
@@ -609,24 +614,30 @@ test('goal and loop coexist above the composer with expandable agent tasks', asy
   expect(query('[data-testid=activity-loop] .objective').getAttribute('title')).toBe('Check CI');
 });
 
-test('queued prompts stay on their thread and run as separate turns', async () => {
+test('all queued prompts run together on their thread without reopening it', async () => {
   await mountOnFake();
   await store.open('t-trace');
-  store.openThread!.status = 'running';
+  await store.send('question');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
   await type('first queued prompt');
   press('Enter');
   await type('second queued prompt');
   press('Enter');
+  await type('third queued prompt');
+  press('Enter');
   await waitFor(() => input().value === '');
   await store.open('t-descriptors');
   await waitFor(() => store.openThread?.id === 't-descriptors');
+  await store.answerQuestion('t-trace', question.id, [], 'Continue');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
+  expect(store.openThread?.id).toBe('t-descriptors');
   await store.open('t-trace');
   await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 3 && !store.busy);
-  expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(-2).map((m) => m.parts)).toEqual([
-    [{ type: 'text', text: 'first queued prompt' }],
-    [{ type: 'text', text: 'second queued prompt' }]
+  expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(2).map((m) => m.parts)).toEqual([
+    [{ type: 'text', text: 'first queued prompt\n\nsecond queued prompt\n\nthird queued prompt' }]
   ]);
-  // Both prompts have run, on t-trace: anything sent to the other thread was sent before them.
+  // The batch belongs to t-trace, even after switching to another thread.
   const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
   expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
 });
@@ -982,7 +993,9 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   // The agent's two, in its own order, before every one of Boite's.
   expect(rows.slice(0, 2)).toEqual(['shout', 'whisper']);
   expect(rows).toContain('model');
-  expect(rows).toContain('theme-dark');
+  expect(rows).not.toContain('theme-dark');
+  expect(rows).not.toContain('sidebar');
+  expect(rows).not.toContain('settings');
   expect(slashMenu()?.textContent).toContain('The prompt back in capitals');
   expect(slashMenu()?.textContent).toContain('<text>');
   expect(document.body.textContent).toContain('Agent');
@@ -1011,19 +1024,19 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(answer).toBe('HELLO');
 });
 
-test('one of Boite own commands runs from the slash menu and empties the box', async () => {
+test('a composer command opens its control without sending a prompt', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread !== null && !store.busy);
 
-  await type('/dark');
+  await type('/model');
   await waitFor(() => slashMenu() !== null);
-  expect(slashRows()).toEqual(['theme-dark']);
+  expect(slashRows()).toEqual(['model']);
 
   input().focus();
   expect(press('Enter')).toBe(false);
   await waitFor(() => slashMenu() === null);
   expect(input().value).toBe('');
-  expect(window.localStorage.getItem('boite.theme')).toBe('dark');
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // Nothing was sent: a Boite command is not a prompt.
   expect(store.busy).toBe(false);
 });
@@ -1136,8 +1149,10 @@ test('queued prompts survive settings and wait for a ready connection', async ()
   const rpc = vi.spyOn(store.client!, 'call');
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  store.page = 'settings';
+  await waitFor(() => document.querySelector('[data-testid=composer-input]') === null);
   store.connection = 'ready';
-  await waitFor(() => store.busy);
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
     ['turns.start', { threadId: 't-trace', prompt: 'queue through settings', expectedSelectionVersion: 0, clientRequestId: expect.stringMatching(/^[a-f0-9]{32}$/) }]
   ]);
@@ -1179,9 +1194,9 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
 
   const sent = store
     .openThread!.messages.filter((message) => message.role === 'user')
-    .slice(-3)
+    .slice(-1)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
-  expect(sent).toEqual(['P1', 'P2', 'P3']);
+  expect(sent).toEqual(['P1\n\nP2\n\nP3']);
 });
 
 test('a turn the core opened on its own holds the prompt, then sends it without an error', async () => {

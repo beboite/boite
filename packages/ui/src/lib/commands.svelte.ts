@@ -1,8 +1,6 @@
 /*
- * Boite's own commands: one list and one dispatcher, shared by the command
- * palette and the composer's slash menu. The palette draws them by their
- * label, the slash menu by their id as `/name` with the label under it, so a
- * command is written once and both entries stay in step.
+ * Boite's application commands and dispatcher for the palette and shortcuts.
+ * The composer's slash menu keeps its prompt controls in composer-menus.ts.
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
@@ -84,8 +82,6 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
-  // The Agents page is an experiment: off, the row would lead nowhere.
-  if (experimentOn('resident-agents')) items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material buttons toolbar'));
   // The one way back to an archived thread: no chord, so written like the tour.
@@ -172,7 +168,6 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'workflows': store.showChat(); store.panel.toggleKind('workflow'); break;
     case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
-    case 'agents': store.showAgents(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
     case 'archived': store.showSettings('general', 'archived'); break;
