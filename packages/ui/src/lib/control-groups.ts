@@ -10,7 +10,7 @@ import { strings } from './strings';
 import { CARDS, kindName } from './surface-labels';
 import type { ControlId } from './work-prefs.svelte';
 
-export type ControlGroupId = 'header' | 'sidebar' | 'panel';
+export type ControlGroupId = 'header' | 'composer' | 'sidebar' | 'panel';
 
 export interface ControlEntry {
   id: ControlId;
@@ -34,7 +34,6 @@ export function controlGroups(owner: boolean): ControlGroup[] {
   const header: ControlEntry[] = [
     { id: 'header.project', label: strings.controls.project, icon: Folder },
     { id: 'header.branch', label: strings.controls.branch, icon: GitBranch },
-    { id: 'header.context', label: strings.controls.context, icon: ChartPie },
     { id: 'header.agents', label: strings.delegation.heading, icon: UsersRound },
     ...(owner ? [{ id: 'header.terminal' as const, label: strings.terminal.title, icon: SquareTerminal }] : [])
   ];
@@ -45,6 +44,7 @@ export function controlGroups(owner: boolean): ControlGroup[] {
   const panel: ControlEntry[] = CARDS.map((card) => ({ id: `panel.${card.kind}` as ControlId, label: kindName(card.kind), icon: null, kind: card.kind }));
   return [
     { id: 'header', label: strings.controls.header, entries: header },
+    { id: 'composer', label: strings.controls.composer, entries: [{ id: 'header.context', label: strings.controls.context, icon: ChartPie }] },
     { id: 'sidebar', label: strings.controls.sidebar, entries: sidebar },
     { id: 'panel', label: strings.controls.panel, entries: panel }
   ];

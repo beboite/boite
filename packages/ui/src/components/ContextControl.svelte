@@ -3,7 +3,7 @@
   import { Clock, Minimize2 } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
-  import { contextPercent, contextLevel, formatTokens } from '../lib/tokens';
+  import { contextPercent, contextLevel } from '../lib/tokens';
   import { count, time } from '../lib/format';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
@@ -69,7 +69,6 @@
 <div class="context" bind:this={root} data-testid="context-meter" data-percent={percent ?? ''} data-level={contextLevel(percent)} onmouseenter={show} onmouseleave={hideLater} onfocusin={show} onfocusout={hideLater}>
   <button type="button" class="trigger ghost" data-testid="context-trigger" aria-label={cacheLabel ? `${strings.thread.contextDetails}, ${cacheLabel}` : strings.thread.contextDetails} aria-expanded={popup.open} aria-haspopup="dialog" onclick={show}>
     <svg viewBox="0 0 40 40" aria-hidden="true"><circle class="track" cx="20" cy="20" r="17" /><circle class="fill" cx="20" cy="20" r="17" pathLength="100" stroke-dasharray="{percent ?? 0} 100" /></svg>
-    {#if context}<span class="amount mono">{percent !== null ? `${percent}%` : formatTokens(context.tokens)}</span>{/if}
     {#if cacheNow}
       <span class="cache-chip mono" data-testid="prompt-cache" data-state={cacheNow.kind} class:low={cacheNow.kind !== 'cold' && cacheNow.secondsLeft <= 300} aria-hidden="true">
         <Clock size={13} strokeWidth={1.75} />{cacheNow.kind === 'cold' ? strings.thread.cacheCold : remaining(cacheNow.secondsLeft)}
@@ -78,7 +77,7 @@
   </button>
   {#if popup.shown}
     <div class="popup" class:closing={popup.closing} role="dialog" aria-label={strings.thread.contextDetails} tabindex="-1" data-testid="context-popup" use:popup.attach onanimationend={popup.end}
-      use:floating={{ anchor: () => root ?? null, align: 'end', dismiss: () => popup.hide() }}>
+      use:floating={{ anchor: () => root ?? null, placement: 'top', align: 'end', cap: Infinity, dismiss: () => popup.hide() }}>
       <div class="heading"><span>{strings.thread.contextDetails}</span>{#if percent !== null}<span class="mono">{percent}%</span>{/if}</div>
       {#if context}
         <p class="total mono">{exact(context.tokens)}{#if context.window !== null}{' / '}{exact(context.window)}{/if}</p>
@@ -112,13 +111,11 @@
 <style>
   .context { position: relative; flex: none; color: var(--color-muted-foreground); }
   .trigger { display: flex; align-items: center; gap: 5px; padding: 4px; }
-  /* On a phone the ring alone says how full the context is; the popup has the number. */
-  @media (max-width: 720px) { .trigger { min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; } .amount { display: none; } }
+  @media (max-width: 720px) { .trigger { min-width: var(--touch-target); min-height: var(--touch-target); justify-content: center; } }
   svg { width: 24px; height: 24px; transform: rotate(-90deg); }
   circle { fill: none; stroke-width: 3; }
   .track { stroke: var(--color-border); }
   .fill { stroke: var(--color-accent); stroke-linecap: round; transition: stroke-dasharray var(--dur-3); }
-  .amount { font-size: var(--text-xs); }
   .cache-chip { display: flex; align-items: center; gap: 3px; margin-left: 4px; font-size: var(--text-xs); }
   .cache-chip[data-state='warm'] :global(svg) { color: var(--color-success); }
   .cache-chip[data-state='maybe'] :global(svg), .cache-chip.low :global(svg) { color: var(--color-live); }
@@ -128,7 +125,7 @@
   .state[data-state='warm'] { color: var(--color-success); }
   .state[data-state='maybe'] { color: var(--color-live); }
   .state[data-state='cold'] { color: var(--color-muted-foreground); }
-  .popup { position: fixed; width: min(290px, calc(100vw - 24px)); z-index: 60; padding: 16px; border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); color: var(--color-foreground); }
+  .popup { position: fixed; width: min(320px, calc(100vw - 24px)); z-index: 60; padding: 16px; border: 1px solid var(--color-edge); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e3); animation: pop var(--dur-2) var(--ease-out-quint); color: var(--color-foreground); overflow-y: auto; overscroll-behavior: contain; }
   .popup.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); pointer-events: none; }
   .heading { display: flex; justify-content: space-between; font-size: var(--text-sm); font-weight: 600; }
   .total { margin: 8px 0 12px; font-size: var(--text-sm); }
