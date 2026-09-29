@@ -21,7 +21,7 @@
  * notifications carry no `jsonrpc` member, which is what the driver has to
  * survive.
  */
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DIRECTIVE = /\[(agents|command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
@@ -507,6 +507,16 @@ function handle(method: string, raw: unknown): unknown {
           ],
         }],
       };
+    case 'account/read':
+      log(`account/read refresh=${params['refreshToken'] === true}`);
+      return { account: existsSync(join(process.cwd(), 'fake-login.json')) ? { type: 'chatgpt', email: 'work@example.com', planType: 'plus' } : null, requiresOpenaiAuth: true };
+    case 'account/login/start':
+      log('account/login/start ' + params['type']);
+      if (process.env['CODEX_FAKE_LOGIN_WAIT'] !== '1') setTimeout(() => {
+        writeFileSync(join(process.cwd(), 'fake-login.json'), '{}');
+        notify('account/login/completed', { loginId: 'fake-login', success: true, error: null });
+      }, 200);
+      return { type: 'chatgptDeviceCode', loginId: 'fake-login', verificationUrl: 'https://example.invalid/device', userCode: 'TEST-CODE' };
     case 'model/list':
       log('model/list');
       // One page, and a null cursor: the driver stops asking on that.

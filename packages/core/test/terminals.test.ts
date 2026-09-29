@@ -201,7 +201,7 @@ describe('terminals', () => {
     const { loaded } = await client.call('providers.list', {});
     expect(loaded.find((provider) => provider.id === 'opencode')?.login).toEqual({ kind: 'terminal' });
     expect(loaded.find((provider) => provider.id === 'grok')?.login).toEqual({ kind: 'terminal' });
-    expect(loaded.find((provider) => provider.id === 'codex')?.login).toEqual({ kind: 'command' });
+    expect(loaded.find((provider) => provider.id === 'codex')?.login).toEqual({ kind: 'device' });
   });
 
   test('a descriptor asking for a terminal without a command is refused by name', async () => {

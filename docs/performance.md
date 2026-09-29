@@ -76,17 +76,17 @@ launch limits were retired:
 | Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.99 s, typing in 3.7 ms and maximum timer lag 36 ms; desktop and phone checked |
 
 After launch limits were retired, the same command with 12 additional readers
-passed on 2026-09-29 after grouping synchronous startup and completion writes:
+passed on 2026-09-30 after grouping synchronous startup and completion writes:
 
 | Scenario | Observed result |
 | --- | --- |
-| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 44.6/20.6 s |
-| Independent HTTP health during streaming | Zero timeouts; p95 78/158 ms and maximum 2.32/0.40 s at six/64 concurrent turns |
-| Scheduler payloads at 64 concurrent turns | 1.06 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
-| All 1,000 turns running together, cold then already used | Starts accepted in 14.4/19.8 s and cancelled in 14.1/17.2 s with the 30-second RPC deadline unchanged |
-| Independent HTTP health during mass start/stop | Zero timeouts; p95 172/217 ms and maximum 3.10/3.56 s for cold/warm phases |
-| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 4.1 s restart |
-| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.60 s, typing in 5.3 ms and maximum timer lag 34 ms; desktop and phone checked |
+| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 40.8/18.3 s |
+| Independent HTTP health during streaming | Zero errors; p95 58/131 ms and maximum 1.84/0.16 s at six/64 concurrent turns |
+| Scheduler payloads at 64 concurrent turns | 1.09 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
+| All 1,000 turns running together, cold then already used | Starts accepted in 10.2/10.6 s and cancelled in 9.7/6.1 s with the 30-second RPC deadline unchanged |
+| Independent HTTP health during mass start/stop | Zero errors; p95 117/109 ms and maximum 3.27/0.15 s for cold/warm phases |
+| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 3.0 s restart |
+| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.68 s, typing in 3.3 ms and maximum timer lag 26 ms; desktop and phone checked |
 
 Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
 starts. The instrumented failure accepted 505 starts before expiry, with no
