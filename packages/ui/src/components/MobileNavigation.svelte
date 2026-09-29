@@ -30,7 +30,7 @@
   let several = $derived(machines.length > 1);
   let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
-  let actionProject = $derived(store.draftInDrafts && !store.openThread ? store.openProject : project);
+  let actionProject = $derived(store.openProject);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);

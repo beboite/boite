@@ -2039,6 +2039,12 @@ test('the phone cannot manage an unrelated project from a draft without a folder
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
   store.startDraft('p-boite');
   await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
+  await store.open('t-trace');
+  if (!store.openThread) throw new Error('the thread did not open');
+  store.openThread.projectId = null;
+  flushSync();
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 });
 
 test('first run opens a draft in the drafts, and the first send makes them', async () => {
