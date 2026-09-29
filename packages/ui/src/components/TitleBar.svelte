@@ -182,7 +182,6 @@
     align-items: center;
     gap: 8px;
     width: var(--project-width);
-    max-width: 35vw;
     flex: none;
     min-width: 0;
     padding-right: 12px;
