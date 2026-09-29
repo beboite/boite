@@ -5,6 +5,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -275,14 +276,23 @@ describe('codex driver', () => {
     const client = await startCore();
     const threadId = await codexThread(client);
     process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
-    const retrying = client.next('core.log', entry => entry.message.includes('retrying SQLite initialization'), 20000);
+    const core = harness!.core;
+    let stopped = false;
+    const unsubscribe = core.bus.onAny((name, payload) => {
+      if (name === 'core.log' && (payload as RpcEvents['core.log']).message.includes('retrying SQLite initialization')) {
+        stopped = core.threads.stopTurn(threadId);
+      }
+    });
     const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
-    await client.call('turns.start', { threadId, prompt: 'Never sent' });
-    await retrying;
-    await client.call('turns.stop', { threadId });
-    expect((await finished).status).toBe('stopped');
-    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
-    expect(fakeLog()).not.toContain('turn/start');
+    try {
+      await client.call('turns.start', { threadId, prompt: 'Never sent' });
+      expect((await finished).status).toBe('stopped');
+      expect(stopped).toBe(true);
+      expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+      expect(fakeLog()).not.toContain('turn/start');
+    } finally {
+      unsubscribe();
+    }
   });
 
   test('a SQLite error after sending the prompt is not retried', async () => {
@@ -742,11 +752,16 @@ describe('codex driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
     await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
     await waitFor(() => fakeLog().includes('thread/start'));
+    if (process.platform === 'win32') {
+      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     const done = await finished;
     expect(done.status).toBe('stopped');
     expect(done.error).toBeNull();
     expect(fakeLog()).not.toContain('turn/start');
+    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
     // The thread the agent opened is kept for the next turn.
     expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
@@ -814,9 +829,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();

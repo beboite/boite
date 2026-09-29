@@ -134,6 +134,7 @@ export class CodexSession {
     turn.markStopped();
     // A turn still queued behind another reads the stop when its own run begins.
     if (this.active !== turn) return;
+    turn.ctx.finishStartup?.();
     if (this.current === turn) this.interrupt(turn);
     this.armStopGrace(turn);
   }
@@ -195,6 +196,8 @@ export class CodexSession {
       else turn.fail(messageOf(error));
       this.endTurn(turn, true);
       return;
+    } finally {
+      turn.ctx.finishStartup?.();
     }
 
     const rpc = this.rpc;
@@ -356,6 +359,7 @@ export class CodexSession {
 
   private spawn(ctx: TurnContext, executable: string, args: string[]): CodexRpc {
     const child = ctx.spawnChild(executable, args, {
+      startup: true,
       cwd: ctx.thread.cwd,
       env: { ...process.env, ...ctx.accountEnv },
     });

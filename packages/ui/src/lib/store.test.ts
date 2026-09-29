@@ -916,11 +916,11 @@ describe('Store', () => {
 
   test('settings changed elsewhere replace the ones the UI holds', async () => {
     const { store, client } = await ready();
-    expect(store.settings?.maxConcurrentTurns).not.toBe(9);
+    expect(store.settings?.warmProcessMinutes).not.toBe(9);
 
-    await client.call('settings.set', { maxConcurrentTurns: 9 });
+    await client.call('settings.set', { warmProcessMinutes: 9 });
 
-    expect(store.settings?.maxConcurrentTurns).toBe(9);
+    expect(store.settings?.warmProcessMinutes).toBe(9);
   });
 
   test('the newest open wins, and the socket is left holding that thread alone', async () => {

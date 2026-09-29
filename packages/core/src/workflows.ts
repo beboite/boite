@@ -52,9 +52,9 @@ function planError<T>(run: () => T): T {
 
 /**
  * The core runs the graph: every step is an ordinary child thread on an
- * owner-approved delegation profile, held to the team's turn budget and
- * concurrency, with no orchestrating model. A run is one JSON record; every
- * change reloads it from SQLite, because a turn can finish synchronously
+ * owner-approved delegation profile, with concurrency set by the plan
+ * and no orchestrating model. A run is one JSON record; every change reloads
+ * it from SQLite, because a turn can finish synchronously
  * inside the `startTurn` that started it.
  */
 export class Workflows {
@@ -474,9 +474,7 @@ export class Workflows {
         }
         Object.assign(inst, { status: 'done', finishedAt: now });
       } else if (turn.status === 'stopped') {
-        const minutes = this.core.delegation.config(run.rootThreadId).maxMinutes;
-        const late = turn.startedAt !== null && now - turn.startedAt >= minutes * 60_000;
-        Object.assign(inst, { status: 'stopped', error: late ? `Stopped after the ${minutes} minute limit of a step turn` : 'Stopped', finishedAt: now });
+        Object.assign(inst, { status: 'stopped', error: 'Stopped', finishedAt: now });
       } else Object.assign(inst, { status: 'failed', error: turn.error ?? 'The turn failed', finishedAt: now });
     });
     if (fix !== null) {
@@ -569,10 +567,15 @@ export class Workflows {
     }
   }
 
-  /** A held summary goes again once the team's settings change: a raised budget or a resume lets it through. */
+  /** A held summary goes again once the owner enables or resumes the team. */
   private redeliver(rootId: string): void {
-    const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0 AND json_extract(data, '$.deliveryError') IS NOT NULL", rootId);
-    if (held.length) this.later(() => { for (const run of held) this.deliver(run.id); });
+    const config = this.core.delegation.config(rootId);
+    if (!config.enabled || config.paused) return;
+    const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0", rootId)
+      .filter(run => run.status === 'paused'
+        ? run.nodes.every(node => node.status === 'done' || node.status === 'skipped')
+        : run.deliveryError != null);
+    if (held.length) this.later(() => { for (const run of held) this.settle(run.id); });
   }
 
   // -- control -----------------------------------------------------------------

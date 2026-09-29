@@ -1,4 +1,4 @@
-/** Delegation: a parent thread's team of child threads, their budget and letters. */
+/** Delegation: a parent thread's team of child threads, their usage and letters. */
 import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
@@ -10,7 +10,8 @@ function delegationRoot(ctx: FakeContext, threadId: ThreadId): ThreadId {
 }
 
 export function delegationConfig(ctx: FakeContext, rootId: ThreadId): DelegationConfig {
-  return structuredClone(ctx.delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG);
+  const saved = ctx.delegationConfigs.get(rootId) ?? DEFAULT_DELEGATION_CONFIG;
+  return structuredClone({ enabled: saved.enabled, paused: saved.paused, profiles: saved.profiles });
 }
 
 function delegatedAgent(ctx: FakeContext, row: { threadId: ThreadId; profileId: string; task: string }): DelegatedAgent {
@@ -65,7 +66,7 @@ export function seedDelegationDemo(ctx: FakeContext): void {
   const root = ctx.thread('t-trace');
   const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
   const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
-  ctx.delegationConfigs.set(root.id, { enabled: true, paused: false, maxAgents: 4, maxConcurrent: 2, maxTurns: 12, maxMinutes: 30, profiles: [reviewer, implementer] });
+  ctx.delegationConfigs.set(root.id, { enabled: true, paused: false, profiles: [reviewer, implementer] });
   const make = (id: string, title: string, task: string, status: Thread['status'], answer: string, profile: DelegationProfile): Thread => {
     const turn: Turn = { id: `turn-${id}`, threadId: id, status: status === 'running' ? 'running' : 'done', queuedAt: demoAt, startedAt: demoAt + 1000, finishedAt: status === 'running' ? null : demoAt + 30_000, usage: status === 'running' ? null : { inputTokens: 820, outputTokens: 260, cacheReadTokens: 1200, cacheWriteTokens: 0, costUsdEquivalent: 0.012 }, error: null };
     return {
@@ -156,16 +157,13 @@ export function pumpDelegation(ctx: FakeContext, rootId: ThreadId): void {
   const config = delegationConfig(ctx, rootId);
   if (!config.enabled || config.paused) return;
   const rows = ctx.delegationAgents.get(rootId) ?? [];
-  let running = rows.filter(row => ['running', 'waiting'].includes(ctx.thread(row.threadId).status)).length;
   for (const row of rows) {
-    if (running >= config.maxConcurrent) break;
     const thread = ctx.thread(row.threadId);
     const turn = thread.turns.at(-1);
     if (thread.status !== 'queued' || turn?.status !== 'queued') continue;
     ctx.scheduler.queued = ctx.scheduler.queued.filter(entry => entry.turnId !== turn.id);
     ctx.scheduler.queued.forEach((entry, index) => { entry.position = index + 1; });
     ctx.startTurn(thread.id, row.task, [], 'delegation', undefined, turn);
-    running += 1;
   }
 }
 
@@ -179,11 +177,6 @@ export function delegationMethods(ctx: FakeContext) {
       if (root !== threadId || !value || typeof value.enabled !== 'boolean' || typeof value.paused !== 'boolean' || !Array.isArray(value.profiles) || value.profiles.length > 16) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'delegation.configure requires a parent thread and a valid config' });
       }
-      const integer = (field: keyof Pick<DelegationConfig, 'maxAgents' | 'maxConcurrent' | 'maxTurns' | 'maxMinutes'>, max: number): number => {
-        const number = value[field];
-        if (!Number.isSafeInteger(number) || number < 1 || number > max) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${field} must be an integer from 1 to ${max}` });
-        return number;
-      };
       const profiles = value.profiles.map(profile => {
         const provider = ctx.providers.find(entry => entry.id === profile.providerId);
         const account = ctx.accounts.find(entry => entry.id === profile.accountId);
@@ -197,13 +190,8 @@ export function delegationMethods(ctx: FakeContext) {
       const config: DelegationConfig = {
         enabled: value.enabled,
         paused: value.paused,
-        maxAgents: integer('maxAgents', 8),
-        maxConcurrent: integer('maxConcurrent', 8),
-        maxTurns: integer('maxTurns', 100),
-        maxMinutes: integer('maxMinutes', 120),
         profiles
       };
-      if (config.maxConcurrent > config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'maxConcurrent must not exceed maxAgents' });
       ctx.delegationConfigs.set(root, structuredClone(config));
       if (!config.enabled || config.paused) await stopDelegation(ctx, root);
       ctx.emit('delegation.changed', { threadId: root });
@@ -226,9 +214,6 @@ export function delegationMethods(ctx: FakeContext) {
       const config = delegationConfig(ctx, parent.id);
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
-      if (rows.length >= config.maxAgents) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation agent limit reached' });
-      if ((ctx.delegationTurns.get(parent.id) ?? 0) >= config.maxTurns) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation turn budget reached' });
-      const running = rows.filter(row => ['queued', 'running', 'waiting'].includes(ctx.thread(row.threadId).status)).length;
       const profile = config.profiles.find(entry => entry.id === params.profileId);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const id = `t-${++ctx.seq}`;
@@ -254,19 +239,10 @@ export function delegationMethods(ctx: FakeContext) {
       ctx.delegationAgents.set(parent.id, [...rows, row]);
       ctx.delegationTurns.set(parent.id, (ctx.delegationTurns.get(parent.id) ?? 0) + 1);
       ctx.emit('thread.created', structuredClone(toSummary(child)));
-      const turn = running >= config.maxConcurrent
-        ? { id: `turn-${++ctx.seq}`, threadId: id, status: 'queued' as const, queuedAt: at, startedAt: null, finishedAt: null, usage: null, error: null }
-        : ctx.startTurn(id, task, [], 'delegation');
-      if (turn.status === 'queued') {
-        child.turns.push(turn);
-        child.status = 'queued';
-        ctx.scheduler.queued = [...ctx.scheduler.queued, { turnId: turn.id, threadId: id, position: ctx.scheduler.queued.length + 1, queuedAt: turn.queuedAt }];
-        ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
-      }
+      ctx.startTurn(id, task, [], 'delegation');
       const agent = delegatedAgent(ctx, row);
       ctx.delegationRequests.set(requestKey, { fingerprint, threadId: id });
       ctx.emit('delegation.changed', { threadId: parent.id });
-      void turn;
       return structuredClone(agent);
     },
     'delegation.send': async (params) => {

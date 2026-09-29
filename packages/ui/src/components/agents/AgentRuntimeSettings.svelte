@@ -81,11 +81,6 @@
       {#if config.subagents.enabled}
         <label class="switch-row"><span class="text">{labels.paused}</span><input type="checkbox" role="switch" bind:checked={config.subagents.paused} /></label>
         {@render routes(true)}
-        <div class="agent-columns">
-          <label class="agent-field">{labels.maxSubagents}<input type="number" min="1" max="8" bind:value={config.subagents.maxAgents} required /></label>
-          <label class="agent-field">{labels.concurrency}<input type="number" min="1" max="8" bind:value={config.subagents.maxConcurrent} required /></label>
-          <label class="agent-field">{labels.maxTurns}<input type="number" min="1" max="100" bind:value={config.subagents.maxTurns} required /></label>
-        </div>
       {/if}
     </fieldset>
 
