@@ -143,15 +143,15 @@
 
 <style>
   /* On the same 4 px rest as the parts it names. */
-  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 4px; padding-left: 4px; }
+  .model-attribution { color: var(--color-muted-foreground); font-size: var(--text-xs); margin-bottom: 8px; padding-left: var(--activity-padding); }
   .system-attribution { width: fit-content; margin-bottom: 6px; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-muted-foreground); background: var(--color-surface-2); font-size: var(--text-xs); font-weight: 600; }
 
   /* A 4 px rest on the left so an answer does not kiss the column's edge. */
   .parts {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding-left: 4px;
+    gap: var(--chat-part-gap);
+    padding-left: var(--activity-padding);
     max-width: 100%;
   }
 
@@ -168,7 +168,7 @@
   .part + .part[data-kind='thinking'],
   .part + .part[data-kind='error'],
   .part + .part[data-kind='hook'] {
-    margin-top: 10px;
+    margin-top: calc(var(--chat-block-gap) - var(--chat-part-gap));
   }
 
   /* An answer is read at its own measure; cards keep the whole column. */
@@ -220,9 +220,9 @@
   }
 
   /* A question waiting in the dock: one line like a tool call, the live colour on its mark. */
-  .docked-question { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; height: auto; padding: 1px 4px 1px 4px; border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-muted-foreground); justify-content: flex-start; text-align: left; }
+  .docked-question { display: flex; align-items: center; gap: var(--activity-gap); width: 100%; min-height: var(--control); height: auto; padding: var(--activity-padding); border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-muted-foreground); justify-content: flex-start; text-align: left; }
   .docked-question:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-foreground); }
-  .docked-question :global(svg) { flex: none; color: var(--color-live); }
+  .docked-question :global(svg) { flex: none; width: var(--activity-glyph); color: var(--color-live); }
   .docked-text { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-foreground); }
   .docked-hint { flex: 0 10 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-xs); color: var(--color-subtle); }
 

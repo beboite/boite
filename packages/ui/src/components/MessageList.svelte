@@ -585,6 +585,7 @@
           {#if turn && lastInTurn.get(turn.id) === message.id}
             <TurnSummary
               {turn}
+              activeTool={message.parts.some((part) => part.type === 'tool' && part.status === 'running')}
               waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
               background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
               stop={() => void store.stop()}

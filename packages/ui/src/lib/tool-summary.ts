@@ -17,7 +17,7 @@ export interface ToolDescription {
   change: { path: string; oldText: string; newText: string } | null;
 }
 
-const SUMMARY_KEYS = ['file_path', 'path', 'command', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
+const SUMMARY_KEYS = ['file_path', 'path', 'command', 'cmd', 'pattern', 'query', 'url', 'notebook_path', 'prompt', 'description'];
 
 /** The first `"key": "value` of a half-typed JSON object, so the line reads before it closes. */
 const PARTIAL_VALUE = /"[^"]*"\s*:\s*"((?:[^"\\]|\\.)*)/;
@@ -63,7 +63,7 @@ export function partialSummaryOf(raw: string): string {
 }
 
 function familyOfShape(fields: Record<string, unknown>): ToolFamily {
-  if (typeof fields['command'] === 'string' || Array.isArray(fields['command'])) return 'command';
+  if (typeof fields['command'] === 'string' || Array.isArray(fields['command']) || typeof fields['cmd'] === 'string') return 'command';
   if ('old_string' in fields || 'new_string' in fields || Array.isArray(fields['edits'])) return 'edit';
   if (bodyOf(fields) !== null && (typeof fields['file_path'] === 'string' || typeof fields['path'] === 'string')) return 'write';
   if (typeof fields['url'] === 'string') return 'fetch';
@@ -92,7 +92,7 @@ export function describeTool(name: string, input: unknown): ToolDescription {
   const path = text(fields['file_path']) || text(fields['path']) || text(fields['notebook_path']) || text(fields['grantRoot']);
   let subject: string;
   switch (family) {
-    case 'command': subject = commandOf(fields['command']) || summaryOf(input); break;
+    case 'command': subject = commandOf(fields['command']) || text(fields['cmd']) || summaryOf(input); break;
     case 'fetch': subject = text(fields['url']) || summaryOf(input); break;
     case 'web': subject = text(fields['query']) || summaryOf(input); break;
     case 'search': subject = text(fields['pattern']) || text(fields['query']) || path || summaryOf(input); break;

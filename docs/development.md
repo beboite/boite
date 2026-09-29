@@ -726,8 +726,8 @@ panel end-to-end tests cover card spacing, folded drafts and phone controls.
 
 `bun test tests/e2e/readability.test.ts` checks the sidebar metadata, process
 panel, paragraph buffering, reasoning replacement, goal display and command
-highlighting through the fake client. It writes desktop, phone and light-theme
-captures under `tests/e2e/.artifacts/`.
+highlighting, compact tool calls and answered questions through the fake client.
+It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
 Scheduled goal and loop prompts journal the command and objective in `text`, with
 activity kind and iteration metadata. The core builds the execution instructions
@@ -742,17 +742,28 @@ and disabled for reduced motion. Finished turns show a check and elapsed time;
 usage totals remain in Usage settings. Context details open separately from
 compaction. `tests/e2e/chat-context.test.ts` covers these interactions.
 
-Tool calls read as a work log. A run of calls with
+Tool calls read as a work log. A single completed call uses a count-based
+summary, with its full input and output available on expansion. A run of calls with
 nothing between them folds under one sentence ("Ran 4 commands, read 1 file and
 searched the code once"): one clause per kind, in the order the kinds first
 ran, with edits counted by file. While a call runs, the folded line says what
-runs ("Running git") with a light passing over it. Each call is a plain line: a
-command as the command it ran, with the pwsh, cmd or bash wrapper taken off
+runs ("Running git"). While that activity is visible, the turn does not add
+a second working indicator unless it needs an answer or has background work.
+Inside an expanded group, each call is a plain line: a command as the command
+it ran, with the pwsh, cmd or bash wrapper taken off
 (`lib/tool-groups.ts`), anything else as a short sentence ("Read app.css"). A
 call that produced a diff stands alone, shows its `+N -M` and opens on the
 diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
 in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
-edit with its diff.
+edit with its diff. Failed and denied calls stay outside groups, with an
+output preview that remains visible when the call is closed.
+
+Answered questions collapse to the actual answer. Expanding restores the
+question and the full answer without enabling another submission. Thinking
+uses one stable label; its current heading remains in the expanded detail.
+These disclosures share the activity spacing tokens in `app.css`: 4 px row
+padding, an 8 px icon gap, 30 px desktop rows and 44 px phone touch targets.
+Text blocks stay 12 px away from activity rows.
 
 ### Faces and zoom
 
