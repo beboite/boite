@@ -778,13 +778,13 @@ Text blocks stay 12 px away from activity rows.
 
 ### Theme colours
 
-Settings, Appearance offers OLED, Catppuccin (Mocha/Latte), Tokyo Night
-(Night/Day), Nord, Gruvbox and Amethyst, with conversation previews showing
-their panels, code, selection and diff colours. OLED switches to dark appearance
+Settings, Appearance offers Original, OLED, Catppuccin (Mocha/Latte), Tokyo Night
+(Night/Day), Nord, Gruvbox and Amethyst as a list of named buttons.
+OLED switches to dark appearance
 and uses pure black for the conversation, sidebar and code background.
 Choose Customize colours to reveal five editable colours:
 background, sidebar and frame, panels and messages, text, and accent. Click a
-preview element or a colour row to edit it with the colour field, hue slider
+colour row to edit it with the colour field, hue slider
 or hex input. The field supports touch and arrow keys; Shift takes larger steps.
 Undo restores the colours before the current edit. Reset returns the active
 appearance to its original palette.

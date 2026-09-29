@@ -32,6 +32,10 @@ test('main colours can be edited, survive reload and keep separate light and dar
   await capture('theme-colors-desktop.png');
   expect(await page.evaluate(`!!document.querySelector('${id('palette-tokyo-night')}')`)).toBe(true);
   await page.click(id('palette-tokyo-night'));
+  await page.click(id('palette-default'));
+  expect(await page.evaluate(`document.querySelector('${id('palette-default')}').getAttribute('aria-pressed')`)).toBe('true');
+  expect(await page.evaluate(`getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim()`)).toBe('#101013');
+  await page.click(id('palette-tokyo-night'));
   await page.click(id('colors-customize'));
   await page.click(id('color-accent'));
   await page.type(id('color-hex'), 'invalid');
