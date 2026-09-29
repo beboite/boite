@@ -107,6 +107,35 @@ test('typing alone is enough when the question allows text and offers nothing', 
   expect(sent).toEqual([{ optionIds: [], text: 'feat/question-part' }]);
 });
 
+test.each([false, true])('Enter sends a typed answer once, including async questions (%s)', (async) => {
+  const sent: { optionIds: string[]; text: string }[] = [];
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: {
+      text: 'Which shape?', options: OPTIONS, allowText: true, multiple: false,
+      async, answer: null, pending: true,
+      submit: (optionIds: string[], text: string) => sent.push({ optionIds, text })
+    }
+  });
+  flushSync();
+  const field = query<HTMLInputElement>('[data-testid=question-text-input]');
+  const enter = (init: KeyboardEventInit = {}) => {
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+    flushSync();
+  };
+  enter();
+  expect(sent).toEqual([]);
+  options()[0]?.click();
+  field.value = ' one line please ';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  enter({ isComposing: true });
+  expect(sent).toEqual([]);
+  enter();
+  enter();
+  expect(sent).toEqual([{ optionIds: ['short'], text: 'one line please' }]);
+});
+
 test('several options are kept at once when the question takes several', () => {
   const sent: { optionIds: string[]; text: string }[] = [];
   running = mount(QuestionCard, {

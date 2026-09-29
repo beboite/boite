@@ -86,7 +86,7 @@ passed on 2026-09-29 after grouping synchronous startup and completion writes:
 | All 1,000 turns running together, cold then already used | Starts accepted in 14.4/19.8 s and cancelled in 14.1/17.2 s with the 30-second RPC deadline unchanged |
 | Independent HTTP health during mass start/stop | Zero timeouts; p95 172/217 ms and maximum 3.10/3.56 s for cold/warm phases |
 | Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 4.1 s restart |
-| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.68 s, typing in 4.5 ms and maximum timer lag 44 ms; desktop and phone checked |
+| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.60 s, typing in 5.3 ms and maximum timer lag 34 ms; desktop and phone checked |
 
 Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
 starts. The instrumented failure accepted 505 starts before expiry, with no
@@ -299,3 +299,9 @@ sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
 runs on the same day. The compiled core also carries bytecode, which saves
 parsing where no signature check dominates the start; on Windows the compiled
 core stayed at about 790 ms either way.
+
+The account connection changes measured on Windows CI on 2026-09-29 use
+525,128 bytes for the UI entry chunk, 3,396,864 bytes for the UI distribution
+and 821,226 bytes for the core bundle. Account editing and device-login UI
+add client code; native authentication checks add core code. The size budgets
+in `scripts/ci/budgets.json` retain about 10% headroom above those measurements.
