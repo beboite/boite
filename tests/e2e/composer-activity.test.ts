@@ -134,8 +134,14 @@ test('default models can be changed on each provider row in Providers', async ()
 test('tasks stay folded until requested and never move the reading position', async () => {
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(async ({store}) => { await store.open('t-trace'); })`);
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
+  // Opening the thread schedules layout measurements and scroll restoration.
+  // Finish those before choosing the reading position this test must preserve.
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
-  const before = await page.evaluate(`(() => { const el = document.querySelector('${id('timeline')}'); const r = el.getBoundingClientRect(); return {top:r.top,height:r.height,scroll:el.scrollTop}; })()`);
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  const before = await page.evaluate<{ top: number; height: number; scroll: number }>(`(() => { const el = document.querySelector('${id('timeline')}'); const r = el.getBoundingClientRect(); return {top:r.top,height:r.height,scroll:el.scrollTop}; })()`);
+  expect(before.scroll).toBe(0);
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => { store.openThread.activity = {goal:{objective:'Verify queued prompts',status:'paused',iterations:1,error:null},loop:null,tasks:[
     {id:'check-input',text:'Check queued input and attachments',status:'completed'},
     {id:'test-stop',text:'Verify Escape sends queued prompts',status:'in_progress'},
