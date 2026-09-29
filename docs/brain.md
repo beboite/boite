@@ -62,21 +62,30 @@ dropping their content. The combined prefix is limited to 128 KiB.
 
 ### Boite guide
 
-The Boite guide switch, on by default, appends Boite's own guide after the
-brain's `AGENTS.md` blocks: the `boite` command, the panel, the task and todo
-lists. The text is `packages/core/src/boite.md`, bundled into the core, about
-900 bytes. It goes only into a turn that starts a native agent session (the
-thread has no `sessionId` yet), since the session keeps it afterwards; the brain's own instructions still go every turn.
+Boite injects its environment guide before the first request of every native
+agent session, including when no brain is connected or sharing is disabled.
+The guide covers the CLI, panel, attachments, tasks and project todos. It lives
+in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
+session keeps the guide; a replacement session receives it again. The brain's
+own instructions still go every normal turn while sharing is enabled.
+The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
 "Asynchronous questions" off, the guide leaves its `boite ask` line out. The
 guide exists only in the turn prefix: it is never written into the brain
 folder, so the brain's Git status and the global links stay untouched, and a
 harness started outside Boite never reads it.
 
-Native slash commands, compaction and agent coordination turns do not receive
-the prefix. Disconnecting a brain stops future injection but cannot remove
-instructions already present in an agent's conversation history. Start a new
-thread when previous instructions must leave the context.
+Native slash commands, compaction and coordination turns in existing sessions
+do not receive this prefix. Disconnecting a brain stops its instructions,
+but keeps Boite's environment guide enabled unless its switch is off.
+Instructions already in a session's history remain there; start a new thread
+when previous instructions must leave the context.
+
+Coordination and delegation add compact instructions only when enabled for
+the thread, independently of the brain. These name authorized contacts and
+profiles, messaging commands, shared-checkout rules and current limits.
+Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
+`boite workflow extend`, with `boite workflow help` for the full format.
 
 ## Global instructions
 

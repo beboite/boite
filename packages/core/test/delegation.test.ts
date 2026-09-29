@@ -63,10 +63,28 @@ test('a fresh delegated session receives the configured brain instructions', asy
   const path = join(h.dataDir, 'shared-brain');
   mkdirSync(path);
   writeFileSync(join(path, 'AGENTS.md'), 'Run parser checks before reporting completion.');
-  await owner.call('brain.configure', { path, enabled: true });
+  await owner.call('brain.configure', { path, enabled: true, boiteGuide: true });
   const child = await spawn();
   expect(runs.get(child.thread.id)?.ctx.sessionId).toBeNull();
   expect(runs.get(child.thread.id)?.ctx.prompt).toContain('Run parser checks before reporting completion.');
+  expect(runs.get(child.thread.id)?.ctx.prompt).toContain('boite where');
+});
+
+test('the parent learns dynamic workflows and coordination within a compact prompt', async () => {
+  const runs = scripted(); const { h, owner, threadId } = await setup();
+  await owner.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
+  h.core.settings.set({ asyncQuestions: true });
+  h.core.coordination.configure(threadId, { mode: 'brief', resources: '', remote: false, paused: false });
+  await owner.call('turns.start', { threadId, prompt: 'Review the parser' });
+  const prompt = runs.get(threadId)!.ctx.prompt;
+  for (const command of ['boite agents list', 'boite agents send', 'boite agents reply', 'boite delegate spawn', 'boite delegate send', 'boite workflow help', 'boite workflow check', 'boite workflow run', 'boite workflow extend', 'forEach', 'when']) expect(prompt).toContain(command);
+  expect(Buffer.byteLength(prompt)).toBeLessThan(2600);
+  runs.get(threadId)!.finish();
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  await owner.call('turns.start', { threadId, prompt: 'Continue' });
+  const resumed = runs.get(threadId)!.ctx;
+  expect(resumed.prompt).not.toContain('boite where');
+  expect(resumed.continuation!().prompt).toContain('boite where');
 });
 
 test('agent tokens can only delegate inside their own owner-enabled family, never change policy or nest', async () => {

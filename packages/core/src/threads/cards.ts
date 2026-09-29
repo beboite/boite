@@ -305,7 +305,7 @@ export class ThreadCards {
     if (provider.protocol === 'codex-appserver' || provider.protocol === 'echo') return '';
     if (this.core.settings.get().asyncQuestions === false) return '';
     // Boite's guide already teaches the command in the same prompt.
-    if (this.core.brain.guides()) return '';
+    if (this.core.brain.config().boiteGuide !== false) return '';
     return ASK_INSTRUCTIONS;
   }
 }
