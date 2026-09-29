@@ -156,6 +156,8 @@ export interface TurnContext {
   spawn(cmd: string, args: string[], opts?: SpawnOptions): SpawnedProcess;
   /** Same registry as `spawn`, node streams and node events, environment as given. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  /** Release the launch priority once the native session has initialized. */
+  finishStartup?(): void;
   /**
    * Terminates every process this thread launched, grandchildren included,
    * through the registry that traced them. For a driver whose only stop is the

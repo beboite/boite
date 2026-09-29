@@ -524,7 +524,7 @@ describe('pi driver', () => {
     // process and the agent waits on an id nobody holds.
     await settle(() => fakeLog().includes('late-answer'));
     expect(fakeLog()).toContain('late-answer late-1 cancelled=true');
-    await waitFor(() => logs.some((line) => line.includes('confirm') && line.includes('late-1')));
+    await settle(() => logs.some((line) => line.includes('confirm') && line.includes('late-1')));
     expect(logs.some((line) => line.includes('confirm') && line.includes('late-1'))).toBe(true);
   });
 
