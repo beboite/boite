@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Account, ProviderSummary } from '@boite/contracts';
 import AccountsPage from './AccountsPage.svelte';
@@ -58,4 +58,49 @@ test('setupStep names one step, install first, then sign-in, then ready', () => 
 test('an added account is named after its provider, numbered from the second', () => {
   expect(nextAccountLabel(provider({}), [account({})])).toBe('Claude');
   expect(nextAccountLabel(provider({}), [account({ label: 'Claude' })])).toBe('Claude 2');
+});
+
+
+test('checking a signed-out account reports its connection without probing models', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const signedOut = await store.addAccount({ providerId: 'codex', label: 'Signed out' });
+  const calls = vi.spyOn(client, 'call');
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  (row('codex')?.querySelector('[data-testid="provider-details-toggle"]') as HTMLButtonElement).click();
+  flushSync();
+  const target = document.querySelector(`[data-testid="account-row"][data-account-id="${signedOut!.id}"]`)!;
+  (target.querySelector('[data-testid="account-verify"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[role="status"]')?.textContent).toContain('not signed in'));
+  expect(calls.mock.calls.some(([method]) => method === 'providers.probe')).toBe(false);
+  expect(calls.mock.calls.some(([method, params]) => method === 'accounts.check' && 'refresh' in params && params.refresh === true)).toBe(true);
+  store.detach(); client.close();
+});
+
+test('accounts keep their chosen name and reveal the email on demand', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  store.providers = [provider({})];
+  store.accounts = [account({ identity: 'work@example.com' })];
+  const rename = vi.spyOn(store, 'renameAccount').mockResolvedValue(true);
+  mounted = mount(AccountsPage, { target: document.body, props: { store } });
+  flushSync();
+  (row('claude')?.querySelector('[data-testid="provider-details-toggle"]') as HTMLButtonElement).click();
+  flushSync();
+  expect(document.querySelector('h3')?.textContent).toBe('Default');
+  const email = document.querySelector('[data-testid="account-email"]') as HTMLButtonElement;
+  expect(email.getAttribute('aria-pressed')).toBe('false');
+  email.click(); flushSync();
+  expect(email.classList.contains('revealed')).toBe(true);
+  (document.querySelector('[data-testid="account-rename"]') as HTMLButtonElement).click(); flushSync();
+  const input = document.querySelector('[data-testid="account-name"]') as HTMLInputElement;
+  input.value = 'Work'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(rename).toHaveBeenCalledWith('a1', 'Work'));
+  store.detach(); client.close();
 });

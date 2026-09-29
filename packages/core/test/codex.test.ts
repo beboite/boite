@@ -12,7 +12,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -1192,4 +1192,48 @@ describe('codex hooks', () => {
     await waitFor(() => fakeLog().split('hooks/list').length === 3);
     expect((await client.call('hooks.status', {})).recent).toHaveLength(2);
   });
+});
+
+
+test('connection checks refresh Codex auth and never mistake models for a login', async () => {
+  const client = await startCore();
+  const { accountId } = await codexAccount(client);
+  const checked = await client.call('accounts.check', { accountId, refresh: true });
+  expect(checked.status).toBe('unauthenticated');
+  expect(checked.identity).toBeNull();
+  expect(fakeLog()).toContain('account/read refresh=true');
+  expect(fakeLog()).not.toContain('model/list');
+});
+
+
+test('Codex device login keeps its code, checks the completed login and returns the email', async () => {
+  const client = await startCore();
+  await codexAccount(client);
+  harness!.core.providers.require('codex-fake').login = { command: ['unused-cli-login'] };
+  const { id: accountId } = await client.call('accounts.add', { providerId: 'codex-fake', label: 'Isolated' });
+  const link = client.next('account.login', event => event.accountId === accountId && event.url !== null);
+  const finished = client.next('account.login', event => event.accountId === accountId && event.state !== 'running');
+  await client.call('accounts.login', { accountId });
+  expect((await link).output).toContain('TEST-CODE');
+  expect((await client.call('accounts.logins', {}))[0]?.output).toContain('TEST-CODE');
+  expect((await finished).state).toBe('done');
+  expect(harness!.core.accounts.require(accountId)).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+  expect(fakeLog()).toContain('account/login/start chatgptDeviceCode');
+  expect(fakeLog()).toContain('account/read refresh=true');
+  expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
+});
+
+test('cancelling a Codex device login closes its process and releases the install', async () => {
+  process.env['CODEX_FAKE_LOGIN_WAIT'] = '1';
+  const client = await startCore();
+  await codexAccount(client);
+  harness!.core.providers.require('codex-fake').login = { command: ['unused-cli-login'] };
+  const { id: accountId } = await client.call('accounts.add', { providerId: 'codex-fake', label: 'Isolated' });
+  const link = client.next('account.login', event => event.accountId === accountId && event.url !== null);
+  await client.call('accounts.login', { accountId });
+  await link;
+  await client.call('accounts.loginCancel', { accountId });
+  expect(await client.call('accounts.logins', {})).toEqual([]);
+  expect(harness!.core.procs.liveCount(`login:${accountId}`)).toBe(0);
+  expect(harness!.core.providers.installs.leaseCount('codex-fake')).toBe(0);
 });
