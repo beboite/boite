@@ -59,7 +59,7 @@ test('a running turn shows no finish time and no stop for its background work', 
   const tasks: BackgroundTask[] = [{ id: 'bash-1', kind: 'shell', description: 'sleep 30', toolId: 'tool-1', startedAt: STARTED }];
   running = mount(TurnSummary, {
     target: document.body,
-    props: { turn: turn({ status: 'running', finishedAt: null, usage: null }), background: tasks, stop: () => {} }
+    props: { turn: turn({ status: 'running', finishedAt: null, usage: null }), activeTool: true, background: tasks, stop: () => {} }
   });
   flushSync();
   expect(text('turn-elapsed')).toMatch(/^Working for /);

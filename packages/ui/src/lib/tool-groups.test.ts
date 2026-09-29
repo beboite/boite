@@ -66,7 +66,7 @@ test('calls fold into runs that text, a question or a produced document breaks',
   ]);
 });
 
-test('an edit whose input spells out its change stands alone, unless it failed', () => {
+test('file changes and failures stand alone, even when a later call succeeds', () => {
   const parts: MessagePart[] = [
     tool('Read', { file_path: 'x' }),
     tool('Edit', { file_path: 'x', old_string: 'a', new_string: 'b' }),
@@ -77,8 +77,17 @@ test('an edit whose input spells out its change stands alone, unless it failed',
   expect(partRuns(parts)).toEqual([
     { kind: 'tools', indices: [0] },
     { kind: 'tools', indices: [1] },
-    { kind: 'tools', indices: [2, 3, 4] }
+    { kind: 'tools', indices: [2] },
+    { kind: 'tools', indices: [3] },
+    { kind: 'tools', indices: [4] }
   ]);
+});
+
+test('command inputs using cmd keep their family and live program label', () => {
+  const part = tool('exec_command', { cmd: 'pwsh -NoProfile -Command "git status --short"' });
+  expect(runSummary([part])).toBe('Ran 1 command');
+  expect(liveLabel(part)).toBe('Running git');
+  expect(toolLine(part).text).toBe('git status --short');
 });
 
 test('a proposed plan is a part of its own, never folded into the calls around it', () => {

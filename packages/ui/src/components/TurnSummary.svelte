@@ -7,9 +7,11 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, waiting = false, background = [], stop, actions }: {
+  let { turn, waiting = false, activeTool = false, background = [], stop, actions }: {
     turn: Turn;
     waiting?: boolean;
+    /** The message already shows the running tool's activity row. */
+    activeTool?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
@@ -41,7 +43,7 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
-{#if turn.status !== 'queued'}
+{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0)}
   <div class="summary" class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}

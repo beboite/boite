@@ -1548,7 +1548,7 @@ test('a tool card shows the input as the model types it, then switches to the pa
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
   expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
-  expect(card.querySelector('.line')?.textContent).toBe('echo streamed');
+  expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
   await waitFor(() => card.querySelector('[data-testid=tool-input]') !== null);

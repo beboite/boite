@@ -283,7 +283,7 @@ test(
       'false',
     );
     expect(await page.evaluate<string>(`document.querySelector('${testid('tool-card')} .line').textContent`)).toBe(
-      'echo streamed',
+      'Ran 1 command',
     );
     await page.click(testid('tool-toggle'));
     await page.waitFor(`document.querySelector('${testid('tool-input')}')`);

@@ -38,7 +38,7 @@
   });
 </script>
 
-{#snippet call(part: ToolPart)}
+{#snippet call(part: ToolPart, nested = false)}
   <ToolCard
     name={part.name}
     input={part.input}
@@ -49,6 +49,7 @@
     startedAt={part.startedAt ?? null}
     finishedAt={part.finishedAt ?? null}
     background={isBackground(part.toolId)}
+    {nested}
   />
 {/snippet}
 
@@ -82,7 +83,7 @@
         {#if built}
           <div class="calls">
             {#each parts as part (part.toolId)}
-              {@render call(part)}
+              {@render call(part, true)}
             {/each}
           </div>
         {/if}
@@ -100,14 +101,15 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--activity-gap);
     width: 100%;
-    min-height: 26px;
+    min-height: var(--control);
     height: auto;
-    padding: 1px 4px 1px 2px;
+    padding: var(--activity-padding);
     border-radius: var(--radius-sm);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
+    font-weight: 400;
     justify-content: flex-start;
   }
 
@@ -124,7 +126,7 @@
   .glyph {
     display: inline-flex;
     flex: none;
-    width: 20px;
+    width: var(--activity-glyph);
     justify-content: center;
     color: var(--color-subtle);
   }
@@ -224,9 +226,9 @@
   .calls {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    margin: 2px 0 4px 11px;
-    padding-left: 8px;
+    gap: var(--chat-part-gap);
+    margin: 4px 0 8px calc(var(--activity-padding) + var(--activity-glyph) / 2);
+    padding-left: var(--activity-gap);
     border-left: 1px solid var(--color-border);
   }
 

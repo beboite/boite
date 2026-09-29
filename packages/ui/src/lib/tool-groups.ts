@@ -18,11 +18,11 @@ export type PartRun = { kind: 'part'; index: number } | { kind: 'tools'; indices
 /**
  * A call that produced a diff, a page or an image stands alone: what it made is
  * the point. So does an edit whose input spells out its change, the diff
- * `ToolCard` draws when the driver attaches none, unless it failed.
+ * `ToolCard` draws when the driver attaches none. Failures stay visible too.
  */
 function standsAlone(part: ToolPart): boolean {
-  if ((part.documents?.length ?? 0) > 0) return true;
-  if (part.status === 'error' || part.status === 'denied' || typeof part.inputText === 'string') return false;
+  if ((part.documents?.length ?? 0) > 0 || part.status === 'error' || part.status === 'denied') return true;
+  if (typeof part.inputText === 'string') return false;
   return describeTool(part.name, part.input).change !== null;
 }
 

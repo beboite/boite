@@ -152,6 +152,17 @@ test('an answered card folds to one line and asks nothing more', () => {
   expect(query('[data-testid=question-answer]').textContent).toBe('Short: one line please');
   expect(options()).toHaveLength(0);
   expect(document.querySelector('[data-testid=question-submit]')).toBeNull();
+  const toggle = query<HTMLButtonElement>('[data-testid=question-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=question-text]')).toBeNull();
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(query('[data-testid=question-text]').textContent).toBe('Which shape should the echo take?');
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(query('[data-testid=question-text]').closest<HTMLElement>('.fold')?.inert).toBe(true);
 });
 
 test('a question whose turn ended says so instead of offering a button', () => {

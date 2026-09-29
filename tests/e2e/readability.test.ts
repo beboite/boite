@@ -55,7 +55,10 @@ test('paragraphs arrive whole, keep previous nodes and flush when stopped; reaso
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('paragraph')}') === window.__firstParagraph`)).toBe(true);
   expect(await page.evaluate(`document.querySelectorAll('${id('thinking-part')}').length`)).toBe(1);
-  expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Checking results');
+  expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Thinking');
+  await page.click(id('thinking-toggle'));
+  await page.waitFor(`document.querySelector('${id('thinking-text')}')?.textContent.includes('Checking results')`);
+  await page.click(id('thinking-toggle'));
   await capture('readability-working');
   await update(`thread.messages.at(-1).parts.push({type:'text',text:'Last partial paragraph'});`);
   await page.waitFor(`document.querySelector('${id('turn-summary')}').dataset.status === 'running'`);
@@ -106,6 +109,54 @@ test('goal prompts and markers stay readable and recognized commands are accente
   await capture('readability-chat-light');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
 });
+
+test('tool activity keeps failures visible and answered questions compact at desktop and phone widths', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.value = ''; input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+  await update(`
+    const turn = thread.turns[0]; turn.status = 'running'; turn.usage = null; turn.finishedAt = null; turn.startedAt = Date.now() - 120000;
+    thread.status = 'running'; thread.memoryEvents = [];
+    thread.messages[0].parts = [{type:'text',text:'Keep the archive branch and publish the project.'}];
+    const m = thread.messages.at(-1); m.state = 'streaming';
+    m.parts = [
+      { type:'thinking', text:'**Inspecting project files**\\nCheck the repository before publishing.' },
+      { type:'text', text:'I will keep the archived version on its branch, then publish both branches.\\n\\n' },
+      { type:'tool', toolId:'readability-check', name:'exec_command', input:{cmd:'git status --short\\ngit branch -vv\\ngit remote -v'}, output:'No remote configured.', status:'done' },
+      { type:'question', questionId:'readability-question', text:'Which remote should receive the branches?', options:[{id:'private',label:'Private repository'}], allowText:true, multiple:false, async:true, answer:{optionIds:['private'],text:'Create it on GitHub.'} },
+      { type:'tool', toolId:'readability-read', name:'Read', input:{file_path:'README.md'}, output:'Project documentation', status:'done' },
+      { type:'tool', toolId:'readability-failed', name:'Bash', input:{command:'git remote get-url origin'}, output:'error: No such remote origin', status:'error' },
+      { type:'tool', toolId:'readability-search', name:'Grep', input:{pattern:'repository'}, output:'README.md:3', status:'done' },
+      { type:'text', text:'I will create the private repository and publish the branches.\\n\\n' },
+      { type:'tool', toolId:'readability-live', name:'Bash', input:{command:'gh repo create sample-project --private --source=. --remote=origin'}, output:null, status:'running', startedAt:Date.now()-2000 }
+    ];
+  `);
+  await page.waitFor(`document.querySelector('${id('question-card')}[data-state=answered]')`);
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  await capture('activity-desktop');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')} .line').textContent`)).toBe('Ran 1 command');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=error]').getBoundingClientRect().height > 0`)).toBe(true);
+  expect(await page.text(id('tool-error-preview'))).toBe('error: No such remote origin');
+  expect(await page.evaluate(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh');
+  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}') === null`)).toBe(true);
+  for (const width of [1300,390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', {width,height:850,deviceScaleFactor:1,mobile:width<720});
+    await page.click(id('question-toggle'));
+    await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'true'`);
+    expect(await page.text(id('question-text'))).toBe('Which remote should receive the branches?');
+    await page.evaluate(`document.querySelector('${id('question-toggle')}').scrollIntoView({block:'center'})`);
+    await capture(width<720 ? 'activity-phone-expanded' : 'activity-desktop-expanded');
+    await page.click(id('question-toggle'));
+    await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'false'`);
+    await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
+    await capture(width<720 ? 'activity-phone' : 'activity-desktop');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    const rows = await page.evaluate<number[]>(`Array.from(document.querySelectorAll('${id('question-toggle')}, ${id('tool-toggle')}, ${id('thinking-toggle')}')).filter(e=>!e.closest('[inert]')).map(e=>e.getBoundingClientRect().height)`);
+    expect(rows.every(height => height >= (width<720 ? 44 : 30))).toBe(true);
+  }
+  await update(`thread.messages.at(-1).parts.at(-1).status = 'done';`);
+  await page.waitFor(`document.querySelector('${id('turn-summary')}[data-status=running]')`);
+}, 30_000);
 
 test('in forced colors a focused text field still shows where the keyboard is', async () => {
   const origin = await page.evaluate<string>('location.origin');
