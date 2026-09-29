@@ -32,7 +32,7 @@ describe('permission modes', () => {
     expect(modeLabel('default', provider('codex-appserver'))).toBe('This folder');
     expect(modeHint('default', provider('codex-appserver'))).toContain('in this folder without asking');
     expect(modeLabel('default', provider('claude-sdk'))).toBe('Ask');
-    expect(modeLabel('bypassPermissions', provider('claude-sdk'))).toBe('No confirmation');
+    expect(modeLabel('bypassPermissions', provider('claude-sdk'))).toBe('Autonomous');
     expect(modeHint('bypassPermissions', null)).toContain('anywhere on this computer');
   });
 });
