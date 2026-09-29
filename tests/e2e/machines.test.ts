@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
 import { startCore, type RunningCore } from './lib/core.ts';
@@ -136,7 +136,8 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(`[data-thread-id="${tb.id}"]`);
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Remote project'`);
     await page.click(id('terminal-toggle'));
-    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.includes(${JSON.stringify(second.dataDir)})`);
+    // PowerShell expands Windows short paths such as RUNNER~1 in its prompt.
+    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.includes(${JSON.stringify(basename(second.dataDir))})`);
     await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
     const terminalPoint = await page.evaluate<{ x: number; y: number }>(`(() => {
       const rect = document.querySelector('[data-testid=terminal-drawer] .xterm-screen').getBoundingClientRect();
