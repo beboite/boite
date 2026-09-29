@@ -374,6 +374,7 @@ export class CodexSession {
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
+      if (this.child !== child) return;
       if (this.initializing) {
         this.startupStderr = (this.startupStderr + chunk).slice(-4_096);
         if (/failed to initialize sqlite state runtime/i.test(this.startupStderr)) this.sqliteInitFailed = true;
@@ -387,12 +388,13 @@ export class CodexSession {
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
-        this.exitCode = code;
+        if (this.child === child) this.exitCode = code;
         resolve(code);
       });
       // `close` and not `exit`: stderr is flushed by then, so the sentence the
       // turn fails with carries the line the agent printed on its way out.
       child.once('close', () => {
+        if (this.child !== child) return;
         const sentence = this.exitSentence(this.exitCode);
         rpc.fail(sentence);
         this.current?.fail(sentence);
@@ -400,6 +402,7 @@ export class CodexSession {
       });
       child.once('error', (error) => {
         resolve(null);
+        if (this.child !== child) return;
         const sentence = `the codex agent did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
         this.current?.fail(sentence);

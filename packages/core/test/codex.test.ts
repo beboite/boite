@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
@@ -152,6 +152,45 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('a delayed close from a failed initialization cannot close the recovered turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    const procs = harness!.core.procs;
+    const spawn = procs.spawnChild.bind(procs);
+    let releaseClose: (() => void) | undefined;
+    let first = true;
+    const intercepted = spyOn(procs, 'spawnChild').mockImplementation((...args) => {
+      const child = spawn(...args);
+      if (!first) return child;
+      first = false;
+      const emit = child.emit.bind(child);
+      child.emit = (event: string | symbol, ...values: unknown[]) => {
+        if (event !== 'close') return emit(event, ...values);
+        // The process has exited and stderr is drained, but another inherited
+        // pipe can defer close after an initialize error response was received.
+        releaseClose = () => { releaseClose = undefined; child.emit = emit; emit(event, ...values); };
+        queueMicrotask(() => child.stdout.emit('data', '{"id":1,"error":{"code":-32603,"message":"SQLite initialization failed"}}\n'));
+        return true;
+      };
+      return child;
+    });
+    try {
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+      await client.call('turns.start', { threadId, prompt: '[slow]' });
+      await waitFor(() => fakeLog().includes('waiting for interrupt'), 20000);
+      expect(releaseClose).toBeDefined();
+      releaseClose!();
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      expect(countLines('initialize')).toBe(2);
+      expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+    } finally {
+      releaseClose?.();
+      intercepted.mockRestore();
+    }
+  });
+
   test('SQLite initialization retries before sending a prompt and keeps the recovered session warm', async () => {
     const client = await startCore({ warmProcessMinutes: 1 });
     const threadId = await codexThread(client);
