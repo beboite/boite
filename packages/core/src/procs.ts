@@ -11,6 +11,8 @@ import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 
 export interface SpawnOptions {
+  /** Bounded normal-priority initialization, ended explicitly when the agent is ready. */
+  startup?: boolean;
   /** Direct spawns are agent roots unless the caller identifies a tool process. */
   agentRoot?: boolean;
   cwd?: string | undefined;
@@ -54,6 +56,7 @@ export interface SpawnedTerminal {
 interface Entry {
   record: ProcessRecord;
   root: boolean;
+  startup?: boolean;
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
@@ -63,6 +66,7 @@ interface Entry {
 const CPU_EPSILON_PERCENT = 1;
 const MEMORY_EPSILON_BYTES = 1024 * 1024;
 const LOAD_INTERVAL_MS = 1000;
+export const STARTUP_PRIORITY = { ms: 30_000 };
 /** How long a thread with nothing running keeps its pid history, for a late job event. */
 const FORGET_DELAY_MS = 30_000;
 /**
@@ -98,6 +102,7 @@ export interface ProcRegistryOptions {
 export class ProcRegistry {
   readonly memory: MemoryGuard;
   private readonly unassigned = new Set<number>();
+  private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
   /** Every pid this thread ever registered. A job event for one of them is a repeat, not a grandchild. */
@@ -203,6 +208,7 @@ export class ProcRegistry {
   close(): Promise<void> {
     if (this.closing !== null) return this.closing;
     this.stopListening();
+    for (const threadId of this.startups.keys()) this.finishStartup(threadId);
     for (const timer of this.sweepTimers.values()) clearTimeout(timer);
     this.sweepTimers.clear();
     clearInterval(this.loadTimer);
@@ -229,6 +235,7 @@ export class ProcRegistry {
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
+      startup: opts.startup === true,
       kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
@@ -265,6 +272,7 @@ export class ProcRegistry {
 
     const record = this.register(threadId, proc.pid, cmd, args, {
       root: opts.agentRoot !== false,
+      startup: opts.startup === true,
       kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
@@ -359,6 +367,7 @@ export class ProcRegistry {
 
     const record = this.register(threadId, child.pid ?? -1, cmd, args, {
       root: opts.agentRoot !== false,
+      startup: opts.startup === true,
       kill: () => {
         if (OWN_GROUP) return stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
         child.kill();
@@ -400,6 +409,13 @@ export class ProcRegistry {
       ioBytes: null,
     };
 
+    if (control.startup && pid > 0 && this.platform.startup) {
+      this.finishStartup(threadId);
+      this.platform.startup(threadId, true);
+      const timer = setTimeout(() => this.finishStartup(threadId), STARTUP_PRIORITY.ms);
+      timer.unref();
+      this.startups.set(threadId, { pid, timer });
+    }
     if (!this.platform.attach(threadId, pid)) this.unassigned.add(pid);
     this.track(threadId, record, control);
     return record;
@@ -482,6 +498,14 @@ export class ProcRegistry {
     return this.live.get(threadId)?.size ?? 0;
   }
 
+  finishStartup(threadId: ThreadId): void {
+    const startup = this.startups.get(threadId);
+    if (!startup) return;
+    clearTimeout(startup.timer);
+    this.startups.delete(threadId);
+    this.platform.startup?.(threadId, false);
+  }
+
   /** What `ThreadSummary.load` carries. Null when the thread has no process. */
   loadOf(threadId: ThreadId): ThreadLoad | null {
     const processes = this.liveCount(threadId);
@@ -494,6 +518,7 @@ export class ProcRegistry {
   }
 
   killTree(threadId: ThreadId): number {
+    this.finishStartup(threadId);
     const byPid = this.live.get(threadId);
     const entries = byPid === undefined ? [] : [...byPid.values()];
     const terminated = this.platform.terminate(threadId);
@@ -619,6 +644,7 @@ export class ProcRegistry {
   }
 
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit): void {
+    if (this.startups.get(threadId)?.pid === pid) this.finishStartup(threadId);
     const entry = this.live.get(threadId)?.get(pid);
     if (entry === undefined) return;
     // Node's exit has no usage. Let the completion-port event carry it, while

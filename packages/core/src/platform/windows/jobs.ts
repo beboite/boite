@@ -4,9 +4,8 @@
  * grandchild that outlives its parent and `killTree` is one call instead of a
  * pid walk. Linux and macOS use the separate POSIX backend.
  *
- * One global job holds the CPU cap and memory budget; every thread job nests under
- * it, runs below normal priority and dies with the core (KILL_ON_JOB_CLOSE,
- * never BREAKAWAY_OK).
+ * The global job holds the CPU and memory caps. Thread jobs normally run below
+ * normal priority, with normal priority during bounded agent initialization.
  */
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
@@ -34,6 +33,7 @@ const JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200;
 const JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x20;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
 const BELOW_NORMAL_PRIORITY_CLASS = 0x4000;
+const NORMAL_PRIORITY_CLASS = 0x20;
 const CPU_RATE_CONTROL_ENABLE = 0x1;
 const CPU_RATE_CONTROL_HARD_CAP = 0x4;
 
@@ -61,8 +61,6 @@ const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const KILL_EXIT_CODE = 9;
-
-// -- Struct offsets, all x64 ------------------------------------------------
 
 /** JOBOBJECT_EXTENDED_LIMIT_INFORMATION. */
 const EXTENDED_LIMIT_SIZE = 144;
@@ -205,6 +203,7 @@ interface TrackedProcess {
 
 interface ThreadJob {
   handle: number;
+  startup: boolean;
   key: number;
   pids: Set<number>;
   lastCpu100ns: bigint;
@@ -298,7 +297,7 @@ export function setProcessLimits(next: ProcessLimits): void {
     applyMemoryLimit(api, globalJob, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
     applyCpuCap(api, globalJob);
   }
-  for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
+  for (const job of threadJobs.values()) applyThreadLimits(api, job);
 }
 
 /** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
@@ -312,13 +311,13 @@ export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
 }
 
 /** The kernel's memory limit and flags. Null selects the global job; read by tests only. */
-export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number } | null {
+export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number; priority: number } | null {
   const handle = threadId === null ? globalJob : threadJobs.get(threadId)?.handle;
   if (native === null || !handle) return null;
   const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
   if (!native.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
   const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)) };
+  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)), priority: view.getUint32(OFF_PRIORITY_CLASS, true) };
 }
 
 export function jobsCapability(): TraceCapability {
@@ -369,6 +368,14 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
   } finally {
     api.close(handle);
   }
+}
+
+export function setThreadStartup(threadId: string, active: boolean): void {
+  const api = ensureNative();
+  const job = active && api ? ensureThreadJob(api, threadId) : threadJobs.get(threadId);
+  if (!api || !job) return;
+  job.startup = active;
+  applyThreadLimits(api, job);
 }
 
 export function terminateThreadJob(threadId: string): boolean {
@@ -500,17 +507,17 @@ function applyCpuCap(api: Native, job: number): void {
   api.setJobInfo(job, CLASS_CPU_RATE_CONTROL, buffer);
 }
 
-function applyThreadLimits(api: Native, job: number): void {
-  applyMemoryLimit(api, job, limits.threadMemoryCapMb * 1.1, true);
+function applyThreadLimits(api: Native, job: ThreadJob): void {
+  applyMemoryLimit(api, job.handle, limits.threadMemoryCapMb * 1.1, job.startup ? NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS);
 }
 
-function applyMemoryLimit(api: Native, job: number, mb: number, thread = false): void {
+function applyMemoryLimit(api: Native, job: number, mb: number, priority = 0): void {
   const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
   const view = new DataView(buffer.buffer);
   let flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (thread) {
+  if (priority) {
     flags |= JOB_OBJECT_LIMIT_PRIORITY_CLASS;
-    view.setUint32(OFF_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, true);
+    view.setUint32(OFF_PRIORITY_CLASS, priority, true);
   }
   // Windows rounds down to pages. A zero limit would refuse every allocation.
   if (mb > 0) {
@@ -550,19 +557,16 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
   ensureGlobalJob(api);
   const handle = api.createJob();
   if (handle === 0) return null;
-  applyThreadLimits(api, handle);
-
   const key = nextKey;
   nextKey += 1;
   associatePort(api, handle, key);
 
-  const job: ThreadJob = { handle, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
+  const job: ThreadJob = { handle, startup: false, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
+  applyThreadLimits(api, job);
   threadJobs.set(threadId, job);
   threadsByKey.set(key, threadId);
   return job;
 }
-
-// -- the completion port drain ----------------------------------------------
 
 function ensureWorker(port: number): void {
   if (worker !== null || workerFailure !== null) return;
