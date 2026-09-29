@@ -25,9 +25,13 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
   const height = () => page.evaluate<number>(`document.querySelector('[data-thread-id="t-descriptors"]').getBoundingClientRect().height`);
   await page.evaluate(`window.__machines = globalThis.__boiteTest.workspace.machines; globalThis.__boiteTest.workspace.machines = window.__machines.slice(0, 1)`);
-  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
-  const single = await height();
-  await page.evaluate(`globalThis.__boiteTest.workspace.machines = window.__machines`);
+  let single: number;
+  try {
+    await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
+    single = await height();
+  } finally {
+    await page.evaluate(`globalThis.__boiteTest.workspace.machines = window.__machines`);
+  }
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
   await capture('readability-thread-density');
   expect(await height()).toBeCloseTo(single, 1);
