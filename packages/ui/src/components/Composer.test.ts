@@ -711,9 +711,20 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
     `data:image/png;base64,${PIXEL}`
   );
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  expect(document.activeElement).toBe(input());
+  await type('Keep writing while looking');
+  expect(query<HTMLImageElement>('[data-testid=composer-image-preview] img').getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(input().value).toBe('Keep writing while looking');
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
 
   query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
+  expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
 
   paste(pngFile());
   await waitFor(() => chips().length === 1);
@@ -744,6 +755,47 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   // What went out left the composer, text and picture together.
   expect(input().value).toBe('');
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
+});
+
+test('image references follow the caret, mixed attachments and removal without losing browser references', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Before after');
+  input().setSelectionRange(7, 7);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'Before [Image 1] after');
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 2);
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value.endsWith('@Save'));
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value.endsWith('[Image 2] '));
+  const references = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-image-reference]'));
+  expect(references().map(item => item.textContent)).toEqual(['[Image 1]', '[Image 2]']);
+  references()[1]!.dispatchEvent(new Event('pointerenter'));
+  await waitFor(() => chips()[2]!.classList.contains('highlighted'));
+  references()[1]!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]')?.textContent?.includes('second.png') === true);
+  chips()[0]!.querySelector<HTMLButtonElement>('[data-testid=composer-attachment-remove]')!.click();
+  await waitFor(() => references().length === 1);
+  expect(references()[0]!.textContent).toBe('[Image 1]');
+  expect(query('[data-testid=composer-image-preview]').textContent).toContain('second.png');
+  expect(query('[data-testid=composer-image-preview]').textContent).toContain('[Image 1]');
+  const browserReference = store.composerStates['t-trace']!.previewReferences![0]!;
+  expect(input().value.slice(browserReference.mention!.start, browserReference.mention!.end)).toBe('@Save');
+  const stop = vi.spyOn(store, 'stop').mockResolvedValue(undefined);
+  store.openThread!.status = 'running';
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(stop).not.toHaveBeenCalled();
+  references()[0]!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
 });
 
 test('sending waits for a file read so the attachment cannot land in the next prompt', async () => {
