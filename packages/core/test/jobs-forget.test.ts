@@ -56,8 +56,17 @@ describeWindows('thread jobs of forgotten threads', () => {
   test('an id minted per call leaves no Job Object behind once the registry forgets it', async () => {
     // One warm-up spawn builds the global job, the port and the Worker, which
     // stay for the life of the core and are not what this measures.
-    const warm = procs.spawn('warm-up', 'cmd', ['/c', 'exit 0']);
-    await warm.exited;
+    // Drain both output pipes before counting native handles. An exited Bun
+    // subprocess can still own its unread pipe handles until garbage collection.
+    const exitQuietly = async (id: string) => {
+      const child = procs.spawn(id, 'cmd', ['/c', 'exit 0']);
+      await Promise.all([
+        new Response(child.proc.stdout).text(),
+        new Response(child.proc.stderr).text(),
+        child.exited,
+      ]);
+    };
+    await exitQuietly('warm-up');
     await waitFor(() => threadJobCount() === 0, 5000);
     const jobsBefore = threadJobCount();
     const handlesBefore = handleCount();
@@ -66,7 +75,7 @@ describeWindows('thread jobs of forgotten threads', () => {
     for (let index = 0; index < SPAWNS; index += 1) {
       const id = `plugin:fetch:${index}`;
       ids.push(id);
-      await procs.spawn(id, 'cmd', ['/c', 'exit 0']).exited;
+      await exitQuietly(id);
     }
     expect(threadJobCount()).toBeGreaterThan(jobsBefore);
     await waitFor(() => ids.every((id) => procs.liveCount(id) === 0), 5000);
