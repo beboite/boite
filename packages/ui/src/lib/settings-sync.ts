@@ -117,19 +117,20 @@ async function copyKeybindings(source: Client, target: Client, signal?: AbortSig
     optional(target.call('keybindings.get', {}))
   ]);
   if (from === null || to === null) return null;
-  const write = (command: KeybindingCommand, chord: string | null | undefined) => {
-    signal?.throwIfAborted();
-    return chord === undefined ? target.call('keybindings.reset', { command }) : target.call('keybindings.set', { command, chord });
-  };
+  const write = (command: KeybindingCommand, chord: string | null | undefined) =>
+    chord === undefined ? target.call('keybindings.reset', { command }) : target.call('keybindings.set', { command, chord });
   const changed: KeybindingCommand[] = [];
   let result = to;
   try {
     for (const command of KEYBINDING_COMMANDS) {
       if (from.bindings[command] === to.bindings[command]) continue;
+      signal?.throwIfAborted();
       changed.push(command);
       result = await write(command, from.bindings[command]);
+      signal?.throwIfAborted();
     }
   } catch (error) {
+    // Cancellation stops forward copies, but entries already written still need restoring.
     for (const command of changed.reverse()) await write(command, to.bindings[command]).catch(() => undefined);
     // A target that reads its file but cannot write an entry has kept its own.
     if (unknownMethod(error)) return null;
@@ -165,7 +166,8 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: Ab
     const config = {
       ...toBrain.config,
       enabled: fromBrain.config.enabled,
-      ...(fromBrain.config.autoPull ? { autoPull: fromBrain.config.autoPull } : {}),
+      ...(fromBrain.config.autoPull !== undefined || toBrain.config.autoPull !== undefined
+        ? { autoPull: fromBrain.config.autoPull ?? { onStartup: false, intervalMinutes: 0 } } : {}),
       ...(fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
       ...(fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
     };

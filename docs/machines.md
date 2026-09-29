@@ -86,7 +86,7 @@ The client copies:
 
 - limits, process guards, agent updates and question mode;
 - keybindings where the two differ, including unbound commands and restored
-  defaults. A refused entry attempts to restore entries already changed;
+  defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Use with agents, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
