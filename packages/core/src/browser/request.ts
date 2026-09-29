@@ -41,4 +41,3 @@ export function validateBrowserRequest(raw: unknown): Request {
     maxSteps: bound(raw.maxSteps, 20, 60, 'maxSteps'), timeoutMs: bound(raw.timeoutMs, 120_000, 300_000, 'timeoutMs'),
   };
 }
-
