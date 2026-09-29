@@ -599,7 +599,7 @@ export const fr: Translation = {
   permissionMode: {
     default: 'Demander',
     acceptEdits: 'Modifier librement',
-    bypassPermissions: 'Sans confirmation',
+    bypassPermissions: 'Autonome',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },
