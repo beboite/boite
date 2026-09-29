@@ -106,23 +106,72 @@ console.log(server.port);
 setInterval(() => {}, 1000);
 "#;
 
-    fn fake_core(directory: &Path, token: &str) -> std::process::Child {
+    struct FakeCore {
+        child: std::process::Child,
+        stderr: Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    }
+
+    impl FakeCore {
+        fn stderr(&mut self) -> String {
+            match self.stderr.take().expect("fixture stderr reader is joined once").join() {
+                Ok(Ok(text)) => text,
+                Ok(Err(error)) => format!("stderr read failed: {error}"),
+                Err(_) => "stderr reader panicked".to_string(),
+            }
+        }
+
+        fn startup_failure(&mut self, reason: &str, line: &str) -> String {
+            // Preserve the spontaneous exit status before any cleanup kill.
+            let observed = self.child.try_wait();
+            let kill = if matches!(observed, Ok(None)) { Some(self.child.kill()) } else { None };
+            let reaped = self.child.wait();
+            let stderr = self.stderr();
+            format!("fake core pid {} {reason}; stdout {line:?}; observed {observed:?}; cleanup kill {kill:?}; reaped {reaped:?}; stderr: {stderr}", self.child.id())
+        }
+    }
+
+    impl Drop for FakeCore {
+        fn drop(&mut self) {
+            // Only this captured child is ours, including after an assertion panics.
+            if matches!(self.child.try_wait(), Ok(None)) { let _ = self.child.kill(); }
+            let _ = self.child.wait();
+            if let Some(reader) = self.stderr.take() { let _ = reader.join(); }
+        }
+    }
+
+    fn fake_core(directory: &Path, token: &str) -> FakeCore {
+        fake_core_with_script(directory, token, FAKE_CORE)
+    }
+
+    fn fake_core_with_script(directory: &Path, token: &str, source: &str) -> FakeCore {
         use std::io::BufRead;
         let script = directory.join("fake-core.ts");
-        std::fs::write(&script, FAKE_CORE).unwrap();
+        std::fs::write(&script, source).unwrap();
         let mut command = Command::new("bun");
-        command.arg(&script).arg(token).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        command.arg(&script).arg(token).env("BOITE_DATA_DIR", directory).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         crate::platform::prepare_command(&mut command);
         let mut child = command.spawn().expect("bun runs the fake core");
+        let mut stderr = child.stderr.take().unwrap();
+        let stderr = std::thread::spawn(move || {
+            let mut text = String::new();
+            stderr.read_to_string(&mut text).map(|_| text)
+        });
+        let mut fixture = FakeCore { child, stderr: Some(stderr) };
         let mut line = String::new();
-        std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-        let port: u16 = line.trim().parse().expect("the fake core prints its port");
+        let readiness = std::io::BufReader::new(fixture.child.stdout.take().unwrap()).read_line(&mut line);
+        let port: u16 = match readiness {
+            Ok(_) => match line.trim().parse() {
+                Ok(port) => port,
+                Err(error) => panic!("{}", fixture.startup_failure(&format!("did not print its port: {error}"), &line)),
+            },
+            Err(error) => panic!("{}", fixture.startup_failure(&format!("readiness read failed: {error}"), &line)),
+        };
         std::fs::write(
             directory.join("core.json"),
-            format!(r#"{{"port":{port},"host":"127.0.0.1","token":"{token}","pid":{}}}"#, child.id()),
+            format!(r#"{{"port":{port},"host":"127.0.0.1","token":"{token}","pid":{}}}"#, fixture.child.id()),
         )
         .unwrap();
-        child
+        fixture
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
@@ -133,15 +182,47 @@ setInterval(() => {}, 1000);
     }
 
     #[test]
+    fn a_fixture_refusing_readiness_reports_stderr_is_reaped_and_leaves_another_child_alive() {
+        let _process_guard = crate::process_test_guard();
+        let directory = scratch("refused-readiness");
+        let other_directory = scratch("readiness-bystander");
+        let mut other = fake_core(&other_directory, "test-token");
+        let refused = std::panic::catch_unwind(|| fake_core_with_script(&directory, "test-token", r#"
+await Bun.write(`${process.env.BOITE_DATA_DIR}/fixture.pid`, String(process.pid));
+console.error('fixture rejected startup marker');
+console.log('invalid');
+setInterval(() => {}, 1000);
+"#));
+        let published_pid = std::fs::read_to_string(directory.join("fixture.pid"));
+        let other_alive = matches!(other.child.try_wait(), Ok(None));
+        // Clean both fresh directories and the separate captured child before assertions.
+        drop(other);
+        std::fs::remove_dir_all(other_directory).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+        let error = match refused {
+            Err(error) => error,
+            Ok(_) => panic!("a fixture with invalid readiness was accepted"),
+        };
+        let message = error.downcast_ref::<String>().map(String::as_str)
+            .or_else(|| error.downcast_ref::<&str>().copied()).unwrap_or("");
+        assert!(message.contains("fixture rejected startup marker"), "the fixture's stderr was lost: {message}");
+        let pid: u32 = published_pid.expect("the rejected fixture published its own pid").trim().parse().unwrap();
+        assert!(!crate::platform::process::alive(pid), "the captured rejected fixture {pid} was not reaped");
+        assert!(other_alive, "readiness cleanup stopped a separate captured child");
+    }
+
+    #[test]
     fn a_resident_core_is_asked_to_stop_with_its_token_and_is_gone_after() {
         let _process_guard = crate::process_test_guard();
         let directory = scratch("stop");
         let mut child = fake_core(&directory, "secret-token");
-        let pid = child.id();
+        let pid = child.child.id();
         let stopped = stop_local_core(&directory, GRACE).expect("the stop succeeds");
         assert_eq!(stopped, Some(pid));
         // It exited on the request, with its own code, not a kill.
-        assert_eq!(child.wait().unwrap().code(), Some(0));
+        assert_eq!(child.child.wait().unwrap().code(), Some(0));
+        let stderr = child.stderr();
+        if !stderr.is_empty() { eprintln!("fake core stderr: {stderr}"); }
         std::fs::remove_dir_all(directory).unwrap();
     }
 
