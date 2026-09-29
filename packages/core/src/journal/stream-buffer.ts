@@ -200,8 +200,12 @@ export class StreamBuffer {
       try {
         this.persistMessages();
       } catch (error) {
-        // The parts stay dirty in memory: the next change or read writes them again.
+        // A quiet stream must retry too; failed writes retain their dirty parts.
         this.onError(`journal message write: ${messageOfError(error)}`);
+        if ([...this.open.values()].some((entry) => entry.dirty)) {
+          this.persistDelay = Math.min(PERSIST_MAX_MS, this.persistDelay * 2);
+          this.armPersistTimer();
+        }
       }
     }, this.persistDelay);
     this.persistTimer.unref?.();

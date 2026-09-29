@@ -80,20 +80,25 @@ message it lands in, framed by `message.started`, `message.part` and
 `message.completed`. While a message streams, its parts live in memory and a
 delta or a tool card only changes them there; the row is written at most every
 500 ms (longer when one write is slow, so writing stays under a twentieth of the
-time, capped at 5 s), when the message completes, when its turn ends, before any
-read of messages, and on close. A delta used to rewrite the whole row, every
-part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. A crash loses at
-most the text of the last write window. Thread activity (goal, loop, tasks) is a
-`settings` row with no event: its payload held the whole loop history and
-nothing read it back. A project's detected icon is a `project_icons` row with
+time, capped at 5 s), when the message completes, when its turn ends, on explicit
+persistence, and on close. Reads overlay the current in-memory parts onto the
+selected rows without forcing a write. A delta used to rewrite the whole row,
+every part of the turn, and a 2 MB turn cost 16 ms per 16 ms window. While writes
+succeed, a crash loses at most the text of the last write window. Thread
+activity (goal, loop, tasks) is a `settings` row with no event: its payload held
+the whole loop history and nothing read it back. A project's detected icon is
+a `project_icons` row with
 no event either: it is derived from the folder and detected again on request
 ([project icons](project-icons.md)). A journal written by a newer release is refused at open
 with the file and both schema versions, before any write. Foreign keys are off,
 so the `ON DELETE CASCADE` clauses are dead; project removal clears every
 thread-keyed table itself. A write that fails on a timer (a full disk, an I/O
-error) has no caller to throw to: it becomes a `core.log` error, the text is
-tried again on the next flush and dropped after three failures, with a line
-saying so. A listener that throws on a bus event is reported the same way and
+error) has no caller to throw to: it becomes a `core.log` error. Streaming parts
+stay dirty in memory and retry automatically, even without new deltas or reads;
+each failed background write doubles the wait up to 5 s. A committed write
+restores the normal adaptive interval. Buffered deltas to completed messages
+retry on the next flush and are dropped after three failures, with a line saying
+so. A listener that throws on a bus event is reported the same way and
 the other listeners still get it. An error nothing caught still ends the core,
 as Bun would, after a log line and the usual shutdown that releases the data
 directory lock. The provider transcript is never remodelled. A thread resumes the

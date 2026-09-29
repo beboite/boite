@@ -142,7 +142,7 @@ describe('journal streaming', () => {
     expect(storedParts('msg_other')).toEqual([]);
   });
 
-  test('a failed write of streaming parts is tried again, not forgotten', () => {
+  test('a failed write of streaming parts is tried again, not forgotten', async () => {
     journal.putMessage(streaming('msg_retry'));
     journal.appendDelta('thr_test', 'msg_retry', 0, 'must land');
     journal.flushDeltas();
@@ -151,6 +151,28 @@ describe('journal streaming', () => {
     journal.db.exec('DROP TRIGGER fail_parts');
     journal.persistMessages();
     expect(storedParts('msg_retry')).toEqual([{ type: 'text', text: 'must land' }]);
+
+    const errors: string[] = [];
+    journal.close();
+    journal = new Journal(file, { onError: (message) => errors.push(message) });
+    journal.putMessage(streaming('msg_background_retry'));
+    journal.appendDelta('thr_test', 'msg_background_retry', 0, 'quiet stream');
+    journal.flushDeltas();
+    journal.db.exec("CREATE TRIGGER fail_parts BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT, 'forced'); END");
+    try {
+      const deadline = performance.now() + 2_000;
+      while (errors.length === 0 && performance.now() < deadline) await Bun.sleep(25);
+      expect(errors.some((message) => message.includes('journal message write: forced'))).toBe(true);
+      expect(storedParts('msg_background_retry')).toEqual([]);
+    } finally { journal.db.exec('DROP TRIGGER fail_parts'); }
+
+    // Only transcript reads follow recovery: an idle stream must persist without another mutation.
+    const deadline = performance.now() + 2_500;
+    while (storedParts('msg_background_retry').length === 0 && performance.now() < deadline) {
+      expect(journal.listMessagePage('thr_test', { limit: 10 }).messages.at(-1)?.parts).toEqual([{ type: 'text', text: 'quiet stream' }]);
+      await Bun.sleep(25);
+    }
+    expect(storedParts('msg_background_retry')).toEqual([{ type: 'text', text: 'quiet stream' }]);
   });
 
   test('a write that an outer transaction rolls back does not lose the streamed parts', () => {
