@@ -53,7 +53,6 @@ export interface BrowserBridge {
   on(handler: (event: BrowserEvent) => void): () => void;
 }
 
-/** A url the field can be handed to: a scheme it already has, or a host to prefix. */
 /** Classify the canonical hostname returned by URL, including its IPv4 interpretation. */
 function isLocalHost(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === '[::1]') return true;
@@ -63,6 +62,7 @@ function isLocalHost(hostname: string): boolean {
     || (first === 192 && second === 168) || (first === 169 && second === 254));
 }
 
+/** A url the field can be handed to: a scheme it already has, or a host to prefix. */
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (text === '') return null;
