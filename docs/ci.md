@@ -98,11 +98,16 @@ harness gives every core its own temporary data directory and port, so files
 stay isolated. The whole core suite took 189 s serially and 35 s with 16
 workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
-when a failure needs a quiet run. Windows CI uses that serial command for the
-complete suite: on 2026-09-29, Bun 1.4.2 parallel workers crashed in the titles
-tests and a subsequent removal-test worker stayed alive for 802 seconds until
-the 15-minute job deadline. Serial execution avoids those worker lifetimes
-without dropping tests or assertions.
+when a failure needs a quiet run. Windows CI uses `test:isolated`: every test
+file runs sequentially in a fresh Bun process, with its own temporary data
+folder and the same 15-second test timeout. A file exceeding 90 seconds fails
+and its captured process is terminated; assertion failures remain failures.
+On 2026-09-29, Bun 1.4.2 parallel workers crashed in the titles tests and a
+subsequent removal-test worker stayed alive for 802 seconds. One serial runtime
+also stopped progressing after the five pure title tests; removal and native
+handle assertions had passed. The longest completed file took 26.2 seconds.
+Fresh processes avoid reusing native workers and globals between files without
+dropping tests; Linux and macOS keep their parallel command.
 The Job Object leak check waits up to five seconds for the process handle
 count to settle, then applies its original handle-growth threshold.
 
