@@ -21,7 +21,8 @@ all 1,000 long-running turns together. Mass cancellation covers both cold and
 already-used threads, and verifies their stopped history after recovery. Additional readers
 alternate local connections with compressed, paced remote connections.
 An independent process probes HTTP health, so parsing the load generator's
-WebSocket frames cannot delay the observer.
+WebSocket frames cannot delay the observer. Mass start/stop phases record
+accepted starts and health too, including diagnostics when an RPC expires.
 
 `test:stress` checks 24 real child processes across the scripted ACP, Codex
 and pi protocols, warm reuse, simultaneous stops and recovery after agent
@@ -46,6 +47,8 @@ startup. The finished
 turn and final thread state also commit together; awaited driver work and
 pending moves stay outside these transactions. In-process listeners stay
 synchronous; network notifications wait for commit and are discarded on rollback.
+Pending wakes, completed activity dismissal and stopped-child admission change
+in memory only after the queued prompt commits.
 
 Scheduler notifications publish the newest snapshot in each 16-millisecond
 window. Other events go out as soon as their storage writes commit.
@@ -75,14 +78,18 @@ passed on 2026-09-29 after grouping synchronous startup and completion writes:
 
 | Scenario | Observed result |
 | --- | --- |
-| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 44.0/27.4 s |
-| Independent HTTP health | Zero timeouts; p95 81/207 ms and maximum 0.34/0.35 s at six/64 concurrent turns |
-| Scheduler payloads at 64 concurrent turns | 1.07 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
-| All 1,000 turns running together, cold then already used | Cancellation in 8.9/12.7 s with the 30-second RPC deadline unchanged |
-| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 5.2 s restart |
-| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.64 s, typing in 4.1 ms and maximum timer lag 40 ms; desktop and phone checked |
+| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 44.6/20.6 s |
+| Independent HTTP health during streaming | Zero timeouts; p95 78/158 ms and maximum 2.32/0.40 s at six/64 concurrent turns |
+| Scheduler payloads at 64 concurrent turns | 1.06 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
+| All 1,000 turns running together, cold then already used | Starts accepted in 14.4/19.8 s and cancelled in 14.1/17.2 s with the 30-second RPC deadline unchanged |
+| Independent HTTP health during mass start/stop | Zero timeouts; p95 172/217 ms and maximum 3.10/3.56 s for cold/warm phases |
+| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 4.1 s restart |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 1.00 s, typing in 5.6 ms and maximum timer lag 44 ms; desktop and phone checked |
 
-Background machine load was not controlled. These single runs establish
+Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
+starts. The instrumented failure accepted 505 starts before expiry, with no
+HTTP errors and maximum health latency 1.00 s. The full run above then passed
+with the same deadline. Background machine load was not controlled. These runs establish
 failures and reproducible checks. They do not
 establish a supported agent count or measure real provider quotas, agent RAM,
 the native shell, Linux or macOS under this load.
