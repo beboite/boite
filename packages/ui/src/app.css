@@ -399,6 +399,23 @@ body {
   background: var(--color-selection);
 }
 
+.code-syntax .hljs-keyword,
+.code-syntax .hljs-selector-tag,
+.code-syntax .hljs-built_in { color: var(--color-accent); }
+.code-syntax .hljs-string,
+.code-syntax .hljs-regexp,
+.code-syntax .hljs-addition { color: var(--color-success); }
+.code-syntax .hljs-number,
+.code-syntax .hljs-literal,
+.code-syntax .hljs-attr,
+.code-syntax .hljs-attribute { color: var(--color-live); }
+.code-syntax .hljs-title,
+.code-syntax .hljs-type,
+.code-syntax .hljs-name { color: var(--color-accent); }
+.code-syntax .hljs-comment,
+.code-syntax .hljs-meta { color: var(--color-muted-foreground); }
+.code-syntax .hljs-deletion { color: var(--color-danger); }
+
 /* Ctrl+F in a thread: every match, and the one the arrows are on. */
 ::highlight(boite-find) {
   background: color-mix(in oklch, var(--color-live) 35%, transparent);

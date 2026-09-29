@@ -57,9 +57,17 @@ export interface BrowserBridge {
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (text === '') return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text;
-  if (/^[\w.-]+(:\d+)?(\/|$)/.test(text)) return `https://${text}`;
-  return `https://${encodeURIComponent(text)}`;
+  const local = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
+  const host = /^(?:[\w-]+\.)+[\w-]+(?::\d+)?(?:[/?#]|$)/.test(text);
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.test(text);
+  const candidate = local ? `http://${text}` : host ? `https://${text}` : scheme ? text : null;
+  if (candidate === null) return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 const PLACEHOLDER = `<!doctype html><meta charset="utf-8"><title>New tab</title>
@@ -91,6 +99,7 @@ export class FakeBridge implements BrowserBridge {
     else frame.src = url;
     document.body.append(frame);
     this.#views.set(id, frame);
+    if (url !== '') this.#emit({ type: 'loading', id, loading: true });
     frame.addEventListener('load', () => {
       this.#loaded.add(id);
       this.annotate(id, null);
@@ -120,6 +129,8 @@ export class FakeBridge implements BrowserBridge {
   reload(id: string): void {
     const frame = this.#views.get(id);
     if (!frame) return;
+    this.#loaded.delete(id);
+    this.#emit({ type: 'loading', id, loading: true });
     try {
       frame.contentWindow?.location.reload();
     } catch {

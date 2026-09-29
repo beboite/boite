@@ -1196,6 +1196,10 @@ export const strings = {
   },
 
   browser: {
+    loading: 'Loading page',
+    failed: 'The page could not be opened. {reason}',
+    invalidUrl: 'Enter a valid HTTP or HTTPS address, or a search query.',
+    resetZoom: 'Reset page zoom',
     back: 'Back',
     forward: 'Forward',
     reload: 'Reload',

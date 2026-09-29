@@ -48,6 +48,13 @@ directory, which is why a login survives a restart. A plain browser gets an
 iframe with the sites that allow it. [machines.md](machines.md) has the origins
 and the bridge.
 
+The address field accepts public hosts, local development addresses such as
+`localhost:5173`, and search terms. Local addresses use HTTP when no scheme is
+given; public hosts use HTTPS. Loading and navigation failures appear in the
+toolbar. A page zoom other than 100% has a reset button.
+`lib/browser-bounds.ts` observes layout changes and follows finite layout
+animations, rather than measuring the page slot on every idle frame.
+
 A text file is edited in place and saved with the Save button or the platform's
 save chord through `files.write`. An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
@@ -57,6 +64,18 @@ the checkerboard behind it tells transparency from white. A video or a sound
 uses the native player over the ticketed file route below. Anything else is a
 size and a download link. A text file downloads too, as the editor shows it,
 unsaved edits included.
+
+Text files and diffs choose syntax highlighting from the file extension or
+the file's reported language. Highlight.js loads its core and each requested
+grammar on demand. Unknown languages and texts over 200,000 characters remain
+plain text. The editor keeps its selection, caret and scroll in a textarea
+over the colored text. Diffs render additions in green and deletions in red,
+including the text, line numbers and signs; unchanged context keeps syntax
+colors. Multiline tokens retain their color across folded context.
+
+Run `bun test tests/e2e/panel.test.ts` to check the panel at desktop and phone
+widths. Captures and `browser-idle.json`, which counts geometry reads across
+60 idle frames, are written under `tests/e2e/.artifacts/`.
 
 ## Files from an answer
 

@@ -1137,6 +1137,10 @@ export const fr: Translation = {
   },
 
   browser: {
+    loading: 'Chargement de la page',
+    failed: "La page n'a pas pu être ouverte. {reason}",
+    invalidUrl: 'Saisissez une adresse HTTP ou HTTPS valide, ou une recherche.',
+    resetZoom: 'Réinitialiser le zoom de la page',
     back: 'Précédent',
     forward: 'Suivant',
     reload: 'Recharger',

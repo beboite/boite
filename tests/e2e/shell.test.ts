@@ -241,6 +241,7 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
+  delete env.BOITE_UI_DIR;
   env.BOITE_SHELL_HIDDEN = '1';
   env.BOITE_CORE_RESIDENT = resident ? '1' : '0';
   env.BOITE_DATA_DIR = ownDataDir;
@@ -498,11 +499,16 @@ afterAll(async () => {
 
 shellTest(
   'the hidden shell starts a core of its own and reaches it',
-  () => {
+  async () => {
     expect(coreFile?.port).toBeGreaterThan(0);
     expect(coreFile?.pid).toBeGreaterThan(0);
     expect(startToHealthMs).toBeGreaterThan(0);
     expect(startToHealthMs).toBeLessThan(READY_TIMEOUT_MS);
+    const index = readFileSync(join(ROOT, 'packages', 'ui', 'dist', 'index.html'), 'utf8');
+    const script = /<script[^>]+type="module"[^>]+src="([^"]+\.js)"/.exec(index)?.[1];
+    expect(script).toBeDefined();
+    await page!.waitFor(`document.querySelector('script[type="module"][src]')`);
+    expect(await page!.evaluate(`document.querySelector('script[type="module"][src]').getAttribute('src').split('/').at(-1)`)).toBe(basename(script!));
   },
   TIMEOUT,
 );
