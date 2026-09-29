@@ -208,7 +208,7 @@
 <style>
 .effort { position: relative; display: inline-flex; }
 .trigger { cursor: pointer; height: var(--control-sm); }
-.trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
+.trigger:hover, .trigger[aria-expanded='true'] { background: var(--control-glaze) var(--color-control-hover); color: var(--color-foreground); }
 .fast-mark { display: inline-flex; margin-left: -2px; color: var(--color-accent); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
