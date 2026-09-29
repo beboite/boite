@@ -14,6 +14,7 @@ import type {
 } from '@boite/contracts';
 import { activityPrompt } from '../activity-prompt.ts';
 import { agentEnvOf } from '../agent.ts';
+import { agentGuide } from '../agent-guide.ts';
 import { prepareAttachments, fileReference } from '../attachments.ts';
 import { continuationInput } from '../continuation.ts';
 import type { Core } from '../core.ts';
@@ -21,7 +22,7 @@ import type { EmitSink, PermissionTicket, QuestionAsk, QuestionTicket, TurnConte
 import { newId } from '../ids.ts';
 import type { SpawnedChild, SpawnOptions } from '../procs.ts';
 import type { ThreadStore } from '../threads.ts';
-import { systemOperation } from './operations.ts';
+import { nativeCommandPrompt, systemOperation } from './operations.ts';
 
 /**
  * The parts of a turn's prompt that building it consumes: the async answers
@@ -113,17 +114,22 @@ export class TurnContexts {
     const continued = !thread.agentSessionId && thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0 ? carry() : input;
     const prepared = prepareAttachments(this.core.dataDir, continued);
     const operation = turn.execution?.operation;
-    const slash = (prompt: string): boolean => prompt.trimStart().startsWith('/');
     // Both are taken once per turn: a second context for the same turn (the
     // core's retry on a fresh session) and a driver's `continuation` get what
     // the first one took.
-    carried.deferred ??= operation || slash(prepared.prompt) ? '' : this.threads.deferred.takeDeferred(threadId);
+    carried.deferred ??= operation || nativeCommandPrompt(prepared.prompt) ? '' : this.threads.deferred.takeDeferred(threadId);
     carried.memory ??= this.threads.deferred.memory.take(threadId);
     carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
     const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId) + carried.letters;
-    const compose = (body: string, sessionId: string | null): string =>
-      carried.memory + ((operation && sessionId !== null) || slash(body) ? '' : this.core.brain.instructions(provider.id, sessionId === null)) + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+    const compose = (body: string, sessionId: string | null): string => {
+      const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
+      // Echo treats "question" as a test directive, including in injected help.
+      const guide = inject && sessionId === null && this.core.brain.config().boiteGuide !== false
+        ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
+      const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
+      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+    };
     return {
       thread,
       account,

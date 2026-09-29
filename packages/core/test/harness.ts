@@ -22,6 +22,7 @@ export interface TestCore {
 export interface TestCoreOptions {
   helloTimeoutMs?: number;
   settings?: Partial<Settings>;
+  boiteGuide?: boolean;
 }
 
 /** Scripted SDK tests need an available executable, never a real CLI install. */
@@ -52,6 +53,8 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, ...options.settings });
+  // Keep scripted replies limited to test input unless testing session context.
+  if (!options.boiteGuide) core.journal.setSetting('brain', { path: null, enabled: false, boiteGuide: false });
 
   const server = startServer({
     core,
