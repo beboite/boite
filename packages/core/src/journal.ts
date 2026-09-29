@@ -285,6 +285,8 @@ export class Journal {
         for (const id of threadIds) query.run(id);
       }
       for (const id of threadIds) {
+        // A conversation's terminal uses a separate process group and trace key.
+        this.db.query("DELETE FROM processes WHERE thread_id = 'terminal:' || ?").run(id);
         this.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(id, id);
         this.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(id, id, id);
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);

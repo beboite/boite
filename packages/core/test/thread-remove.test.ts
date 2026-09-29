@@ -4,22 +4,31 @@ import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
+import { threadTerminalId } from '../src/terminals.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let harness: TestCore;
 let client: CoreClient;
-beforeEach(async () => { harness = await startTestCore(); client = await harness.connect(); });
+beforeEach(async () => { harness = await startTestCore({ settings: { focusGuard: false, muteAgents: false } }); client = await harness.connect(); });
 afterEach(async () => { await harness.stop(); });
 
 test('removal stops the family and clears its stored history while keeping project files', async () => {
   const { threadId } = await echoThread(harness, client);
   const { threadId: keptId } = await echoThread(harness, client, 'keep');
+  // Real owned processes keep the native tracker active and verify cancellation,
+  // rather than testing only echo's in-process turn and idle warm-up workers.
+  const startProcess = (id: string) => harness.core.procs.spawn(id, process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+  const parentProcess = startProcess(threadId);
+  const keptProcess = startProcess(keptId);
   const parent = harness.core.threads.require(threadId);
   const marker = join(parent.cwd, 'keep.txt');
   writeFileSync(marker, 'project file');
   await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
   const child = await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'long running '.repeat(500), requestId: 'remove-child' });
   const childId = child.thread.id;
+  const childProcess = startProcess(childId);
+  const terminalId = threadTerminalId(threadId);
+  const terminalProcess = startProcess(terminalId);
   const turns = [await client.call('turns.start', { threadId, prompt: 'long running '.repeat(500) })];
   const { questionId } = await client.call('questions.ask', { threadId, text: 'Pending question', options: ['Yes', 'No'] });
   for (const id of [threadId, childId]) {
@@ -30,6 +39,7 @@ test('removal stops the family and clears its stored history while keeping proje
   const removed: string[] = [];
   client.on('thread.removed', event => removed.push(event.threadId));
   await client.call('threads.remove', { threadId });
+  await Promise.all([parentProcess.exited, childProcess.exited, terminalProcess.exited]);
   await waitFor(() => removed.length === 2);
   expect(removed.sort()).toEqual([threadId, childId].sort());
   expect(harness.core.scheduler.state()).toEqual({ running: [], queued: [] });
@@ -38,12 +48,16 @@ test('removal stops the family and clears its stored history while keeping proje
     expect(harness.core.journal.getThread(id)).toBeNull();
     expect(harness.core.journal.listMessages(id)).toEqual([]);
     expect(harness.core.journal.listTurns(id)).toEqual([]);
+    expect(harness.core.journal.listProcesses(id, 100)).toEqual([]);
     expect(harness.core.journal.getSetting(`move-note:${id}`)).toBeUndefined();
     expect(harness.core.journal.getSetting(`memory-notices:${id}`)).toBeUndefined();
     expect(harness.core.journal.getSetting(`coordination:${id}`)).toBeUndefined();
     expect(harness.core.journal.db.query('SELECT COUNT(*) AS n FROM events WHERE thread_id = ?').get(id)).toEqual({ n: 0 });
   }
   for (const turn of turns) expect(harness.core.journal.getTurn(turn.id)).toBeNull();
+  expect(harness.core.journal.listProcesses(terminalId, 100)).toEqual([]);
+  expect(keptProcess.proc.exitCode).toBeNull();
+  expect(harness.core.procs.liveCount(keptId)).toBeGreaterThan(0);
   expect(harness.core.journal.getThread(keptId)).not.toBeNull();
   expect(existsSync(marker)).toBe(true);
   // A delayed turn completion or stream flush cannot recreate the removed rows.

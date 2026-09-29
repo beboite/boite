@@ -16,8 +16,7 @@
     "build:linux": "bun run build && bun ../../scripts/ci/bun-version.ts \"the Linux core\" && bun build --compile --target=bun-linux-x64-baseline '--env=BOITE_RELEASE_*' --minify-whitespace --minify-syntax src/main.ts --outfile dist/boite-core-linux-x64 && bun run bin/stage-cli.ts",
     "check": "tsc -p tsconfig.json",
     "test": "bun test --parallel --timeout 15000",
-    "test:serial": "bun test --timeout 15000",
-    "test:isolated": "bun ../../scripts/ci/core-tests.ts"
+    "test:serial": "bun test --timeout 15000"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.5.0",

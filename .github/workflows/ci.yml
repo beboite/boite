@@ -88,9 +88,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      # Windows reused runtimes have crashed or hung beyond the test timeout.
-      # Run every file in a fresh process there; other platforms stay parallel.
-      - run: bun run --cwd packages/core ${{ runner.os == 'Windows' && 'test:isolated' || 'test' }}
+      - run: bun run --cwd packages/core test
 
   web:
     needs: changes

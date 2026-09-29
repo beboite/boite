@@ -92,24 +92,13 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
-Core test files run in parallel worker processes on Linux and macOS, one per CPU core by default
+Core test files run in parallel worker processes, one per CPU core by default
 (`bun test --parallel`). Each file gets a fresh global object, and the test
 harness gives every core its own temporary data directory and port, so files
 stay isolated. The whole core suite took 189 s serially and 35 s with 16
 workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
-when a failure needs a quiet run. Windows CI uses `test:isolated`: every test
-file runs sequentially in a fresh Bun process, with its own temporary data
-folder and the same 15-second test timeout. A file exceeding 90 seconds fails
-and its captured process is terminated; assertion failures remain failures.
-On 2026-09-29, Bun 1.4.2 parallel workers crashed in the titles tests and a
-subsequent removal-test worker stayed alive for 802 seconds. One serial runtime
-also stopped progressing after the five pure title tests; removal and native
-handle assertions had passed. The longest completed file took 26.2 seconds.
-Fresh processes avoid reusing native workers and globals between files without
-dropping tests; Linux and macOS keep their parallel command.
-The Job Object leak check waits up to five seconds for the process handle
-count to settle, then applies its original handle-growth threshold.
+when a failure needs a quiet run.
 
 Process-wide kernel handle assertions run in a dedicated child through
 `procs.spawn`: a reused test worker can retain handles from earlier files.
@@ -155,10 +144,9 @@ projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners. On 2026-09-29, `bun run build:ui`,
-`bun run build:core` and `bun scripts/ci/budgets.ts` measured 3319.5 KB for the
-UI and 799.1 KB for the core after the permanent-deletion controls and atomic
-history cleanup were integrated with current main, including answer submission
-with Enter. The whole UI limit is 3739000 bytes, preserving the 10% margin;
+`bun run build:core` and `bun scripts/ci/budgets.ts` measured 3322.8 KB for the
+UI and 804.1 KB for the core after permanent deletion was integrated with
+current main. The UI limit is 3739000 bytes, about 10% above that measurement;
 integration retains main's larger 578000-byte entry and 904000-byte core limits.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
