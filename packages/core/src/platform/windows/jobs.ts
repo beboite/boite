@@ -286,7 +286,8 @@ export function setProcessLimits(next: ProcessLimits): void {
   let capped = false;
   if (globalJob !== 0) {
     applyMemoryLimit(api, globalJob, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
-    capped = applyCpuCap(api, globalJob, limits.agentCpuCapPercent);
+    const written = applyCpuCap(api, globalJob, limits.agentCpuCapPercent);
+    capped = written && limits.agentCpuCapPercent > 0 && limits.agentCpuCapPercent < 100;
   }
   for (const job of threadJobs.values()) {
     if (capped) job.startup.apply();
@@ -370,7 +371,8 @@ export function setThreadStartup(threadId: string, active: boolean): void {
   const job = active && api ? ensureThreadJob(api, threadId) : threadJobs.get(threadId);
   if (!api || !job) return;
   const capped = active && !nestingRefused && globalJob !== 0 && applyCpuCap(api, globalJob, limits.agentCpuCapPercent);
-  job.startup.set(active && capped);
+  const configured = limits.agentCpuCapPercent > 0 && limits.agentCpuCapPercent < 100;
+  job.startup.set(active && configured && capped);
 }
 
 export function terminateThreadJob(threadId: string): boolean {

@@ -54,7 +54,8 @@ CPU and memory caps apply throughout, including when settings change during
 initialization. Other threads retain below-normal priority. Warm sessions reuse
 their process without another priority window. A refused native downgrade is
 retried every 250 ms until it succeeds or the job closes. The boost is withheld
-if global-job assignment or CPU-cap application fails. This applies only on Windows;
+if global-job assignment or CPU-cap application fails, or the CPU cap is disabled
+(0 or 100 percent). This applies only on Windows;
 Linux and macOS retain their existing scheduling behavior.
 
 A completion port on the job reports every process that enters or leaves it,
