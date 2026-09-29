@@ -335,8 +335,8 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
-  login: false | { kind: 'command' | 'acp' | 'terminal' };
+  /** How Boite starts login: a piped command, ACP, a terminal or a device-code protocol. */
+  login: false | { kind: 'command' | 'acp' | 'terminal' | 'device' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
@@ -969,6 +969,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
+      nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
       /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
@@ -1887,10 +1889,26 @@ export interface DelegationView {
   rootThreadId: ThreadId;
   config: DelegationConfig;
   agents: DelegatedAgent[];
+  /** Native children reported by this conversation's provider, including earlier message pages. */
+  nativeAgents: NativeAgent[];
   messages: AgentLetter[];
   turnsUsed: number;
   usage: Usage;
 }
+
+export interface NativeAgentUpdate {
+  id: string;
+  name?: string;
+  task?: string;
+  model?: string;
+  status: 'running' | 'done' | 'error' | 'stopped' | 'unknown';
+  result?: string;
+}
+export interface NativeAgent extends NativeAgentUpdate {
+  toolId: string;
+  startedAt: Timestamp;
+}
+export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {
@@ -2002,6 +2020,8 @@ export interface TerminalState {
   cwd: string;
   /** What it printed lately, so a client that attaches late draws the same screen. */
   output: string;
+  /** Last output event included in this snapshot; absent on older cores. */
+  sequence?: number;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
@@ -2310,7 +2330,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
     result: Account;
   };
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
-  'accounts.check': { params: { accountId: AccountId }; result: Account };
+  'accounts.rename': { params: { accountId: AccountId; label: string }; result: Account };
+  /** Refresh the provider's login when requested; never uses a model catalogue as authentication. */
+  'accounts.check': { params: { accountId: AccountId; refresh?: boolean }; result: Account };
   /**
    * Start the provider's login command for this account. Refused when the
    * provider has no `login` block, when the account uses the provider's own
@@ -2691,7 +2713,9 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
   /** What a shell printed, as it printed it. */
-  'terminal.output': { id: string; data: string };
+  'terminal.output': { id: string; data: string; sequence?: number };
+  /** Portable brain switches changed. The folder stays on its host. */
+  'brain.configured': BrainConfig;
   /** The shell ended: typed `exit`, closed, or killed with its thread. */
   'terminal.exited': { id: string; exitCode: number | null };
 }

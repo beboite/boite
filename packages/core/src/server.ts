@@ -276,6 +276,7 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
  * reach it. The answer is 202: the process drains and exits after it.
  */
 export const SHUTDOWN_PATH = '/shutdown';
+export const IDLE_SHUTDOWN_PATH = '/shutdown-if-idle';
 
 function sameToken(given: string, expected: string): boolean {
   const a = Buffer.from(given);
@@ -283,7 +284,7 @@ function sameToken(given: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function shutdownResponse(core: Core, request: Request): Response {
+export function shutdownResponse(core: Core, request: Request, idleOnly = false): Response {
   if (request.method !== 'POST') return new Response('POST only', { status: 405, headers: { allow: 'POST' } });
   if (!isLoopbackHost(request.headers.get('host'))) {
     return new Response('shutdown is only served on a loopback name', { status: 403 });
@@ -293,7 +294,14 @@ export function shutdownResponse(core: Core, request: Request): Response {
   if (token === '' || !sameToken(token, core.token)) {
     return new Response('shutdown needs "Authorization: Bearer <core token>" from core.json', { status: 401 });
   }
-  if (!core.requestShutdown()) return new Response('this embedded core has no process to stop', { status: 501 });
+  if (idleOnly) {
+    if (new URL(request.url).searchParams.get('pid') !== String(process.pid)) {
+      return new Response('pid must name this core process', { status: 412 });
+    }
+    const admission = core.requestIdleShutdown();
+    if (admission === 'busy') return new Response('active work prevents installation; retry after it finishes', { status: 409 });
+    if (admission === 'unsupported') return new Response('this embedded core has no process to stop', { status: 501 });
+  } else if (!core.requestShutdown()) return new Response('this embedded core has no process to stop', { status: 501 });
   return Response.json({ ok: true, pid: process.pid }, { status: 202 });
 }
 
@@ -343,6 +351,7 @@ export function startServer(options: ServerOptions): RunningServer {
       const url = new URL(request.url);
 
       if (url.pathname === '/agent-messages') {
+        if (core.stopping) return new Response('core stopping', { status: 503 });
         const response = core.coordination.http(request);
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
@@ -354,6 +363,7 @@ export function startServer(options: ServerOptions): RunningServer {
       }
 
       if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);
+      if (url.pathname === IDLE_SHUTDOWN_PATH) return shutdownResponse(core, request, true);
 
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });

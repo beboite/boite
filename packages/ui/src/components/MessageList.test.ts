@@ -426,12 +426,12 @@ test('Ctrl+F counts matches in messages the window has not drawn, walks to them,
   stubLayout(messages.length * ESTIMATE);
   live.findOpen = true;
   running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
-  // The bar loads on first use.
+  // The bar's first-use import can take longer than the default one-second wait on CI.
   const input = await vi.waitFor(() => {
     const found = document.querySelector<HTMLInputElement>('[data-testid=find-input]');
     if (!found) throw new Error('the find bar is not drawn yet');
     return found;
-  });
+  }, { timeout: 8_000 });
   await settle();
   expect(document.activeElement).toBe(input);
 

@@ -43,6 +43,57 @@ async function setup(patch: Partial<DelegationConfig> = {}) {
   return { h, owner, threadId, config, spawn };
 }
 
+test('disabled workflows are explained to every driver instead of silently falling back to native agents', async () => {
+  const runs = scripted();
+  const { h, owner, threadId } = await setup({ enabled: false, profiles: [] });
+  await owner.call('turns.start', { threadId, prompt: 'Run a dynamic workflow' });
+  await waitFor(() => runs.has(threadId));
+  expect(runs.get(threadId)!.ctx.prompt).toContain('Boite delegation and workflows are disabled');
+  expect(runs.get(threadId)!.ctx.prompt).toContain('Do not substitute native subagents');
+  expect(runs.get(threadId)!.ctx.prompt).toContain('Team');
+  expect(h.core.delegation.instructions(threadId)).toContain('owner');
+  runs.get(threadId)!.finish();
+});
+
+test('native results survive message pagination and restart without using delegation turns or leaking to another thread', async () => {
+  const runs = scripted();
+  const { h, owner, threadId } = await setup({ enabled: false, profiles: [] });
+  await owner.call('threads.subscribe', { threadId });
+  await owner.call('turns.start', { threadId, prompt: 'Review' });
+  await waitFor(() => runs.has(threadId));
+  const run = runs.get(threadId)!;
+  const changed = owner.next('delegation.changed', event => event.threadId === threadId);
+  const id = run.ctx.emit.startMessage('assistant');
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
+  run.ctx.emit.complete(id, 'complete');
+  await changed;
+  // Populate the later page in one transaction while retaining the real message events.
+  h.core.journal.db.transaction(() => {
+    for (let index = 0; index < 220; index++) {
+      const next = run.ctx.emit.startMessage('assistant');
+      run.ctx.emit.part(next, 0, { type: 'text', text: `Later message ${index}` });
+      run.ctx.emit.complete(next, 'complete');
+    }
+  })();
+  const finished = owner.next('turn.finished', turn => turn.threadId === threadId);
+  run.finish();
+  await finished;
+  const page = await owner.call('threads.get', { threadId });
+  expect(page.messagesBefore).not.toBeNull();
+  expect(page.messages.some(message => message.id === id)).toBe(false);
+  const view = await owner.call('delegation.get', { threadId });
+  expect(view.nativeAgents).toHaveLength(1);
+  expect(view.nativeAgents[0]).toMatchObject({ task: 'Review parsing', result: 'Checked', status: 'done' });
+  expect(view.turnsUsed).toBe(0);
+  expect(view.usage.inputTokens).toBe(0);
+  const other = await echoThread(h, owner, 'Other conversation');
+  expect((await owner.call('delegation.get', { threadId: other.threadId })).nativeAgents).toEqual([]);
+  await h.core.close();
+  const restarted = new Core({ dataDir: h.dataDir, token: h.token });
+  try { expect(restarted.delegation.get(threadId).nativeAgents).toEqual(view.nativeAgents); }
+  finally { await restarted.close(); }
+});
+
 test('thirty delegated agents launch despite stored legacy team budgets', async () => {
   const runs = scripted(); const { h, threadId, config, spawn } = await setup();
   h.core.journal.setSetting(`delegation:${threadId}`, { ...config, maxAgents: 1, maxConcurrent: 1, maxTurns: 1, maxMinutes: 1 });

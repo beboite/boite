@@ -134,11 +134,14 @@ test('default models can be changed on each provider row in Providers', async ()
 test('tasks stay folded until requested and never move the reading position', async () => {
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(async ({store}) => { await store.open('t-trace'); })`);
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
+  // History navigation requires overflow: a short thread at scrollTop 0 is still pinned.
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread.messages.at(-1).parts.push({ type: 'text', text: 'Earlier conversation context.\\n'.repeat(80) })`);
   // Opening the thread schedules layout measurements and scroll restoration.
   // Finish those before choosing the reading position this test must preserve.
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
   await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
+  await page.waitFor(`document.querySelector('[data-testid="jump-to-latest"]')`);
   await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   const before = await page.evaluate<{ top: number; height: number; scroll: number }>(`(() => { const el = document.querySelector('${id('timeline')}'); const r = el.getBoundingClientRect(); return {top:r.top,height:r.height,scroll:el.scrollTop}; })()`);
   expect(before.scroll).toBe(0);

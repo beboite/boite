@@ -165,7 +165,7 @@ describe('scheduler', () => {
     const states: SchedulerState[] = [];
     client.on('scheduler.updated', (state) => states.push(state));
 
-    for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:300]' });
+    for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
     const release = holdAccountTurns(harness);
     await client.call('turns.start', { threadId: threads[2] ?? '', prompt: '[sleep:300]' });
 
@@ -183,6 +183,7 @@ describe('scheduler', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threads[2], 15000);
     release();
     await finished;
+    for (const threadId of threads.slice(0, 2)) await client.call('turns.stop', { threadId });
     const settled = await client.call('scheduler.get', {});
     expect(settled.running).toHaveLength(0);
     expect(settled.queued).toHaveLength(0);

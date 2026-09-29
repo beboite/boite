@@ -21,15 +21,15 @@
  * notifications carry no `jsonrpc` member, which is what the driver has to
  * survive.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -258,6 +258,16 @@ async function runTurn(turnId: string, text: string): Promise<void> {
 
   for (const directive of directives) {
     switch (directive) {
+      case 'agents': {
+        const item = { type: 'collabAgentToolCall', id: 'spawn-reviewer', tool: 'spawnAgent', status: 'completed', senderThreadId: threadId, receiverThreadIds: ['native-reviewer'], prompt: 'Review parser boundaries', model: 'fake-smart', agentsStates: { 'native-reviewer': { status: 'running', message: null } } };
+        notify('item/completed', { threadId, turnId, item });
+        notify('item/agentMessage/delta', { threadId: 'native-reviewer', turnId: 'child-turn', itemId: 'child-text', delta: 'Private child work' });
+        notify('item/completed', { threadId: 'native-reviewer', turnId: 'child-turn', item: commandItem('child-command', 'completed', 'Private command output') });
+        notify('item/completed', { threadId, turnId, item: { ...item, id: 'wait-reviewer', tool: 'wait', prompt: null, model: null, agentsStates: { 'native-reviewer': { status: 'completed', message: 'Parser checked' } } } });
+        notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'started' } });
+        notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other-done', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'completed' } });
+        break;
+      }
       case 'command': {
         itemCounter += 1;
         const itemId = `item-${itemCounter}`;
@@ -436,9 +446,9 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         });
         break;
       case 'crash':
-        process.stderr.write('boom\n');
+        process.stderr.write(`${process.env['CODEX_FAKE_CRASH_ERROR'] ?? 'boom'}\n`);
         setTimeout(() => {
-          process.exit(3);
+          process.exit(process.env['CODEX_FAKE_CRASH_ERROR'] ? 1 : 3);
         }, 20);
         // The exit is what the client sees; this promise never settles.
         await new Promise<void>(() => undefined);
@@ -458,6 +468,24 @@ function handle(method: string, raw: unknown): unknown {
   switch (method) {
     case 'initialize':
       log('initialize');
+      if (process.env['CODEX_FAKE_INIT_FAILURES']) {
+        const attempts = readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').split('\n').filter(line => line === 'initialize').length;
+        if (attempts <= Number(process.env['CODEX_FAKE_INIT_FAILURES'])) {
+          const error = process.env['CODEX_FAKE_INIT_ERROR'] ?? 'failed to initialize sqlite state runtime under test-home: failed to initialize state runtime at test-home';
+          if (process.env['CODEX_FAKE_INIT_RPC_ERROR']) {
+            log('initialize RPC error');
+            if (process.env['CODEX_FAKE_INIT_RPC_ERROR'] === 'exit') {
+              setTimeout(() => {
+                process.stderr.write(`Error: ${error}\nCaused by: database is locked\n`);
+                process.exit(1);
+              }, 100);
+            }
+            throw new Error('SQLite initialization failed');
+          }
+          process.stderr.write(`Error: ${error}\nCaused by: database is locked\n`);
+          process.exit(1);
+        }
+      }
       return {
         userAgent: 'codex-fake/0 (test) boite',
         codexHome: process.cwd(),
@@ -479,6 +507,16 @@ function handle(method: string, raw: unknown): unknown {
           ],
         }],
       };
+    case 'account/read':
+      log(`account/read refresh=${params['refreshToken'] === true}`);
+      return { account: existsSync(join(process.cwd(), 'fake-login.json')) ? { type: 'chatgpt', email: 'work@example.com', planType: 'plus' } : null, requiresOpenaiAuth: true };
+    case 'account/login/start':
+      log('account/login/start ' + params['type']);
+      if (process.env['CODEX_FAKE_LOGIN_WAIT'] !== '1') setTimeout(() => {
+        writeFileSync(join(process.cwd(), 'fake-login.json'), '{}');
+        notify('account/login/completed', { loginId: 'fake-login', success: true, error: null });
+      }, 200);
+      return { type: 'chatgptDeviceCode', loginId: 'fake-login', verificationUrl: 'https://example.invalid/device', userCode: 'TEST-CODE' };
     case 'model/list':
       log('model/list');
       // One page, and a null cursor: the driver stops asking on that.

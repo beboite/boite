@@ -157,7 +157,7 @@ jobs:
       - name: Check bundle size budgets
         run: bun scripts/ci/budgets.ts
       - name: Windows installer regression tests
-        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts
+        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
       - run: bun run test:shell --release
       - name: Native shell end-to-end tests
         if: needs.changes.outputs.e2e == 'true'

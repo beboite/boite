@@ -128,6 +128,7 @@ describe('terminals', () => {
       expect(events).toBeLessThan(chunks / 2);
       const again = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
       expect(again.output).toBe(text.slice(-HISTORY_CHARS));
+      expect(again.sequence).toBe(events);
     } finally {
       spy.mockRestore();
     }
@@ -200,7 +201,7 @@ describe('terminals', () => {
     const { loaded } = await client.call('providers.list', {});
     expect(loaded.find((provider) => provider.id === 'opencode')?.login).toEqual({ kind: 'terminal' });
     expect(loaded.find((provider) => provider.id === 'grok')?.login).toEqual({ kind: 'terminal' });
-    expect(loaded.find((provider) => provider.id === 'codex')?.login).toEqual({ kind: 'command' });
+    expect(loaded.find((provider) => provider.id === 'codex')?.login).toEqual({ kind: 'device' });
   });
 
   test('a descriptor asking for a terminal without a command is refused by name', async () => {

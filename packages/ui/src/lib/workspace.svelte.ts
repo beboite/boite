@@ -12,6 +12,7 @@ import {
   type StoredEnvironment
 } from './endpoint';
 import { strings } from './strings';
+import { AutoSettingsSync } from './auto-settings-sync.svelte';
 
 export interface Machine {
   id: string;
@@ -54,6 +55,7 @@ export class Workspace {
   active = $state(store);
   view = $state<'projects' | 'recent'>('projects');
   error = $state<string | null>(null);
+  readonly settingsSync = new AutoSettingsSync(() => this.machines, profileKey);
   #generation = 0;
   #lifecycle = 0;
 
@@ -294,6 +296,7 @@ export class Workspace {
     const machine = this.machines.find((m) => m.id === id);
     if (!machine || machine.store === store) return;
     ++this.#generation;
+    this.settingsSync.forget(machine);
     machine.store.client?.close();
     machine.store.detach();
     this.machines = this.machines.filter((m) => m !== machine);

@@ -6,10 +6,9 @@
  * pure pieces it derives from.
  */
 import type { AgentCommand, PreviewReference } from '@boite/contracts';
-import { AGENT_PREFIX, appCommands } from './commands.svelte';
+import { AGENT_PREFIX } from './commands.svelte';
 import type { PaletteItem } from './palette';
 import { strings } from './strings';
-import type { Store } from './store.svelte';
 
 /** A command the composer runs itself: the testid of the chip whose menu it opens, and its line. */
 export type ChipCommand = { testid: string; description: string };
@@ -39,10 +38,10 @@ export function agentSlashItems(commands: AgentCommand[]): PaletteItem[] {
 }
 
 /**
- * Boite's own under them: the palette's list plus the three the composer runs
- * itself. A row reads as the `/name` it is typed as, the sentence under it.
+ * Only actions for the current prompt. Application navigation stays in the
+ * command palette rather than competing with the agent's slash commands.
  */
-export function boiteSlashItems(store: Store, inShell: boolean, chips: Record<string, ChipCommand>): PaletteItem[] {
+export function boiteSlashItems(chips: Record<string, ChipCommand>): PaletteItem[] {
   return [
     { id: 'goal', kind: 'command', label: '/goal', description: strings.activity.goalDescription },
     { id: 'loop', kind: 'command', label: '/loop', description: strings.activity.loopDescription },
@@ -51,16 +50,6 @@ export function boiteSlashItems(store: Store, inShell: boolean, chips: Record<st
       kind: 'command' as const,
       label: `/${name}`,
       description: chip.description
-    })),
-    // A command is looked up by the `/name` it is typed as, so the palette's
-    // sentence becomes the line under it and never part of what is ranked: it
-    // is a whole sentence, and one of its words would outrank every real name.
-    ...appCommands(store, inShell).map((item) => ({
-      id: item.id,
-      kind: 'command' as const,
-      label: `/${item.id}`,
-      description: item.label,
-      keywords: item.keywords
     }))
   ];
 }

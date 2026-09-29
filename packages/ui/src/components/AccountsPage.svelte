@@ -32,7 +32,11 @@
   /** Providers whose install was asked for from a row: sign-in follows the download. */
   let chained = $state<Record<string, boolean>>({});
   let busy = $state<string | null>(null);
-  let verified = $state<Record<string, number>>({});
+  let verified = $state<Record<string, Account['status']>>({});
+  let editing = $state<string | null>(null);
+  let label = $state('');
+  let saving = $state(false);
+  let revealed = $state<Record<string, boolean>>({});
   let checking = $state<string | null>(null);
   let detecting = $state(false);
   let lastDetect = 0;
@@ -109,15 +113,9 @@
     }
     if (step === 'ready') {
       const signedIn = store.accountsOf(provider.id).filter((account) => account.status === 'ok');
-      const identity = signedIn.find((account) => account.identity)?.identity ?? null;
-      if (signedIn.length > 1) {
-        return `${strings.providerSettings.step.ready} · ${
-          identity
-            ? strings.providerSettings.readyMore.replace('{identity}', identity).replace('{count}', String(signedIn.length - 1))
-            : strings.providerSettings.accountsCount.replace('{count}', String(signedIn.length))
-        }`;
-      }
-      return identity ? `${strings.providerSettings.step.ready} · ${identity}` : strings.providerSettings.step.ready;
+      return signedIn.length > 1
+        ? `${strings.providerSettings.step.ready} · ${strings.providerSettings.accountsCount.replace('{count}', String(signedIn.length))}`
+        : strings.providerSettings.step.ready;
     }
     return strings.providerSettings.step[step];
   }
@@ -205,18 +203,22 @@
     finally { detecting = false; }
   }
 
-  /** The session file, then the agent itself: how many models it answers with. */
   async function verify(account: Account) {
-    if (!store.client) return;
+    if (!store.client || checking !== null) return;
     checking = account.id;
+    delete verified[account.id];
     try {
-      await store.checkAccount(account.id);
-      if (store.providerOf(account.providerId)?.available) {
-        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id, refresh: true });
-        verified = { ...verified, [account.id]: models.length };
-      }
-    } catch (error) { store.error = String(error); }
-    finally { checking = null; }
+      const checked = await store.checkAccount(account.id, true);
+      if (checked) verified = { ...verified, [account.id]: checked.status };
+    } finally { checking = null; }
+  }
+
+  async function rename(event: SubmitEvent, accountId: string) {
+    event.preventDefault();
+    if (saving || !label.trim()) return;
+    saving = true;
+    try { if (await store.renameAccount(accountId, label)) editing = null; }
+    finally { saving = false; }
   }
 
   async function remove(account: Account) {
@@ -369,6 +371,7 @@
           {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
         </p>
         <form class="code" onsubmit={(event) => void sendCode(event, loginAccount.id)}>
+          {#if provider.login && provider.login.kind !== 'device'}
           <input
             data-testid="account-login-input"
             placeholder={provider.login && provider.login.kind === 'acp'
@@ -378,6 +381,8 @@
             oninput={(event) => (codes = { ...codes, [loginAccount.id]: event.currentTarget.value })}
           />
           <button type="submit" class="quiet small" data-testid="account-login-send">{strings.accounts.loginSend}</button>
+          {/if}
+          {#if provider.login && provider.login.kind === 'device'}<span class="hint">{strings.providerSettings.deviceHint}</span>{/if}
           <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
             {strings.accounts.loginCancel}
           </button>
@@ -405,10 +410,16 @@
     <div class="account" data-testid="account-row" data-account-id={entry.id}>
       <div class="account-line">
         <div class="who">
-          <h3>{entry.identity ?? entry.label}</h3>
+          {#if editing === entry.id}
+            <form class="code rename" onsubmit={event => void rename(event, entry.id)}>
+              <input aria-label={strings.providerSettings.accountName} data-testid="account-name" maxlength="100" bind:value={label} />
+              <button class="small" type="submit" disabled={saving || !label.trim()}>{strings.providerSettings.save}</button>
+              <button class="quiet small" type="button" disabled={saving} onclick={() => editing = null}>{strings.install.removeCancel}</button>
+            </form>
+          {:else}<h3>{entry.label}</h3>{/if}
+          {#if entry.identity}<p class="identity"><button type="button" class="private-email" class:revealed={revealed[entry.id]} aria-label={strings.providerSettings.revealEmail} aria-pressed={revealed[entry.id] === true} data-testid="account-email" onclick={() => revealed[entry.id] = !revealed[entry.id]}>{entry.identity}</button></p>{/if}
           <p class="state">
             <span class="kind">{entry.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
-            {#if entry.identity && entry.identity !== entry.label}<span>· {entry.label}</span>{/if}
             {#if entry.status !== 'ok'}
               <span class:bad={entry.status !== 'unknown'}>· {strings.accounts.status[entry.status]}</span>
             {/if}
@@ -420,11 +431,12 @@
               {entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
             </button>
           {/if}
-          <button class="quiet small" disabled={checking !== null} data-testid="account-verify" onclick={() => void verify(entry)}>{strings.providerSettings.check}</button>
+          <button class="quiet small" data-testid="account-rename" onclick={() => { editing = entry.id; label = entry.label; }}>{strings.providerSettings.rename}</button>
+          <button class="quiet small" disabled={checking !== null || loggingIn(entry.id)} data-testid="account-verify" onclick={() => void verify(entry)}>{checking === entry.id ? strings.providerSettings.checking : strings.providerSettings.check}</button>
           <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}>{strings.accounts.remove}</button>
         </div>
       </div>
-      {#if verified[entry.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[entry.id]))}</p>{/if}
+      {#if verified[entry.id] !== undefined}<p class="hint" role="status">{entry.status === 'ok' ? strings.providerSettings.connectionOk : strings.accounts.status[entry.status]}</p>{/if}
     </div>
   {/each}
 
@@ -635,6 +647,11 @@
 </div>
 
 <style>
+  .private-email { display: inline-block; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; filter: blur(5px); cursor: pointer; transition: filter var(--dur-2); overflow-wrap: anywhere; }
+  .private-email:hover, .private-email:focus-visible, .private-email.revealed { filter: none; }
+  .identity { margin: 4px 0; color: var(--color-muted-foreground); }
+  .rename { flex-wrap: wrap; }
+
 
   /* One card, one row per provider: the page reads top to bottom as a checklist. */
   .provider { padding: 12px 16px; display: grid; gap: 10px; }

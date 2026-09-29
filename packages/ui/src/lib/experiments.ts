@@ -13,8 +13,8 @@
  * sidebar, the palette and the store ask `experiments.svelte.ts` whether
  * `session-import` is on before showing or running the import, and the
  * context meter asks the same of `prompt-cache` before drawing its timer. The
- * sidebar, the phone's tab bar and the store ask `resident-agents` before
- * offering the Agents page.
+ * bottom-left launchers and the store ask `resident-agents` before offering
+ * the dedicated Agents interface.
  */
 
 export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'preview-comments' | 'resident-agents' | 'whip';

@@ -184,7 +184,7 @@ export class FakeContext {
   /** The current output of every active fake login, also returned after reconnect. */
   readonly logins = new Map<string, RpcEvents['account.login']>();
   /** Fake shells by terminal id: what they printed and the line being typed. */
-  readonly terminals = new Map<string, { cwd: string; output: string; line: string }>();
+  readonly terminals = new Map<string, { cwd: string; output: string; line: string; sequence?: number }>();
   /** Threads whose title is being written, which the core refuses a second ask for. */
   readonly retitling = new Set<ThreadId>();
   seq = 0;

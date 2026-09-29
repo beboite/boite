@@ -23,6 +23,22 @@ async function updates(phase: string, nightly = false) {
   await openUpdate();
 }
 async function openUpdate() {
+  if (await page.evaluate('innerWidth <= 720')) {
+    // Native updates live in the shell drawer. The browser fixture uses phone
+    // navigation, so expose that same drawer before exercising its real control.
+    if (await page.evaluate("document.querySelector('.body.mobile-covered') !== null")) {
+      await page.click(id('mobile-new'));
+      await page.waitFor("document.querySelector('.body.mobile-covered') === null");
+    }
+    await page.evaluate('window.__boiteTest.workspace.active.sidebarOpen = true');
+  }
+  await page.waitFor(`(() => {
+    const button = document.querySelector('${id('nav-app-update')}');
+    if (!button) return false;
+    const box = button.getBoundingClientRect();
+    return getComputedStyle(button).visibility === 'visible' && box.width > 0 && box.height > 0
+      && box.left >= 0 && box.top >= 0 && box.right <= innerWidth && box.bottom <= innerHeight;
+  })()`);
   await page.click(id('nav-app-update'));
   await page.waitFor(`document.querySelector('${id('app-update-popover')}')`);
 }
@@ -191,4 +207,34 @@ test('ordinary browsers never offer native updates, including French phone setti
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
   await capture('phone-fr');
+}, 30_000);
+
+test('waiting can be dismissed and cancellation restores the downloaded update on desktop and phone', async () => {
+  for (const viewport of [1400, 390]) {
+    await width(viewport);
+    await updates('waiting');
+    expect(await page.text(id('app-update-status'))).toContain('Waiting for work');
+    expect(await page.evaluate(`document.querySelector('${id('app-update-check')}') === null`)).toBe(true);
+    await page.click(`${id('app-update-popover')} summary`);
+    expect(await page.evaluate(`document.querySelector('${id('app-update-nightly')}').disabled`)).toBe(true);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.waitFor(`(() => {
+      const popup = document.querySelector('${id('app-update-popover')}');
+      if (!popup) return false;
+      const box = popup.getBoundingClientRect();
+      const style = getComputedStyle(popup);
+      return style.visibility === 'visible' && Number(style.opacity) === 1
+        && box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0
+        && box.right <= innerWidth && box.bottom <= innerHeight
+        && popup.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })()`);
+    await capture(`waiting-${viewport < 720 ? 'phone' : 'desktop'}`);
+    await escapeUpdate();
+    await openUpdate();
+    await page.click(id('app-update-cancel'));
+    await page.waitFor(`document.querySelector('${id('app-update-install')}') !== null`);
+    expect(await page.text(id('app-update-content'))).toContain('2.0.0-beta.2');
+    await page.click(`${id('app-update-popover')} summary`);
+    expect(await page.evaluate(`document.querySelector('${id('app-update-nightly')}').disabled`)).toBe(false);
+  }
 }, 30_000);
