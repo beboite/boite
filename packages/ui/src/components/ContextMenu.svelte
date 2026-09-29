@@ -41,7 +41,7 @@
   });
 
   function rows(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]')) : [];
+    return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)')) : [];
   }
 
   /**
@@ -155,6 +155,9 @@
     z-index: 70;
     min-width: 200px;
     max-width: min(320px, calc(100vw - 12px));
+    max-height: calc(100dvh - 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 4px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
@@ -238,6 +241,7 @@
   }
 
   .rule {
+    flex-shrink: 0;
     height: 1px;
     margin: 4px 6px;
     background: var(--color-border);

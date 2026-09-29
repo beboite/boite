@@ -2030,6 +2030,17 @@ async function emptyCore(): Promise<void> {
   await store.openWhereLeft();
 }
 
+test('the phone cannot manage an unrelated project from a draft without a folder', async () => {
+  await mountOnFake();
+  expect(store.projects.length).toBeGreaterThan(0);
+  store.startDraft(null);
+  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+  store.startDraft('p-boite');
+  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
+});
+
 test('first run opens a draft in the drafts, and the first send makes them', async () => {
   await mountOnFake();
   await emptyCore();

@@ -90,6 +90,32 @@ test('projects follow user activity, then keep a dragged custom order after relo
   expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
 }, 20_000);
 
+test('phone management scrolls on short screens and reorders the selected project', async () => {
+  const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
+  const before = await keys();
+  await page.evaluate(`(() => { const [machine, project] = ${before[0]}; const owner = globalThis.__boiteTest.workspace.machines.find(m => m.id === machine).store; return globalThis.__boiteTest.workspace.select(owner, undefined, project); })()`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 240, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  await page.click(id('mobile-project-actions'));
+  await page.click(`${id('context-menu')} [data-value=manage]`);
+  await page.waitFor(`document.querySelector('${id('context-menu')} [data-value=remove]')`);
+  expect(await page.evaluate(`(() => { const r = document.querySelector('${id('context-menu')}').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
+  const key = async (key: string, code: number) => {
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
+  };
+  await key('End', 35);
+  await page.waitFor(`document.activeElement?.dataset.value === 'remove'`);
+  expect(await page.evaluate(`(() => { const r = document.activeElement.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`)).toBe(true);
+  await capture('project-management-short-phone.png');
+  await key('Home', 36);
+  await key('ArrowDown', 40);
+  expect(await page.evaluate(`document.activeElement?.dataset.value`)).toBe('move-down');
+  await key('Enter', 13);
+  await page.waitFor(`!document.querySelector('${id('context-menu')}')`);
+  expect(await keys()).toEqual([before[1]!, before[0]!, ...before.slice(2)]);
+}, 20_000);
+
 test('phone exposes project filtering and custom-order controls without overflow', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.click(id('mobile-conversations'));

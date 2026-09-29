@@ -30,6 +30,7 @@
   let several = $derived(machines.length > 1);
   let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
+  let actionProject = $derived(store.draftInDrafts && !store.openThread ? store.openProject : project);
   let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
   let selected = $derived(projectView.selected(groups));
   let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
@@ -92,6 +93,16 @@
     else store.startDraft(project?.id);
     show('chat');
   }
+  function openProjectMenu(event: MouseEvent) {
+    if (!actionProject) return;
+    const entry = groups.find(group => group.machine.store === store && group.project.id === actionProject.id);
+    const key = entry ? projectKey(entry) : null;
+    projectMenu(event, store, actionProject, projectView.order === 'manual' && key !== null ? {
+      up: projectKey(groups[0]!) !== key,
+      down: projectKey(groups[groups.length - 1]!) !== key,
+      move: direction => projectView.step(groups, key, direction)
+    } : undefined);
+  }
 </script>
 
 <header class="mobile-header" class:settings={store.page !== 'chat'} data-testid="mobile-header">
@@ -104,9 +115,9 @@
       {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
     </Menu>
   </div>
-  {#if project}
+  {#if actionProject}
     <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
-      onclick={(event) => project && projectMenu(event, store, project)}><Ellipsis size={20} /></button>
+      onclick={openProjectMenu}><Ellipsis size={20} /></button>
   {/if}
   <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!groups.length || draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>
 </header>
