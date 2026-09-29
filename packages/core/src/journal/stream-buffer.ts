@@ -32,7 +32,7 @@ interface OpenMessage {
 /**
  * The streaming write path: text deltas coalesced for 16 ms, and the parts of
  * each message still streaming held in memory and written to its row on a
- * timer. The journal calls it before every read of messages.
+ * timer. Reads overlay held messages onto their selected rows without writing.
  */
 export class StreamBuffer {
   private readonly deltas = new Map<string, PendingDelta>();

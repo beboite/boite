@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '../../packages/contracts/src/index.ts';
 import { connect, type CoreClient } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
@@ -50,6 +51,8 @@ test('launch, inspect, forward and stop a real delegated thread from the panel',
   expect(await page.text('[data-testid="delegation-progress"]')).toContain('1 stopped');
   expect(await page.text('[data-testid="delegation-progress"]')).toContain('0/1 completed');
   expect(page.errors()).toEqual([]);
+  await page.waitFor('document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity)');
+  await page.screenshot(join(import.meta.dir, '.artifacts/delegation-desktop.png'));
 }, 40_000);
 
 test('the phone can open the same team and inspect its retained result', async () => {
@@ -61,6 +64,8 @@ test('the phone can open the same team and inspect its retained result', async (
   await page.waitFor('document.querySelector("[data-testid=delegation-surface]")?.getBoundingClientRect().width > 200');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   expect(await page.text('[data-testid="delegation-surface"]')).toContain('Review parser boundaries');
+  await page.waitFor('document.getAnimations().every(animation => animation.playState !== "running" || animation.effect?.getTiming().iterations === Infinity)');
+  await page.screenshot(join(import.meta.dir, '.artifacts/delegation-phone.png'));
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 500, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('innerHeight === 500');
   expect(await page.evaluate('document.querySelector("[data-testid=delegation-message]").getBoundingClientRect().bottom <= innerHeight')).toBe(true);

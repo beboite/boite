@@ -624,13 +624,41 @@ describe('managed installs', () => {
     expect(installs.leaseCount('echo')).toBe(0);
 
     await client.call('threads.subscribe', { threadId });
-    // Stay alive long enough to observe the lease on both hosts. `ver` was a
-    // Windows-only command and could exit before the first polling sample.
-    const command = `${process.platform === 'win32' ? '' : 'exec '}bun -e "setTimeout(()=>{},250)"`;
-    await client.call('turns.start', { threadId, prompt: `go [spawn:${command}]` });
-    await waitFor(() => installs.leaseCount('echo') > 0, 10_000);
-    await waitFor(() => installs.leaseCount('echo') === 0, 10_000);
-  });
+    // A timed child can exit before a busy runner observes its lease. Hold it
+    // until the test releases it, with every fixture file in this core's data dir.
+    const ready = join(harness.dataDir, 'install-lease-ready.json');
+    const release = join(harness.dataDir, 'install-lease-release');
+    const fixture = join(harness.dataDir, 'install-lease-fixture.ts');
+    writeFileSync(fixture, `
+      import { existsSync, renameSync, writeFileSync } from 'node:fs';
+      writeFileSync(${JSON.stringify(`${ready}.tmp`)}, JSON.stringify({ pid: process.pid }));
+      renameSync(${JSON.stringify(`${ready}.tmp`)}, ${JSON.stringify(ready)});
+      while (!existsSync(${JSON.stringify(release)})) await Bun.sleep(50);
+    `);
+    // Expand the quoted Windows path inside cmd, rather than handing embedded
+    // quotes through Bun's escaping of cmd's /c argument.
+    const fixtureEnv = `BOITE_INSTALL_LEASE_${threadId.toUpperCase()}`;
+    process.env[fixtureEnv] = process.platform === 'win32' ? `"${fixture}"` : fixture;
+    const command = process.platform === 'win32' ? `bun %${fixtureEnv}%` : `exec bun "$${fixtureEnv}"`;
+    try {
+      await client.call('turns.start', { threadId, prompt: `go [spawn:${command}]` });
+      await waitFor(() => existsSync(ready), 10_000);
+      const { pid } = JSON.parse(readFileSync(ready, 'utf8')) as { pid: number };
+      expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+      await waitFor(() => harness.core.procs.liveOf(threadId).some(record => record.pid === pid), 10_000);
+      await waitFor(() => installs.leaseCount('echo') > 0, 10_000);
+      expect(installs.leaseCount('echo')).toBeGreaterThan(0);
+      expect(existsSync(release)).toBe(false);
+      writeFileSync(release, 'release');
+      await waitFor(() => !harness.core.procs.liveOf(threadId).some(record => record.pid === pid), 10_000);
+      await waitFor(() => installs.leaseCount('echo') === 0, 10_000);
+      expect(installs.leaseCount('echo')).toBe(0);
+    } finally {
+      delete process.env[fixtureEnv];
+      writeFileSync(release, 'release');
+      if (harness.core.procs.liveCount(threadId) > 0) await harness.core.procs.stopAndWait(threadId);
+    }
+  }, 30_000);
 
   test('a core starting on the same data directory reads the install back off disk', async () => {
     await loadDescriptor(goodInstall());

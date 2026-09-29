@@ -79,6 +79,78 @@ describe('the procfs parsers', () => {
 });
 
 describe('a thread load on Linux', () => {
+  test('one parent snapshot supplies stat reads across threads and refreshes after 500 ms', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100 101 200');
+    proc.set(100, 10, 0, 1000);
+    proc.set(200, 10, 0, 2000);
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'child', 100));
+    proc.files.set('/proc/101/status', status(3000));
+    const reads: string[] = [];
+    const load = new LinuxLoad(2, path => { reads.push(path); return proc.read(path); }, proc.now);
+    load.add('first', 100);
+    load.add('second', 200);
+    expect(load.sample('first')?.processes).toBe(2);
+    expect(load.sample('second')?.processes).toBe(1);
+    expect(reads.filter(path => path === '/proc')).toHaveLength(1);
+    expect(reads.filter(path => path.endsWith('/stat'))).toHaveLength(3);
+    expect(reads.some(path => path.includes('/task'))).toBe(false);
+    proc.files.set('/proc', '100 101 102 200');
+    proc.files.set('/proc/102/stat', stat(102, 10, 0, 'new-child', 100));
+    proc.files.set('/proc/102/status', status(4000));
+    proc.at += 499;
+    expect(load.sample('first')?.processes).toBe(2);
+    proc.at += 1;
+    expect(load.sample('first')?.processes).toBe(3);
+    expect(reads.filter(path => path === '/proc')).toHaveLength(2);
+  });
+
+  test('a newly registered root absent from the cached scan is still sampled, and a vanished root is skipped', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100');
+    proc.set(100, 10, 0, 1000);
+    const load = new LinuxLoad(2, proc.read, proc.now);
+    load.add('first', 100);
+    expect(load.sample('first')?.processes).toBe(1);
+    proc.set(200, 10, 0, 2000);
+    load.add('new', 200);
+    expect(load.sample('new')?.memoryBytes).toBe(2000 * 1024);
+    proc.gone(100);
+    expect(load.sample('first')).toBeNull();
+  });
+
+  test('a vanished cached child does not hide its surviving sibling', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100 101 102');
+    proc.set(100, 10, 0, 1000);
+    for (const pid of [101, 102]) {
+      proc.files.set(`/proc/${pid}/stat`, stat(pid, 10, 0, 'child', 100));
+      proc.files.set(`/proc/${pid}/status`, status(2000));
+    }
+    const load = new LinuxLoad(2, proc.read, proc.now);
+    load.add('thr', 100);
+    expect(load.sample('thr')?.processes).toBe(3);
+    proc.gone(101);
+    expect(load.sample('thr')).toMatchObject({ processes: 2, memoryBytes: 3000 * 1024 });
+  });
+
+  test('killTree refreshes the parent scan and keeps children discovered only through another task', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100');
+    proc.set(100, 10, 0, 1000);
+    const signalled: number[] = [];
+    const load = new LinuxLoad(2, proc.read, proc.now, pid => { signalled.push(pid); });
+    load.add('thr', 100);
+    load.sample('thr');
+    proc.files.set('/proc', '100 101');
+    proc.files.set('/proc/101/stat', stat(101, 10, 0, 'child', 100));
+    proc.files.set('/proc/100/task', '100 110');
+    proc.files.set('/proc/100/task/110/children', '102');
+    proc.files.set('/proc/102/task/102/children', '103');
+    expect(load.killTree(100)).toBe(true);
+    expect(signalled.sort()).toEqual([100, 101, 102, 103]);
+  });
+
   test('counts children from every task and grandchildren once, with their executable names', () => {
     const proc = new FakeProc();
     const load = new LinuxLoad(2, proc.read, proc.now);

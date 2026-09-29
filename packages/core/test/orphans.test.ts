@@ -88,8 +88,11 @@ describe('orphan sweep', () => {
   });
 
   test('a process younger than the grace is left alone', () => {
-    expect(procs.sweepOrphans(THREAD, Date.now())).toEqual([]);
-    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+    // SQLite fixture writes can take longer than the short test grace. Use the
+    // captured births so this checks age, independently of setup latency.
+    const births = procs.liveOf(THREAD).filter(record => record.pid === 103 || record.pid === 104).map(record => record.startedAt);
+    expect(procs.sweepOrphans(THREAD, Math.min(...births))).toEqual([]);
+    expect(procs.sweepOrphans(THREAD, Math.max(...births) + GRACE_MS).sort()).toEqual([103, 104]);
   });
 
   test('a parent pid taken by a younger process does not count as the parent', async () => {

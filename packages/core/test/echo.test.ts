@@ -558,16 +558,19 @@ describe('echo driver', () => {
     client.on('process.started', (record) => {
       if (record.threadId === threadId) started.push(record);
     });
-    const exited = client.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const exited = client.next('process.exited', (record) => record.threadId === threadId && record.parentPid === process.pid, 10000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
 
     await client.call('turns.start', { threadId, prompt: '[spawn:echo hello]' });
     const done = await finished;
     expect(done.status).toBe('done');
 
-    expect(started).toHaveLength(1);
-    expect(started[0]?.commandLine).toContain('echo hello');
+    const roots = started.filter(record => record.parentPid === process.pid);
+    expect(roots).toHaveLength(1);
+    const root = roots[0]!;
+    expect(root.commandLine).toContain('echo hello');
     const exitEvent = await exited;
+    expect(exitEvent.pid).toBe(root.pid);
     expect(exitEvent.exitCode).toBe(0);
 
     const thread = await client.call('threads.get', { threadId });
@@ -575,18 +578,29 @@ describe('echo driver', () => {
     const text = assistant?.parts.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
     expect(text).toContain('hello');
 
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 10000);
     const trace = await client.call('trace.get', { threadId });
-    expect(trace).toHaveLength(1);
-    expect(trace[0]?.exitCode).toBe(0);
+    // Native tracing also reports real descendants. Every captured start must
+    // have exactly one completed trace row, with the direct child identified separately.
+    const startedPids = started.map(record => record.pid).sort((a, b) => a - b);
+    expect(new Set(startedPids).size).toBe(startedPids.length);
+    expect(trace.map(record => record.pid).sort((a, b) => a - b)).toEqual(startedPids);
+    const rootTrace = trace.find(record => record.pid === root.pid)!;
+    expect(trace.filter(record => record.pid === root.pid)).toHaveLength(1);
+    for (const record of trace) {
+      expect(record.exitedAt).not.toBeNull();
+      expect(record.exitCode).toBe(0);
+      expect(record.parentPid === process.pid || startedPids.includes(record.parentPid ?? -1)).toBe(true);
+    }
     // The child wrote `hello` into a pipe, so WriteTransferCount is above zero
     // wherever Job Objects read the counters. Elsewhere the poll path measures
     // nothing and the field stays null.
     if (process.platform === 'win32') {
-      expect(trace[0]?.ioBytes).toBeGreaterThan(0);
+      expect(rootTrace.ioBytes).toBeGreaterThan(0);
     } else {
-      expect(trace[0]?.ioBytes).toBeNull();
+      expect(rootTrace.ioBytes).toBeNull();
     }
-    expect(exitEvent.ioBytes).toBe(trace[0]?.ioBytes ?? null);
+    expect(exitEvent.ioBytes).toBe(rootTrace.ioBytes);
   });
 
   test('an error directive fails the turn loudly', async () => {

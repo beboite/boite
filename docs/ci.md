@@ -85,13 +85,14 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
-Core test files run in parallel worker processes, one per CPU core by default
-(`bun test --parallel`). Each file gets a fresh global object, and the test
-harness gives every core its own temporary data directory and port, so files
-stay isolated. The whole core suite took 189 s serially and 35 s with 16
-workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
-`bun run --cwd packages/core test:serial` runs the files one after another
-when a failure needs a quiet run.
+Core test files run in fresh Bun processes, with four files at once by default.
+`BOITE_TEST_WORKERS` accepts 1 to 8; `bun run --cwd packages/core test:serial`
+runs one file at a time. Every core retains its own temporary data directory
+and port. This avoids reusing Bun's native runtime between FFI tests after a
+Windows Bun 1.4.2 worker crash and late-file timeouts observed on 2026-09-29.
+The runner prints full per-file output and fails on any nonzero exit. The old
+reused-worker runner took 189 s serially, 35 s with 16 workers and 53 s with
+4 workers on 2026-09-25; those timings do not describe the fresh-process runner.
 
 Where the time goes, from `gh run view` on the 23 finished `ci` runs before
 2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows

@@ -83,18 +83,28 @@ function pidsIn(text: string): number[] {
     .filter(pid => Number.isSafeInteger(pid) && pid > 0);
 }
 
-/** Every pid by its parent, from each process's stat line. */
-function procChildren(read: ProcRead): Map<number, number[]> {
+interface ProcSnapshot {
+  at: number;
+  children: Map<number, number[]>;
+  stats: Map<number, string>;
+  available: boolean;
+}
+
+/** Parent links and raw stat lines from the same procfs walk. */
+function scanProc(read: ProcRead): Omit<ProcSnapshot, 'at'> {
   const children = new Map<number, number[]>();
-  for (const pid of pidsIn(read('/proc') ?? '')) {
+  const stats = new Map<number, string>();
+  const directory = read('/proc');
+  for (const pid of pidsIn(directory ?? '')) {
     const stat = read(`/proc/${pid}/stat`);
+    if (stat !== null) stats.set(pid, stat);
     const parent = stat === null ? null : statField(stat, 4);
     if (parent === null) continue;
     const siblings = children.get(parent) ?? [];
     siblings.push(pid);
     children.set(parent, siblings);
   }
-  return children;
+  return { children, stats, available: directory !== null };
 }
 
 export class LinuxLoad {
@@ -102,7 +112,7 @@ export class LinuxLoad {
   /** The thread's CPU ticks at its previous sample, per pid, and when that was. */
   readonly #last = new Map<string, { ticks: Map<number, number>; at: number }>();
   /** One parent scan serves every thread sampled in the same tick. */
-  #scan: { at: number; children: Map<number, number[]> } | null = null;
+  #scan: ProcSnapshot | null = null;
 
   constructor(
     private readonly logicalCpus: number,
@@ -111,14 +121,16 @@ export class LinuxLoad {
     private readonly signal: (pid: number) => void = (pid) => { process.kill(pid, 'SIGKILL'); },
   ) {}
 
-  /**
-   * A task's children file may miss a child that another exit raced with, as
-   * proc_tid_children(5) warns, so the parent scan always adds what it saw.
-   */
-  #children(pid: number, fresh = false): number[] {
+  #snapshot(fresh = false): ProcSnapshot {
     const at = this.now();
-    if (fresh || this.#scan === null || at - this.#scan.at >= 500) this.#scan = { at, children: procChildren(this.read) };
-    const found = new Set(this.#scan.children.get(pid) ?? []);
+    if (fresh || this.#scan === null || at - this.#scan.at >= 500) this.#scan = { at, ...scanProc(this.read) };
+    return this.#scan;
+  }
+
+  /** Killing always adds each task's current children to the fresh parent scan. */
+  #children(pid: number, scan: ProcSnapshot, tasks = false): number[] {
+    const found = new Set(scan.children.get(pid) ?? []);
+    if (scan.available && !tasks) return [...found];
     for (const tid of pidsIn(this.read(`/proc/${pid}/task`) ?? String(pid))) {
       for (const child of pidsIn(this.read(`/proc/${pid}/task/${tid}/children`) ?? '')) found.add(child);
     }
@@ -131,8 +143,9 @@ export class LinuxLoad {
    * holding their memory. False when the process itself could not be signalled.
    */
   killTree(pid: number): boolean {
+    const scan = this.#snapshot(true);
     const tree = new Set([pid]);
-    for (const member of tree) for (const child of this.#children(member, member === pid)) tree.add(child);
+    for (const member of tree) for (const child of this.#children(member, scan, true)) tree.add(child);
     let stopped = false;
     for (const member of tree) {
       try {
@@ -176,19 +189,22 @@ export class LinuxLoad {
     let memoryBytes = 0;
     const workingSets: NonNullable<ProcessSample['workingSets']> = [];
     let processes = 0;
+    const scan = this.#snapshot();
     const pending = new Set(pids);
     for (const pid of pending) {
-      const stat = this.read(`/proc/${pid}/stat`);
+      const status = this.read(`/proc/${pid}/status`);
+      // A cached stat may belong to a process that has since exited. If its
+      // status vanished, confirm it still exists rather than counting stale CPU.
+      const stat = status === null ? this.read(`/proc/${pid}/stat`) : scan.stats.get(pid) ?? this.read(`/proc/${pid}/stat`);
       const used = stat === null ? null : cpuTicks(stat);
       if (used === null) continue;
       processes += 1;
       ticks.set(pid, used);
-      const status = this.read(`/proc/${pid}/status`);
       const bytes = status === null ? null : residentBytes(status);
       const exe = this.read(`/proc/${pid}/comm`)?.trim();
       if (bytes !== null) workingSets.push({ pid, bytes, ...(exe ? { exe } : {}) });
       memoryBytes += bytes ?? 0;
-      for (const child of this.#children(pid)) pending.add(child);
+      for (const child of this.#children(pid, scan)) pending.add(child);
     }
     if (processes === 0) return null;
 

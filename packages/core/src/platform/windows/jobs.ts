@@ -451,8 +451,9 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
 
   let memoryBytes = 0;
   const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
-  for (const [pid, entry] of tracked) {
-    if (entry.threadId !== threadId) continue;
+  for (const pid of job.pids) {
+    const entry = tracked.get(pid);
+    if (entry === undefined || entry.threadId !== threadId) continue;
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;

@@ -410,7 +410,7 @@ off.
 
 ```bash
 bun run check    # contracts, core, UI, end-to-end test, bench and telemetry Worker types
-bun run test     # bun test in packages/core (parallel workers), vitest in packages/ui
+bun run test     # fresh core test processes (four at once), vitest in packages/ui
 bun run build:ui # required by the core-backed browser tests on a fresh checkout
 bun run e2e      # tests/e2e
 ```
@@ -637,11 +637,17 @@ it came from, and rerun before quoting an old one.
 
 ## Architecture checks
 
-Core tests default to 15 seconds per case because scripted driver tests start
-several traced child processes. Their explicit protocol and shutdown deadlines
-still apply. Override the default with `bun run --cwd packages/core test --timeout 5000`
-when reproducing a timing failure. A slow assertion still fails; this timeout
-does not retry or skip tests.
+Core tests run each file in a fresh Bun process, with four files at once. Set
+`BOITE_TEST_WORKERS` from 1 to 8, or run `bun run --cwd packages/core test:serial`
+for one file at a time. On Windows, repeated Bun 1.4.2 parallel-worker runs
+exposed a native segmentation fault and late-file timeouts that passed in
+fresh processes. The runner preserves every file and its complete output.
+
+The default is 60 seconds per case because scripted driver tests start several
+traced child processes. Their explicit protocol and shutdown deadlines still
+apply. Override it with `bun run --cwd packages/core test --timeout 5000` when
+reproducing a timing failure. It does not retry or skip tests. For a selected
+file or test name, run `bun test` directly.
 
 `bun run check` includes `bun run check:architecture`. The architecture check
 uses Bun's parser and needs no installed workspace dependencies. CI runs it in

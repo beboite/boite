@@ -43,6 +43,33 @@ async function setup(patch: Partial<DelegationConfig> = {}) {
   return { h, owner, threadId, config, spawn };
 }
 
+test('load ticks keep team snapshots quiet while semantic changes notify every subscribed member once', async () => {
+  scripted();
+  const { h, threadId, spawn } = await setup();
+  const children = await Promise.all([spawn('one'), spawn('two'), spawn('three')]);
+  await Bun.sleep(0);
+  const changed: string[] = [];
+  const off = h.core.bus.onAny((name, payload) => {
+    if (name === 'delegation.changed') changed.push((payload as { threadId: string }).threadId);
+  });
+  try {
+    for (const child of children) {
+      const thread = h.core.threads.require(child.thread.id);
+      h.core.bus.emit('thread.updated', { ...thread, load: { processes: 8, cpuPercent: 25, memoryBytes: 100_000_000 } });
+    }
+    await Bun.sleep(0);
+    expect(changed).toEqual([]);
+    for (const child of children) {
+      const thread = { ...h.core.threads.require(child.thread.id), title: 'Updated task title' };
+      h.core.journal.putThread(thread);
+      h.core.bus.emit('thread.updated', thread);
+    }
+    await Bun.sleep(0);
+    expect(changed.sort()).toEqual([threadId, ...children.map(child => child.thread.id)].sort());
+    expect(h.core.delegation.get(threadId).agents.every(agent => agent.thread.title === 'Updated task title')).toBe(true);
+  } finally { off(); }
+});
+
 test('approved profiles launch ordinary isolated sessions in the parent checkout; spawn retries are idempotent', async () => {
   const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
   const parent = h.core.threads.require(threadId);

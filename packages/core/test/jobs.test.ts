@@ -3,7 +3,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
-import { cpuRateOfGlobalJob, memoryLimitOfJob } from '../src/platform/windows/jobs.ts';
+import { cpuRateOfGlobalJob, memoryLimitOfJob, releaseThreadJob, sampleThreadJob } from '../src/platform/windows/jobs.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { echoThread, startTestCore } from './harness.ts';
@@ -59,6 +59,28 @@ afterEach(async () => {
 });
 
 describeWindows('windows job objects', () => {
+  test('load samples only the owning thread and drops its exited and forgotten pids', async () => {
+    const procs = harness.core.procs;
+    const first = procs.spawn('sample-first', 'ping', ['-n', '30', '127.0.0.1']);
+    const second = procs.spawn('sample-second', 'ping', ['-n', '30', '127.0.0.1']);
+    await until('both sample roots to be tracked', () =>
+      sampleThreadJob('sample-first')?.workingSets?.some(row => row.pid === first.record.pid) === true
+      && sampleThreadJob('sample-second')?.workingSets?.some(row => row.pid === second.record.pid) === true, 10000);
+    expect(sampleThreadJob('sample-first')?.workingSets?.map(row => row.pid)).toEqual([first.record.pid]);
+    expect(sampleThreadJob('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
+    procs.killTree('sample-first');
+    await first.exited;
+    await until('the first root to leave the live registry', () => procs.liveCount('sample-first') === 0, 5000);
+    expect(sampleThreadJob('sample-first')?.workingSets).toEqual([]);
+    expect(sampleThreadJob('sample-first')?.memoryBytes).toBe(0);
+    expect(sampleThreadJob('sample-second')?.workingSets?.map(row => row.pid)).toEqual([second.record.pid]);
+    releaseThreadJob('sample-first');
+    expect(sampleThreadJob('sample-first')).toBeNull();
+    await procs.killAll();
+    await procs.close();
+    expect(sampleThreadJob('sample-second')).toBeNull();
+  }, 30000);
+
   test('global and thread memory limits are resolved and updated on existing jobs', async () => {
     const client = await harness.connect();
     const child = harness.core.procs.spawn('memory-cap', 'ping', ['-n', '30', '127.0.0.1']);

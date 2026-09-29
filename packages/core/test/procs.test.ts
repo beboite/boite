@@ -129,8 +129,16 @@ describe('procs', () => {
     const running = await echoThread(harness, client, 'runs a process');
     const done = await echoThread(harness, client, 'ran one, now done');
     const idle = await echoThread(harness, client, 'never ran one');
-    const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
-    await harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]).exited;
+    // Windows may also report native descendants. The retained trace must match
+    // all starts observed for this thread, including its explicitly spawned root.
+    const started = new Set<number>();
+    const off = harness.core.bus.onAny((name, payload) => {
+      if (name === 'process.started' && (payload as { threadId: string }).threadId === done.threadId) {
+        started.add((payload as { pid: number }).pid);
+      }
+    });
+    const quick = harness.core.procs.spawn(done.threadId, process.execPath, ['-e', 'process.exit(0)']);
+    await quick.exited;
     await waitFor(() => harness.core.procs.liveCount(done.threadId) === 0, 5000);
     const long = process.platform === 'win32' ? ['cmd', ['/c', 'ping -n 30 127.0.0.1 > nul']] as const : ['sleep', ['30']] as const;
     harness.core.procs.spawn(running.threadId, long[0], [...long[1]]);
@@ -149,7 +157,11 @@ describe('procs', () => {
       await harness.core.procs.stopAndWait(running.threadId);
     }
     // The trace still has what exited.
-    expect((await client.call('trace.get', { threadId: done.threadId })).length).toBe(1);
+    const trace = await client.call('trace.get', { threadId: done.threadId });
+    off();
+    expect(trace.map(record => record.pid).sort()).toEqual([...started].sort());
+    expect(trace.filter(record => record.pid === quick.record.pid)).toHaveLength(1);
+    expect(trace.every(record => record.exitedAt !== null)).toBe(true);
     expect(await client.call('resources.list', {})).toEqual([]);
   }, 20000);
 

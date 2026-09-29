@@ -34,6 +34,42 @@ afterEach(() => {
 });
 
 describe('journal streaming', () => {
+  test('reading one thread returns current parts without writing any streaming rows', () => {
+    journal.putMessage(streaming('msg_read', 'trn_read'));
+    journal.putMessage({ ...streaming('msg_other', 'trn_other'), threadId: 'thr_other' });
+    journal.putMessage({ ...streaming('msg_user', 'trn_read'), role: 'user', state: 'complete', parts: [{ type: 'text', text: 'request' }] });
+    let current = 'current';
+    const rowid = journal.messageRowid('thr_test', 'msg_read')!;
+    const readers = [
+      () => journal.getMessage('msg_read'),
+      () => journal.listMessages('thr_test')[0],
+      () => journal.listMessagePage('thr_test', { limit: 10 }).messages[0],
+      () => journal.listMessagesFrom('thr_test', rowid, 10)?.[0],
+      () => [...journal.walkMessages('thr_test')][0],
+      () => [...journal.walkTurnMessages('thr_test', 'trn_read')][0],
+    ];
+    const read = (): void => {
+      for (const reader of readers) {
+        journal.appendDelta('thr_test', 'msg_read', 0, ' next');
+        current += ' next';
+        expect(reader()?.parts).toEqual([{ type: 'text', text: current }]);
+      }
+      expect(journal.lastUserMessage('thr_test', 'trn_read')?.parts).toEqual([{ type: 'text', text: 'request' }]);
+      expect(journal.messageIdsFrom('thr_test', rowid).messageIds).toEqual(['msg_read', 'msg_user']);
+    };
+    journal.appendDelta('thr_test', 'msg_read', 0, 'current');
+    journal.appendDelta('thr_other', 'msg_other', 0, 'unrelated');
+    read();
+    expect(storedParts('msg_read')).toEqual([]);
+    expect(storedParts('msg_other')).toEqual([]);
+    // Read overlays cannot consume dirty state, even under an aborted transaction.
+    expect(() => journal.db.transaction(() => { read(); throw new Error('conflict'); })()).toThrow('conflict');
+    journal.close();
+    journal = new Journal(file);
+    expect(storedParts('msg_read')).toEqual([{ type: 'text', text: current }]);
+    expect(storedParts('msg_other')).toEqual([{ type: 'text', text: 'unrelated' }]);
+  });
+
   test('a delta flush costs the same on a 2 MB message as on an empty one', () => {
     journal.putMessage(streaming('msg_big'));
     let index = 0;
@@ -62,7 +98,8 @@ describe('journal streaming', () => {
     const page = journal.listMessagePage('thr_test', { limit: 10 }).messages;
     expect(page[0]?.parts.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
     expect(page[0]?.parts[2]).toEqual({ type: 'text', text: 'after' });
-    // The row itself caught up, so raw SQL readers see it too.
+    // Explicit persistence also makes the current parts available to raw SQL readers.
+    journal.persistMessages();
     expect(storedParts('msg_live').length).toBe(3);
   });
 

@@ -4,6 +4,43 @@ What boite does to stay cheap on a slow link and quick to start, how each part
 is measured, and the numbers of the last run. A claim about speed or size needs
 a fresh run of the bench that covers it, with the command and the date.
 
+## Concurrent-agent resource use
+
+The [2026-09-29 audit](../bench/results/2026-09-29-resources.md) compares the
+streaming journal, team refreshes, process sampling and idle core against
+`606bc56d`. On the tested Linux workloads, journal CPU fell 95.6% and sampled
+peak RSS fell 60.6%; sampling 64 processes used 60.8% less CPU. The idle core
+stayed at about 61 MiB and 0.7% of one CPU core. These are scoped measurements,
+not a 30% to 50% reduction in the whole application or its provider processes.
+
+Message reads overlay current buffered parts only for the selected rows. They
+leave the adaptive persistence timer alone instead of rewriting every dirty
+stream. Completion, explicit persistence and shutdown still write all pending
+text. Load-only thread updates patch team rows without invalidating their
+history. Semantic changes coalesce per team, and the client permits one active
+refresh plus one pending refresh. Navigation and client identity isolate old
+responses.
+
+Linux sampling shares stat lines and parent links across threads for 500 ms.
+Ordinary samples avoid each process's task directories when the global procfs
+scan is available. Killing a tree still takes a fresh scan and reads task
+children. Windows samples the PIDs already assigned to each job rather than
+filtering the global tracked-process map. Process history has an index on
+`(thread_id, started_at DESC)`.
+
+The offline benchmarks use fresh temporary journals and no provider login:
+
+```sh
+bun bench/streaming-load.ts 128 32
+bun bench/delegation-load.ts 8 16
+bun bench/process-load.ts
+bun bench/process-load.ts --live --roots 64 # Linux procfs; sleeping fixtures
+bun bench/core-idle.ts 10
+```
+
+The audit records samples, workload limits and remaining candidates, including
+queue admission, WebSocket fan-out and retained tool bodies in the browser.
+
 ## Naming a long conversation
 
 `bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text
