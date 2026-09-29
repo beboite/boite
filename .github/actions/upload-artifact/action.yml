@@ -1,0 +1,49 @@
+name: Upload artifact with retry
+description: Retry one failed upload without rebuilding or rerunning tests.
+inputs:
+  name:
+    description: Artifact name, unique within the workflow run.
+    required: true
+  path:
+    description: Files or directories to upload.
+    required: true
+  if-no-files-found:
+    description: Behavior when no files match.
+    default: warn
+  compression-level:
+    description: ZIP compression level.
+    default: '6'
+  retention-days:
+    description: Days to retain the artifact.
+    default: '7'
+  include-hidden-files:
+    description: Include hidden files in the upload.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Upload artifact
+      id: upload
+      # The caller may be collecting captures after a failed or cancelled job.
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+        retention-days: ${{ inputs.retention-days }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
+    - name: Retry failed artifact upload
+      if: ${{ !cancelled() && steps.upload.outcome == 'failure' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+        retention-days: ${{ inputs.retention-days }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
+        # A failed finalization can leave the same name reserved on the service.
+        overwrite: true
