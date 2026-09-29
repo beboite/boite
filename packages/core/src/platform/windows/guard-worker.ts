@@ -18,7 +18,8 @@
  */
 import { dlopen, FFIType, JSCallback, ptr } from 'bun:ffi';
 import { coInitialize, coUninitialize, openSessions } from './audio-sessions.ts';
-import type { AudioSession, AudioSessions } from './audio-sessions.ts';
+import type { AudioSession } from './audio-sessions.ts';
+import { AudioEndpoint } from './audio-endpoint.ts';
 import { GuardLogic } from './guard-logic.ts';
 import type { ForegroundPushed, GuardWin32 } from './guard-logic.ts';
 import { MuteLogic } from './mute-logic.ts';
@@ -44,7 +45,10 @@ export type GuardWorkerCommand =
 export type GuardWorkerMessage =
   /** `hook` is the `HWINEVENTHOOK` in decimal, never "0" once the hook is in. */
   | { kind: 'ready'; hook: string }
+  /** Nothing native can run: the Worker does nothing more and waits to be stopped. */
   | { kind: 'failed'; reason: string }
+  /** The focus hook was refused; the pump and the audio mute run without it. */
+  | { kind: 'hook-failed'; reason: string }
   | { kind: 'stopped' }
   | ForegroundPushed
   | MuteEvent;
@@ -143,40 +147,20 @@ function nativeWin32(u32: User32, k32: Kernel32): GuardWin32 {
 let logic: GuardLogic | null = null;
 let mute: MuteLogic | null = null;
 /**
- * The endpoint's session manager, opened on the first walk and reopened after a
- * failure: a default device that changes invalidates the one that was held.
+ * The default render endpoint, opened on the first walk and reopened after a
+ * failure, after the user switched output device, and every half minute on a
+ * machine that had none. A walk that throws is what puts the reason in a single
+ * `audio-failed`.
  */
-let endpoint: AudioSessions | null = null;
-/** True once this machine has answered that it has no render endpoint at all. */
-let noEndpoint = false;
+const endpoint = new AudioEndpoint(openSessions);
+/** True once COM refused this thread: the audio half stays off for the Worker's life. */
+let comFailed = false;
 /** True between a `CoInitializeEx` that took and its matching `CoUninitialize`. */
 let comReady = false;
 
-/**
- * One walk of the endpoint's sessions, opening it if this is the first. A
- * machine with no render endpoint turns the audio half off for the Worker's
- * life, and the throw is what puts the reason in a single `audio-failed`.
- */
-function listSessions(): AudioSession[] {
-  if (endpoint === null) {
-    const opened = openSessions();
-    if (opened === null) {
-      noEndpoint = true;
-      mute?.setEnabled(false);
-      throw new Error('this machine has no default audio render endpoint');
-    }
-    endpoint = opened;
-  }
-  try {
-    return endpoint.list();
-  } catch (error) {
-    // The device is gone or COM refused: drop it so the next walk opens a fresh one.
-    endpoint.release();
-    endpoint = null;
-    throw error;
-  }
+function listSessions(skipped: (message: string) => void): AudioSession[] {
+  return endpoint.list(skipped);
 }
-
 scope.onmessage = (event: { data: unknown }): void => {
   const command = event.data as GuardWorkerCommand;
   if (command.kind !== 'start') {
@@ -212,27 +196,29 @@ scope.onmessage = (event: { data: unknown }): void => {
     },
   );
 
+  // A refused hook turns the focus half off, not the audio one: a core with no
+  // interactive desktop still mutes what its agents play.
+  let hook = 0n;
   if (callback.ptr === null) {
     callback.close();
-    send({ kind: 'failed', reason: 'the WinEventProc callback has no pointer' });
-    return;
+    send({ kind: 'hook-failed', reason: 'the WinEventProc callback has no pointer' });
+  } else {
+    hook = u32.SetWinEventHook(
+      EVENT_SYSTEM_FOREGROUND,
+      EVENT_SYSTEM_FOREGROUND,
+      0n,
+      callback.ptr,
+      0,
+      0,
+      WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+    );
+    if (hook === 0n) {
+      callback.close();
+      send({ kind: 'hook-failed', reason: 'SetWinEventHook returned no hook' });
+    } else {
+      send({ kind: 'ready', hook: hook.toString() });
+    }
   }
-
-  const hook = u32.SetWinEventHook(
-    EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_FOREGROUND,
-    0n,
-    callback.ptr,
-    0,
-    0,
-    WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
-  );
-  if (hook === 0n) {
-    callback.close();
-    send({ kind: 'failed', reason: 'SetWinEventHook returned no hook' });
-    return;
-  }
-  send({ kind: 'ready', hook: hook.toString() });
 
   // COM comes after the hook, on this same thread: the apartment is the
   // message-pumping one, and only outgoing calls are ever made from it.
@@ -243,7 +229,7 @@ scope.onmessage = (event: { data: unknown }): void => {
     comReady = true;
   } catch (error) {
     audio.setEnabled(false);
-    noEndpoint = true;
+    comFailed = true;
     send({ kind: 'audio-failed', message: error instanceof Error ? error.message : String(error) });
   }
 
@@ -259,8 +245,10 @@ scope.onmessage = (event: { data: unknown }): void => {
   let nextWalk = 0;
   const tick = (): void => {
     if (Atomics.load(stop, 0) !== 0) {
-      u32.UnhookWinEvent(hook);
-      callback.close();
+      if (hook !== 0n) {
+        u32.UnhookWinEvent(hook);
+        callback.close();
+      }
       logic = null;
       shutDownAudio(audio);
       send({ kind: 'stopped' });
@@ -289,8 +277,7 @@ scope.onmessage = (event: { data: unknown }): void => {
 function shutDownAudio(audio: MuteLogic): void {
   audio.releaseAll();
   mute = null;
-  endpoint?.release();
-  endpoint = null;
+  endpoint.release();
   if (!comReady) return;
   comReady = false;
   try {
@@ -313,8 +300,8 @@ function onCommand(command: Exclude<GuardWorkerCommand, GuardWorkerStart>): void
       break;
     case 'set':
       logic.setEnabled(command.enabled);
-      // A machine that answered it has no endpoint stays off whatever the user asks.
-      if (!noEndpoint) mute?.setEnabled(command.mute);
+      // A thread COM refused stays off whatever the user asks.
+      if (!comFailed) mute?.setEnabled(command.mute);
       break;
     default:
       return;

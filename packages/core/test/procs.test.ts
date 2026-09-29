@@ -8,6 +8,16 @@ const TREE_SIZE = process.platform === 'win32' ? 2 : 1;
 
 let harness: TestCore;
 
+/** Signal 0 checks that a pid exists without touching it. */
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 beforeEach(async () => {
   harness = await startTestCore();
 });
@@ -90,6 +100,58 @@ describe('procs', () => {
     await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
     expect(registry.forgetTimers.has(threadId)).toBe(true);
   }, 15000);
+
+  test.skipIf(process.platform === 'win32')('off Windows killTree reaches what the child started', async () => {
+    const threadId = 'posix-group';
+    // The shell prints the pid of its background sleep, then waits on it.
+    const spawned = harness.core.procs.spawn(threadId, 'sh', ['-c', 'sleep 30 & echo $!; wait']);
+    const reader = spawned.proc.stdout.getReader();
+    const { value } = await reader.read();
+    const grandchild = Number(new TextDecoder().decode(value).trim());
+    expect(grandchild).toBeGreaterThan(0);
+
+    expect(harness.core.procs.killTree(threadId)).toBe(1);
+    await spawned.exited;
+    await waitFor(() => !isRunning(grandchild), 5000);
+  }, 15000);
+
+  test.skipIf(process.platform === 'win32')('off Windows a child that ignores SIGTERM still lets its thread stop', async () => {
+    const threadId = 'posix-stubborn';
+    const spawned = harness.core.procs.spawn(threadId, 'sh', ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done']);
+    await spawned.proc.stdout.getReader().read();
+    const started = Date.now();
+    await harness.core.procs.stopAndWait(threadId);
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 15000);
+
+  test('resources.list carries only the threads running something now, archived or not', async () => {
+    const client = await harness.connect();
+    const running = await echoThread(harness, client, 'runs a process');
+    const done = await echoThread(harness, client, 'ran one, now done');
+    const idle = await echoThread(harness, client, 'never ran one');
+    const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
+    await harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]).exited;
+    await waitFor(() => harness.core.procs.liveCount(done.threadId) === 0, 5000);
+    const long = process.platform === 'win32' ? ['cmd', ['/c', 'ping -n 30 127.0.0.1 > nul']] as const : ['sleep', ['30']] as const;
+    harness.core.procs.spawn(running.threadId, long[0], [...long[1]]);
+    await waitFor(() => harness.core.procs.liveCount(running.threadId) > 0, 5000);
+    await client.call('threads.archive', { threadId: running.threadId, archived: true });
+
+    try {
+      const resources = await client.call('resources.list', {});
+      expect(resources.map((entry) => entry.threadId)).toEqual([running.threadId]);
+      const [mine] = resources;
+      expect(mine?.title).toBe('runs a process');
+      expect(mine?.live.length).toBeGreaterThan(0);
+      expect(mine?.live.every((record) => record.exitedAt === null)).toBe(true);
+      expect(mine?.load.processes).toBe(mine?.live.length);
+    } finally {
+      await harness.core.procs.stopAndWait(running.threadId);
+    }
+    // The trace still has what exited.
+    expect((await client.call('trace.get', { threadId: done.threadId })).length).toBe(1);
+    expect(await client.call('resources.list', {})).toEqual([]);
+  }, 20000);
 
   test('the trace capability says what it can promise on this OS', async () => {
     const client = await harness.connect();

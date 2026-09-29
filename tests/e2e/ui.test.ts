@@ -8,12 +8,12 @@ import { claudeProjectFolder } from '../../packages/core/src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from '../../packages/core/test/fixtures/claude-session.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
+import { developmentMarkers, ensureProductionUi } from './lib/prod-ui.ts';
 
 const TIMEOUT = 60_000;
 /** The reconnect has its own budget: a backoff that needs a minute is a bug. */
 const RECONNECT_TIMEOUT_MS = 30_000;
 const ROOT = join(import.meta.dir, '..', '..');
-const UI_INDEX = join(ROOT, 'packages', 'ui', 'dist', 'index.html');
 const SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui.png');
 const RELOAD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-permission-reload.png');
 const TOOL_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-tool-input.png');
@@ -29,15 +29,15 @@ const KEYBOARD_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-keyboard.png
 const RETITLE_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-retitle.png');
 const IMPORT_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-import.png');
 const EXPERIMENTS_SCREENSHOT = join(import.meta.dir, '.artifacts', 'ui-experiments.png');
-/** The one name `public/sw.js` opens; every other cache is deleted on activate. */
-const UI_CACHE = 'boite-ui-v3';
+/** The cache `public/sw.js` opens, before the build appends its id; every other cache is deleted on activate. */
+const UI_CACHE_PREFIX = 'boite-ui-v3-';
 /** What the echo provider's `[tool-stream]` directive types, one piece at a time. */
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
 let core: RunningCore;
 let page: BrowserPage;
 let projectDir: string;
-/** Where the core puts the project's worktrees: beside it, under `.boite-worktrees`. */
+/** Where the core puts the project's worktrees: inside `.boite/worktrees`. */
 let worktreesDir: string;
 
 function testid(id: string): string {
@@ -56,20 +56,10 @@ async function clickWhenEnabled(selector: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  if (process.env.BOITE_E2E_PREBUILT_UI !== '1') {
-    const built = Bun.spawnSync({
-      cmd: ['bun', 'run', '--cwd', 'packages/ui', 'build'],
-      cwd: ROOT,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      windowsHide: true,
-    });
-    if (!built.success) throw new Error(`the ui did not build:\n${built.stderr.toString()}`);
-  }
-  if (!existsSync(UI_INDEX)) throw new Error(`Missing prebuilt UI: ${UI_INDEX}. Run bun run build:ui first.`);
+  ensureProductionUi();
   core = await startCore();
   projectDir = mkdtempSync(join(tmpdir(), 'boite-e2e-ui-'));
-  worktreesDir = join(tmpdir(), '.boite-worktrees', basename(projectDir));
+  worktreesDir = join(projectDir, '.boite', 'worktrees');
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
 }, TIMEOUT);
 
@@ -80,11 +70,20 @@ afterAll(async () => {
   if (worktreesDir !== undefined) await removeDirectory(worktreesDir);
 }, 15_000);
 
+test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
+  const index = await (await fetch(`${core.url}/`)).text();
+  const scripts = [...index.matchAll(/src="(?:\.\/|\/)(assets\/[^"]+\.js)"/g)].map((match) => match[1] ?? '');
+  expect(scripts.length).toBeGreaterThan(0);
+  const files = await Promise.all(scripts.map(async (name) => ({ name, text: await (await fetch(`${core.url}/${name}`)).text() })));
+  expect(developmentMarkers(files)).toEqual([]);
+});
+
 test(
-  'a fresh core opens on the first-run card, connected to the core it was paired with',
+  'a fresh core opens on a draft in the drafts, connected to the core it was paired with',
   async () => {
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('first-run')}')`);
+    await page.waitFor(`document.querySelector('${testid('draft-open-folder')}')`);
+    expect(await page.evaluate<string>(`document.querySelector('${testid('draft-project')}').textContent`)).toContain('Drafts');
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`);
   },
   TIMEOUT,
@@ -130,16 +129,23 @@ test(
       `document.querySelector('${testid('permission-card')}').dataset.decision === 'allow'`,
       30_000,
     );
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
     expect(assistant).toContain('browser thread');
     expect(assistant).toContain('allowed');
 
-    // The context meter the echo agent reported at the end of the turn: the
-    // prompt's characters over a floor of 100, on a window of 2000.
-    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '6'`);
-    expect((await page.text(testid('context-meter'))).trim()).toBe('6%');
+    // Session guidance contributes to context too; compare the UI with the core's report.
+    const client = await connect(core.url, core.token);
+    let percent: number;
+    try {
+      const [thread] = await client.call('threads.list', {});
+      expect(thread?.context?.tokens).toBeGreaterThan(0);
+      expect(thread?.context?.window).toBeGreaterThan(0);
+      percent = Math.round(thread!.context!.tokens / thread!.context!.window! * 100);
+    } finally { client.close(); }
+    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '${percent}'`);
+    expect((await page.text(testid('context-trigger'))).trim()).toBe('');
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
@@ -202,6 +208,8 @@ test(
     const openProjectMenu = `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`;
     await page.evaluate<null>(openProjectMenu);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=copy]')`);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=back]')`);
     expect(await page.evaluate<boolean>(`document.querySelector('${testid('context-menu')} [data-value=import]') === null`)).toBe(true);
     await page.evaluate<null>(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return null; })()`);
     await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
@@ -215,6 +223,7 @@ test(
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
 
     await page.evaluate<null>(openProjectMenu);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=import]')`);
     await page.click(`${testid('context-menu')} [data-value=import]`);
     await page.waitFor(`document.querySelectorAll('${testid('import-row')}').length === 1`);
@@ -244,7 +253,7 @@ test(
       `(() => { Array.from(document.querySelectorAll('${testid('thread-row')}')).find((row) => row.textContent.includes('Echo: browser thread')).click(); return null; })()`,
     );
     await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`);
   },
   TIMEOUT,
 );
@@ -269,7 +278,7 @@ test(
     await page.type(testid('composer-input'), 'now [tool-stream] please');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`document.querySelector('${testid('tool-card')}')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
     await page.evaluate<null>(`(() => { clearInterval(window.__toolTimer); return null; })()`);
 
     const samples = await page.evaluate<string[]>('window.__toolSamples');
@@ -284,7 +293,7 @@ test(
       'false',
     );
     expect(await page.evaluate<string>(`document.querySelector('${testid('tool-card')} .line').textContent`)).toBe(
-      'echo streamed',
+      'Ran 1 command',
     );
     await page.click(testid('tool-toggle'));
     await page.waitFor(`document.querySelector('${testid('tool-input')}')`);
@@ -301,14 +310,11 @@ test(
   async () => {
     await page.type(testid('composer-input'), 'now [diff] please');
     await clickWhenEnabled(testid('composer-send'));
-    await page.waitFor(`document.querySelector('${testid('tool-document-chip')}')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('tool-diff-counts')}')`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
-    // The folded card says what it carries, and only opening it draws the diff.
-    expect(await page.text(testid('tool-document-chip'))).toBe('1 diff');
-    await page.click(
-      `${testid('tool-card')}:has(${testid('tool-document-chip')}) ${testid('tool-toggle')}`,
-    );
+    // The edit's line counts what it changed, and its diff is drawn open under it.
+    expect((await page.text(testid('tool-diff-counts'))).replace(/\s+/g, ' ').trim()).toBe('+2 -1');
     await page.waitFor(`document.querySelector('${testid('tool-document')}[data-kind=diff]')`);
 
     const gutters = await page.evaluate<string[]>(
@@ -356,7 +362,7 @@ test(
       30_000,
     );
     expect(await page.text(testid('question-answer'))).toBe('Short: one line please');
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     const assistant = await page.evaluate<string>(ASSISTANT_TEXT);
     expect(assistant).toContain('answered short one line please');
@@ -398,7 +404,7 @@ test(
     await page.type(testid('composer-input'), 'what is this square');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('what is this square')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
 
     // The strip is empty again, the echo names the image it was given, and the
     // user bubble carries the thumbnail as a part of the journalled message.
@@ -429,7 +435,7 @@ test(
     expect(names.length).toBeGreaterThan(2);
     await page.screenshot(SLASH_SCREENSHOT);
 
-    await page.type(testid('composer-input'), '/sh');
+    await page.type(testid('composer-input'), '/sho');
     await page.waitFor(`document.querySelectorAll('${testid('slash-row')}').length === 1`, 10_000);
     await page.evaluate<null>(
       `(() => {
@@ -444,7 +450,7 @@ test(
     await page.type(testid('composer-input'), '/shout the square again');
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('THE SQUARE AGAIN')`, 30_000);
-    await page.waitFor(`document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`, 30_000);
+    await page.waitFor(`document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`, 30_000);
   },
   TIMEOUT,
 );
@@ -605,10 +611,13 @@ test(
   'settings show the core the UI is connected to',
   async () => {
     await page.click(testid('nav-settings'));
-    await page.waitFor(`document.querySelector('${testid('settings-page')}')`);
+    await page.waitFor(`document.querySelector('${testid('settings-home')}')`);
+    // The core the UI talks to sits under Advanced, with the rest a developer reads.
+    await page.click(testid('settings-tab-advanced'));
+    await page.waitFor(`document.querySelector('${testid('settings-endpoint')}')`);
     expect(await page.evaluate<string>(textOf('settings-endpoint'))).toBe(`127.0.0.1:${core.port}`);
     expect(await page.evaluate<string>(textOf('settings-version'))).toBe(corePackage.version);
-    await page.click(testid('settings-machines'));
+    await page.click(testid('settings-tab-machines'));
     await page.waitFor(`document.querySelector('${testid('machine-card')}')`);
     expect(await page.evaluate<string>(textOf('machine-card'))).toContain(core.url);
 
@@ -693,7 +702,7 @@ test(
       expect(stored.token).not.toBe(core.token);
       expect(await phone.evaluate<string>('location.search')).toBe('');
       await phone.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
-      await phone.click('[data-testid=mobile-tabs] button:nth-child(3)');
+      await phone.click('[data-testid=mobile-settings]');
       await phone.click('[data-testid=mobile-settings-phone]');
       await phone.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
       expect(await phone.evaluate(`document.querySelector('[data-testid=phone-public-url]') === null`)).toBe(true);
@@ -701,7 +710,7 @@ test(
       await phone.waitFor(`Array.from(document.querySelectorAll('[data-testid=phone-settings] button')).some(button => button.textContent.includes('Enable notifications') && !button.disabled)`);
       await phone.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))])`);
       await phone.screenshot(join(import.meta.dir, '.artifacts', 'mobile-paired-settings.png'));
-      await phone.click('[data-testid=mobile-tabs] button:nth-child(1)');
+      await phone.click('[data-testid=mobile-conversations]');
       await phone.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`);
 
       // Same link again: refused, and the page says so instead of retrying forever.
@@ -715,6 +724,7 @@ test(
 
       // The desktop lists the phone and revokes it; the phone's socket closes and its key is dead.
       await page.click(testid('nav-settings'));
+      await page.click(testid('settings-tab-machines'));
       await page.waitFor(`document.querySelector('${testid('paired-devices')} li[data-session-id]')`, 30_000);
       const client = await connect(core.url, core.token);
       try {
@@ -772,7 +782,7 @@ test(
     await clickWhenEnabled(testid('composer-send'));
     await page.waitFor(`${ASSISTANT_TEXT}.includes('after the restart')`, RECONNECT_TIMEOUT_MS);
     await page.waitFor(
-      `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,
+      `document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`,
       RECONNECT_TIMEOUT_MS,
     );
   },
@@ -786,7 +796,7 @@ test('inline code stays literal at desktop and phone widths', async () => {
   await clickWhenEnabled(testid('composer-send'));
   const codes = `Array.from(document.querySelectorAll('[data-role=assistant] [data-testid=text-part] code'))`;
   await page.waitFor(`${codes}.some(node => node.textContent === '**literal**')`);
-  await page.waitFor(`document.querySelector('[data-testid=thread-status]').dataset.status === 'idle'`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-header][data-status]').dataset.status === 'idle'`);
   expect(await page.evaluate<boolean>(`${codes}.some(node => node.querySelector('strong, a'))`)).toBe(false);
   expect(await page.evaluate<boolean>(`${codes}.some(node => node.textContent === '[link](https://example.com)')`)).toBe(true);
   try {
@@ -807,14 +817,17 @@ test(
     // controlling this page long before the suite reaches this test.
     await page.waitFor('navigator.serviceWorker.controller !== null', RECONNECT_TIMEOUT_MS);
     await page.evaluate<null>('navigator.serviceWorker.ready.then(() => null)');
-    expect(await page.evaluate<string[]>('caches.keys()')).toEqual([UI_CACHE]);
+    const cacheNames = await page.evaluate<string[]>('caches.keys()');
+    expect(cacheNames).toHaveLength(1);
+    expect(cacheNames[0]!.startsWith(UI_CACHE_PREFIX)).toBe(true);
+    const uiCache = cacheNames[0]!;
 
     // The hashed files of the first load were fetched before the worker took
     // control, so they only reach the cache on the load after it: which is
     // exactly the phone that opens Boite a second time.
     await page.navigate(`${core.url}/`);
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, RECONNECT_TIMEOUT_MS);
-    const cachedPaths = `caches.open(${JSON.stringify(UI_CACHE)})
+    const cachedPaths = `caches.open(${JSON.stringify(uiCache)})
       .then((cache) => cache.keys())
       .then((keys) => keys.map((request) => new URL(request.url).pathname))`;
     await page.waitFor(`${cachedPaths}.then((paths) => paths.some((path) => path.startsWith('/assets/')))`, 30_000);
@@ -832,10 +845,10 @@ test(
     await page.waitFor(`document.querySelector('${testid('sidebar')}')`, RECONNECT_TIMEOUT_MS);
     expect(await page.evaluate<string>('document.title')).toBe('Boite');
     // The threads are the core's, so with no answer the shell opens on its
-    // first-run card: the point is that it is the app drawing it, not Chromium.
+    // empty chat: the point is that it is the app drawing it, not Chromium.
     expect(
       await page.evaluate<boolean>(
-        `!!document.querySelector('${testid('first-run')}') || !!document.querySelector('${testid('chat')}')`,
+        `!!document.querySelector('${testid('no-thread')}') || !!document.querySelector('${testid('chat')}')`,
       ),
     ).toBe(true);
     const offline = await page.evaluate<string>(`document.querySelector('[data-testid=status-connection]').dataset.state`);

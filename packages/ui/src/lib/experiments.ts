@@ -11,15 +11,18 @@
  * other way, `theme.ts` asks here whether `theme-grain` is on and subscribes so
  * a switch flipped on the Experiments page repaints without a reload, and the
  * sidebar, the palette and the store ask `experiments.svelte.ts` whether
- * `session-import` is on before showing or running the import.
+ * `session-import` is on before showing or running the import, and the
+ * context meter asks the same of `prompt-cache` before drawing its timer. The
+ * sidebar, the phone's tab bar and the store ask `resident-agents` before
+ * offering the Agents page.
  */
 
-export type ExperimentId = 'theme-grain' | 'session-import';
+export type ExperimentId = 'theme-grain' | 'session-import' | 'prompt-cache' | 'chat-artifacts' | 'preview-comments' | 'resident-agents';
 
 export const EXPERIMENTS_STORAGE_KEY = 'boite.experiments';
 
 /** Every experiment this build ships, in the order the page lists them. */
-export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import'];
+export const EXPERIMENT_IDS: ExperimentId[] = ['theme-grain', 'session-import', 'prompt-cache', 'chat-artifacts', 'preview-comments', 'resident-agents'];
 
 type Listener = (enabled: ExperimentId[]) => void;
 

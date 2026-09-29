@@ -8,11 +8,15 @@ export function visibleUserText(text: string): string {
 
 /** Hide protocol-only lines, including a marker that is still streaming. */
 export function visibleAnswer(text: string): string {
-  const tail = /(?:^|\n)([\t ]*\[BOITE[^\r\n]*?)[\t ]*(?:\r?\n[\t ]*)*$/.exec(text);
+  // Only the last line that is not blank can hold the marker, so the regex reads
+  // from the break before it rather than trying every offset of the answer.
+  const from = Math.max(0, text.trimEnd().lastIndexOf('\n'));
+  const tail = /(?:^|\n)([\t ]*\[BOITE[^\r\n]*?)[\t ]*(?:\r?\n[\t ]*)*$/.exec(text.slice(from));
   if (!tail) return text;
   const marker = tail[1]!.trim();
   if (!['[BOITE_GOAL_COMPLETE]', '[BOITE_GOAL_BLOCKED]'].some(value => value.startsWith(marker))) return text;
-  const start = tail.index + (text[tail.index] === '\n' ? 1 : 0);
+  const index = from + tail.index;
+  const start = index + (text[index] === '\n' ? 1 : 0);
   // A terminal marker inside an unfinished fenced example is still answer content.
   let fence: string | null = null;
   for (const line of text.slice(0, start).split('\n')) {
@@ -33,6 +37,63 @@ export function promptText(part: Extract<MessagePart, { type: 'text' }>): string
   return part.displayText ?? visibleUserText(part.text);
 }
 
+export interface PromptSegment {
+  text: string;
+  kind: 'plain' | 'command' | 'ultrathink' | 'ultracode';
+}
+
+/**
+ * The words Claude Code acts on anywhere in a prompt: `ultrathink` asks for the
+ * deepest thinking on that turn, `ultracode` opts the turn into the Workflow
+ * tool. Other harnesses read them as plain words.
+ */
+const PROMPT_KEYWORDS = /\b(ultrathink|ultracode)\b/gi;
+
+/**
+ * Whether the keywords do anything: Claude Code has to run the turn, and on a
+ * Claude model. A `claude-sdk` descriptor routed to another model, or a Claude
+ * model behind another harness, reads them as plain words. No model is the
+ * CLI's own default, a Claude one.
+ */
+export function claudeKeywords(protocol: string | undefined, model: string | null | undefined): boolean {
+  if (protocol !== 'claude-sdk') return false;
+  return model == null || /^(claude|opus|sonnet|haiku|fable|default)(?![a-z0-9])/i.test(model);
+}
+
+/** A prompt cut where it is drawn differently: the command it opens with, then each keyword. */
+export function promptSegments(text: string, command: string | undefined, keywords: boolean): PromptSegment[] {
+  const segments: PromptSegment[] = [];
+  const start = command && text.startsWith(command) ? command.length : 0;
+  if (start > 0) segments.push({ text: command!, kind: 'command' });
+  let at = start;
+  if (keywords) {
+    for (const match of text.slice(start).matchAll(PROMPT_KEYWORDS)) {
+      const index = start + match.index;
+      if (index > at) segments.push({ text: text.slice(at, index), kind: 'plain' });
+      segments.push({ text: match[0], kind: match[0].toLowerCase() as 'ultrathink' | 'ultracode' });
+      at = index + match[0].length;
+    }
+  }
+  if (at < text.length) segments.push({ text: text.slice(at), kind: 'plain' });
+  return segments;
+}
+
+/**
+ * The segments that fall in `[start, end)` of the prompt they were cut from, so
+ * a piece of the prompt keeps the keyword boundaries of the whole.
+ */
+export function sliceSegments(segments: PromptSegment[], start: number, end: number): PromptSegment[] {
+  const slice: PromptSegment[] = [];
+  let at = 0;
+  for (const segment of segments) {
+    const from = Math.max(at, start);
+    const to = Math.min(at + segment.text.length, end);
+    if (from < to) slice.push({ text: segment.text.slice(from - at, to - at), kind: segment.kind });
+    at += segment.text.length;
+  }
+  return slice;
+}
+
 /** The Boite command a prompt opens with, drawn in the accent wherever the prompt is shown. */
 export function promptCommand(text: string): string | undefined {
   return /^\/(goal|loop)(?=\s|$)/.exec(text)?.[0];
@@ -44,26 +105,54 @@ export function answerText(text: string, _live: boolean): string {
 
 /** Only complete paragraphs and fenced blocks enter the timeline while streaming. */
 export function paragraphBlocks(text: string, live: boolean): string[] {
-  const blocks: string[] = [];
-  let start = 0;
-  let offset = 0;
-  let fence = '';
-  for (const line of text.split(/(?<=\n)/)) {
-    const trimmed = line.trim();
-    const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
-    if (marker) {
-      if (!fence) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length && trimmed === marker) fence = '';
+  return new ParagraphScan().blocks(text, live);
+}
+
+/**
+ * paragraphBlocks for a text that grows: a new text that extends the last one
+ * resumes at the last complete line, so a delta reads only its own lines. The
+ * same array comes back until a paragraph completes. Only complete lines are
+ * read, because an unfinished line can open a fence but never close a block.
+ */
+export class ParagraphScan {
+  #read = '';
+  #start = 0;
+  #fence = '';
+  #done: string[] = [];
+  #tail = '';
+  #result: string[] | null = null;
+
+  blocks(text: string, live: boolean): string[] {
+    if (!text.startsWith(this.#read)) {
+      this.#read = '';
+      this.#start = 0;
+      this.#fence = '';
+      this.#done = [];
+      this.#result = null;
     }
-    offset += line.length;
-    if (!fence && !trimmed && line.endsWith('\n')) {
-      const block = text.slice(start, offset).trim();
-      if (block) blocks.push(block);
-      start = offset;
+    let offset = this.#read.length;
+    let grew = false;
+    for (let end = text.indexOf('\n', offset); end !== -1; end = text.indexOf('\n', offset)) {
+      const trimmed = text.slice(offset, end + 1).trim();
+      offset = end + 1;
+      const marker = /^(?:`{3,}|~{3,})/.exec(trimmed)?.[0];
+      if (marker) {
+        if (!this.#fence) this.#fence = marker;
+        else if (marker[0] === this.#fence[0] && marker.length >= this.#fence.length && trimmed === marker) this.#fence = '';
+      }
+      if (!this.#fence && !trimmed) {
+        const block = text.slice(this.#start, offset).trim();
+        if (block) { this.#done.push(block); grew = true; }
+        this.#start = offset;
+      }
     }
+    this.#read = text.slice(0, offset);
+    const tail = live ? '' : text.slice(this.#start).trim();
+    if (this.#result && !grew && tail === this.#tail) return this.#result;
+    this.#tail = tail;
+    this.#result = tail ? [...this.#done, tail] : [...this.#done];
+    return this.#result;
   }
-  if (!live && text.slice(start).trim()) blocks.push(text.slice(start).trim());
-  return blocks;
 }
 
 /** Codex can append several bold thought headings inside the same part. */
@@ -71,4 +160,27 @@ export function currentThought(text: string): { title: string | null; text: stri
   const headings = [...text.matchAll(/^[\t ]*\*\*([^*\r\n]+)\*\*[\t ]*\r?$/gm)];
   const last = headings.at(-1);
   return { title: last?.[1]?.trim() ?? null, text: last ? text.slice(last.index) : text };
+}
+
+/** Everything the agent wrote in one turn, its tool cards left out: what a copy of the answer takes. */
+export function turnAnswer(messages: readonly Message[], turnId: string): string {
+  return messages
+    .filter((message) => message.turnId === turnId && message.role === 'assistant')
+    .flatMap((message) => message.parts.flatMap((part) => (part.type === 'text' ? [visibleAnswer(part.text).trim()] : [])))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** The newest turn's answer that has any text, or the empty string. */
+export function lastAnswer(messages: readonly Message[]): string {
+  // A turn with no text is read once, however many messages it spans.
+  const read = new Set<string>();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== 'assistant' || message.turnId === null || read.has(message.turnId)) continue;
+    read.add(message.turnId);
+    const text = turnAnswer(messages, message.turnId);
+    if (text) return text;
+  }
+  return '';
 }

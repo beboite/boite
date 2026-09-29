@@ -22,6 +22,7 @@
  */
 import pkg from '../../../package.json';
 import type { SpawnedChild } from '../../procs.ts';
+import { LineSplitter } from '../lines.ts';
 import type { InitializeResult } from './protocol.ts';
 import { CLIENT_NAME, CLIENT_TITLE, SCHEMA_VERSION, STDERR_MAX } from './protocol.ts';
 
@@ -91,7 +92,9 @@ interface RpcHandlers {
 export class MuseRpc {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
-  private buffer = '';
+  private readonly lines = new LineSplitter((line) => {
+    this.onLine(line);
+  });
   private closed = false;
 
   constructor(
@@ -100,7 +103,7 @@ export class MuseRpc {
   ) {
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
-      this.feed(chunk);
+      this.lines.feed(chunk);
     });
     child.stdin.on('error', () => undefined);
   }
@@ -145,23 +148,16 @@ export class MuseRpc {
     }
   }
 
-  private feed(chunk: string): void {
-    this.buffer += chunk;
-    for (; ;) {
-      const at = this.buffer.indexOf('\n');
-      if (at < 0) break;
-      const line = this.buffer.slice(0, at).trim();
-      this.buffer = this.buffer.slice(at + 1);
-      if (line.length === 0) continue;
-      let message: Record<string, unknown>;
-      try {
-        message = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        this.handlers.log('warn', `muse host: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
-        continue;
-      }
-      this.dispatch(message);
+  private onLine(raw: string): void {
+    const line = raw.trim();
+    let message: Record<string, unknown>;
+    try {
+      message = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      this.handlers.log('warn', `muse host: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
+      return;
     }
+    this.dispatch(message);
   }
 
   private dispatch(message: Record<string, unknown>): void {

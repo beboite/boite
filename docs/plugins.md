@@ -152,7 +152,8 @@ steps:
 The download:
 
 - is the artifact for the core's platform, over https, redirects included;
-- takes at most 120 seconds and 64 MB;
+- takes at most 64 MB, and stops after 30 seconds without a byte or after 30
+  minutes in all, so a slow link that keeps sending still finishes;
 - shows its progress and can be cancelled.
 
 The SHA-256 is checked before anything is written as the executable. The core

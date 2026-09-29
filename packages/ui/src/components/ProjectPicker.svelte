@@ -2,6 +2,7 @@
   import { tick, untrack } from 'svelte';
   import { ArrowUp, ChevronDown, ChevronRight, Folder, FolderOpen, Monitor, X } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
+  import { mobileOverlay } from '../lib/mobile-history';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -46,6 +47,7 @@
       if (current === revision) error = failure instanceof Error ? failure.message : String(failure);
     } finally { if (current === revision) busy = false; }
   }
+  $effect(() => { if (overlay.open) return mobileOverlay(close); });
   function close() {
     ++revision;
     store.projectPickerOpen = false;
@@ -90,8 +92,11 @@
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="project-picker-title" tabindex="-1" bind:this={card} data-testid="project-picker">
       <header><h2 id="project-picker-title">{strings.firstRun.heading}</h2><button type="button" class="ghost icon" aria-label={strings.common.cancel} onclick={close}><X size={16} /></button></header>
       <div class="body">
-        <div class="field-label">{strings.connection.machine}</div>
-        <Menu items={machines} onpick={id => void machine(id)} label={strings.connection.machine} placement="bottom" testid="project-machine"><Monitor size={15} />{machineName}<ChevronDown size={13} /></Menu>
+        <!-- One machine names no machine: the folder is the only choice left. -->
+        {#if available.length > 1}
+          <div class="field-label">{strings.connection.machine}</div>
+          <Menu items={machines} onpick={id => void machine(id)} label={strings.connection.machine} placement="bottom" testid="project-machine"><Monitor size={15} />{machineName}<ChevronDown size={13} /></Menu>
+        {/if}
         <label for="project-folder">{strings.connection.folder}</label>
         <form onsubmit={e => { e.preventDefault(); void browse(path); }} data-testid="add-project-form">
           <input id="project-folder" data-testid="project-path" bind:this={input} bind:value={path} spellcheck="false" autocomplete="off" placeholder={strings.firstRun.pathPlaceholder} />
@@ -119,7 +124,7 @@
   h2 { font-size: var(--text-md); font-weight: 600; }
   .body { padding: 16px; }
   .field-label, label { display: block; margin-bottom: 8px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  label { margin-top: 20px; }
+  label:not(:first-child) { margin-top: 20px; }
   form { display: flex; gap: 6px; }
   input { width: 100%; min-width: 0; font-family: var(--font-mono); font-size: var(--text-sm); }
   form button { height: var(--input); flex: none; }

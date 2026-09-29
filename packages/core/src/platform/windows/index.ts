@@ -1,4 +1,7 @@
 import type { ProcessPlatform } from '../types.ts';
+import { totalmem } from 'node:os';
+import { resolveMemoryLimits } from '../../memory-limits.ts';
+import { machineMemory } from './memory.ts';
 import * as jobs from './jobs.ts';
 import * as guard from './guard.ts';
 
@@ -7,18 +10,18 @@ export const platform: ProcessPlatform = {
     jobs.retainJobs(events);
     guard.retainGuard(protections);
   },
-  release() {
-    jobs.releaseJobs();
-    guard.releaseGuard();
+  async release() {
+    await Promise.all([jobs.releaseJobs(), guard.releaseGuard()]);
   },
   capability: jobs.jobsCapability,
   applySettings(settings) {
-    jobs.setProcessLimits(settings);
+    jobs.setProcessLimits({ ...settings, ...resolveMemoryLimits(settings, machineMemory()?.totalBytes ?? totalmem()) });
     guard.setGuardEnabled(settings.focusGuard);
     guard.setGuardMute(settings.muteAgents);
   },
   attach: jobs.assignToThreadJob,
   terminate: jobs.terminateThreadJob,
+  terminateProcess: jobs.terminateJobProcess,
   terminateUnassigned(pid) {
     // Only a pid captured by the registry may reach this fallback.
     try {
@@ -31,7 +34,14 @@ export const platform: ProcessPlatform = {
     }
   },
   sample: jobs.sampleThreadJob,
+  machineMemory,
   pidAdded: guard.guardPidAdded,
   pidRemoved: guard.guardPidRemoved,
+  warm() {
+    jobs.warmJobs();
+    guard.warmGuard();
+  },
+  forget: jobs.releaseThreadJob,
   guardStatus: guard.guardStatus,
+  startedAt: jobs.processStartedAt,
 };

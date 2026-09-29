@@ -1,10 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+import { startUi } from './lib/ui.ts';
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 async function capture(name: string) {
@@ -13,8 +11,8 @@ async function capture(name: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen(); url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
+  server = await startUi(port);
+  url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
   page = await BrowserPage.launch({ url });
   await page.waitFor(`document.querySelector('[data-testid=composer-picker]')`);
 }, 60_000);
@@ -25,7 +23,8 @@ test.each([1440, 390])('provider switching keeps the picker frame still at %ipx'
   await page.navigate(url);
   await page.click('[data-testid=composer-picker]');
   const frames: { x: number; y: number; width: number; height: number }[] = [];
-  for (const provider of ['claude', 'echo', 'opencode', 'antigravity', 'favorites']) {
+  // Only providers with a signed-in account have a tile; the fake's Antigravity is signed out.
+  for (const provider of ['claude', 'echo', 'opencode', 'codex', 'favorites']) {
     await page.click(`[data-provider="${provider}"]`);
     await capture(`picker-stable-${width}-${provider}.png`);
     frames.push(await page.evaluate<{ x: number; y: number; width: number; height: number }>(`document.querySelector('[data-testid=composer-picker-menu]').getBoundingClientRect().toJSON()`));
@@ -163,8 +162,9 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');
   await page.click('[data-model=claude-opus-5]');
-  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker]')?.textContent.includes('Opus')`);
   await page.click('[data-testid=composer-effort]');
+  await page.waitFor(`document.querySelector('[data-testid=effort-speed]')`);
   await page.click('[data-value=low]');
   const low = await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`);
   await page.click('[data-value=max]');
@@ -172,8 +172,10 @@ test('the accent persists and colours the effort track continuously to the thumb
   expect(await page.evaluate(`getComputedStyle(document.querySelector('.progress')).backgroundColor`)).not.toBe(low);
   const bounds = await page.evaluate<any>(`(() => { const p=document.querySelector('.progress').getBoundingClientRect(); const t=document.querySelector('.thumb').getBoundingClientRect(); return {edge:p.right,center:t.left+t.width/2}; })()`);
   expect(Math.abs(bounds.edge - bounds.center)).toBeLessThan(1);
-  expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading').textContent.trim()`)).toBe('Max');
-  expect(await page.evaluate(`!!document.querySelector('[data-testid=composer-effort-menu] svg')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('[data-testid=composer-effort-menu] .heading .level').textContent.trim()`)).toBe('Max');
+  // The fast switch is the menu's one icon, at the top left of the slider.
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=composer-effort-menu] svg')].every(svg => svg.closest('[data-testid=effort-speed]'))`)).toBe(true);
+  expect(await page.evaluate(`(() => { const s=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); const t=document.querySelector('[data-testid=effort-track]').getBoundingClientRect(); return s.bottom <= t.top && Math.abs(s.left - t.left) < 8; })()`)).toBe(true);
   expect(await page.evaluate(`!!document.querySelector('[data-testid=composer] .hint')`)).toBe(false);
   const speed = await page.evaluate<any>(`(() => { const r=document.querySelector('[data-testid=effort-speed]').getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`);
   await page.send('Input.dispatchMouseEvent', { type:'mouseMoved', ...speed });
@@ -184,7 +186,11 @@ test('the accent persists and colours the effort track continuously to the thumb
   await page.click('[data-testid=settings-tab-appearance]');
   await capture('appearance-accent-phone.png');
   await page.click('[data-testid=accent-260]');
+  const overlay = await page.evaluate<string>('history.state?.boiteOverlay');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  // The wide layout unmounts the phone panel, which pops its history entry. A navigation sent before
+  // that back() lands is replaced by the old document, and the next test waits on a dead loader.
+  await page.waitFor(`history.state?.boiteOverlay !== ${JSON.stringify(overlay)}`);
 }, 30_000);
 
 

@@ -1,33 +1,30 @@
 <script lang="ts">
-  import {
-    Activity,
-    ChevronLeft,
-    ChevronRight,
-    FileText,
-    FolderTree,
-    GitCompare,
-    Globe,
-    ListChecks,
-    Maximize2,
-    Minimize2,
-    Plus,
-    X
-  } from '@lucide/svelte';
+  import { untrack } from 'svelte';
+  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X } from '@lucide/svelte';
   import { browserBridge } from '../lib/browser-bridge';
+  import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
+  import { controlMenu, CONTROLS_SECTION } from '../lib/controls';
+  import type { ControlId } from '../lib/work-prefs.svelte';
   import { separator } from '../lib/menu';
   import { closeTabs } from '../lib/panel-close';
-  import { PANEL_DEFAULT, baseName, clampPanel, rightPanel } from '../lib/right-panel.svelte';
+  import { rightPanel } from '../lib/right-panel.svelte';
   import type { BoundPanel, Surface, SurfaceKind } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import { offeredCards, available as availableTo, kindName, label, tooltip, unavailable } from '../lib/surface-labels';
   import BrowserSurface from './BrowserSurface.svelte';
+  import DelegationSurface from './DelegationSurface.svelte';
   import ChangesSurface from './ChangesSurface.svelte';
   import FileSurface from './FileSurface.svelte';
   import FilesSurface from './FilesSurface.svelte';
   import Menu from './Menu.svelte';
+  import PanelResizeHandle from './PanelResizeHandle.svelte';
+  import SurfaceIcon from './SurfaceIcon.svelte';
+  import SurfaceLauncher from './SurfaceLauncher.svelte';
   import TasksSurface from './TasksSurface.svelte';
   import TraceSurface from './TraceSurface.svelte';
+  import WorkflowSurface from './WorkflowSurface.svelte';
 
   let {
     store,
@@ -45,6 +42,8 @@
   } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  /** The new-surface menu's last row, which no surface kind can be called. */
+  const CUSTOMIZE = 'customize';
 
   let tabs = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLElement | undefined>(undefined);
@@ -56,62 +55,9 @@
   let active = $derived(panel.active);
   let empty = $derived(surfaces.length === 0);
 
-  /**
-   * The launcher's five cards, in the order they are drawn. Each carries the
-   * letter its card shows, which is also the key the launcher answers to.
-   */
-  const CARDS: { kind: SurfaceKind; key: string }[] = [
-    { kind: 'browser', key: 'B' },
-    { kind: 'changes', key: 'C' },
-    { kind: 'files', key: 'F' },
-    { kind: 'tasks', key: 'K' },
-    { kind: 'trace', key: 'T' }
-  ];
-
-  /** The name of a kind, which a card, a tab and the new-surface menu all read. */
-  function kindName(kind: SurfaceKind): string {
-    if (kind === 'browser') return strings.rightPanel.browser;
-    if (kind === 'changes') return strings.rightPanel.changes;
-    if (kind === 'files') return strings.rightPanel.files;
-    if (kind === 'file') return strings.rightPanel.file;
-    if (kind === 'tasks') return strings.rightPanel.tasks;
-    return strings.rightPanel.trace;
-  }
-
-  function kindHint(kind: SurfaceKind): string {
-    if (kind === 'browser') return strings.rightPanel.browserHint;
-    if (kind === 'changes') return strings.rightPanel.changesHint;
-    if (kind === 'files') return strings.rightPanel.filesHint;
-    if (kind === 'tasks') return strings.rightPanel.tasksHint;
-    return strings.rightPanel.traceHint;
-  }
-
   /** A page needs a webview; everything else reads what only the owner may ask for. */
   function available(kind: SurfaceKind): boolean {
-    return kind === 'browser' ? inShell : store.owner;
-  }
-
-  function unavailable(kind: SurfaceKind): string {
-    return kind === 'browser' ? strings.rightPanel.desktopOnly : strings.rightPanel.ownerOnly;
-  }
-
-  function label(surface: Surface): string {
-    // A file tab reads as its name; the whole path is its tooltip.
-    if (surface.kind === 'file') return surface.path ? baseName(surface.path) : strings.rightPanel.file;
-    if (surface.kind !== 'browser') return kindName(surface.kind);
-    if (surface.title) return surface.title;
-    if (surface.url) {
-      try {
-        return new URL(surface.url).host || strings.rightPanel.untitled;
-      } catch {
-        return surface.url;
-      }
-    }
-    return strings.rightPanel.untitled;
-  }
-
-  function tooltip(surface: Surface): string {
-    return surface.kind === 'file' && surface.path ? surface.path : label(surface);
+    return availableTo(kind, inShell, store.owner);
   }
 
   // What the pages report. Only the thread showing has browser views, because a
@@ -148,8 +94,13 @@
 
   function measure(): void {
     const node = tabs;
-    if (!node) return;
-    overflowing = node.scrollWidth - node.clientWidth > 1;
+    // A strip with no width yet, a phone's sheet still coming in, has nothing to
+    // measure: the observer calls again once it has one. Measured at zero, 44 px
+    // chevrons wider than the tabs flipped the state on every run.
+    if (!node || node.clientWidth === 0) return;
+    const gap = parseFloat(getComputedStyle(node.parentElement ?? node).columnGap) || 0;
+    const room = [...(node.parentElement?.querySelectorAll<HTMLElement>(':scope > .chev') ?? [])].reduce((sum, chevron) => sum + chevron.offsetWidth + gap, 0);
+    overflowing = stripOverflows(node.scrollWidth, node.clientWidth, room, untrack(() => overflowing));
   }
 
   $effect(() => {
@@ -157,12 +108,21 @@
     if (!node) return;
     // The strip is remeasured when its width or its content changes.
     void surfaces.length;
-    measure();
+    untrack(measure);
     // jsdom lays nothing out and ships no ResizeObserver: the strip still renders.
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    // The chevrons resize the observed tabs: toggling them inside the callback
+    // was a resize the observer could not deliver that frame (a loop error).
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
     observer.observe(node);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   });
 
   // The tab that is showing is always the one in view.
@@ -257,59 +217,28 @@
       return;
     }
     const key = event.key.toLowerCase();
-    const card = CARDS.find((one) => one.key.toLowerCase() === key);
+    const card = offeredCards().find((one) => one.key.toLowerCase() === key);
     if (!card) return;
     event.preventDefault();
     launch(card.kind);
   }
 
-  // ---------------------------------------------------------------- the drag
-
-  function sibling(): number {
-    if (window.innerWidth <= 720 || store.sidebarCollapsed) return 0;
-    return store.sidebarWidth;
-  }
-
-  function onHandleDown(event: PointerEvent): void {
-    event.preventDefault();
-    dragging = true;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  }
-
-  function onHandleMove(event: PointerEvent): void {
-    if (!dragging) return;
-    rightPanel.width = clampPanel(window.innerWidth - event.clientX, window.innerWidth, sibling());
-  }
-
-  function onHandleUp(event: PointerEvent): void {
-    if (!dragging) return;
-    dragging = false;
-    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    // The width reaches localStorage once, on the drag's end.
-    rightPanel.saveWidth();
-  }
-
-  function onHandleKey(event: KeyboardEvent): void {
-    const step = event.key === 'ArrowLeft' ? 16 : event.key === 'ArrowRight' ? -16 : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    rightPanel.width = clampPanel(rightPanel.width + step, window.innerWidth, sibling());
-    rightPanel.saveWidth();
-  }
-
-  function reset(): void {
-    rightPanel.width = clampPanel(PANEL_DEFAULT, window.innerWidth, sibling());
-    rightPanel.saveWidth();
-  }
-
-  let menuItems = $derived(
-    CARDS.map((card) => ({
+  let menuItems = $derived([
+    ...offeredCards().map((card) => ({
       id: card.kind,
       label: kindName(card.kind),
       disabled: !available(card.kind),
       ...(available(card.kind) ? {} : { hint: unavailable(card.kind) })
-    }))
-  );
+    })),
+    // The way back to a kind this device put away.
+    separator('sep-customize'),
+    { id: CUSTOMIZE, label: strings.controls.customize }
+  ]);
+
+  function pickNew(id: string): void {
+    if (id === CUSTOMIZE) store.showSettings('appearance', CONTROLS_SECTION);
+    else launch(id as SurfaceKind);
+  }
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
@@ -322,7 +251,7 @@
 ></button>
 
 <aside
-  class="panel"
+  class="panel framed motion-panel"
   class:maximized={rightPanel.maximized}
   class:dragging
   class:closing
@@ -338,19 +267,7 @@
     if (!root?.contains(event.relatedTarget as Node | null)) near = false;
   }}
 >
-  <button
-    type="button"
-    class="handle"
-    aria-label={strings.rightPanel.resize}
-    title={strings.rightPanel.resize}
-    data-testid="panel-resize"
-    onpointerdown={onHandleDown}
-    onpointermove={onHandleMove}
-    onpointerup={onHandleUp}
-    onpointercancel={onHandleUp}
-    ondblclick={reset}
-    onkeydown={onHandleKey}
-  ></button>
+  <PanelResizeHandle {store} bind:dragging />
 
   <header class="strip">
     {#if overflowing}
@@ -401,19 +318,7 @@
             }}
           >
             <span class="glyph">
-              {#if surface.kind === 'trace'}
-                <Activity size={14} strokeWidth={1.75} />
-              {:else if surface.kind === 'changes'}
-                <GitCompare size={14} strokeWidth={1.75} />
-              {:else if surface.kind === 'files'}
-                <FolderTree size={14} strokeWidth={1.75} />
-              {:else if surface.kind === 'file'}
-                <FileText size={14} strokeWidth={1.75} />
-              {:else if surface.kind === 'tasks'}
-                <ListChecks size={14} strokeWidth={1.75} />
-              {:else}
-                <Globe size={14} strokeWidth={1.75} />
-              {/if}
+              <SurfaceIcon kind={surface.kind} size={14} />
             </span>
             <span class="cross"><X size={14} strokeWidth={2} /></span>
           </button>
@@ -437,8 +342,9 @@
     {#if !empty}
       <Menu
         items={menuItems}
-        onpick={(id) => launch(id as SurfaceKind)}
+        onpick={pickNew}
         placement="bottom"
+        align="end"
         variant="ghost"
         label={strings.rightPanel.newSurface}
         testid="panel-add"
@@ -477,11 +383,15 @@
   </header>
 
   <div class="body">
-    {#if active?.kind === 'trace'}
+    {#if active?.kind === 'agents'}
+      <DelegationSurface {store} />
+    {:else if active?.kind === 'workflow'}
+      <WorkflowSurface {store} surface={active} {panel} />
+    {:else if active?.kind === 'trace'}
       <TraceSurface {store} />
     {:else if active?.kind === 'browser'}
       {#key active.id}
-        <BrowserSurface surface={active} {panel} />
+        <BrowserSurface surface={active} {panel} {store} />
       {/key}
     {:else if active?.kind === 'changes'}
       <ChangesSurface {store} surface={active} {panel} />
@@ -494,38 +404,12 @@
     {:else if active?.kind === 'tasks'}
       <TasksSurface {store} />
     {:else}
-      <div class="launcher" data-testid="panel-launcher">
-        <p class="section-label">{strings.rightPanel.launcher}</p>
-        <div class="cards">
-          <!-- A card that cannot open stays and says why: a page needs the
-               desktop shell's webview, and the rest read what a paired device
-               is refused. -->
-          {#each CARDS as card (card.kind)}
-            <button
-              type="button"
-              class="card"
-              disabled={!available(card.kind)}
-              data-testid="launch-{card.kind}"
-              onclick={() => launch(card.kind)}
-            >
-              {#if card.kind === 'browser'}
-                <Globe size={16} strokeWidth={1.75} />
-              {:else if card.kind === 'changes'}
-                <GitCompare size={16} strokeWidth={1.75} />
-              {:else if card.kind === 'files'}
-                <FolderTree size={16} strokeWidth={1.75} />
-              {:else if card.kind === 'tasks'}
-                <ListChecks size={16} strokeWidth={1.75} />
-              {:else}
-                <Activity size={16} strokeWidth={1.75} />
-              {/if}
-              <span class="card-name">{kindName(card.kind)}</span>
-              <span class="card-hint">{available(card.kind) ? kindHint(card.kind) : unavailable(card.kind)}</span>
-              <span class="kbd">{card.key}</span>
-            </button>
-          {/each}
-        </div>
-      </div>
+      <SurfaceLauncher
+        {available}
+        onlaunch={launch}
+        onmenu={(event, kind) => controlMenu(event, store, `panel.${kind}` as ControlId)}
+        oncustomize={() => store.showSettings('appearance', CONTROLS_SECTION)}
+      />
     {/if}
   </div>
 </aside>
@@ -539,69 +423,14 @@
     flex-direction: column;
     min-height: 0;
     min-width: 0;
-    border-left: 1px solid var(--color-border);
-    background: var(--color-surface);
-    /* Only the first open travels: a drag and a maximize are instant. */
-    animation: panel-in var(--dur-3) var(--ease-out-quint);
+    /* A framed card whose resize handle hangs out into the gap beside it, so
+       the card itself does not clip: its body rounds the bottom corners. */
+    overflow: visible;
   }
 
   .panel.maximized {
     width: auto;
     flex: 1;
-  }
-
-  /* The exit is opacity alone: the width would be horizontal travel on the way out. */
-  .panel.closing {
-    animation-name: fade-out;
-    pointer-events: none;
-  }
-
-  @keyframes panel-in {
-    from {
-      width: 0;
-      opacity: 0;
-    }
-  }
-
-  .handle {
-    position: absolute;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    left: -4px;
-    top: 0;
-    bottom: 0;
-    width: 8px;
-    z-index: 10;
-    cursor: col-resize;
-    touch-action: none;
-  }
-
-  .handle::after {
-    content: '';
-    position: absolute;
-    left: 3px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: transparent;
-    transition: background var(--dur-2) var(--ease-out-quint);
-  }
-
-  .handle:hover:not(:disabled),
-  .handle:active:not(:disabled) {
-    background: transparent;
-    transform: none;
-  }
-
-  .handle:hover::after,
-  .handle:focus-visible::after {
-    background: var(--color-border);
-  }
-
-  .panel.dragging .handle::after {
-    background: color-mix(in srgb, var(--color-foreground) 60%, transparent);
   }
 
   .strip {
@@ -735,58 +564,11 @@
     flex-direction: column;
   }
 
-  .launcher {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    animation: rise var(--dur-3) var(--ease-out-quint);
-  }
-
-  .cards {
-    display: grid;
-    /* Five cards now, on a panel dragged to any width: the row fills with what
-       fits instead of staying at two columns. */
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 8px;
-  }
-
-  .card {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    height: auto;
-    padding: 12px 12px 14px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    background: var(--color-surface-2);
-    color: var(--color-muted-foreground);
-    text-align: left;
-    white-space: normal;
-  }
-
-  .card:hover:not(:disabled) {
-    border-color: var(--color-edge);
-    background: var(--color-surface-3);
-  }
-
-  .card-name {
-    color: var(--color-foreground);
-    font-weight: 600;
-    margin-top: 6px;
-  }
-
-  .card-hint {
-    font-size: var(--text-sm);
-    line-height: 1.4;
-  }
-
-  .card .kbd {
-    position: absolute;
-    top: 8px;
-    right: 8px;
+  @media (min-width: 721px) {
+    .body {
+      overflow: clip;
+      border-radius: 0 0 calc(var(--radius-frame) - 1px) calc(var(--radius-frame) - 1px);
+    }
   }
 
   .sheet-scrim {
@@ -798,9 +580,9 @@
     .panel,
     .panel.maximized {
       position: absolute;
-      right: 0;
+      right: var(--frame-gap);
       top: 0;
-      bottom: 0;
+      bottom: var(--frame-gap);
       z-index: 30;
       width: min(42vw, 448px);
       min-width: 320px;
@@ -819,10 +601,6 @@
       border-radius: 0;
       background: var(--color-scrim);
     }
-
-    .handle {
-      display: none;
-    }
   }
 
   @media (max-width: 720px) {
@@ -832,12 +610,25 @@
       inset: 0;
       width: auto;
       min-width: 0;
-      border-left: none;
+      background: var(--color-surface);
       box-shadow: none;
+      /* The sheet covers the whole screen, the status bar and the home indicator included. */
+      box-sizing: border-box;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
     }
 
     .sheet-scrim {
       display: none;
+    }
+
+    /* The tab's icon is its close button: a finger needs the whole height of the tab. */
+    .tab {
+      padding-left: 0;
+    }
+
+    .closer {
+      width: var(--touch-target);
+      height: var(--touch-target);
     }
   }
 </style>

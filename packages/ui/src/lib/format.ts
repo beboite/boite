@@ -12,9 +12,13 @@ interface Formatters {
   clock: Intl.DateTimeFormat;
   dayClock: Intl.DateTimeFormat;
   calendar: Intl.DateTimeFormat;
-  relative: Intl.RelativeTimeFormat;
+  /** `22 min` in both languages: French's narrow relative form reads `-22 min`. */
+  minutes: Intl.NumberFormat;
   counter: Intl.NumberFormat;
   plain: Intl.NumberFormat;
+  /** One digit after the decimal sign, always: `38.0 s`, `38,0 s`. */
+  tenths: Intl.NumberFormat;
+  whole: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
 }
 
@@ -28,9 +32,11 @@ function formatters(): Formatters {
     clock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     dayClock: new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit' }),
     calendar: new Intl.DateTimeFormat(tag, { day: 'numeric', month: 'short' }),
-    relative: new Intl.RelativeTimeFormat(tag, { numeric: 'auto', style: 'narrow' }),
+    minutes: new Intl.NumberFormat(tag, { style: 'unit', unit: 'minute', unitDisplay: 'short' }),
     counter: new Intl.NumberFormat(tag, { notation: 'compact', maximumFractionDigits: 1 }),
     plain: new Intl.NumberFormat(tag),
+    tenths: new Intl.NumberFormat(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    whole: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
   };
   sets.set(tag, made);
@@ -40,27 +46,82 @@ function formatters(): Formatters {
 export function bytes(value: number | null | undefined): string {
   const units = strings.units;
   if (value === null || value === undefined) return strings.common.none;
+  const { tenths, whole } = formatters();
   if (value < 1024) return `${value} ${units.bytes}`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} ${units.kilobytes}`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(0)} ${units.megabytes}`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} ${units.gigabytes}`;
+  if (value < 1024 * 1024) return `${whole.format(value / 1024)} ${units.kilobytes}`;
+  if (value < 1024 * 1024 * 1024) return `${whole.format(value / (1024 * 1024))} ${units.megabytes}`;
+  return `${tenths.format(value / (1024 * 1024 * 1024))} ${units.gigabytes}`;
 }
 
 export function millis(value: number | null | undefined): string {
   const units = strings.units;
   if (value === null || value === undefined) return strings.common.none;
+  const { tenths } = formatters();
   if (value < 1000) return `${Math.round(value)} ${units.milliseconds}`;
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} ${units.seconds}`;
-  if (value < 3_600_000) return `${(value / 60_000).toFixed(1)} ${units.minutes}`;
-  return `${(value / 3_600_000).toFixed(1)} ${units.hours}`;
+  if (value < 60_000) return `${tenths.format(value / 1000)} ${units.seconds}`;
+  if (value < 3_600_000) return `${tenths.format(value / 60_000)} ${units.minutes}`;
+  return `${tenths.format(value / 3_600_000)} ${units.hours}`;
+}
+
+/** An effort or speed level in the app's language, by the id providers share; another id keeps the provider's word. */
+export function levelName(level: { id: string; label: string }): string {
+  const name: unknown = (strings.effortLevels as unknown as Record<string, unknown>)[level.id];
+  return typeof name === 'string' ? name : level.label;
+}
+
+/**
+ * A quota window the core named in English (`5 hours`, `Weekly`, `Monthly`,
+ * `Credits`) in the app's language; any other name as sent. The core joins a
+ * period to a model or a group with ` · ` (`Weekly · Opus`, `Gemini · 5 hours`),
+ * so each side is read on its own.
+ */
+export function quotaWindowName(label: string): string {
+  return label.split(' · ').map(quotaPeriod).join(' · ');
+}
+
+function quotaPeriod(part: string): string {
+  if (part === 'Weekly') return strings.quotas.windowWeekly;
+  if (part === 'Monthly') return strings.quotas.windowMonthly;
+  if (part === 'Credits') return strings.quotas.windowCredits;
+  const hours = /^(\d+(?:\.\d+)?) hours$/.exec(part)?.[1];
+  return hours === undefined ? part : strings.quotas.windowHours.replace('{hours}', formatters().plain.format(Number(hours)));
+}
+
+/** Up to one decimal, in the language's own digits: a percentage left on a quota. */
+export function tenth(value: number): string {
+  return formatters().plain.format(Math.round(value * 10) / 10);
 }
 
 export function duration(startedAt: number, endedAt: number | null): string {
   return millis((endedAt ?? Date.now()) - startedAt);
 }
 
+/** The whole date and time, for the hover title of a relative or shortened stamp. */
+export function exactTime(value: number): string {
+  return new Date(value).toLocaleString(formatLocale());
+}
+
 export function time(value: number): string {
   return formatters().clock.format(new Date(value));
+}
+
+/** `10:31` today, `Tue 10:31` within the week, `12 Sep 10:31` before that: when a turn finished. */
+export function clockTime(value: number, now = Date.now()): string {
+  const set = formatters();
+  const then = new Date(value);
+  const today = new Date(now);
+  if (then.toDateString() === today.toDateString()) return set.dayClock.format(then);
+  if (now - value < 6 * 86_400_000) return set.weekday.format(then);
+  return `${set.calendar.format(then)} ${set.dayClock.format(then)}`;
+}
+
+/** `12s`, `4m 41s`, `1h 02m`: a stopwatch, the way a turn's footer reads it. */
+export function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
 /** A day and an hour: what a quota window's reset reads as. */
@@ -94,12 +155,12 @@ export function percent(value: number): string {
   return `${Math.round(value)}%`;
 }
 
-/** "now", "5 min ago", "14:02", "3 Sep": what a sidebar row needs and nothing more. */
+/** "now", "5 min", "14:02", "3 Sep": what a sidebar row needs and nothing more. */
 export function ago(value: number, now = Date.now()): string {
   const delta = now - value;
   if (delta < 45_000) return strings.time.now;
   const set = formatters();
-  if (delta < 3_600_000) return set.relative.format(-Math.round(delta / 60_000), 'minute');
+  if (delta < 3_600_000) return set.minutes.format(Math.round(delta / 60_000));
   const then = new Date(value);
   const today = new Date(now);
   const sameDay =
@@ -114,4 +175,10 @@ export function titleFrom(prompt: string, max = 60): string {
   const line = prompt.trim().split('\n')[0]?.trim() ?? '';
   if (line.length <= max) return line;
   return line.slice(0, max).trimEnd();
+}
+
+/** A project's name as the user reads it: the drafts in the app's own language, any other as the core named it. */
+export function projectName(project: { name: string; kind?: 'drafts' } | null | undefined): string {
+  if (!project) return '';
+  return project.kind === 'drafts' ? strings.drafts.name : project.name;
 }

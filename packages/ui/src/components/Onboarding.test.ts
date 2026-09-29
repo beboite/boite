@@ -1,12 +1,17 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
 import { FakeClient } from '../lib/fake-client';
-import { LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
+import { loadLocale, LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION, readOnboarding, steps } from '../lib/onboarding';
 import { closeTour, openTour, tourRequested, tourSeen } from '../lib/onboarding.svelte';
 import { Store } from '../lib/store.svelte';
 import { THEME_STORAGE_KEY } from '../lib/theme';
+import { PREFS_STORAGE_KEY } from '../lib/prefs';
+import { work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
+
+// French is its own chunk: loaded once, the tour's language buttons switch at once.
+beforeAll(() => loadLocale('fr'));
 
 /**
  * The tour: the screens it walks, the switches it carries, and the record it
@@ -19,6 +24,7 @@ let store: Store;
 
 beforeEach(async () => {
   window.localStorage.clear();
+  work.load();
   store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));
   await store.connect();
@@ -64,19 +70,29 @@ async function settle(): Promise<void> {
   await tick();
 }
 
-test('demo artwork stays English while the surrounding tour stays French', async () => {
+test('demo artwork speaks the language of the tour around it', async () => {
   setLocaleSetting('fr');
   await open();
+  expect(query('[data-testid=onboarding-animation]').textContent).toContain('Créer mon portfolio');
   await click('onboarding-dot-agents');
   await click('onboarding-example-voice');
-  expect(query('[data-testid=onboarding-animation]').textContent).toContain('Build my portfolio');
+  expect(query('[data-testid=onboarding-animation]').textContent).toContain('Rends les boutons plus lisibles');
+  expect(query('[data-testid=onboarding-animation]').textContent).not.toContain('Build my portfolio');
   await click('onboarding-animation-pause');
-  expect(query('[data-testid=onboarding-animation-pause]').textContent).toContain('Reprendre');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Rejouer');
+  expect(query('[data-testid=onboarding-animation-pause]').getAttribute('aria-label')).toBe('Reprendre');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Rejouer');
   expect(query('[data-testid=onboarding-next]').textContent).toContain('Suivant');
 });
 
-test('the tour walks its screens, the dots follow, and the last one closes it', async () => {
+/** The consent rows answer through the fake core before the tour closes. */
+async function answer(testid: string): Promise<void> {
+  await click(testid);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  await settle();
+}
+
+test('the tour walks its screens, the dots follow, and the consent choice closes it', async () => {
   const screens = steps();
   await open();
 
@@ -91,12 +107,12 @@ test('the tour walks its screens, the dots follow, and the last one closes it', 
     expect(query(`[data-testid=onboarding-dot-${screens[at]}]`).getAttribute('aria-current')).toBe('step');
   }
 
-  // The last screen sends the user into the app rather than to another one.
-  expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
+  // The owner's last screen is the trade offer: its two rows are the only way on.
+  expect(step()).toBe('privacy');
+  expect(document.querySelector('[data-testid=onboarding-next]')).toBeNull();
   expect(readOnboarding()).toBeNull();
 
-  await click('onboarding-next');
-  await settle();
+  await answer('onboarding-telemetry-enhanced');
 
   expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
   expect(tourSeen()).toBe(true);
@@ -164,7 +180,7 @@ test('usage and reach explain themselves without delayed account lists or exits'
   expect(switches.length).toBe(0);
   expect(document.body.textContent).toContain('24% used');
   expect(document.body.textContent).toContain('5-hour limit');
-  expect(document.body.textContent).toContain('beside the clock');
+  expect(document.body.textContent).toContain('Hover the Boite icon');
 
   await click('onboarding-dot-reach');
   expect(document.querySelector('[data-testid=onboarding-pair]')).toBeNull();
@@ -206,7 +222,7 @@ test('demo choices are labelled buttons and dictation keeps word spacing', async
   await click('onboarding-example-voice');
   expect(query('[data-testid=onboarding-scene]').textContent).toContain('Make the buttons easier to read');
   expect(query('[data-testid=onboarding-scene]').textContent).not.toContain('Illustration');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Replay');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Replay');
 });
 
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
@@ -233,55 +249,104 @@ test('losing owner access on the last screen keeps the step and count valid', as
   flushSync();
   await tick();
   expect(step()).toBe('quiet');
-  expect(document.querySelectorAll('.dots .dot')).toHaveLength(5);
+  expect(document.querySelectorAll('.dots .dot')).toHaveLength(6);
+  // A guest's last screen has no consent to give: its button closes the tour.
+  expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
 });
 
-test('continuing the privacy step keeps basic counters without opting into details', async () => {
+test('refusing the deal keeps basic counters, turns the row red and closes after the clip', async () => {
   await open();
   await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  const inputs = [...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')];
-  expect(inputs.map(input => input.checked)).toEqual([true, false]);
-  await click('onboarding-next');
+  expect(document.querySelector('.soul')).not.toBeNull();
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  await answer('onboarding-telemetry-basic');
   expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'basic' });
-});
-
-test('the privacy switch opts in explicitly and replay preserves a saved opt-out', async () => {
-  await open();
-  await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  const inputs = document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input');
-  inputs[1]!.click();
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
-  await store.client!.call('telemetry.configure', { mode: 'off' });
-  await click('onboarding-dot-welcome');
-  await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0));
-  flushSync();
-  expect([...document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')].map(input => input.checked)).toEqual([false, false]);
-});
-
-test('an accidental opt-out can be reversed while deletion is pending, without data-management buttons', async () => {
-  await store.client!.call('telemetry.configure', { mode: 'enhanced' });
-  await open();
-  await click('onboarding-dot-privacy');
-  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
-  query<HTMLInputElement>('[data-testid=telemetry-settings] input').click();
-  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
-  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off', pendingDeletion: true });
-  const enhanced = document.querySelectorAll<HTMLInputElement>('[data-testid=telemetry-settings] input')[1]!;
-  expect(enhanced.disabled).toBe(false);
-  enhanced.click();
-  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
-  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced', pendingDeletion: true });
-  expect(document.querySelector('[data-testid=telemetry-settings] button')).toBeNull();
+  expect(query('[data-testid=onboarding-telemetry-basic]').classList.contains('refused')).toBe(true);
+  expect(query<HTMLButtonElement>('[data-testid=onboarding-telemetry-enhanced]').disabled).toBe(true);
+  // The refusal clip plays before the tour goes away.
   expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
 });
 
+test('the note under the rows turns everything off in one click and closes the tour', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query('[data-testid=onboarding-telemetry-basic]').textContent).toContain('basic counters');
+  await answer('onboarding-telemetry-off');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
+  expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+  expect(tourSeen()).toBe(true);
+});
+
+test('under reduced motion refusing closes at once, and a replay keeps a saved opt-out', async () => {
+  document.documentElement.dataset.motion = 'reduced';
+  try {
+    await store.client!.call('telemetry.configure', { mode: 'off' });
+    await open();
+    await click('onboarding-dot-privacy');
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    await answer('onboarding-telemetry-basic');
+    expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
+    expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+    expect(tourSeen()).toBe(true);
+  } finally { delete document.documentElement.dataset.motion; }
+});
+
+test('refusing waits for the saved mode, so an unread opt-out is never overwritten', async () => {
+  const client = store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: never) => {
+    if (method === 'telemetry.state') throw new Error('state unreadable');
+    return call(method as never, params);
+  }) as typeof client.call);
+  await call('telemetry.configure', { mode: 'off' } as never);
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query<HTMLButtonElement>('[data-testid=onboarding-telemetry-basic]').disabled).toBe(true);
+  await answer('onboarding-telemetry-basic');
+  expect(await call('telemetry.state', {} as never)).toMatchObject({ mode: 'off' });
+  expect(query('[data-testid=telemetry-deal] [role=alert]').textContent).toContain('state unreadable');
+});
+
+test('a client swapped under the screen is asked for its own saved mode before refusing', async () => {
+  document.documentElement.dataset.motion = 'reduced';
+  try {
+    await open();
+    await click('onboarding-dot-privacy');
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    // The first client said basic; the one attached now has opted out.
+    const next = new FakeClient({ delayMs: 0 });
+    store.attach(next);
+    await store.connect();
+    await next.call('telemetry.configure', { mode: 'off' } as never);
+    await answer('onboarding-telemetry-basic');
+    await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+    expect(await next.call('telemetry.state', {} as never)).toMatchObject({ mode: 'off' });
+  } finally { delete document.documentElement.dataset.motion; }
+});
+
+test('the deal opts into enhanced analytics and ends the tour', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await answer('onboarding-telemetry-enhanced');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'enhanced' });
+  expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+});
+
+test('a failed consent write stays on the screen with its error', async () => {
+  const client = store.client!;
+  const call = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation((async (method: string, params: never) => {
+    if (method === 'telemetry.configure') throw new Error('relay unreachable');
+    return call(method as never, params);
+  }) as typeof client.call);
+  await open();
+  await click('onboarding-dot-privacy');
+  await answer('onboarding-telemetry-enhanced');
+  expect(query('[data-testid=telemetry-deal] [role=alert]').textContent).toContain('relay unreachable');
+  expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
+});
 test('voice setup failures stay in the tour and preserve their message across status reads', async () => {
   const client = store.client!;
   const call = client.call.bind(client);
@@ -316,4 +381,26 @@ test('focus stays in the dialog and navigation focuses its new heading', async (
   expect(document.activeElement).toBe(query('[data-testid=onboarding-skip]'));
   document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
   expect(document.activeElement).toBe(query('[data-testid=onboarding-next]'));
+});
+
+test('the second screen asks who is using Boite and writes the preset at once', async () => {
+  await open();
+  await click('onboarding-next');
+  expect(step()).toBe('profile');
+  expect(query('[data-testid=onboarding-profile-everyday]').textContent).toContain("I'm not a developer! Don't confuse me with code and commands!");
+  expect(query('[data-testid=onboarding-profile-developer]').textContent).toContain("I'm a developer, give me the works.");
+
+  store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
+  await click('onboarding-profile-everyday');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('true');
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', startIn: 'drafts', panel: 'files', hidden: ['header.terminal', 'panel.trace'] });
+  // The everyday answer asks before each action.
+  expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({ permissionMode: 'default' });
+
+  // Changing the answer rewrites the whole preset, and skipping keeps it.
+  await click('onboarding-profile-developer');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('false');
+  await click('onboarding-skip');
+  await settle();
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', startIn: 'project', panel: 'changes', hidden: [] });
 });

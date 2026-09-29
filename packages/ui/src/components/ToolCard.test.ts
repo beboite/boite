@@ -61,3 +61,48 @@ test('a short input has no cut and no Show all', () => {
   expect(query('[data-testid=tool-input]').classList.contains('clamped')).toBe(false);
   expect(document.querySelector('[data-testid=tool-input-show-all]')).toBeNull();
 });
+
+test('a failed edit claims no change: no counts, no diff drawn from what it meant to do', () => {
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Edit', input: { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }, output: 'old_string not found', status: 'error' as const }
+  });
+  flushSync();
+  expect(document.querySelector('[data-testid=tool-diff-counts]')).toBeNull();
+  expect(query('[data-testid=tool-error-preview]').textContent).toBe('old_string not found');
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
+  flushSync();
+  expect(document.querySelector('[data-testid=diff-view]')).toBeNull();
+  expect(query('[data-testid=tool-output]').textContent).toContain('old_string not found');
+});
+
+test('a standalone command has a compact summary and preserves its full input on expansion', () => {
+  const command = 'git status --short\ngit branch -vv\ngit remote -v';
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Bash', input: { command }, output: 'clean', status: 'done' as const }
+  });
+  flushSync();
+  expect(query('[data-testid=tool-toggle] .line').textContent).toBe('Ran 1 command');
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
+  flushSync();
+  expect(query('[data-testid=tool-input]').textContent).toContain('git branch -vv');
+  expect(query('[data-testid=tool-output]').textContent).toBe('clean');
+});
+
+test('a command\'s one diff keeps its heading, since the command does not name the file', () => {
+  const diff = { kind: 'diff' as const, path: 'src/a.ts', oldText: 'a\n', newText: 'b\n' };
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Bash', input: { command: 'git apply fix.patch' }, output: '', status: 'done' as const, documents: [diff] }
+  });
+  flushSync();
+  expect(query('[data-testid=diff-view] .path').textContent).toBe('src/a.ts');
+  unmount(running, { outro: false });
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Edit', input: { file_path: 'src/a.ts' }, output: '', status: 'done' as const, documents: [diff] }
+  });
+  flushSync();
+  expect(document.querySelector('[data-testid=diff-view] .path')).toBeNull();
+});

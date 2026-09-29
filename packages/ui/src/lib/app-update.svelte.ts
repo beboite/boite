@@ -1,3 +1,5 @@
+import { strings } from './strings';
+
 export type UpdateChannel = 'stable' | 'nightly';
 
 export type UpdatePhase =
@@ -47,6 +49,12 @@ export interface AppUpdateTestFixture {
 
 const FIRST_CHECK_MS = 8_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
+const DISMISSED_UPDATE_KEY = 'boite.app-update-dismissed';
+
+function readDismissedUpdate(): string | null {
+  try { return window.localStorage.getItem(DISMISSED_UPDATE_KEY); }
+  catch { return null; }
+}
 
 const idleSnapshot: UpdateSnapshot = {
   phase: 'idle',
@@ -122,17 +130,19 @@ function queryFixture(): AppUpdateTestFixture | undefined {
   if (!import.meta.env.DEV || query.get('fake') !== '1') return undefined;
   if (window.__BOITE_APP_UPDATE_TEST__) return window.__BOITE_APP_UPDATE_TEST__;
   const phase = query.get('appUpdate');
-  if (!['ready', 'downloading', 'error'].includes(phase ?? '')) return undefined;
+  if (!['checking', 'ready', 'downloading', 'error'].includes(phase ?? '')) return undefined;
   const channel: UpdateChannel = query.get('appUpdateChannel') === 'nightly' ? 'nightly' : 'stable';
   const currentChannel: UpdateChannel = query.get('appUpdateCurrentChannel') === 'nightly' ? 'nightly' : 'stable';
+  // A running check has found nothing yet: the shell clears the offer when it starts one.
+  const offered = phase !== 'checking';
   const snapshot: UpdateSnapshot = {
-    phase: phase as 'ready' | 'downloading' | 'error',
+    phase: phase as 'checking' | 'ready' | 'downloading' | 'error',
     currentVersion: currentChannel === 'nightly' ? '2.0.0-nightly.7' : '2.0.0-beta.1',
     currentChannel,
     channel,
-    version: channel === 'nightly' ? '2.0.0-nightly.8' : '2.0.0-beta.2',
-    notes: '## What changed\n\n- Faster startup\n- More reliable desktop updates',
-    publishedAt: '2026-09-22T12:00:00Z',
+    version: !offered ? null : channel === 'nightly' ? '2.0.0-nightly.8' : '2.0.0-beta.2',
+    notes: offered ? '## What changed\n\n- Faster startup\n- More reliable desktop updates' : null,
+    publishedAt: offered ? '2026-09-22T12:00:00Z' : null,
     received: phase === 'downloading' ? 38_000_000 : 0,
     total: phase === 'downloading' ? 100_000_000 : null,
     error: phase === 'error' ? 'The release server did not answer.' : null,
@@ -155,6 +165,7 @@ export function showAppUpdateUi(): boolean {
 export class AppUpdater {
   snapshot = $state.raw<UpdateSnapshot>({ ...idleSnapshot });
   lastCheckedAt = $state<number | null>(null);
+  #dismissedUpdate = $state<string | null>(readDismissedUpdate());
 
   #backend: AppUpdateBackend;
   #clock: UpdateClock;
@@ -180,6 +191,21 @@ export class AppUpdater {
 
   get ready(): boolean {
     return this.snapshot.supported && this.snapshot.phase === 'ready';
+  }
+
+  get announceReady(): boolean {
+    return this.ready && this.#dismissedUpdate !== this.#offerKey;
+  }
+
+  get #offerKey(): string {
+    return `${this.snapshot.channel}:${this.snapshot.version}`;
+  }
+
+  dismiss(): void {
+    if (!this.ready) return;
+    this.#dismissedUpdate = this.#offerKey;
+    try { window.localStorage.setItem(DISMISSED_UPDATE_KEY, this.#dismissedUpdate); }
+    catch { /* Keep the dismissal for this session when storage is unavailable. */ }
   }
 
   get busy(): boolean {
@@ -328,3 +354,12 @@ export const appUpdater = new AppUpdater(
   systemClock,
   showAppUpdateUi
 );
+
+/**
+ * The name the app goes by: a nightly build is "boite (de nuit)" wherever it
+ * says its own name, like the shell's window title and tray. The update card
+ * still names the track Boite Nightly.
+ */
+export function appName(): string {
+  return appUpdater.snapshot.currentChannel === 'nightly' ? strings.app.nightlyName : strings.app.name;
+}

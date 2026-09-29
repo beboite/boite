@@ -1,10 +1,13 @@
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import { removeDir } from './fs-retry.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Account, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
+import { hostAgentsEnabled } from './providers/resolve.ts';
+import { grokQuotaToken } from './grok-quota-auth.ts';
 
 export const ANTIGRAVITY_QUOTA_ID = 'quota:antigravity-cli';
 const obj = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -16,7 +19,18 @@ function limit(id: string, label: string, percent: unknown, reset: unknown): Quo
 
 export function grokQuotaWindows(raw: unknown): QuotaWindow[] {
   const config = obj(obj(raw)['config']);
-  return limit('credits', 'Credits', config['creditUsagePercent'], obj(config['currentPeriod'])['end'] ?? config['billingPeriodEnd']);
+  const periodEnd = obj(config['currentPeriod'])['end'];
+  let percent = config['creditUsagePercent'];
+  if (percent === undefined) {
+    const budget = obj(config['monthlyLimit'])['val'];
+    const used = config['used'];
+    const amount = used !== null && typeof used === 'object' && !Array.isArray(used) ? obj(used)['val'] ?? 0 : undefined;
+    if (typeof budget === 'number' && Number.isFinite(budget) && budget > 0 && typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) percent = amount / budget * 100;
+    // The credits endpoint omits proto3 zero scalars, but reported legacy
+    // amounts take precedence over that default when both field sets coexist.
+    else if (typeof periodEnd === 'string' && Number.isFinite(Date.parse(periodEnd))) percent = 0;
+  }
+  return limit('credits', 'Credits', percent, periodEnd ?? config['billingPeriodEnd']);
 }
 
 export function openCodeQuotaWindows(raw: unknown, now = Date.now()): QuotaWindow[] {
@@ -50,11 +64,14 @@ async function credentials(path: string, name: string): Promise<Record<string, u
   catch { throw new Error(`${name} login could not be read. Connect the account in Providers.`); }
 }
 
+class RejectedQuotaToken extends Error {}
+
 async function request(url: string, token: string, name: string, headers: Record<string, string> = {}): Promise<unknown> {
   let response: Response;
   try { response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...headers }, redirect: 'error', signal: AbortSignal.timeout(15_000) }); }
   catch { throw new Error(`${name} usage request failed. Check the connection and retry.`); }
-  if (response.status === 401 || response.status === 403) throw new Error(`${name} login expired or has no subscription access. Reconnect in Providers.`);
+  if (response.status === 401) throw new RejectedQuotaToken(`${name} login expired or has no subscription access. Reconnect in Providers.`);
+  if (response.status === 403) throw new Error(`${name} login expired or has no subscription access. Reconnect in Providers.`);
   if (!response.ok) throw new Error(`${name} usage returned HTTP ${response.status}. Retry in five minutes.`);
   try { return await response.json(); } catch { throw new Error(`${name} returned an invalid usage response.`); }
 }
@@ -64,11 +81,16 @@ export async function readExtraQuota(core: Core, account: Account): Promise<Quot
   const env = core.accounts.accountEnv(account, core.providers.require(account.providerId));
   if (account.providerId === 'grok') {
     const root = env['GROK_HOME'] ?? process.env['GROK_HOME'] ?? join(homePath(), '.grok');
-    const auth = await credentials(join(root, 'auth.json'), 'Grok');
-    const entries = Object.entries(auth).filter(([key]) => key.startsWith('https://auth.x.ai::') || key === 'https://accounts.x.ai/sign-in').sort(([a], [b]) => Number(b.startsWith('https://auth.x.ai::')) - Number(a.startsWith('https://auth.x.ai::')));
-    const login = entries.map(([, value]) => obj(value)).find((value) => typeof value['key'] === 'string' && typeof value['expires_at'] === 'string' && Date.parse(value['expires_at']) > Date.now());
-    if (!login) throw new Error('Grok login is missing or expired. Run grok login, then refresh.');
-    return grokQuotaWindows(await request('https://cli-chat-proxy.grok.com/v1/billing?format=credits', login['key'] as string, 'Grok', { 'x-xai-token-auth': 'xai-grok-cli' }));
+    const path = join(root, 'auth.json');
+    const token = await grokQuotaToken(path);
+    const read = (key: string) => request('https://cli-chat-proxy.grok.com/v1/billing?format=credits', key, 'Grok', { 'x-xai-token-auth': 'xai-grok-cli' });
+    let report: unknown;
+    try { report = await read(token.key); }
+    catch (error) {
+      if (!(error instanceof RejectedQuotaToken)) throw error;
+      report = await read((await grokQuotaToken(path, token)).key);
+    }
+    return grokQuotaWindows(report);
   }
   const root = env['XDG_DATA_HOME'] ?? process.env['XDG_DATA_HOME'] ?? join(homePath(), '.local', 'share');
   // Isolated accounts never borrow an API key from the host environment.
@@ -91,12 +113,12 @@ export function supportsAntigravityUsage(version: string): boolean {
 
 async function readAntigravity(core: Core): Promise<QuotaWindow[]> {
   const installed = join(process.env['LOCALAPPDATA'] ?? join(homePath(), 'AppData', 'Local'), 'agy', 'bin', 'agy.exe');
-  const executable = Bun.which('agy') ?? (process.platform === 'win32' && existsSync(installed) ? installed : null);
+  const executable = !hostAgentsEnabled() ? null : Bun.which('agy') ?? (process.platform === 'win32' && existsSync(installed) ? installed : null);
   if (!executable) throw new Error('Install Antigravity CLI 1.1.11 or later, run agy to sign in, then refresh.');
   const cwd = await mkdtemp(join(tmpdir(), 'boite-agy-quota-'));
   const threadId = ANTIGRAVITY_QUOTA_ID;
   const run = (args: string[], timeout: number) => new Promise<string>((resolve, reject) => {
-    const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1' };
+    const env: Record<string, string | undefined> = { ...process.env, NO_COLOR: '1', AGY_CLI_DISABLE_AUTO_UPDATE: 'true' };
     delete env['ANTIGRAVITY_OAUTH_CREDENTIALS_JSON'];
     const child = core.procs.spawnChild(threadId, executable, args, { cwd, env });
     let output = '', bytes = 0, failure = '';
@@ -118,7 +140,7 @@ async function readAntigravity(core: Core): Promise<QuotaWindow[]> {
     try { report = JSON.parse(output); } catch { throw new Error('Antigravity returned an invalid usage report.'); }
     return antigravityQuotaWindows(report);
   } finally {
-    await core.procs.stopAndWait(threadId);
-    await rm(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `antigravity quota: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(cwd, (message) => core.log('warn', `antigravity quota: ${message}`));
   }
 }

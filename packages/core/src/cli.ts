@@ -17,6 +17,8 @@ import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
 import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
+import { agentCommand } from './agents/cli.ts';
+import { workflowCommand } from './workflow-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -28,11 +30,16 @@ export interface CliIo {
 export const USAGE = `usage: boite <command> [args] [--json]
 
   where                          this thread, project, cwd, branch
+  thread move <project>          move this thread to another project (name,
+                                 id or folder) when this turn ends
+  attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
-  open trace|tasks|changes|files [dir]
+  open trace|tasks|changes|files|workflow [dir|run-id]
   status                         git status of the working directory
+  ask <question> [option ...]    ask the user without stopping; the answer
+                                 arrives later as a message (--multiple)
   task list                      the agent's task list
   task add <text>                add a task (id t1, t2, ...)
   task start|done|remove <id>    move or drop one task
@@ -44,6 +51,32 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agents inbox                   agent messages, provenance and delivery state
   agents send <core>/<thread> <text>
   agents reply <message-id> <text>
+  agent context|inbox|missions   this persistent agent's authorized context
+  agent send <ids|-> <text>      post to its group or direct conversation
+  agent reply <message-id> <text>
+  agent acquire <task-id>        acquire a mission task atomically
+  agent submit <task-id> <generation> <result>
+  agent artifact <json>          title, summary, missionId, taskId, paths, commit, verification
+  agent decide <json>            prompt and options; yield until the user answers
+  agent memory [query]           search memory in this context
+  agent remember <json>          title and text, optional id and expectedRevision
+  agent routines                list this identity's scheduled work
+  agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
+  --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
+  delegate profiles|list         approved models, team status and bounded results
+  delegate spawn <profile> <brief>
+  delegate send <thread-id> <text>
+  delegate stop [thread-id]      stop one child, or pause the whole team
+  workflow help                  the plan format, with an example
+  workflow check|run <plan>      validate, or start, a JSON plan (file or inline)
+  workflow list|show [run-id]    runs of this thread, or one run's steps and results
+  workflow extend <run-id> <steps>
+  workflow pause|resume|stop <run-id>
+  workflow retry <run-id> [step]
+  workflow output <json>         a step's structured result, checked on the spot
+  workflow templates             plans kept for this project
+  workflow save <name> <plan|run-id>
+  workflow start <template>      run a kept plan by name or id
 
   --thread <id> --data-dir <dir> --channel <stable|dev>
                                  drive a thread from outside it, as the owner`;
@@ -69,22 +102,26 @@ class Usage extends Error {}
 interface Parsed {
   positional: string[];
   json: boolean;
+  multiple: boolean;
   thread: string | undefined;
   dataDir: string | undefined;
   channel: Channel;
+  requestId?: string;
 }
 
 function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const next = (): string => {
       const value = argv[index + 1];
-      if (value === undefined) throw new Usage(`${arg} needs a value`);
+      if (value === undefined || value === '' || value.startsWith('--')) throw new Usage(`${arg} needs a value`);
       index += 1;
       return value;
     };
     if (arg === '--json') parsed.json = true;
+    else if (arg === '--request-id') parsed.requestId = next();
+    else if (arg === '--multiple') parsed.multiple = true;
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -192,6 +229,47 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'agent': {
+      const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
+      print([JSON.stringify(result)], result);
+      return;
+    }
+    case 'attach': {
+      const message = await client.call('artifacts.publish', { threadId, path: absolute(io.cwd, want(0, 'a file')) });
+      print([`attached: ${rest[0]}`, `message: ${message.id}`], message);
+      return;
+    }
+    case 'delegate': {
+      const action = want(0, 'profiles, list, spawn, send or stop');
+      if (action === 'profiles' || action === 'list') {
+        const view = await client.call('delegation.get', { threadId });
+        print([
+          `parent: ${view.rootThreadId}`,
+          `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
+          `turns: ${view.turnsUsed}/${view.config.maxTurns}`,
+          ...(action === 'profiles'
+            ? view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)
+            : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
+          'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
+        ], view);
+      } else if (action === 'spawn') {
+        const profileId = want(1, 'a profile id from delegate profiles');
+        const task = rest.slice(2).join(' ');
+        if (!task) throw new Usage('delegate spawn needs a bounded task brief');
+        const agent = await client.call('delegation.spawn', { threadId, profileId, task, requestId: parsed.requestId ?? crypto.randomUUID() });
+        print([`agent: ${agent.thread.id}`, `status: ${agent.thread.status}`, `model: ${agent.thread.providerId}/${agent.thread.model}`, 'Result will be forwarded to the parent automatically.'], agent);
+      } else if (action === 'send') {
+        const toThreadId = want(1, 'a parent or child thread id');
+        const body = rest.slice(2).join(' ');
+        if (!body) throw new Usage('delegate send needs message text');
+        const letter = await client.call('delegation.send', { threadId, toThreadId, text: body, requestId: parsed.requestId ?? crypto.randomUUID() });
+        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Queued messages are not an acknowledgement or consent.'], letter);
+      } else if (action === 'stop') {
+        const result = await client.call('delegation.stop', { threadId, ...(rest[1] ? { agentId: rest[1] } : {}) });
+        print([`stopped: ${result.stopped}`], result);
+      } else throw new Usage('delegate expects profiles, list, spawn, send or stop');
+      return;
+    }
     case 'agents': {
       const action = want(0, 'list, inbox, send or reply');
       if (action === 'list') {
@@ -215,9 +293,13 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           if (!coreId || !targetThreadId || extra) throw new Usage('recipient must be <core-id>/<thread-id> from agents list');
           to = { coreId, threadId: targetThreadId };
         }
-        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
+        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: parsed.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
         print([`id: ${letter.id}`, `status: ${letter.status}`, 'Delivery is not consent. Wait for an explicit reply before a disruptive action.', ...(letter.error ? [`error: ${letter.error}`] : [])], letter);
       } else throw new Usage('agents expects list, inbox, send or reply');
+      return;
+    }
+    case 'workflow': {
+      await workflowCommand(client, threadId, rest, io, print, parsed.requestId);
       return;
     }
     case 'where': {
@@ -236,6 +318,22 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       );
       return;
     }
+    case 'thread': {
+      const action = want(0, 'move');
+      if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);
+      const project = rest.slice(1).join(' ').trim();
+      if (project.length === 0) throw new Usage('thread move needs a project name, id or folder');
+      const moved = await client.call('agent.move', { threadId, project });
+      const where = moved.cwd ?? `a new folder of ${moved.projectPath}`;
+      const background = moved.stopsBackground ? ' Background work stops then.' : '';
+      print(
+        moved.when === 'turn-end'
+          ? [`Moves to ${moved.project} (${moved.projectPath}) when this turn ends; the next turn starts in ${where}.${background}`]
+          : [`Moved to ${moved.project} (${moved.projectPath}); the next turn starts in ${where}.${background}`],
+        moved,
+      );
+      return;
+    }
     case 'show': {
       const { path, line } = splitLine(want(0, 'a file'));
       await opened({ kind: 'file', path: absolute(io.cwd, path), ...(line === undefined ? {} : { line }) });
@@ -251,13 +349,21 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       return;
     }
     case 'open': {
-      const kind = want(0, 'trace, tasks, changes or files');
+      const kind = want(0, 'trace, tasks, changes, files or workflow');
       if (kind === 'trace' || kind === 'tasks') await opened({ kind });
+      else if (kind === 'workflow') await opened(rest[1] === undefined ? { kind } : { kind, runId: rest[1] });
       else if (kind === 'changes') await opened({ kind: 'diff' });
       else if (kind === 'files') {
         const dir = rest[1];
         await opened(dir === undefined ? { kind: 'files' } : { kind: 'files', path: absolute(io.cwd, dir) });
       } else throw new Usage(`open: unknown surface ${kind}`);
+      return;
+    }
+    case 'ask': {
+      const text = want(0, 'a question');
+      const options = rest.slice(1);
+      const asked = await client.call('questions.ask', { threadId, text, ...(options.length > 0 ? { options } : {}), ...(parsed.multiple ? { multiple: true } : {}) });
+      print([`asked: ${asked.questionId}`, 'Keep working. The answer arrives as a message quoting the question; without one, go on with a sensible default.'], asked);
       return;
     }
     case 'status': {

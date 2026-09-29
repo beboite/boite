@@ -7,12 +7,17 @@
  */
 
 import type { PanelSurface } from '@boite/contracts';
+import { SvelteSet } from 'svelte/reactivity';
 import { browserBridge } from './browser-bridge';
+import { work } from './work-prefs.svelte';
+import { ZOOM_STEPS } from './zoom';
 
-export type SurfaceKind = 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
+export type SurfaceKind = 'agents' | 'workflow' | 'trace' | 'browser' | 'changes' | 'files' | 'file' | 'tasks';
 
 /** Every kind a stored layout may name, and what `parse` checks a blob against. */
 export const SURFACE_KINDS: readonly SurfaceKind[] = [
+  'agents',
+  'workflow',
   'trace',
   'browser',
   'changes',
@@ -25,7 +30,7 @@ export const SURFACE_KINDS: readonly SurfaceKind[] = [
  * The kinds that get one tab and no more: asking for them again brings the tab
  * that exists forward. A browser page and a file are the two that multiply.
  */
-const SINGLETON_KINDS: readonly SurfaceKind[] = ['trace', 'changes', 'files', 'tasks'];
+const SINGLETON_KINDS: readonly SurfaceKind[] = ['agents', 'workflow', 'trace', 'changes', 'files', 'tasks'];
 
 export interface Surface {
   id: string;
@@ -43,6 +48,8 @@ export interface Surface {
   path?: string;
   /** The line a file tab lands on, when whoever opened it named one. */
   line?: number;
+  /** The run the workflow tab shows; absent means the newest one. */
+  runId?: string;
 }
 
 /** What the tab menu, the close button and the close key ask for. */
@@ -67,24 +74,17 @@ export const SIBLING_MIN = 360;
 export const PANEL_INLINE_MIN_VIEWPORT = 981;
 
 export const TRACE_SURFACE_ID = 'trace';
+export const AGENTS_SURFACE_ID = 'agents';
 export const CHANGES_SURFACE_ID = 'changes';
 export const FILES_SURFACE_ID = 'files';
 export const TASKS_SURFACE_ID = 'tasks';
+export const WORKFLOW_SURFACE_ID = 'workflow';
 
 /** Past this the changes surface puts its diff beside the list rather than under it. */
 export const CHANGES_SPLIT_MIN = 900;
 
-/** The rungs `Ctrl+=`, `Ctrl+-` and `Ctrl+0` walk on a browser surface. */
-export const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
-export const ZOOM_DEFAULT = 1;
-
-/** The rung after this one in that direction, or the end of the ladder. */
-export function stepZoom(current: number, direction: -1 | 1): number {
-  const at = ZOOM_STEPS.findIndex((step) => Math.abs(step - current) < 0.001);
-  const from = at < 0 ? ZOOM_STEPS.indexOf(ZOOM_DEFAULT) : at;
-  const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, from + direction));
-  return ZOOM_STEPS[next] ?? ZOOM_DEFAULT;
-}
+/** A browser surface walks the interface zoom's own ladder (`lib/zoom.ts`). */
+export { ZOOM_DEFAULT, ZOOM_STEPS, stepZoom } from './zoom';
 
 interface Persisted {
   version: number;
@@ -123,7 +123,7 @@ function parse(raw: string): Record<string, PanelState> {
     const surfaces: Surface[] = [];
     for (const surface of raws) {
       if (typeof surface !== 'object' || surface === null) continue;
-      const { id, kind, title, url, zoom, path, line } = surface as Surface;
+      const { id, kind, title, url, zoom, path, line, runId } = surface as Surface;
       if (typeof id !== 'string') continue;
       if (!SURFACE_KINDS.includes(kind)) continue;
       // A file tab with no path has nothing to read, so it is not a tab.
@@ -139,7 +139,8 @@ function parse(raw: string): Record<string, PanelState> {
         ...(typeof url === 'string' ? { url } : {}),
         ...stored,
         ...(typeof path === 'string' ? { path } : {}),
-        ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {})
+        ...(typeof line === 'number' && Number.isFinite(line) ? { line } : {}),
+        ...(typeof runId === 'string' ? { runId } : {})
       });
     }
     const active = (value as PanelState).activeSurfaceId;
@@ -162,8 +163,12 @@ export function clampPanel(width: number, viewport: number, sibling: number): nu
 }
 
 export class RightPanelStore {
-  /** One entry per thread id. The empty key is the scratch state of "no thread". */
-  threads = $state<Record<string, PanelState>>({});
+  /**
+   * One entry per thread id. The empty key is the scratch state of "no thread".
+   * Raw: every write replaces the record, so no deep proxy is built, and `save()`
+   * serializes plain objects instead of walking one proxy per layout.
+   */
+  threads = $state.raw<Record<string, PanelState>>({});
   width = $state(PANEL_DEFAULT);
   /** The chat column at zero width. Deliberately not persisted, like T3's. */
   maximized = $state(false);
@@ -175,6 +180,13 @@ export class RightPanelStore {
    */
   readonly drafts = new Map<string, Map<string, string>>();
 
+  /**
+   * The threads a phone-width load shut, kept beside the stored layout rather
+   * than in it: every write saves the whole map, and a desktop reading the same
+   * storage must still find these panels open. Opening one takes it out.
+   */
+  readonly phoneShut = new SvelteSet<string>();
+
   #bound = new Map<string, BoundPanel>();
 
   constructor() {
@@ -184,7 +196,15 @@ export class RightPanelStore {
   load(): void {
     try {
       const raw = window.localStorage.getItem(PANEL_STORAGE_KEY);
-      this.threads = raw ? parse(raw) : {};
+      const threads = raw ? parse(raw) : {};
+      // On a phone the panel is a sheet over the whole chat: a reload opens on
+      // the chat, and the tabs wait for the next open. The stored layout keeps
+      // isOpen, so a desktop reading the same storage still finds its panel open.
+      this.phoneShut.clear();
+      if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 720px)').matches) {
+        for (const [threadId, state] of Object.entries(threads)) if (state.isOpen) this.phoneShut.add(threadId);
+      }
+      this.threads = threads;
     } catch {
       this.threads = {};
     }
@@ -228,18 +248,37 @@ export class RightPanelStore {
 
   /** A thread that left Boite takes its panel with it, browser views included. */
   forget(threadId: string): void {
-    const state = this.threads[threadId];
-    if (!state) return;
-    // The strip goes with the layout, so nothing will ever list these surfaces
-    // again: a view not destroyed here outlives the session with no tab to
-    // close it. The surface's own teardown only parks it, on purpose.
-    for (const surface of state.surfaces) {
-      if (surface.kind === 'browser') browserBridge.destroy(surface.id);
+    this.#forget([threadId]);
+  }
+
+  /**
+   * The layouts `stale` names, dropped in one write. The caller decides which
+   * keys it may judge: a machine not connected yet must keep its own.
+   */
+  prune(stale: (key: string) => boolean): void {
+    this.#forget(Object.keys(this.threads).filter((key) => key !== '' && stale(key)));
+  }
+
+  #forget(keys: string[]): void {
+    const kept = { ...this.threads };
+    let changed = false;
+    for (const key of keys) {
+      const state = kept[key];
+      if (!state) continue;
+      // The strip goes with the layout, so nothing will ever list these surfaces
+      // again: a view not destroyed here outlives the session with no tab to
+      // close it. The surface's own teardown only parks it, on purpose.
+      for (const surface of state.surfaces) {
+        if (surface.kind === 'browser') browserBridge.destroy(surface.id);
+      }
+      delete kept[key];
+      this.#bound.delete(key);
+      this.drafts.delete(key);
+      this.phoneShut.delete(key);
+      changed = true;
     }
-    const { [threadId]: _gone, ...kept } = this.threads;
+    if (!changed) return;
     this.threads = kept;
-    this.#bound.delete(threadId);
-    this.drafts.delete(threadId);
     this.save();
   }
 }
@@ -257,8 +296,10 @@ export class BoundPanel {
     return this.#key === '' ? null : this.#key;
   }
 
+  /** The layout as this device shows it: a panel a phone-width load shut reads closed. */
   get state(): PanelState {
-    return this.#root.threads[this.#key] ?? emptyState();
+    const stored = this.#root.threads[this.#key] ?? emptyState();
+    return stored.isOpen && this.#root.phoneShut.has(this.#key) ? { ...stored, isOpen: false } : stored;
   }
 
   get isOpen(): boolean {
@@ -279,6 +320,10 @@ export class BoundPanel {
   }
 
   #write(next: PanelState): void {
+    // A write that leaves a phone-shut panel shut keeps what the desktop stored.
+    const stored = this.#root.threads[this.#key];
+    if (next.isOpen) this.#root.phoneShut.delete(this.#key);
+    else if (this.#root.phoneShut.has(this.#key) && stored?.isOpen && next.surfaces.length > 0) next = { ...next, isOpen: true };
     this.#root.threads = { ...this.#root.threads, [this.#key]: next };
     this.#root.save();
   }
@@ -342,6 +387,13 @@ export class BoundPanel {
     return this.open('tasks');
   }
 
+  /** The workflow tab, on one run when one is named. */
+  openWorkflow(runId?: string): Surface {
+    const opened = this.open('workflow');
+    if (runId !== undefined) this.update(opened.id, { runId });
+    return this.state.surfaces.find((surface) => surface.id === opened.id) ?? opened;
+  }
+
   /**
    * What the core's `panel.open` asked for, mapped onto this panel. `diff` is
    * the changes surface on one file, `browser` opens the url the way a page
@@ -353,6 +405,7 @@ export class BoundPanel {
     else if (surface.kind === 'diff') this.openChanges(surface.path);
     else if (surface.kind === 'browser') this.open('browser', surface.url);
     else if (surface.kind === 'tasks') this.openTasks();
+    else if (surface.kind === 'workflow') this.openWorkflow(surface.runId);
     else this.open('trace');
   }
 
@@ -464,10 +517,25 @@ export class BoundPanel {
     this.#write({ ...current, surfaces });
   }
 
-  /** The panel itself, open or shut; an empty panel opens on its launcher. */
-  toggle(): void {
+  /**
+   * The panel itself, open or shut. An empty panel opens on the surface this
+   * device starts with, else on its launcher. Outside a git repository, the
+   * drafts included, Changes has nothing to diff and Files takes its place.
+   */
+  toggle(repository = true): void {
     const current = this.state;
+    const start = work.current.panel === 'changes' && !repository ? 'files' : work.current.panel;
+    if (!current.isOpen && current.surfaces.length === 0 && start !== 'launcher') {
+      this.open(start);
+      return;
+    }
     this.#write({ ...current, isOpen: !current.isOpen });
+  }
+
+  /** Shuts the panel, its surfaces kept: what Back does on a phone. */
+  hide(): void {
+    const current = this.state;
+    if (current.isOpen) this.#write({ ...current, isOpen: false });
   }
 
   /**

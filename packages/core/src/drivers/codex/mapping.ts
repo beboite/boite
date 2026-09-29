@@ -1,7 +1,7 @@
 import type { ImageAttachment, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
 import type { TurnContext } from '../types.ts';
-import type { CodexItem, CodexQuestion, CodexTokenUsage, ToolView } from './protocol.ts';
-import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME } from './protocol.ts';
+import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
+import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
 
 // ---------------------------------------------------------------------------
 // Mapping helpers
@@ -84,8 +84,17 @@ function itemStatus(status: string | undefined): ToolStatus {
 }
 
 /** The four `ThreadItem` variants that are a tool card. Everything else is dropped. */
-export function toolViewOf(item: CodexItem): ToolView | null {
+export function toolViewOf(item: CodexItem, completed = false): ToolView | null {
   switch (item.type) {
+    // The agent waiting on purpose, for a background command or a timer: a
+    // card, so the pause reads as a pause and not as a hang.
+    case 'sleep':
+      return {
+        name: SLEEP_TOOL_NAME,
+        input: { durationMs: typeof item.durationMs === 'number' ? item.durationMs : null },
+        output: null,
+        status: completed ? 'done' : 'running',
+      };
     case 'commandExecution':
       return {
         name: COMMAND_TOOL_NAME,
@@ -130,6 +139,14 @@ export function mapUsage(last: CodexTokenUsage): Usage {
     cacheReadTokens: last.cachedInputTokens ?? 0,
     cacheWriteTokens: last.cacheWriteInputTokens ?? 0,
     costUsdEquivalent: null,
+  };
+}
+
+/** The model and model provider a `thread/start` or `thread/resume` answer names. */
+export function servedOf(opened: CodexThreadOpened): { model: string | null; provider: string | null } {
+  return {
+    model: typeof opened.model === 'string' ? opened.model : null,
+    provider: typeof opened.modelProvider === 'string' ? opened.modelProvider : null,
   };
 }
 

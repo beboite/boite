@@ -1,4 +1,4 @@
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, IMAGE_MIME_TYPES } from './attachment-limits.ts';
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, IMAGE_MIME_TYPES } from './attachment-limits.ts';
 import type { ProviderDescriptor } from './index.ts';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -24,6 +24,7 @@ export function attachmentError(attachments: unknown, provider: Pick<ProviderDes
       max: ATTACHMENTS_PER_TURN,
     });
   }
+  let total = 0;
   for (const [index, attachment] of attachments.entries()) {
     if (attachment.name !== null && (typeof attachment.name !== 'string' || attachment.name.length > 255)) return refused(`attachment ${index + 1}: name must be null or a string of at most 255 characters`);
     const label = attachment.name ?? `attachment ${index + 1}`;
@@ -48,6 +49,13 @@ export function attachmentError(attachments: unknown, provider: Pick<ProviderDes
         max: ATTACHMENT_MAX_BYTES,
       });
     }
+    total += bytes;
+  }
+  if (total > ATTACHMENTS_TOTAL_MAX_BYTES) {
+    return refused(`the attachments weigh ${(total / 1048576).toFixed(1)} MB together, over the ${ATTACHMENTS_TOTAL_MAX_BYTES / 1048576} MB one turn may carry`, {
+      bytes: total,
+      max: ATTACHMENTS_TOTAL_MAX_BYTES,
+    });
   }
   return null;
 }

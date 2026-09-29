@@ -25,6 +25,13 @@ export const EXIT_GRACE_MS = 500;
 /** How long a stopped turn waits for its `turn/completed` before the host is closed. */
 export const INTERRUPT_DEADLINE_MS = 30_000;
 
+/**
+ * How long each startup step (`initialize`, then `session/start` or
+ * `session/resume`) may take before the host is closed. A cold start on old
+ * hardware takes seconds, a host stuck on its disk or its network never ends.
+ */
+export const STARTUP_DEADLINE_MS = 90_000;
+
 /** Muse names its shell tool on its own; the card carries the usual one when a command is known. */
 export const COMMAND_TOOL_NAME = 'Bash';
 

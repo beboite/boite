@@ -2,7 +2,7 @@ import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contract
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { messageOf, unavailable } from '../../errors.ts';
-import { agentEnv, profileFor } from '../../providers/loader.ts';
+import { agentEnv, profileFor } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import { museExecutable, textOf } from './mapping.ts';
 import type { MuseModelList, Timer } from './protocol.ts';

@@ -1,8 +1,10 @@
-import type { QuestionAnswer } from '@boite/contracts';
+import type { HookOutcome, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
+import { tildePath } from '../../paths.ts';
+import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { QuestionAsk, TurnContext } from '../types.ts';
 import {
   answerTextOf,
@@ -11,20 +13,42 @@ import {
   modelOf,
   optionsOf,
   questionTextOf,
+  servedOf,
   textOf,
   toolViewOf,
 } from './mapping.ts';
-import type { CodexItem, CodexQuestion, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
+import type { CodexHookRun, CodexHooksListed, CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, CodexTurnError, CodexTurnRecord, Timer } from './protocol.ts';
 import {
   CLIENT_NAME,
   COMMAND_TOOL_NAME,
   EXIT_GRACE_MS,
   FILE_CHANGE_TOOL_NAME,
   MODE_POLICY,
+  PERMISSIONS_TOOL_NAME,
   STDERR_MAX,
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
 import { CodexTurn } from './turn.ts';
+
+/**
+ * What `thread/resume` answers when the thread's rollout file is gone. Both
+ * sentences are in the 0.156.1 binary; any other refusal keeps the thread.
+ */
+const MISSING_THREAD = /no rollout found for (?:thread|conversation) id|thread not found: /i;
+
+/** `thread/resume` refused a thread the agent no longer has. */
+class ThreadLostError extends Error {}
+
+/** `hook/completed` statuses as the ledger counts them; `running` is not an end. */
+const HOOK_OUTCOMES: Record<string, HookOutcome> = {
+  completed: 'ok',
+  failed: 'failed',
+  blocked: 'blocked',
+  stopped: 'stopped',
+};
+
+/** How long a stopped turn waits for the agent to end it before its process is stopped. */
+const STOP_GRACE_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // The session: one agent process per thread
@@ -44,15 +68,25 @@ export class CodexSession {
 
   /** The Codex thread id: what `ctx.sessionId` stores and `thread/resume` takes. */
   private threadId: string | null = null;
+  /** What `thread/start` or `thread/resume` said it runs on, for the prompt cache lifetime. */
+  private served: { model: string | null; provider: string | null } = { model: null, provider: null };
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
   private idle: Timer | null = null;
   /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
   private current: CodexTurn | null = null;
+  /** The turn this session is running, from its process start to its settle. */
+  private active: CodexTurn | null = null;
+  /** Armed by a stop: an agent that has not ended the turn by then loses its process. */
+  private stopTimer: Timer | null = null;
   private contextSink: CodexTurn['ctx']['context'] | null = null;
+  /** The context the process was opened with, for a hook that runs while no turn is. */
+  private opener: TurnContext | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
+  /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
+  private readonly asyncItems = new Set<string>();
   private closing = false;
   private ended = false;
 
@@ -91,8 +125,34 @@ export class CodexSession {
     // A stop that lands before `turn/start` answered is replayed the moment the
     // turn id arrives, so the order of the two never decides the outcome.
     turn.markStopped();
-    if (this.current !== turn) return;
-    this.interrupt(turn);
+    // A turn still queued behind another reads the stop when its own run begins.
+    if (this.active !== turn) return;
+    if (this.current === turn) this.interrupt(turn);
+    this.armStopGrace(turn);
+  }
+
+  /**
+   * `turn/interrupt` is a request the agent may never act on: a wedged
+   * app-server, or a `turn/start` or `thread/start` that never answers. The
+   * stop is the user's, so it wins after the grace: the turn ends stopped and
+   * the process goes, and the next turn resumes the Codex thread on a new one.
+   */
+  private armStopGrace(turn: CodexTurn): void {
+    if (this.stopTimer !== null) return;
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      if (turn.decided || this.active !== turn) return;
+      turn.ctx.log('warn', `codex: the agent did not end the stopped turn within ${STOP_GRACE_MS} ms; its process is stopped`);
+      turn.endStopped();
+      this.drop();
+    }, STOP_GRACE_MS);
+    this.stopTimer.unref?.();
+  }
+
+  private clearStopGrace(): void {
+    if (this.stopTimer === null) return;
+    clearTimeout(this.stopTimer);
+    this.stopTimer = null;
   }
 
   private interrupt(turn: CodexTurn): void {
@@ -119,10 +179,12 @@ export class CodexSession {
   // -- the turn -------------------------------------------------------------
 
   private async runTurn(turn: CodexTurn): Promise<void> {
+    this.active = turn;
     try {
       await this.start(turn.ctx);
     } catch (error) {
-      turn.fail(messageOf(error));
+      if (error instanceof ThreadLostError) turn.loseSession(error.message);
+      else turn.fail(messageOf(error));
       this.endTurn(turn, true);
       return;
     }
@@ -136,6 +198,12 @@ export class CodexSession {
     }
 
     turn.noteSession(threadId);
+    // Stopped while the process or the thread was opening: the prompt never goes out.
+    if (turn.isStopped) {
+      turn.endStopped();
+      this.endTurn(turn, false);
+      return;
+    }
     this.current = turn;
     this.contextSink = turn.ctx.context;
     const ctx = turn.ctx;
@@ -172,10 +240,15 @@ export class CodexSession {
 
     await turn.finished;
     this.current = null;
+    // Only OpenAI's own endpoint has a published lifetime; Codex never sends a
+    // retention option, so the default for the model applies.
+    if (this.served.provider === 'openai') turn.cacheLife = openAiCacheLife(modelOf(ctx) ?? this.served.model);
     this.endTurn(turn, turn.isStopped);
   }
 
   private endTurn(turn: CodexTurn, drop: boolean): void {
+    if (this.active === turn) this.active = null;
+    this.clearStopGrace();
     turn.settle();
     this.running = Math.max(0, this.running - 1);
     if (drop || this.closing || this.warmMs <= 0) {
@@ -215,17 +288,19 @@ export class CodexSession {
     });
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
+    this.opener = ctx;
 
     await rpc.request('initialize', {
       clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
       capabilities: null,
     });
     rpc.notify('initialized', {});
+    void this.reportSkippedHooks(rpc, ctx);
 
     const policy = MODE_POLICY[ctx.thread.permissionMode];
     const model = modelOf(ctx);
     if (ctx.sessionId !== null) {
-      const resumed = await rpc.request<{ thread: { id: string } }>('thread/resume', {
+      const resumed = await rpc.request<CodexThreadOpened>('thread/resume', {
         threadId: ctx.sessionId,
         cwd: ctx.thread.cwd,
         approvalPolicy: policy.approvalPolicy,
@@ -233,12 +308,16 @@ export class CodexSession {
         ...(model === null ? {} : { model }),
         config: { 'tools.update_plan.enabled': true },
         excludeTurns: true,
+      }).catch((error: unknown) => {
+        const reason = messageOf(error);
+        throw MISSING_THREAD.test(reason) ? new ThreadLostError(reason) : error;
       });
       this.threadId = resumed.thread.id;
+      this.served = servedOf(resumed);
       return;
     }
 
-    const created = await rpc.request<{ thread: { id: string } }>('thread/start', {
+    const created = await rpc.request<CodexThreadOpened>('thread/start', {
       config: { 'tools.update_plan.enabled': true },
       cwd: ctx.thread.cwd,
       approvalPolicy: policy.approvalPolicy,
@@ -246,6 +325,7 @@ export class CodexSession {
       ...(model === null ? {} : { model }),
     });
     this.threadId = created.thread.id;
+    this.served = servedOf(created);
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {
@@ -348,6 +428,10 @@ export class CodexSession {
       this.reportUsage(params);
       return;
     }
+    if (method === 'hook/completed') {
+      this.onHook(params['run'] as CodexHookRun | undefined);
+      return;
+    }
     const turn = this.current;
     if (turn === null) return;
     switch (method) {
@@ -357,7 +441,11 @@ export class CodexSession {
         break;
       }
       case 'item/agentMessage/delta':
+        if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
         turn.writeText(textOf(params['delta']));
+        break;
+      case 'item/commandExecution/outputDelta':
+        if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
         break;
       case 'turn/plan/updated': {
         const plan = params['plan'];
@@ -368,8 +456,10 @@ export class CodexSession {
         break;
       }
       case 'item/reasoning/textDelta':
+        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:content:${String(params['contentIndex'] ?? 0)}`);
+        break;
       case 'item/reasoning/summaryTextDelta':
-        turn.writeThinking(textOf(params['delta']));
+        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:summary:${String(params['summaryIndex'] ?? 0)}`);
         break;
       case 'item/started':
       case 'item/completed': {
@@ -379,7 +469,14 @@ export class CodexSession {
           turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
           break;
         }
-        const view = toolViewOf(item);
+        if (item.type === 'agentMessage' && item.delivery === 'async') {
+          if (!this.asyncItems.has(item.id)) {
+            this.asyncItems.add(item.id);
+            for (const question of item.questions ?? []) this.askAsync(turn, question);
+          }
+          break;
+        }
+        const view = toolViewOf(item, method === 'item/completed');
         if (view !== null) turn.upsertTool(item.id, view);
         break;
       }
@@ -402,6 +499,56 @@ export class CodexSession {
         // the mcpServer, account, project and realtime families: the contract
         // has no part for them, so they are dropped.
         break;
+    }
+  }
+
+  /**
+   * One run of the user's hooks: counted, and when it refused the prompt or
+   * stopped the turn, drawn in the thread as a quiet line, since the agent
+   * writes nothing else for it. A denied tool shows on its own card already.
+   */
+  private onHook(run: CodexHookRun | undefined): void {
+    if (run === undefined) return;
+    const outcome = HOOK_OUTCOMES[run.status];
+    if (outcome === undefined) return;
+    const turn = this.current ?? this.active;
+    const said = (run.entries ?? [])
+      .filter((entry) => entry.kind !== 'context')
+      .map((entry) => entry.text.trim())
+      .filter((text) => text.length > 0)
+      .join('\n');
+    const ctx = turn?.ctx ?? this.opener;
+    ctx?.hook?.({ event: run.eventName, name: tildePath(run.sourcePath), outcome, message: said.length === 0 ? null : said });
+    if (turn === null || turn.settled) return;
+    if (outcome === 'stopped' || (outcome === 'blocked' && run.eventName === 'userPromptSubmit')) {
+      turn.part(turn.takeIndex(), { type: 'hook', event: run.eventName, outcome, message: said.slice(0, 500) });
+    }
+  }
+
+  /**
+   * Codex runs no hook the user has not reviewed in Codex, and skips one that
+   * changed since, without a word in the turn. Asked once per process, so
+   * Settings can say which ones and why. An older Codex without `hooks/list`
+   * is one line in the log.
+   */
+  private async reportSkippedHooks(rpc: CodexRpc, ctx: TurnContext): Promise<void> {
+    try {
+      const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
+      for (const entry of listed.data ?? []) {
+        for (const hook of entry.hooks ?? []) {
+          if (hook.enabled === false || (hook.trustStatus !== 'untrusted' && hook.trustStatus !== 'modified')) continue;
+          ctx.hook?.({
+            event: hook.eventName,
+            name: tildePath(hook.sourcePath),
+            outcome: 'skipped',
+            message: hook.trustStatus === 'modified'
+              ? 'changed since it was reviewed, so Codex skips it until it is reviewed again in Codex'
+              : 'not reviewed yet, so Codex skips it until it is reviewed in Codex',
+          });
+        }
+      }
+    } catch (error) {
+      ctx.log('info', `codex: hooks/list failed: ${messageOf(error)}`);
     }
   }
 
@@ -442,9 +589,49 @@ export class CodexSession {
       }
       case 'item/tool/requestUserInput':
         return { answers: await this.askQuestions(ctx, params['questions']) };
+      case 'mcpServer/elicitation/request':
+        return this.answerElicitation(ctx, params);
+      case 'item/permissions/requestApproval': {
+        // Only asked with Codex's exec_permission_approvals or
+        // request_permissions_tool features on. An empty profile grants nothing.
+        const decision = await this.askUser(
+          PERMISSIONS_TOOL_NAME,
+          { permissions: params['permissions'] ?? null, cwd: params['cwd'] ?? null },
+          textOf(params['reason']),
+        );
+        return decision === 'accept' ? { permissions: params['permissions'] ?? {}, scope: 'turn' } : { permissions: {} };
+      }
+      case 'currentTime/read':
+        return { currentTimeAt: Math.floor(Date.now() / 1000) };
       default:
         throw new Error(`boite does not implement ${method}`);
     }
+  }
+
+  /**
+   * An MCP server's elicitation. Codex routes its own MCP tool-call approvals
+   * through it (`_meta.codex_approval_kind: "mcp_tool_call"`), and a server
+   * may ask a plain yes or no as a form with nothing required: both become the
+   * permission card, accepted with empty content. A form with required fields,
+   * a url, or a device verification has no card yet and is declined, which
+   * Codex reports as a refused call instead of a failed request.
+   */
+  private async answerElicitation(ctx: TurnContext, params: Record<string, unknown>): Promise<unknown> {
+    const server = textOf(params['serverName']);
+    const meta = (params['_meta'] ?? {}) as Record<string, unknown>;
+    const schema = params['requestedSchema'] as { required?: unknown } | undefined;
+    const required = Array.isArray(schema?.required) ? schema.required.length : 0;
+    const confirmation = meta['codex_approval_kind'] === 'mcp_tool_call' || (params['mode'] === 'form' && required === 0);
+    if (!confirmation) {
+      ctx.log('warn', `codex: declined a ${textOf(params['mode']) || 'modeless'} elicitation from MCP server ${server || '(unnamed)'}, which boite cannot show`);
+      return { action: 'decline' };
+    }
+    const decision = await this.askUser(
+      `mcp:${server}`,
+      { message: textOf(params['message']), tool_title: meta['tool_title'] ?? null, tool_params: meta['tool_params'] ?? null },
+      '',
+    );
+    return decision === 'accept' ? { action: 'accept', content: {} } : { action: decision };
   }
 
   /**
@@ -481,6 +668,20 @@ export class CodexSession {
     return answers;
   }
 
+  /**
+   * An asynchronous question (GPT-6 Astra's `delivery: "async"`): the agent
+   * goes on, so nothing waits here. The core folds the answer into the card
+   * and brings it back with `turn/steer` or as the next prompt, framed as the
+   * Codex TUI frames it: `> title`, a blank line, the answer.
+   */
+  private askAsync(turn: CodexTurn, question: { title?: string; options?: string[] | null }): void {
+    const text = typeof question.title === 'string' ? question.title.trim() : '';
+    if (text.length === 0) return;
+    const ask: QuestionAsk = { text, options: optionsOf(question.options), allowText: true, multiple: false, async: true };
+    const ticket = turn.ctx.askQuestion(ask);
+    turn.part(turn.takeIndex(), { type: 'question', questionId: ticket.questionId, ...ask, answer: null });
+  }
+
   /** One question card, drawn and then folded with what the user picked. */
   private async askOne(turn: CodexTurn, ask: QuestionAsk): Promise<QuestionAnswer | null> {
     const ticket = turn.ctx.askQuestion(ask);
@@ -506,6 +707,9 @@ export class CodexSession {
     const answer = await Promise.race([ticket, turn.stopped.then(() => 'cancelled' as const)]);
     if (answer === 'cancelled') return 'cancel';
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: answer });
+    // Stop denies the open card before it stops the turn: that deny is a
+    // cancel, never the user's refusal.
+    if (turn.isStopped) return 'cancel';
     return answer === 'allow' ? 'accept' : 'decline';
   }
 }

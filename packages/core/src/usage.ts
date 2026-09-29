@@ -1,7 +1,7 @@
 import type { ProviderId, ThreadId, Usage, UsageHistory, UsageHistoryThread } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams } from './errors.ts';
-import type { UsageSums } from './journal.ts';
+import type { UsageSums } from './journal/usage-sums.ts';
 
 /** A year of days plus the closing edge. */
 export const MAX_USAGE_EDGES = 367;

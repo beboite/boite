@@ -1,10 +1,14 @@
 import type { MessageId, MessagePart, ToolStatus, Usage } from '@boite/contracts';
-import type { TurnContext, TurnResult } from '../types.ts';
+import type { PromptCacheLife, TurnContext, TurnResult } from '../types.ts';
 import type { CodexTurnRecord, ToolView } from './protocol.ts';
 
 // ---------------------------------------------------------------------------
 // The turn and what it draws
 // ---------------------------------------------------------------------------
+
+/** How much of a running command's output the card carries, and how often it is redrawn. */
+const LIVE_OUTPUT_MAX = 16_000;
+const LIVE_OUTPUT_BEAT_MS = 250;
 
 interface ToolEntry {
   index: number;
@@ -24,7 +28,12 @@ export class CodexTurn {
   private nextIndex = 0;
   private textIndex: number | null = null;
   private thinkingIndex: number | null = null;
+  /** The reasoning section the last thinking delta belonged to. */
+  private thinkingSection: string | null = null;
   private readonly tools = new Map<string, ToolEntry>();
+  /** Tools whose streamed output waits for the next flush, so a chatty command costs one write per beat. */
+  private readonly dirty = new Set<string>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   private status: TurnResult['status'] = 'done';
   private error: string | null = null;
@@ -42,9 +51,13 @@ export class CodexTurn {
   /** The Codex turn id, known once `turn/start` answers. */
   turnId: string | null = null;
   usage: Usage | null = null;
+  /** The published prompt cache lifetime of the model this turn ran on. */
+  cacheLife: PromptCacheLife | null = null;
   decided = false;
   isStopped = false;
   settled = false;
+  /** `thread/resume` said the Codex thread is gone. */
+  sessionLost = false;
 
   constructor(readonly ctx: TurnContext) {
     this.sessionId = ctx.sessionId;
@@ -96,8 +109,35 @@ export class CodexTurn {
     this.decide();
   }
 
+  /** A stop the agent never got to act on: the turn ends stopped, with nothing drawn. */
+  endStopped(): void {
+    if (this.decided) return;
+    this.decided = true;
+    this.status = 'stopped';
+    this.decide();
+  }
+
+  /**
+   * The thread this turn resumes no longer exists on the agent's side. No
+   * error part: the core starts a fresh session and runs the turn again. A
+   * turn the user stopped meanwhile ends stopped, so nothing runs it again.
+   */
+  loseSession(reason: string): void {
+    if (this.decided) return;
+    this.decided = true;
+    this.sessionLost = true;
+    if (this.isStopped) {
+      this.status = 'stopped';
+    } else {
+      this.status = 'error';
+      this.error = reason;
+    }
+    this.decide();
+  }
+
   settle(): void {
     if (this.settled) return;
+    this.flushOutput();
     this.settled = true;
     this.decided = true;
     this.wake();
@@ -110,6 +150,8 @@ export class CodexTurn {
       sessionId: this.sessionId,
       usage: this.usage,
       error: this.error ?? undefined,
+      promptCache: this.cacheLife,
+      ...(this.sessionLost ? { sessionLost: true } : {}),
     });
   }
 
@@ -144,8 +186,13 @@ export class CodexTurn {
     this.ctx.emit.delta(this.message(), this.textIndex, text);
   }
 
-  /** The reasoning deltas, which the UI folds. Their own part, like the text. */
-  writeThinking(text: string): void {
+  /**
+   * The reasoning deltas, which the UI folds. Their own part, like the text.
+   * `section` names the reasoning item and its summary or content index: the
+   * server streams each section with no newline around it, so a delta of a new
+   * section that lands in the same part starts after a blank line.
+   */
+  writeThinking(text: string, section?: string): void {
     if (text.length === 0) return;
     if (this.thinkingIndex === null) {
       const index = this.nextIndex;
@@ -153,8 +200,37 @@ export class CodexTurn {
       this.thinkingIndex = index;
       this.textIndex = null;
       this.part(index, { type: 'thinking', text: '' });
+    } else if (section !== undefined && this.thinkingSection !== null && section !== this.thinkingSection) {
+      this.ctx.emit.delta(this.message(), this.thinkingIndex, '\n\n');
     }
+    if (section !== undefined) this.thinkingSection = section;
     this.ctx.emit.delta(this.message(), this.thinkingIndex, text);
+  }
+
+  /**
+   * `item/commandExecution/outputDelta`: what a running command printed so
+   * far, drawn under its card while it runs. Only the tail is kept; the
+   * completed item carries the whole output anyway.
+   */
+  appendOutput(itemId: string, delta: string): void {
+    const entry = this.tools.get(itemId);
+    if (entry === undefined || entry.status !== 'running' || delta.length === 0) return;
+    const output = (entry.output ?? '') + delta;
+    entry.output = output.length > LIVE_OUTPUT_MAX ? output.slice(output.length - LIVE_OUTPUT_MAX) : output;
+    this.dirty.add(itemId);
+    if (this.flushTimer !== null) return;
+    this.flushTimer = setTimeout(() => this.flushOutput(), LIVE_OUTPUT_BEAT_MS);
+    this.flushTimer.unref?.();
+  }
+
+  private flushOutput(): void {
+    if (this.flushTimer !== null) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    for (const itemId of this.dirty) {
+      const entry = this.tools.get(itemId);
+      if (entry !== undefined && entry.status === 'running') this.drawTool(itemId, entry);
+    }
+    this.dirty.clear();
   }
 
   /** `item/started` opens the part, `item/completed` replaces the same one by item id. */
@@ -171,6 +247,11 @@ export class CodexTurn {
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
     this.tools.set(itemId, entry);
+    this.dirty.delete(itemId);
+    this.drawTool(itemId, entry);
+  }
+
+  private drawTool(itemId: string, entry: ToolEntry): void {
     this.part(entry.index, {
       type: 'tool',
       toolId: itemId,

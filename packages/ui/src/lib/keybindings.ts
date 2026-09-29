@@ -35,7 +35,22 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'theme-light': null,
   'theme-system': null,
   archive: null,
-  'import-session': null
+  'import-session': null,
+  terminal: 'mod+j',
+  // The browser's key for the tab just closed: here the thread just archived.
+  'reopen-thread': 'mod+shift+t',
+  'copy-answer': 'mod+alt+c',
+  find: 'mod+f',
+  // The Nth thread of the sidebar, top to bottom as it is drawn.
+  'thread-1': 'alt+1',
+  'thread-2': 'alt+2',
+  'thread-3': 'alt+3',
+  'thread-4': 'alt+4',
+  'thread-5': 'alt+5',
+  'thread-6': 'alt+6',
+  'thread-7': 'alt+7',
+  'thread-8': 'alt+8',
+  'thread-9': 'alt+9'
 };
 
 /** The resolved table: every command, its chord parsed or null, and whether the file set it. */
@@ -65,7 +80,10 @@ export function matchesChord(event: KeyboardEvent, chord: Chord, mac: boolean = 
   if (event.ctrlKey !== ctrl || event.metaKey !== meta || event.altKey !== chord.alt || event.shiftKey !== chord.shift) {
     return false;
   }
-  return event.key.toLowerCase() === chord.key;
+  if (event.key.toLowerCase() === chord.key) return true;
+  // A digit is its key cap, not the character: on a French layout the key
+  // marked 1 reports `&` unless Shift is down.
+  return /^[0-9]$/.test(chord.key) && event.code === `Digit${chord.key}`;
 }
 
 /** The first command whose chord this keydown is, or null when the key belongs to no one. */
@@ -144,9 +162,10 @@ export function chordFromEvent(event: KeyboardEvent, mac: boolean = isMac()): st
 }
 
 /** The Keyboard page's sections. Every command sits in exactly one; a test holds that. */
-export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'thread' | 'theme'; commands: KeybindingCommand[] }[] = [
+export const COMMAND_GROUPS: { id: 'general' | 'surfaces' | 'thread' | 'jump' | 'theme'; commands: KeybindingCommand[] }[] = [
   { id: 'general', commands: ['new-thread', 'palette', 'sidebar', 'panel', 'settings', 'providers', 'appearance', 'add-project', 'pair', 'import-session'] },
-  { id: 'surfaces', commands: ['browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
-  { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive'] },
+  { id: 'surfaces', commands: ['terminal', 'browser', 'changes', 'files', 'tasks', 'trace', 'close-surface'] },
+  { id: 'thread', commands: ['send-and-draft', 'stash', 'pin', 'rename', 'retitle', 'archive', 'reopen-thread', 'copy-answer', 'find'] },
+  { id: 'jump', commands: ['thread-1', 'thread-2', 'thread-3', 'thread-4', 'thread-5', 'thread-6', 'thread-7', 'thread-8', 'thread-9'] },
   { id: 'theme', commands: ['theme-dark', 'theme-light', 'theme-system'] }
 ];

@@ -1,7 +1,7 @@
 import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
-import { profileFor, resolveExecutable } from '../../providers/loader.ts';
+import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { ProbeContext } from '../types.ts';
 import type { CodexModel, CodexModelListResponse, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, PROBE_MAX_PAGES, PROBE_TIMEOUT_MS, STDERR_MAX } from './protocol.ts';

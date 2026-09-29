@@ -1,3 +1,9 @@
+import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
+import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
+export * from './agents';
+export * from './workflows';
+export * from './workflow-plan';
+
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
  * (the host process that runs the agents) and its clients (the desktop shell,
@@ -47,6 +53,13 @@ export interface ExecutableCandidate {
    */
   kind: 'path' | 'file' | 'npm';
   value: string;
+  /**
+   * Environment the agent's updater gets when it runs from this candidate: what
+   * a launcher Boite skips would have set. Codex's npm package runs its binary
+   * through a Node script that sets `CODEX_MANAGED_BY_NPM`, and `codex update`
+   * without it cannot tell how it was installed.
+   */
+  updateEnv?: Record<string, string>;
 }
 
 /**
@@ -155,6 +168,13 @@ export interface OsProfile {
    * redirect the agent Boite runs.
    */
   unsetEnv?: string[];
+  /**
+   * The files that carry the login on this OS, in place of `auth.session`. An
+   * empty list says the login can be kept outside any file here (Claude Code
+   * uses the macOS Keychain): the `auth.session` files still read `ok` when
+   * present, and their absence reads `unknown`, never `unauthenticated`.
+   */
+  session?: string[];
   /** Process names the core closes when an account is removed. */
   close?: { processes?: string[] };
 }
@@ -172,7 +192,9 @@ export interface ProviderAuth {
  *
  * `command` is a CLI Boite runs under the account's isolation directory,
  * streaming its output back as `account.login`; the user answers a prompt with
- * `accounts.loginInput`.
+ * `accounts.loginInput`. With `terminal`, the same command is typed into a
+ * shell the user sees instead (`accounts.loginTerminal`), for a CLI whose login
+ * is an interactive menu a pipe cannot drive.
  *
  * `acp` is the protocol's own `authenticate` call: the core starts the agent
  * like a turn would, sends `initialize` then `authenticate` with that method
@@ -187,6 +209,8 @@ export interface ProviderLogin {
   env?: Record<string, string>;
   /** The ACP `authenticate` method id, for an agent that logs in over the protocol. */
   acp?: { methodId: string };
+  /** Type `command` into a terminal the user drives rather than piping it. Only with `command`. */
+  terminal?: boolean;
 }
 
 /** How this provider's accounts are kept apart, whatever the OS profile does. */
@@ -197,6 +221,40 @@ export interface ProviderIsolation {
    * case: its IDE credentials are never Boite's to use.
    */
   alwaysIsolated: boolean;
+}
+
+/**
+ * What an account with a directory of its own takes from the provider's own
+ * profile, so a second login still runs the user's hooks, instructions, skills
+ * and plugins. `variable` is one of the profile's isolation variables: its
+ * default location is the source, the account's value of it the destination.
+ * A directory is linked there, a file is copied again whenever the source
+ * changed. A path that holds or contains a login file is refused at load time.
+ */
+export interface ProviderShare {
+  variable: string;
+  /** Relative to the variable's directory, no `..`. */
+  paths: string[];
+  /**
+   * Files among `paths` whose copy names other files among `paths` by absolute
+   * path, with those names: the copy points at the account's own file instead.
+   * Codex keys the trust of each hook by the absolute path of `hooks.json`.
+   */
+  retarget?: Record<string, string[]>;
+}
+
+/**
+ * Where the agent reads the user's own hooks, so Settings can say how many it
+ * has. `events` is a JSON file, or every `.json` file of a directory, shaped
+ * `{ "hooks": { "<Event>": [{ "hooks": [ ... ] }] } }`; each inner entry is one
+ * hook. `modules` is a directory whose entries are each one module the agent
+ * loads, hooks included (pi extensions, OpenCode plugins).
+ */
+export interface ProviderHookSource {
+  /** An isolation variable, resolved like `ProviderShare.variable`. Absent means `path` starts with `~/`. */
+  variable?: string;
+  path: string;
+  format: 'events' | 'modules';
 }
 
 /**
@@ -256,6 +314,10 @@ export interface ProviderDescriptor {
    * already there is left alone, because the agent owns it afterwards.
    */
   seedFiles?: Record<string, string>;
+  /** What an isolated account shares with the provider's own profile. Absent shares nothing. */
+  shared?: ProviderShare[];
+  /** Where the user's own hooks live. Only with `capabilities.hooks`. */
+  hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */
   quirks?: ProviderQuirk[];
   models: ModelInfo[];
@@ -273,12 +335,14 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and which protocol owns it. */
-  login: false | { kind: 'command' | 'acp' };
+  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
+  login: false | { kind: 'command' | 'acp' | 'terminal' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
   install: ProviderInstallState | null;
+  /** True when this provider's agent writes thread titles: what Settings offers for `titleModel`. Missing on older cores. */
+  titles?: boolean;
 }
 
 /** A descriptor that did not load. Always shown, never silent. */
@@ -442,7 +506,57 @@ export interface Project {
   name: string;
   path: string;
   createdAt: Timestamp;
+  /**
+   * The folder holds a `.git`, read on every answer rather than stored: the
+   * test `threads.create.worktree` applies. Absent from a core older than this
+   * field, which a client reads as unknown and keeps the worktree switch for.
+   */
+  repository?: boolean;
+  /**
+   * `drafts` on the one project `projects.drafts` made in the machine's
+   * Documents folder, read from the path on every answer like `repository`.
+   * A thread started there without a `cwd` gets a folder of its own inside it.
+   * Absent on every other project and from a core older than this field.
+   */
+  kind?: 'drafts';
+  /**
+   * Put away with `projects.archive`: out of the sidebar, its threads and their
+   * processes left as they were. A new thread in it brings it back. Absent when
+   * false and from a core older than this field.
+   */
+  archived?: boolean;
+  /**
+   * How many of its own threads are archived, sub-threads left out, counted on
+   * every answer; `project.updated` carries the new count when one is archived
+   * or restored. Absent when none and from a core older than this field.
+   */
+  archivedThreads?: number;
+  /**
+   * What the sidebar draws in place of the project's initial, detected from
+   * its folder after it was added and on `projects.refreshIcon`, never while a
+   * list is answered. An `image` carries only its version: the bytes come
+   * from `projects.icon`, once per version, so a list stays a few bytes per
+   * project. Absent when nothing was found, before the first detection and
+   * from a core older than this field.
+   */
+  icon?: ProjectIcon;
 }
+
+/**
+ * The stacks a project can be recognised by when its folder holds no logo,
+ * each drawn by the UI as a small mark. A core only ever names one of these.
+ */
+export const TECH_ICON_IDS = [
+  'unity', 'unreal', 'godot', 'flutter', 'dart', 'electron', 'next', 'nuxt', 'svelte', 'angular',
+  'react', 'android', 'swift', 'rust', 'go', 'python', 'dotnet', 'java', 'cpp', 'node',
+] as const;
+export type TechIconId = (typeof TECH_ICON_IDS)[number];
+
+export type ProjectIcon =
+  /** A logo, favicon or app icon read from the folder; `version` changes with its bytes. */
+  | { kind: 'image'; version: string }
+  /** No image, but the folder reads as this stack. */
+  | { kind: 'tech'; id: TechIconId };
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
 
@@ -483,12 +597,47 @@ export interface ContextUse {
   at: Timestamp;
 }
 
+/**
+ * How long the provider keeps the conversation's prompt prefix cached after the
+ * last turn. A request inside that time reads the prefix from the cache at a
+ * fraction of the input price; after it, the provider processes the whole
+ * context again. Every hit restarts the clock, so `at` is the end of the turn
+ * that last touched the cache, not the turn that first wrote it.
+ */
+export interface PromptCache {
+  /** When the turn that last used the cache finished. */
+  at: Timestamp;
+  /** Seconds the prefix is kept after `at`. */
+  ttlSeconds: number;
+  /**
+   * Seconds the provider may keep it on a best-effort basis beyond
+   * `ttlSeconds` (OpenAI: up to an hour under low load). Absent when the
+   * lifetime is fixed.
+   */
+  maxSeconds?: number;
+  /**
+   * `reported`: the agent's own usage named the lifetime of this request
+   * (Claude's `cache_creation.ephemeral_1h_input_tokens`). `documented`: the
+   * provider's published lifetime for what this agent sends.
+   */
+  source: 'reported' | 'documented';
+  /** Tokens the last turn read from the cache, zero on a turn that started cold. */
+  readTokens: number;
+  /** The model and account the cache belongs to: another model or account starts cold. */
+  model: string | null;
+  accountId: AccountId;
+}
+
 export interface ThreadSummary {
+  /** Core-owned delegation relationship. Absent on ordinary conversations. */
+  parentThreadId?: ThreadId | null;
   /** Last accepted user message, independent of assistant activity and renames. */
   lastUserMessageAt?: Timestamp | null;
   pullRequest?: { number: number; url: string; state: 'OPEN' | 'CLOSED' | 'MERGED' } | null;
   id: ThreadId;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
+  /** Only persistent agent sessions have no project. */
+  agentSessionId?: string;
   title: string;
   titleSource: TitleSource;
   providerId: ProviderId;
@@ -506,12 +655,39 @@ export interface ThreadSummary {
   branch: string | null;
   permissionMode: PermissionMode;
   status: ThreadStatus;
+  /**
+   * When the turn now running started, what a sidebar row counts its time
+   * from. Also set while the turn waits on the user. Null when no turn runs;
+   * missing on older cores.
+   */
+  runningSince?: Timestamp | null;
+  /**
+   * What the agent still runs in the background, a monitor or a shell it left
+   * going past its turn: the kind of each task and when the oldest started,
+   * so a row can say the thread is not finished. The tasks themselves are
+   * `Thread.background`. Null when nothing runs; missing on older cores.
+   */
+  backgroundWork?: { kinds: BackgroundTask['kind'][]; since: Timestamp } | null;
+  /**
+   * A move asked for while the thread's turn ran, applied when that turn
+   * ends (`threads.move`, `agent.move`). In memory only: null after a core
+   * restart, and missing on older cores.
+   */
+  pendingMove?: PendingMove | null;
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
   pinned: boolean;
   /** Provider session id once the first turn has run; used to resume. */
   sessionId: string | null;
+  /**
+   * The entry of `sessionId`'s native transcript the next turn resumes at,
+   * forking the rest away: set by `threads.rewind` and `threads.fork` on a
+   * driver that can cut its own transcript (Claude), cleared once the agent
+   * answered on the forked session. Null or absent means resume the whole
+   * session. Clients have nothing to do with it.
+   */
+  sessionResumeAt?: string | null;
   /** Changes when the account changes; native sessions never cross this boundary. */
   sessionGeneration?: number;
   /** Optimistic revision of the selection for future turns. Missing on older clients means zero. */
@@ -519,6 +695,11 @@ export interface ThreadSummary {
   load: ThreadLoad | null;
   /** The context meter, written at the end of every turn whose agent reports its usage. */
   context: ContextUse | null;
+  /**
+   * The prompt cache the last turn left behind, null when the provider's
+   * lifetime is unknown or no turn has finished. Missing on older cores.
+   */
+  promptCache?: PromptCache | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -558,7 +739,7 @@ export interface UsageHistoryRow {
 export interface UsageHistoryThread {
   threadId: ThreadId;
   title: string;
-  projectId: ProjectId;
+  projectId: ProjectId | null;
   providerId: ProviderId;
   archived: boolean;
   turns: number;
@@ -579,8 +760,16 @@ export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
 /** Frozen when a prompt is accepted, including while it waits in the scheduler. */
 export type TurnExecution = Pick<ThreadSummary,
-  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId'
-> & { sessionGeneration: number; selectionVersion: number; operation?: 'compact' | 'coordination' };
+  'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId' | 'sessionResumeAt'
+> & {
+  sessionGeneration: number;
+  selectionVersion: number;
+  /**
+   * `background`: the agent resumed on its own after background work it
+   * started finished; the turn carries no prompt of the user's.
+   */
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background';
+};
 
 export interface Turn {
   id: TurnId;
@@ -593,6 +782,41 @@ export interface Turn {
   error: string | null;
   /** Absent only for turns saved before execution snapshots were introduced. */
   execution?: TurnExecution;
+  /**
+   * Where the agent's native transcript stood when this turn ended: the
+   * session it ran on and the id of the last entry it wrote there (Claude: the
+   * uuid of the last main-chain message). What `threads.rewind` and
+   * `threads.fork` resume at. Absent on drivers that report none and on turns
+   * finished before it was recorded.
+   */
+  checkpoint?: { sessionId: string; entry: string } | null;
+}
+
+/** A thread status that means one of its turns is still under way. */
+export function threadActive(status: ThreadStatus): boolean {
+  return status === 'queued' || status === 'running' || status === 'waiting';
+}
+
+/**
+ * Whether a finished turn is worth a notification, for the core's Web Push and
+ * a client's own toast alike. A delegated agent's result goes to its parent,
+ * whose next turn reports it; a parent's turn that ends while `activeChildren`
+ * of its agents still work is not the answer yet; a persistent agent's work is
+ * read in the agents inbox, so only its failures notify; compacting the
+ * context is housekeeping. A stop is the user's own doing. Requests that wait
+ * for an answer are notified whatever the thread.
+ */
+export function notifiesOnFinish(
+  thread: Pick<ThreadSummary, 'parentThreadId' | 'agentSessionId'>,
+  turn: Pick<Turn, 'status' | 'execution'>,
+  activeChildren: number,
+): boolean {
+  if (turn.status !== 'done' && turn.status !== 'error') return false;
+  if (thread.parentThreadId) return false;
+  if (turn.execution?.operation === 'compact') return false;
+  if (turn.status === 'error') return true;
+  if (thread.agentSessionId) return false;
+  return activeChildren === 0;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -607,7 +831,7 @@ export type ToolDocument =
   /** `data` is base64 with no `data:` prefix. The core caps it before it is journalled. */
   | { kind: 'image'; mimeType: string; data: string; alt: string | null };
 
-export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN } from './attachment-limits.ts';
+export { IMAGE_MIME_TYPES, ATTACHMENT_MAX_BYTES, ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, RPC_MAX_FRAME_BYTES } from './attachment-limits.ts';
 import type { ImageMimeType } from './attachment-limits.ts';
 export type { ImageMimeType } from './attachment-limits.ts';
 
@@ -635,8 +859,60 @@ export interface FileAttachment {
 
 export type Attachment = ImageAttachment | FileAttachment;
 
+/** A user-selected element. Page text is untrusted context, never instructions. */
+export interface PreviewReference {
+  id: string;
+  url: string;
+  selector: string;
+  shadowPath?: string[];
+  text: string;
+  bounds: { x: number; y: number; width: number; height: number };
+  surfaceId?: string;
+  /** UTF-16 offsets of the visible mention in the prompt/displayText. */
+  mention?: { start: number; end: number };
+}
+
+export { PREVIEW_REFERENCES_PER_TURN, previewReferencesError, previewPrompt } from './preview';
+
+/** One end of a thread move: the project and the folder the agent works in. */
+export interface MoveEnd {
+  projectId: ProjectId;
+  /** The project's display name when the move happened. */
+  name: string;
+  cwd: string;
+}
+
+/**
+ * Carried by the first user message after `threads.move`: where the thread
+ * came from and where it works now. `note` is the plain sentence the core
+ * put before the prompt for the agent; the UI shows a marker line instead.
+ * Several moves before that message keep the first `from` and the last `to`.
+ * With `by: 'agent'` it rides on a system message instead: the agent moved
+ * its own thread (`agent.move`), nothing was put before a prompt, and `note`
+ * is only what a fresh session's history says about it.
+ */
+export interface MoveNotice {
+  from: MoveEnd;
+  to: MoveEnd;
+  note: string;
+  by?: 'agent';
+  /** Epoch milliseconds of the last move. */
+  at: number;
+}
+
+/** A move waiting for the thread's turn to end (`ThreadSummary.pendingMove`). */
+export interface PendingMove {
+  projectId: ProjectId;
+  /** The target project's name, for the row's "Moves to ... after this turn". */
+  project: string;
+  /** Who asked: the user from a menu or a drag, or the agent with `boite thread move`. */
+  by: 'user' | 'agent';
+  /** Epoch milliseconds of the request. */
+  at: number;
+}
+
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; activity?: { kind: 'goal' | 'loop'; iteration: number } }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -653,6 +929,10 @@ export type MessagePart =
       status: ToolStatus;
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
+      /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
+      startedAt?: Timestamp;
+      /** Stamped by the core when the status leaves `running`. */
+      finishedAt?: Timestamp | null;
     }
   | { type: 'permission'; requestId: RequestId; toolName: string; decision: 'allow' | 'deny' | null }
   /**
@@ -669,12 +949,20 @@ export type MessagePart =
       allowText: boolean;
       multiple: boolean;
       answer?: QuestionAnswer | null;
+      /** Asked without stopping: see `QuestionRequest.async`. */
+      async?: boolean;
     }
   /**
    * The agent compacted its context mid-turn: what it held before, what is
    * left after when it says so. Drawn as a divider in the timeline.
    */
   | { type: 'compaction'; trigger: 'auto' | 'manual'; preTokens: number | null; postTokens: number | null }
+  /**
+   * One of the user's own hooks ended the turn: it blocked the prompt, or told
+   * the agent to stop. `event` is the agent's own name for the hook event. A
+   * hook that denied a tool call shows on that tool's card instead.
+   */
+  | { type: 'hook'; event: string; outcome: 'blocked' | 'stopped'; message: string }
   | { type: 'error'; message: string };
 
 export interface Message {
@@ -729,6 +1017,8 @@ export interface ActivityIteration {
 }
 
 export interface Thread extends ThreadSummary {
+  /** The latest 100 memory notices, oldest first, including those missed while disconnected. */
+  memoryEvents?: MemoryEvent[];
   activity?: ThreadActivity;
   /**
    * Set when `threads.get` answered an `after`: `messages` starts at this
@@ -745,6 +1035,11 @@ export interface Thread extends ThreadSummary {
    */
   commands: AgentCommand[];
   /**
+   * What the agent still runs in the background (`thread.background`). Kept in
+   * memory like `commands`; missing on older cores.
+   */
+  background?: BackgroundTask[];
+  /**
    * The oldest message `messages` carries, when the thread has older ones behind
    * it; null when this page is the whole thread. It is the cursor `messages.list`
    * takes as `before`.
@@ -752,6 +1047,24 @@ export interface Thread extends ThreadSummary {
   messagesBefore: MessageId | null;
   /** The turns `messages` refers to, plus any still queued or running; never the whole history. */
   turns: Turn[];
+}
+
+/** What `threads.rewind` answers: the thread after the cut and the removed message, ready for the composer. */
+export interface ThreadRewind {
+  /** As `threads.get` would answer now: the last page of what is left. */
+  thread: Thread;
+  /** What the user typed, without the page context a preview reference added to it. */
+  prompt: string;
+  /** The images and files the removed message carried, as `turns.start` takes them. */
+  attachments: Attachment[];
+  /** The page elements the removed message referred to, empty when none. */
+  previewReferences: PreviewReference[];
+  /**
+   * How the agent forgets the removed part. `native`: the driver resumes its
+   * own transcript at the cut. `seeded`: the next turn starts a fresh session
+   * carrying the kept history, as a change of account does.
+   */
+  session: 'native' | 'seeded';
 }
 
 // ---------------------------------------------------------------------------
@@ -798,7 +1111,27 @@ export interface QuestionRequest {
   /** No options plus this true is a plain free-text prompt. */
   allowText: boolean;
   multiple: boolean;
+  /**
+   * The agent did not stop for it. The thread is not `waiting`, the card
+   * outlives its turn, and the answer reaches the agent as a steer when a turn
+   * is running or as the next prompt when none is.
+   */
+  async?: boolean;
   createdAt: Timestamp;
+}
+
+/**
+ * Work the agent left running beyond one tool call: a shell started in the
+ * background, a subagent, a monitor or a workflow. The list is the agent's
+ * own, whole, each time it changes, and lives as long as the agent process.
+ */
+export interface BackgroundTask {
+  id: string;
+  kind: 'shell' | 'agent' | 'monitor' | 'workflow' | 'other';
+  description: string;
+  /** The tool call that started it, when the agent says so. */
+  toolId: string | null;
+  startedAt: Timestamp;
 }
 
 // ---------------------------------------------------------------------------
@@ -819,12 +1152,14 @@ export interface ProcessRecord {
   ioBytes: number | null;
 }
 
+/** A thread with at least one process running now; what exited stays in `trace.get`. */
 export interface ThreadResources {
   threadId: ThreadId;
   title: string;
   status: ThreadStatus;
   live: ProcessRecord[];
-  totals: { processes: number; cpuMs: number; peakMemoryBytes: number };
+  /** The latest sample of the whole tree, the same one `ThreadSummary.load` carries. */
+  load: ThreadLoad;
 }
 
 /** What the trace can and cannot promise on this OS. */
@@ -846,6 +1181,31 @@ export interface SchedulerState {
   queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
 
+export type MemoryState = 'ok' | 'critical';
+
+export interface MemoryStatus {
+  state: MemoryState;
+  agentBytes: number;
+  availableBytes: number | null;
+  limits: { budgetMb: number; threadMemoryCapMb: number; memoryReserveMb: number };
+}
+
+interface MemoryEventBase {
+  threadId: string | null;
+  pid?: number;
+  exe?: string;
+  bytes?: number;
+  state: MemoryState;
+  at: number;
+}
+
+export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
+
+export type MemoryEvent = MemoryEventBase & (
+  | { kind: 'killed'; reason: MemoryKillReason; limitBytes: number }
+  | { kind: 'thread-cap' | 'budget' | 'pressure' }
+);
+
 /** Per-core consent. Installation identifiers never cross RPC. */
 export interface TelemetryState {
   mode: 'off' | 'basic' | 'enhanced';
@@ -854,6 +1214,8 @@ export interface TelemetryState {
 }
 
 export interface Settings {
+  /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
+  worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
   browserOrigins?: string[];
   /** HTTPS origin served by the reverse proxy, used in phone pairing links. */
@@ -870,12 +1232,16 @@ export interface Settings {
    * CPU rate control, and other systems ignore it.
    */
   agentCpuCapPercent: number;
+  /** Share of physical RAM for all agents, an integer from 10 to 90. Default 60. */
+  agentMemoryBudgetPercent: number;
   /**
    * Memory ceiling for one thread's whole process tree, in megabytes. 0 means
-   * no cap. Windows only: it is the thread job's memory limit, and a tree that
-   * reaches it fails its next allocation.
+   * half the effective budget, rounded down to 256 MB. An explicit cap cannot
+   * exceed the budget. The kernel safety net sits 10% above this quota on Windows.
    */
   threadMemoryCapMb: number;
+  /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
+  memoryReserveMb: number;
   /**
    * Windows of agent processes never keep the foreground: one that takes it is
    * sent to the bottom without activation and the window the user was on gets
@@ -889,11 +1255,44 @@ export interface Settings {
    */
   muteAgents: boolean;
   /**
-   * The core updates its agents by itself: checked a minute after start and
-   * every six hours, each one updated once no turn of its provider is in
+   * A process a thread left running after its turn, whose parent has exited, is
+   * stopped once the thread has been idle for a few seconds: what an interrupted
+   * or refused command started and nobody is left to stop. Windows only, where
+   * the job reports grandchildren. Missing on older cores, which read as on.
+   */
+  reapOrphans?: boolean;
+  /**
+   * The core updates its agents by itself: checked ten minutes after start,
+   * or six hours after the reading kept from the last run when that is later,
+   * then every six hours, each one updated once no turn of its provider is in
    * flight. It needs no client connected, which is how a server stays current.
    */
   autoUpdateHarnesses: boolean;
+  /**
+   * Agents without asynchronous questions of their own are told about
+   * `boite ask` at the start of a session, so they can ask without stopping.
+   * Missing on older cores, which read as on.
+   */
+  asyncQuestions?: boolean;
+  /**
+   * The model that writes every thread's title after its first answer. Null
+   * or missing: each thread's own provider on its small model
+   * (`defaultTitleModel`), under the thread's account. A provider that can no
+   * longer write one falls back to that too.
+   */
+  titleModel?: TitleModel | null;
+}
+
+export type WorktreeStorage =
+  | { mode: 'project'; directory: string | null }
+  | { mode: 'shared'; directory: string };
+
+/** One provider's model, picked in Settings to write thread titles. */
+export interface TitleModel {
+  /** A provider whose summary says `titles`. */
+  providerId: ProviderId;
+  /** A model id that provider lists. */
+  model: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -928,6 +1327,19 @@ export const KEYBINDING_COMMANDS = [
   'theme-system',
   'archive',
   'import-session',
+  'terminal',
+  'reopen-thread',
+  'copy-answer',
+  'find',
+  'thread-1',
+  'thread-2',
+  'thread-3',
+  'thread-4',
+  'thread-5',
+  'thread-6',
+  'thread-7',
+  'thread-8',
+  'thread-9',
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
 
@@ -1118,14 +1530,33 @@ export const AGENT_ENV = {
 export interface AgentWhere {
   threadId: ThreadId;
   title: string;
-  projectId: ProjectId;
-  projectPath: string;
+  projectId: ProjectId | null;
+  projectPath: string | null;
   /** The thread's working directory: the project, or its worktree. */
   cwd: string;
   branch: string | null;
   worktree: boolean;
   providerId: ProviderId;
   model: string;
+}
+
+/** What `agent.move` answers: where the thread goes, and when. */
+export interface AgentMove {
+  threadId: ThreadId;
+  projectId: ProjectId;
+  /** The target project's name. */
+  project: string;
+  /** The target project's folder. */
+  projectPath: string;
+  /**
+   * The folder the next turn starts in: known now for a plain project folder,
+   * null while a turn runs and the move will make a worktree or a draft folder.
+   */
+  cwd: string | null;
+  /** `turn-end`: a turn runs and the move waits for it to end. `done`: the thread moved on the spot. */
+  when: 'turn-end' | 'done';
+  /** Background work the agent left running stops when the move happens. */
+  stopsBackground: boolean;
 }
 
 /**
@@ -1140,9 +1571,10 @@ export type PanelSurface =
   | { kind: 'diff'; path?: string }
   | { kind: 'browser'; url: string }
   | { kind: 'trace' }
-  | { kind: 'tasks' };
+  | { kind: 'tasks' }
+  | { kind: 'workflow'; runId?: string };
 
-export const PANEL_SURFACE_KINDS = ['file', 'files', 'diff', 'browser', 'trace', 'tasks'] as const;
+export const PANEL_SURFACE_KINDS = ['file', 'files', 'diff', 'browser', 'trace', 'tasks', 'workflow'] as const;
 export type PanelSurfaceKind = (typeof PANEL_SURFACE_KINDS)[number];
 
 /**
@@ -1185,6 +1617,38 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   changes: GitChange[];
+}
+
+/**
+ * One linked worktree of a project's repository, as `worktrees.list` reads it
+ * from `git worktree list`: the core's own in its configured storage and any the
+ * user added by hand, never the main checkout. What it says is what a removal
+ * would lose.
+ */
+export interface WorktreeEntry {
+  /** The directory, in the form of the machine running the core. */
+  path: string;
+  /** The branch checked out there without `refs/heads/`, null on a detached HEAD. */
+  branch: string | null;
+  /** `git status` lists something: a modified, staged or untracked file. False when `missing`. */
+  dirty: boolean;
+  /**
+   * HEAD is reachable from no local branch or remote-tracking ref other than
+   * the worktree's own branch: removing the worktree and its branch loses
+   * those commits. A branch with no commit of its own is not unmerged.
+   */
+  unmerged: boolean;
+  /** Git still lists the worktree but its directory is gone. */
+  missing: boolean;
+  /**
+   * The thread whose working directory is this worktree or a folder inside
+   * it, compared without case on Windows. A live thread wins over an archived
+   * one; null when no thread stands there.
+   */
+  threadId: ThreadId | null;
+  threadTitle: string | null;
+  /** That thread is archived: the worktree can be removed. False when `threadId` is null. */
+  threadArchived: boolean;
 }
 
 /** Both sides of one file, the working tree against `ref` (HEAD by default). */
@@ -1271,6 +1735,26 @@ export interface SpeechConfig {
   fallback: boolean;
   executable: string;
   modelPath: string;
+  /**
+   * The local model in use: a `SPEECH_CATALOGUE` id or the `custom-<12 hex>` of
+   * one added from a link. `modelPath`, when set, wins over it. A `speech.configure`
+   * that leaves it out keeps the current one.
+   */
+  model: string;
+}
+/** A local model this core offers or holds. */
+export interface SpeechModel {
+  id: string;
+  kind: 'catalogue' | 'custom';
+  /** The catalogue's name, or the file name of the link a custom model came from. */
+  name: string;
+  /** The catalogue size, or what a custom download holds; 0 while unknown. */
+  bytes: number;
+  /** Catalogue only. */
+  tier?: SpeechModelTier;
+  /** Custom only: the host it came from. The link itself stays on the core. */
+  host?: string;
+  installed: boolean;
 }
 export interface SpeechStatus {
   revision: string;
@@ -1281,9 +1765,16 @@ export interface SpeechStatus {
   openrouterKeySet: boolean;
   installing: boolean;
   downloadedBytes: number;
+  /** 0 while a link's server has not said how big the file is. */
   totalBytes: number;
   error: string | null;
   canInstallRuntime: boolean;
+  /** The catalogue, then every model added from a link. */
+  models: SpeechModel[];
+  /** The model a running download is for, null when none runs. */
+  downloading: string | null;
+  /** The managed runtime predates the resident engine; `speech.install` fetches it again (8 MB). */
+  runtimeOutdated: boolean;
 }
 export const SPEECH_MAX_SECONDS = 120;
 export const SPEECH_MAX_BYTES = 44 + 16000 * 2 * SPEECH_MAX_SECONDS;
@@ -1304,6 +1795,8 @@ export interface AgentContact extends AgentAddress {
   mode: CoordinationMode;
 }
 export interface AgentLetter {
+  /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
+  origin?: 'user' | 'agent' | 'result';
   id: string;
   from: AgentContact;
   to: AgentAddress;
@@ -1327,7 +1820,172 @@ export interface CoordinationView {
   wakeLimit: number;
 }
 
-export interface RpcMethods {
+/** Owner-selected routes. Agents name a profile, never arbitrary credentials or permissions. */
+export interface DelegationProfile {
+  id: string;
+  name: string;
+  providerId: ProviderId;
+  accountId: AccountId;
+  model: string;
+  effort: string | null;
+}
+export interface DelegationConfig {
+  enabled: boolean;
+  paused: boolean;
+  maxAgents: number;
+  maxConcurrent: number;
+  /** Total child turns and automatic parent wake turns across this team's lifetime. */
+  maxTurns: number;
+  /** Deadline for child turns and automatic parent wakes, including time awaiting an answer. */
+  maxMinutes: number;
+  profiles: DelegationProfile[];
+}
+export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
+  enabled: false, paused: false, maxAgents: 4, maxConcurrent: 2,
+  maxTurns: 12, maxMinutes: 30, profiles: [],
+};
+export interface DelegatedAgent {
+  thread: ThreadSummary;
+  profileId: string;
+  task: string;
+  lastTurn: Turn | null;
+  /** Bounded final answer, without tool payloads or a summarization model call. */
+  result: string | null;
+}
+export interface DelegationView {
+  rootThreadId: ThreadId;
+  config: DelegationConfig;
+  agents: DelegatedAgent[];
+  messages: AgentLetter[];
+  turnsUsed: number;
+  usage: Usage;
+}
+
+/** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
+export interface BrainConfig {
+  path: string | null;
+  enabled: boolean;
+  /** Pull only. An interval of 0 disables periodic pulls. Defaults to off. */
+  autoPull?: { onStartup: boolean; intervalMinutes: number };
+  /** Link the root AGENTS.md into user-level harness profiles on this machine. */
+  globalInstructions?: boolean;
+  /** Inject Boite's guide once per agent session, even without a brain. Defaults to on. */
+  boiteGuide?: boolean;
+}
+
+export interface BrainLink {
+  name: string;
+  path: string;
+  state: 'linked' | 'existing' | 'blocked';
+  error: string | null;
+}
+
+export interface BrainEntry {
+  kind: 'instructions' | 'skill' | 'plugin';
+  path: string;
+  name: string;
+  description: string;
+  error: string | null;
+}
+
+export interface BrainStatus {
+  config: BrainConfig;
+  entries: BrainEntry[];
+  problems: string[];
+  git: { branch: string | null; upstream: string | null; ahead: number; behind: number; dirty: boolean } | null;
+  lastSync: number | null;
+  links?: BrainLink[];
+}
+
+/**
+ * What one hook run came to. `skipped` is a hook the agent has but will not
+ * run, Codex's untrusted or modified ones.
+ */
+export type HookOutcome = 'ok' | 'blocked' | 'failed' | 'stopped' | 'skipped';
+
+/** One hook run that did not simply pass. The core keeps the newest ones in memory, since it started. */
+export interface HookRun {
+  at: Timestamp;
+  providerId: ProviderId;
+  accountId: AccountId | null;
+  threadId: ThreadId | null;
+  /** The agent's own name for the event: `PreToolUse`, `userPromptSubmit`. */
+  event: string;
+  /** What the agent calls the hook, `PreToolUse:Bash`, or the file it comes from. */
+  name: string;
+  outcome: Exclude<HookOutcome, 'ok'>;
+  /** What the hook or the agent said about it, at most 500 characters. */
+  message: string | null;
+}
+
+/** One place the agent reads the user's hooks from, as Settings shows it. */
+export interface HookSourceState {
+  /** The path read, the home directory written `~`. */
+  path: string;
+  format: ProviderHookSource['format'];
+  /** Hooks (`events`) or modules (`modules`) found there. Null when the path does not exist. */
+  count: number | null;
+  /** Why it could not be read, null when it was. */
+  error: string | null;
+}
+
+/** An account with a directory of its own, and what it does not get from the provider's own profile. */
+export interface HookShareState {
+  accountId: AccountId;
+  label: string;
+  problems: { path: string; message: string }[];
+}
+
+export interface ProviderHooks {
+  providerId: ProviderId;
+  name: string;
+  /** `capabilities.hooks`: the agent runs the hooks the user configured for it. */
+  runsHooks: boolean;
+  /** Boite sees each run (Claude, Codex); for the others only the configuration is known. */
+  reports: boolean;
+  sources: HookSourceState[];
+  accounts: HookShareState[];
+  /** Since `HooksStatus.since`. */
+  runs: number;
+  blocked: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface HooksStatus {
+  /** When this core started counting. */
+  since: Timestamp;
+  /** Every provider available on this core's machine. */
+  providers: ProviderHooks[];
+  /** Newest first, at most 50. */
+  recent: HookRun[];
+}
+
+/**
+ * A shell the core runs in a pseudo-terminal. Its id names what it belongs to:
+ * `terminal:<threadId>` for a thread's, `login:<accountId>` for a sign-in.
+ */
+export interface TerminalState {
+  id: string;
+  /** Where the shell started. */
+  cwd: string;
+  /** What it printed lately, so a client that attaches late draws the same screen. */
+  output: string;
+}
+
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
+  'core.shutdown': { params: Record<string, never>; result: { ok: true } };
+  'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
+  'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
+  'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
+  'delegation.send': { params: { threadId: ThreadId; toThreadId: ThreadId; text: string; requestId: string }; result: AgentLetter };
+  'delegation.stop': { params: { threadId: ThreadId; agentId?: ThreadId }; result: { stopped: number } };
+  'brain.status': { params: Record<string, never>; result: BrainStatus };
+  'brain.configure': { params: BrainConfig; result: BrainStatus };
+  /** Fetch, fast-forward and push existing commits. Never stage, stash, reset or force. */
+  'brain.sync': { params: Record<string, never>; result: BrainStatus };
+  /** Where each agent reads the user's hooks, what separate accounts miss of them, and the runs that did not pass. */
+  'hooks.status': { params: Record<string, never>; result: HooksStatus };
   'collaboration.get': { params: { threadId: ThreadId }; result: CoordinationView };
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
@@ -1340,15 +1998,29 @@ export interface RpcMethods {
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
-  'speech.install': { params: Record<string, never>; result: SpeechStatus };
+  /**
+   * Downloads a model and activates it once it is complete and checked: `model`
+   * names a catalogue entry, `url` an https link to a ggml Whisper file (no digest
+   * is known for it, its header is checked instead). Neither means the active
+   * model. The runtime comes along when this core needs it.
+   */
+  'speech.install': { params: { model?: string; url?: string }; result: SpeechStatus };
   'speech.installCancel': { params: Record<string, never>; result: SpeechStatus };
-  'speech.uninstall': { params: Record<string, never>; result: SpeechStatus };
-  /** PCM WAV, mono 16 kHz. Each connection may have one request in flight. Audio is never journalled. */
-  'speech.transcribe': { params: { requestId: string; revision: string; audio: string }; result: { text: string } };
+  /** Removes one downloaded model, or with no `model` the runtime and every managed model. */
+  'speech.uninstall': { params: { model?: string }; result: SpeechStatus };
+  /** A dictation is starting: load the local model now so the first request finds it ready. */
+  'speech.warm': { params: Record<string, never>; result: { ok: true } };
+  /**
+   * PCM WAV, mono 16 kHz. Each connection may have one request in flight. Audio is never journalled.
+   * `preview` marks a provisional window, which a local engine may decode faster and less exactly.
+   * `language` passes back what a preview of the same recording heard, used when the configured
+   * language is automatic, so the final request skips its own detection.
+   */
+  'speech.transcribe': { params: { requestId: string; revision: string; audio: string; preview?: boolean; language?: string }; result: { text: string; language?: string } };
   'speech.cancel': { params: { requestId: string }; result: { ok: true } };
   'threads.activity.set': { params: { threadId: ThreadId; goal?: { objective: string } | null; loop?: { prompt: string; intervalMs: number; maxIterations?: number | null } | null }; result: ThreadActivity };
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
-  'quotas.list': { params: { refresh?: boolean }; result: AccountQuota[] };
+  'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
   /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
@@ -1373,11 +2045,20 @@ export interface RpcMethods {
    * a pairing grant, exchanged here for a session whose token comes back in
    * `session` and is what this client says hello with from then on. One of the
    * two, never both.
+   *
+   * `nonce` goes with a grant: a random string of 16 to 256 characters the
+   * client picks once and repeats on every retry. When the answer carrying the
+   * session is lost, the same grant and nonce get the same session back until
+   * the grant would have expired or the session first says hello with its
+   * token. Without a nonce a grant is strictly one-shot. A nonce of another
+   * length, or one sent with a token, is refused with `InvalidParams` naming
+   * `nonce`, before the grant is spent.
    */
   hello: {
     params: {
       token?: string;
       grant?: string;
+      nonce?: string;
       protocolVersion: number;
       client: { name: string; version: string };
     };
@@ -1395,12 +2076,28 @@ export interface RpcMethods {
   /** Where the calling thread is. */
   'agent.where': { params: { threadId: ThreadId }; result: AgentWhere };
   /**
+   * The agent moves its own thread to another project, named by id, name or
+   * folder. A process cannot change folder in the middle of a turn, so while
+   * one runs the move waits for it to end (`when: 'turn-end'`), then goes
+   * through what `threads.move` does; an idle thread moves on the spot. The
+   * agent asked, so its next message carries no `MoveNotice` note: the thread
+   * records a system message whose text part has `moved` with `by: 'agent'`.
+   * Background work stops at the move. Refused for an unknown project, the
+   * thread's own project, and every refusal of `threads.move` that already
+   * holds when asked; one that only appears at the end of the turn is a system
+   * message saying the move did not happen. A core restart before the turn
+   * ends drops a waiting move.
+   */
+  'agent.move': { params: { threadId: ThreadId; project: string }; result: AgentMove };
+  /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
    * checks a path exists inside the working directory and a url is http(s),
    * and refuses by name otherwise.
    */
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
+  /** Explicitly publish a bounded file snapshot from this thread's working directory. */
+  'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
@@ -1444,6 +2141,32 @@ export interface RpcMethods {
   };
   'projects.remove': { params: { projectId: ProjectId }; result: { ok: true } };
   /**
+   * Put a project away, or bring it back with `archived: false`. Nothing else
+   * changes: its threads keep their state and a running one keeps running.
+   * Refused on the drafts project, which a thread with no folder lands in.
+   */
+  'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
+  /**
+   * The image of a project whose `icon.kind` is `image`, as a `data:` URL for
+   * an `<img>` (an SVG drawn that way runs no script and loads nothing), at
+   * most 256 KB before encoding. Read from the journal, not the folder. Refused
+   * with `field: 'projectId'` for a project whose icon is not an image.
+   */
+  'projects.icon': { params: { projectId: ProjectId }; result: { version: string; dataUrl: string } };
+  /**
+   * Detects the project's icon again from its folder, stores it and answers
+   * the project; `project.updated` follows when the icon changed. Owner only:
+   * it reads the disk.
+   */
+  'projects.refreshIcon': { params: { projectId: ProjectId }; result: Project };
+  /**
+   * The drafts project: `Boite` in the Documents folder of the machine running
+   * this core, or `BOITE_DRAFTS_DIR` when set. The folder and the project are
+   * made on the first call and returned as they are on every later one, so a
+   * client can ask for it right before its first send.
+   */
+  'projects.drafts': { params: Record<string, never>; result: Project };
+  /**
    * The files of a project a mention can name, ranked on the query: relative
    * paths with `/` separators, `.git`, `node_modules` and what the root
    * `.gitignore` names by plain name left out. `total` is the number of
@@ -1456,6 +2179,26 @@ export interface RpcMethods {
     result: { files: string[]; total: number; capped: boolean };
   };
 
+  /**
+   * The linked worktrees of the project's repository, main checkout and the
+   * project's own folder left out, each with what removing it would lose and
+   * the thread standing in it. Owner only: it names paths.
+   */
+  'worktrees.list': { params: { projectId: ProjectId }; result: WorktreeEntry[] };
+  /**
+   * `git worktree remove`, then `git branch -d` on its branch (`-D` with
+   * `force`), then `git worktree prune --expire 1.hour.ago`. Refused by name
+   * for a path git does not list for this project, the main checkout, and a
+   * worktree a thread that is not archived stands in; refused without `force`
+   * when it is dirty or unmerged. A missing directory only loses its
+   * registration. `branchDeleted` is false when git kept the branch (not
+   * merged, checked out elsewhere) or there was none. Owner only.
+   */
+  'worktrees.remove': {
+    params: { projectId: ProjectId; path: string; force?: boolean };
+    result: { ok: true; branchDeleted: boolean };
+  };
+
   'providers.list': {
     params: Record<string, never>;
     result: { loaded: ProviderSummary[]; rejected: ProviderRejected[] };
@@ -1466,7 +2209,9 @@ export interface RpcMethods {
   };
   /**
    * Claude, ACP, Codex and pi list models through a temporary agent process.
-   * Results are kept until refresh, `providers.reload` or an account change.
+   * Results are kept until refresh, a `providers.reload` that changes a
+   * descriptor, or an account whose status or login changes: an unchanged
+   * reload or `accounts.check` keeps them.
    * For any other protocol they are the descriptor's models, with `probedAt`
    * the moment of the call.
    */
@@ -1483,13 +2228,13 @@ export interface RpcMethods {
   /**
    * Download and unpack the release this profile's `install` block names. On a
    * provider already installed at an older version this is the update: the new
-   * release lands beside the old one and `current` is repointed, the old
-   * directory staying until `providers.uninstall` because a process may still
-   * be running out of it. Refused when the profile carries no such block, when
-   * the installed version is already the one the descriptor names, when an
+   * release lands beside the old one and `current` is repointed. The old
+   * release is deleted once no process of that provider is left, since one may
+   * still be running out of it. Refused when the profile carries no such block,
+   * when the installed version is already the one the descriptor names, when an
    * install is already running for that provider, or when the free space under
-   * the data directory is under the archive plus the unpacked files plus a
-   * 256 MB margin. Progress arrives as `providers.installProgress`.
+   * the data directory is under the archive, less what a kept `.part` of that
+   * same archive already holds, plus the unpacked files plus a 256 MB margin. Progress arrives as `providers.installProgress`.
    */
   'providers.install': { params: { providerId: ProviderId }; result: ProviderInstallState };
   /** Abort the running install. The operation id is the one its state carries. */
@@ -1502,7 +2247,8 @@ export interface RpcMethods {
   /**
    * Where every available agent stands against its newest release, on the
    * machine this core runs on. `refresh` asks the agents and the registries
-   * again; without it the last reading answers, and the first call reads.
+   * again; without it the last reading answers, an empty list when the core
+   * has none yet. A plain call never runs an agent.
    */
   'providers.updates': { params: { refresh?: boolean }; result: HarnessUpdate[] };
   /**
@@ -1542,10 +2288,26 @@ export interface RpcMethods {
   'accounts.loginCancel': { params: { accountId: AccountId }; result: { ok: true } };
   /** One line into the running login's stdin, for a CLI that asks for a code. */
   'accounts.loginInput': { params: { accountId: AccountId; text: string }; result: { ok: true } };
+  /**
+   * Open a shell with this account's environment and type its login command
+   * into it, or attach to the one already open. Only for a login whose
+   * descriptor says `terminal`. The default account is allowed: the user drives
+   * the shell, as in their own terminal. Closing the terminal rechecks the account.
+   */
+  'accounts.loginTerminal': { params: { accountId: AccountId; cols: number; rows: number }; result: TerminalState };
+
+  /** Attach to the thread's shell, starting one in the thread's working directory when none runs. */
+  'terminals.open': { params: { threadId: ThreadId; cols: number; rows: number }; result: TerminalState };
+  /** Keystrokes, as the terminal emulator encodes them. */
+  'terminals.write': { params: { id: string; data: string }; result: { ok: true } };
+  'terminals.resize': { params: { id: string; cols: number; rows: number }; result: { ok: true } };
+  /** Kill the shell and its tree. `terminal.exited` follows. */
+  'terminals.close': { params: { id: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
   /** Read the working branch's PR using the execution machine's GitHub CLI. */
-  'threads.pullRequest': { params: { threadId: ThreadId }; result: ThreadSummary['pullRequest'] };
+  /** `refresh`: a user asked, so what the core kept for this repository is read again, and a missing gh is tried again. */
+  'threads.pullRequest': { params: { threadId: ThreadId; refresh?: boolean }; result: ThreadSummary['pullRequest'] };
   'threads.create': {
     params: {
       projectId: ProjectId;
@@ -1562,7 +2324,7 @@ export interface RpcMethods {
        * own: `boite/<slug of the title>` unless `branch` names one. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
-       * Excludes `cwd`.
+       * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
     };
@@ -1608,14 +2370,65 @@ export interface RpcMethods {
   };
   /**
    * A title written from the thread's first prompt and first answer. The
-   * agent's own driver writes it when it can (Claude on one short call to a
-   * small model, echo in memory), the core cuts the first line of the prompt
+   * model `Settings.titleModel` names writes it, else the thread's own agent
+   * on its small model when its driver can (Claude and Codex on one short
+   * call, echo in memory); the core cuts the first line of the prompt
    * otherwise. Refused by name on a thread that has no prompt yet, or while
    * a title is already being written for it. The answer is the thread as
    * saved, `titleSource` saying which of the two wrote it.
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /**
+   * Edit a sent message: `messageId`, a user message of the thread, and every
+   * message and turn after it leave the conversation, and the next turn
+   * continues from just before it, the agent's own memory included. The answer
+   * is the thread as it now stands and the removed message's content, for the
+   * composer. Refused while a turn runs or waits in the queue (stop it first),
+   * for a message that is not a user message of that thread, and on a
+   * persistent agent session, each naming the field and what it expected.
+   * Every client subscribed to the thread gets `message.truncated`. The journal
+   * keeps the removed messages' events; the removed turns keep their usage.
+   */
+  'threads.rewind': { params: { threadId: ThreadId; messageId: MessageId }; result: ThreadRewind };
+  /**
+   * A new thread holding a copy of this thread's history up to and including
+   * `messageId`, whose next turn continues from there; the original thread is
+   * untouched. `worktree: true` puts it in a git worktree of its own, as
+   * `threads.create` does with `worktree: {}`; false or absent works in the
+   * same folder. Refused while the named message is still streaming, and on a
+   * persistent agent session.
+   */
+  'threads.fork': { params: { threadId: ThreadId; messageId: MessageId; worktree?: boolean }; result: ThreadSummary };
+  /**
+   * Move a thread to another project of the same core. Its folder becomes the
+   * target's: the project folder, a new git worktree of the target when the
+   * thread had a worktree of its own and the target is a repository, or a new
+   * draft folder when the target is the drafts project. The old folder or
+   * worktree stays on disk untouched. The agent never works in the old folder
+   * again: its warm process is dropped, and the next user message tells it the
+   * thread moved (`MoveNotice` on that message's text part). Sub-threads follow
+   * their parent. A target project put away comes back. Refused for an unknown
+   * thread or project, the same project, an archived thread, a sub-thread, a
+   * persistent agent session, a missing target folder, a turn running or
+   * queued on one of its sub-threads (`reason: 'turn-in-flight'`), and
+   * background work without `stopBackground` (true stops it, false leaves it
+   * running in the old folder until the agent's next turn). Every client gets
+   * `thread.updated` with the new `projectId`, `cwd` and `branch`.
+   *
+   * A thread whose own turn runs, waits or is queued is not refused: the move
+   * is recorded as `pendingMove` on the answered row and happens when that
+   * turn ends, however it ends, through the same path as the agent's own move.
+   * A second move replaces a pending one; archiving the thread drops it. The
+   * pending move lives in memory and a core restart forgets it.
+   */
+  'threads.move': { params: { threadId: ThreadId; projectId: ProjectId; stopBackground?: boolean }; result: ThreadSummary };
+  /**
+   * Drop the move waiting for the thread's turn to end (`pendingMove`), the
+   * user's or the agent's. Answers the row without it; a thread with no
+   * pending move is refused naming `threadId`.
+   */
+  'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
@@ -1625,7 +2438,7 @@ export interface RpcMethods {
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
-  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**
@@ -1654,9 +2467,21 @@ export interface RpcMethods {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
     result: { ok: true };
   };
+  /**
+   * An asynchronous question from the agent of a thread (`boite ask`): the card
+   * is drawn in the running turn, the agent keeps working, and the answer
+   * reaches it later as a steer or as the next prompt. `options` are labels;
+   * none makes a free-text question.
+   */
+  'questions.ask': {
+    params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean };
+    result: { questionId: RequestId };
+  };
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
+  /** Owner-only machine memory reading and the limits actually applied by the governor. */
+  'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };
 
   'scheduler.get': { params: Record<string, never>; result: SchedulerState };
@@ -1710,7 +2535,10 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+  'resources.memory': MemoryEvent;
+  'thread.memory': MemoryEvent & { threadId: string };
+  'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
@@ -1718,18 +2546,24 @@ export interface RpcEvents {
   /** The project's whole list, after any change. */
   'todos.updated': { projectId: ProjectId; todos: Todo[] };
   'quotas.updated': AccountQuota[];
+  /** Owner-only partial result, correlated with the caller's quotas.list request. */
+  'quotas.progress': { requestId: string; quota: AccountQuota };
   /** One plugin after any change. A `url` plugin that comes back `not-installed` is gone from the list. */
   'plugins.updated': PluginState;
   /** A project `projects.add` created. A known path returns its project without one. */
   'project.added': Project;
   /** A project `projects.remove` deleted, after the `thread.removed` of each of its threads. */
   'project.removed': { projectId: ProjectId };
+  /** A project archived or restored, one whose count of archived threads moved, or one whose icon changed. */
+  'project.updated': Project;
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
   'thread.removed': { threadId: ThreadId };
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
+  /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
   'turn.finished': Turn;
@@ -1741,6 +2575,12 @@ export interface RpcEvents {
   /** A part created or replaced whole (tool call state, permission card). */
   'message.part': { threadId: ThreadId; messageId: MessageId; partIndex: number; part: MessagePart };
   'message.completed': { threadId: ThreadId; messageId: MessageId; state: Message['state'] };
+  /**
+   * `messageId` and every message after it left the thread (`threads.rewind`),
+   * and so did their turns. A client holding the thread drops them; one that
+   * does not hold `messageId` reads the thread again.
+   */
+  'message.truncated': { threadId: ThreadId; messageId: MessageId };
 
   /** A client that missed this one reads the request from `permissions.list`. */
   'permission.requested': PermissionRequest;
@@ -1772,6 +2612,8 @@ export interface RpcEvents {
   'process.muted': { threadId: ThreadId; pid: number; at: Timestamp };
 
   'scheduler.updated': SchedulerState;
+  /** A hook blocked, failed, stopped a turn or was skipped: `hooks.status` has it. Runs that passed only count. */
+  'hooks.changed': { at: Timestamp };
   'accounts.updated': Account;
   /** An account `accounts.remove` deleted. */
   'accounts.removed': { accountId: AccountId };
@@ -1811,6 +2653,10 @@ export interface RpcEvents {
     exitCode: number | null;
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  /** What a shell printed, as it printed it. */
+  'terminal.output': { id: string; data: string };
+  /** The shell ended: typed `exit`, closed, or killed with its thread. */
+  'terminal.exited': { id: string; exitCode: number | null };
 }
 
 export type RpcEventName = keyof RpcEvents;
@@ -1862,6 +2708,19 @@ export const RpcErrorCode = {
   Unavailable: -32011,
 } as const;
 
+/**
+ * The `data` of the Refused error `turns.start` answers while the thread
+ * already has a turn queued or running, often one the core opened by itself
+ * (held answers to asynchronous questions, an agent resuming on its own). The
+ * prompt is not wrong, only early: `thread` is the row as the core has it, and
+ * a client keeps the prompt until that turn is over.
+ */
+export interface TurnInFlightData {
+  threadId: ThreadId;
+  reason: 'turn-in-flight';
+  thread: ThreadSummary;
+}
+
 /** WebSocket close codes the core uses. */
 export const RpcCloseCode = {
   Unauthorized: 4001,
@@ -1885,3 +2744,8 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
+export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
+export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
+export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
+import type { SpeechModelTier } from './speech-models.ts';

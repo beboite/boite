@@ -87,6 +87,7 @@ export class Scheduler {
       if (this.running.size >= settings.maxConcurrentTurns) break;
       const index = this.queue.findIndex(
         (entry) => this.runningForAccount(entry.accountId) < settings.perAccountConcurrency
+          && this.core.delegation.canRun(entry.threadId, [...this.running.values()].map(run => run.threadId))
           && !this.core.plugins.blocksAccount(entry.accountId)
           && ![...this.running.values()].some((run) => run.threadId === entry.threadId),
       );

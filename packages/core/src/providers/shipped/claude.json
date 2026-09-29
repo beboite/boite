@@ -37,15 +37,25 @@
       "update": { "args": ["update"], "latestNpm": "@anthropic-ai/claude-code" },
       "executable": [{ "kind": "path", "value": "claude" }],
       "isolation": { "CLAUDE_CONFIG_DIR": "{isolationDir}" },
+      "session": [],
       "close": { "processes": ["claude"] }
     }
   },
   "auth": { "kind": "oauth-cli", "session": [".credentials.json"] },
   "login": { "command": ["claude", "auth", "login"] },
+  "shared": [
+    {
+      "variable": "CLAUDE_CONFIG_DIR",
+      "paths": ["settings.json", "CLAUDE.md", "skills", "plugins", "agents", "commands", "hooks", "output-styles"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "CLAUDE_CONFIG_DIR", "path": "settings.json", "format": "events" }
+  ],
   "models": [
     {
       "id": "claude-fable-5-1",
-      "name": "Claude Fable 5.1",
+      "name": "Fable 5.1",
       "badge": "new",
       "effort": {
         "levels": [
@@ -61,7 +71,7 @@
     },
     {
       "id": "claude-opus-5",
-      "name": "Claude Opus 5",
+      "name": "Opus 5",
       "effort": {
         "levels": [
           { "id": "low", "label": "Low" },
@@ -76,7 +86,7 @@
     },
     {
       "id": "claude-sonnet-5",
-      "name": "Claude Sonnet 5",
+      "name": "Sonnet 5",
       "default": true,
       "effort": {
         "levels": [
@@ -92,7 +102,7 @@
     },
     {
       "id": "claude-fable-5",
-      "name": "Claude Fable 5",
+      "name": "Fable 5",
       "legacy": true,
       "effort": {
         "levels": [
@@ -105,7 +115,7 @@
     },
     {
       "id": "claude-opus-4-8",
-      "name": "Claude Opus 4.8",
+      "name": "Opus 4.8",
       "legacy": true,
       "effort": {
         "levels": [
@@ -118,7 +128,7 @@
     },
     {
       "id": "claude-opus-4-7",
-      "name": "Claude Opus 4.7",
+      "name": "Opus 4.7",
       "legacy": true,
       "effort": {
         "levels": [
@@ -131,7 +141,7 @@
     },
     {
       "id": "claude-opus-4-6",
-      "name": "Claude Opus 4.6",
+      "name": "Opus 4.6",
       "legacy": true,
       "effort": {
         "levels": [
@@ -144,7 +154,7 @@
     },
     {
       "id": "claude-opus-4-5",
-      "name": "Claude Opus 4.5",
+      "name": "Opus 4.5",
       "legacy": true,
       "effort": {
         "levels": [
@@ -157,7 +167,7 @@
     },
     {
       "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4.6",
+      "name": "Sonnet 4.6",
       "legacy": true,
       "effort": {
         "levels": [
@@ -168,7 +178,7 @@
         "default": "high"
       }
     },
-    { "id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "legacy": true }
+    { "id": "claude-haiku-4-5-20251001", "name": "Haiku 4.5", "legacy": true }
   ],
   "capabilities": {
     "approvals": true,

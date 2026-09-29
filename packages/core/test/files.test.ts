@@ -55,6 +55,18 @@ describe('the file index', () => {
     expect(walk.files).toHaveLength(2);
   });
 
+  test('project worktrees never appear as duplicate files in mentions', async () => {
+    const root = join(harness.dataDir, 'tree');
+    plantTree(root);
+    const nested = join(root, '.boite', 'worktrees', 'task', 'src');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, 'app.ts'), 'export {};');
+    const client = await harness.connect();
+    const project = await client.call('projects.add', { path: root });
+    const page = await client.call('projects.files', { projectId: project.id, query: 'app.ts' });
+    expect(page.files).toEqual(['src/app.ts']);
+  });
+
   test('a file name beats a directory in the ranking, and a query needs every word', () => {
     expect(scorePath('store', 'src/lib/store.ts')).toBe(80);
     expect(scorePath('store.ts', 'src/lib/store.ts')).toBe(100);

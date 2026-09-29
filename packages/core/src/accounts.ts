@@ -1,12 +1,13 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents } from '@boite/contracts';
+import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
 import { invalidParams, messageOf, notFound, refused } from './errors.ts';
-import { runAcpLogin, type AcpLoginRun } from './drivers/acp.ts';
-import { agentEnv, launchPrefix, profileFor, resolveExecutable } from './providers/loader.ts';
+import { runAcpLogin, type AcpLoginRun } from './drivers/acp/login.ts';
+import { agentEnv, hostAgentsEnabled, launchPrefix, profileFor, resolveExecutable } from './providers/resolve.ts';
 import { browserNoopPath, browserNoopScript, currentOs, homePath } from './paths.ts';
+import { ISOLATION_DEFAULTS, shareProfile, unshareProfile, type ShareProblem } from './profile-share.ts';
 import type { SpawnedPipedProcess } from './procs.ts';
 
 /** The thread a login process is traced under. It is a name, never a real thread. */
@@ -20,24 +21,6 @@ const SIGN_IN_LINK = /oauth|authorize|redirect_uri|client_id|user_code|\/device|
 
 /** How long the one GET on a pasted redirect URL waits before it is called failed. */
 const CALLBACK_TIMEOUT_MS = 10_000;
-
-/**
- * What an isolation variable means when it is not set, as segments under the
- * home directory. A descriptor that isolates an account through one of them
- * (OpenCode uses the XDG pair, Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`)
- * puts its session file under that same variable, so the provider's own location
- * is the variable's own default, never `~/.<id>`.
- */
-const ISOLATION_DEFAULTS: Record<string, string[]> = {
-  XDG_DATA_HOME: ['.local', 'share'],
-  XDG_CONFIG_HOME: ['.config'],
-  XDG_STATE_HOME: ['.local', 'state'],
-  XDG_CACHE_HOME: ['.cache'],
-  CODEX_HOME: ['.codex'],
-  CLAUDE_CONFIG_DIR: ['.claude'],
-  GROK_HOME: ['.grok'],
-  PI_CODING_AGENT_DIR: ['.pi', 'agent'],
-};
 
 interface LoginRun {
   done: Promise<void>;
@@ -104,6 +87,8 @@ function refuseUnisolable(provider: ProviderDescriptor): void {
 
 export class AccountStore {
   private readonly logins = new Map<AccountId, LoginRun>();
+  /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
+  private readonly shareLog = new Map<AccountId, string>();
 
   constructor(private readonly core: Core) {}
 
@@ -142,11 +127,20 @@ export class AccountStore {
       this.core.journal.putAccount(account);
     });
     this.prepare(account, provider);
-    return this.check(account.id);
+    return this.check(account.id, true);
   }
 
   async remove(accountId: AccountId): Promise<void> {
     const account = this.require(accountId);
+    const checkAgentReferences = () => {
+      if (this.core.workforce.records.list('profile').some(agent => {
+        const config = this.core.workforce.resident.config(agent.id);
+        return agent.selection.accountId === accountId || [...config.allowedRoutes, ...config.subagents.profiles].some(route => route.accountId === accountId);
+      })) {
+        throw refused('this account is used by a persistent agent; choose another account on its profile first', { accountId });
+      }
+    };
+    checkAgentReferences();
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
@@ -156,24 +150,39 @@ export class AccountStore {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     await this.loginCancel(accountId);
+    checkAgentReferences();
     // Cancelling yields to RPC work; a new thread may have claimed this account.
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
       throw refused('this account is used by a thread; remove its project before removing the account', { accountId });
     }
-    if (directory !== null) rmSync(directory, { recursive: true, force: true });
+    if (directory !== null) {
+      unshareProfile(directory);
+      rmSync(directory, { recursive: true, force: true });
+    }
     this.core.journal.append(
       { type: 'account.removed', threadId: null, version: 1, payload: { accountId } },
       () => {
         this.core.journal.deleteAccount(accountId);
+        // A stale grant would make every later agents.accounts.set refuse the whole list.
+        const grants = this.core.workforce.resident.grants();
+        if (grants.some(g => g.accountId === accountId)) this.core.journal.setSetting('agents:account-grants', grants.filter(g => g.accountId !== accountId));
       },
     );
     this.core.bus.emit('accounts.removed', { accountId });
   }
 
-  check(accountId: AccountId): Account {
+  /**
+   * Reads the account's session again. An unchanged status writes nothing and
+   * tells nobody, so a page that checks on every focus costs no journal row, no
+   * broadcast and no model-list reset. `announce` writes and broadcasts anyway,
+   * for a new account and after a login, which may change what an unchanged
+   * status stands for.
+   */
+  check(accountId: AccountId, announce = false): Account {
     const account = this.require(accountId);
     const provider = this.core.providers.get(account.providerId);
     const status = provider === undefined ? 'error' : this.sessionStatus(account, provider);
+    if (!announce && status === account.status) return account;
     const next: Account = { ...account, status };
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);
@@ -206,26 +215,37 @@ export class AccountStore {
   }
 
   /**
-   * What has to exist before the agent ever runs: the descriptor's seed files
-   * under the isolation directory, and the browser launcher `BROWSER` points at
-   * when the profile names one. Both are idempotent, so this runs before every
-   * spawn as well as at account creation; a seed file already there is the
-   * agent's own and is left alone.
+   * What has to exist before the agent ever runs: the provider's own profile
+   * shared into the isolation directory (hooks, instructions, skills, plugins),
+   * the descriptor's seed files there, and the browser launcher `BROWSER`
+   * points at when the profile names one. All idempotent, so this runs before
+   * every spawn as well as at account creation; a seed file already there is
+   * the agent's own and is left alone. What could not be shared is returned and
+   * logged, never thrown: the agent still runs, with less of the profile.
    */
-  prepare(account: Account, provider: ProviderDescriptor): void {
+  prepare(account: Account, provider: ProviderDescriptor): ShareProblem[] {
     const profile = profileFor(provider);
-    if (profile === undefined) return;
+    if (profile === undefined) return [];
     if (Object.values(profile.env ?? {}).some((value) => value === browserNoopPath(this.core.dataDir))) {
       this.writeBrowserNoop();
     }
     const isolationDir = account.isolationDir;
-    if (isolationDir === null) return;
+    if (isolationDir === null) return [];
+    mkdirSync(isolationDir, { recursive: true });
+    // `BOITE_HOST_AGENTS=0` keeps a test core away from the developer's own profile too.
+    const problems = hostAgentsEnabled() ? shareProfile(isolationDir, profile, provider.shared ?? []) : [];
+    const said = problems.map((problem) => `${problem.path}: ${problem.message}`).join('; ');
+    if (said !== (this.shareLog.get(account.id) ?? '')) {
+      this.shareLog.set(account.id, said);
+      if (said.length > 0) this.core.log('warn', `accounts: ${account.label} (${provider.id}) does not share ${said}`);
+    }
     for (const [path, content] of Object.entries(provider.seedFiles ?? {})) {
       const target = join(isolationDir, path);
       if (existsSync(target)) continue;
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, 'utf8');
     }
+    return problems;
   }
 
   private writeBrowserNoop(): void {
@@ -266,7 +286,7 @@ export class AccountStore {
         { accountId, providerId: provider.id, field: 'isolationDir' },
       );
     }
-    if (this.logins.has(accountId)) {
+    if (this.logins.has(accountId) || this.core.terminals.has(loginThreadId(accountId))) {
       throw refused(`a login is already running for ${account.label}`, { accountId });
     }
 
@@ -303,6 +323,62 @@ export class AccountStore {
     this.emitLogin(accountId, 'running', '', run);
     run.done = this.readLogin(accountId, run).finally(() => this.core.providers.installs.release(provider.id));
     return { ok: true };
+  }
+
+  /**
+   * The login command typed into a shell the user drives, for a CLI whose
+   * sign-in is a menu a pipe cannot answer. The shell runs with the account's
+   * environment, in its directory. The default account is allowed here: it is
+   * the user's own CLI in a terminal they see and type into, which is what the
+   * refusal of `login` asks them to do anyway. Closing the shell rechecks the
+   * account.
+   */
+  loginTerminal(accountId: AccountId, cols: number, rows: number): TerminalState {
+    const account = this.require(accountId);
+    const provider = this.core.providers.require(account.providerId);
+    const argv = provider.login?.command;
+    if (provider.login?.terminal !== true || argv === undefined) {
+      throw refused(`${provider.name} does not sign in from a terminal`, {
+        accountId,
+        providerId: provider.id,
+        field: 'login.terminal',
+        expected: true,
+      });
+    }
+    if (this.logins.has(accountId)) {
+      throw refused(`a login is already running for ${account.label}`, { accountId });
+    }
+    const id = loginThreadId(accountId);
+    const isolationDir = account.isolationDir;
+    if (isolationDir !== null) mkdirSync(isolationDir, { recursive: true });
+    const place = (value: string) => (isolationDir === null ? value : value.split('{isolationDir}').join(isolationDir));
+    const env = agentEnv(provider, this.accountEnv(account, provider));
+    for (const [key, value] of Object.entries(provider.login.env ?? {})) env[key] = place(value);
+    const [first, ...args] = argv.map(place);
+    if (first === undefined) throw refused('the login command is empty', { accountId, field: 'login.command' });
+    const starting = !this.core.terminals.has(id);
+    if (starting) this.core.providers.installs.acquire(provider.id);
+    try {
+      return this.core.terminals.open(id, {
+        cwd: isolationDir ?? homePath(),
+        env,
+        cols,
+        rows,
+        type: [this.loginExecutable(provider, first), ...args],
+        onExit: () => {
+          this.core.providers.installs.release(provider.id);
+          if (this.core.journal.isClosed()) return;
+          try {
+            this.check(accountId, true);
+          } catch {
+            // the account was removed while its terminal ran
+          }
+        },
+      });
+    } catch (error) {
+      if (starting && !this.core.terminals.has(id)) this.core.providers.installs.release(provider.id);
+      throw error;
+    }
   }
 
   /**
@@ -361,6 +437,7 @@ export class AccountStore {
 
   async loginCancel(accountId: AccountId): Promise<{ ok: true }> {
     this.require(accountId);
+    await this.core.terminals.close(loginThreadId(accountId));
     const run = this.logins.get(accountId);
     if (run !== undefined) {
       this.core.procs.killTree(loginThreadId(accountId));
@@ -385,7 +462,7 @@ export class AccountStore {
     this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
     if (this.core.journal.isClosed()) return;
     try {
-      this.check(accountId);
+      this.check(accountId, true);
     } catch {
       // the account was removed while its login ran
     }
@@ -506,7 +583,7 @@ export class AccountStore {
     this.emitLogin(accountId, exitCode === 0 ? 'done' : 'failed', run.lastLine, run, exitCode);
     if (this.core.journal.isClosed()) return;
     try {
-      this.check(accountId);
+      this.check(accountId, true);
     } catch {
       // the account was removed while its login ran
     }
@@ -514,14 +591,16 @@ export class AccountStore {
 
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
-    const session = provider.auth.session ?? [];
+    // A profile may say where the login lives on its OS, or, with an empty list,
+    // that it can live outside any file there: then a file still proves a login
+    // and its absence proves nothing.
+    const own = profileFor(provider)?.session;
+    const session = own !== undefined && own.length > 0 ? own : provider.auth.session ?? [];
     if (session.length === 0) return 'unknown';
     const base = account.isolationDir ?? this.defaultLocation(provider);
     if (base === null) return 'unknown';
-    for (const file of session) {
-      if (!existsSync(join(base, file))) return 'unauthenticated';
-    }
-    return 'ok';
+    if (session.every((file) => existsSync(join(base, file)))) return 'ok';
+    return own?.length === 0 ? 'unknown' : 'unauthenticated';
   }
 
   /**
@@ -556,6 +635,8 @@ export function registerAccountMethods(core: Core): void {
   core.router.register('accounts.check', (params) => core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
+  core.router.register('accounts.loginTerminal', (params) =>
+    core.accounts.loginTerminal(params.accountId, params.cols, params.rows));
   core.router.register('accounts.loginCancel', (params) => core.accounts.loginCancel(params.accountId));
   core.router.register('accounts.loginInput', (params) => {
     if (typeof params.text !== 'string') throw invalidParams('a login input needs text', { field: 'text' });

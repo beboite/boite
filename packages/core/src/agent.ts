@@ -18,6 +18,7 @@ import { newToken } from './ids.ts';
 import { registerGitMethods } from './git.ts';
 import { registerTodoMethods } from './todos.ts';
 import { existingInside, registerWorkdirMethods, resolveInside } from './workdir.ts';
+import { publishArtifact } from './artifacts.ts';
 
 /** More than a plan, and the tasks surface stops being readable anyway. */
 export const TASKS_MAX = 200;
@@ -92,12 +93,12 @@ export function agentEnvOf(core: Core, threadId: ThreadId, base: Record<string, 
 }
 
 function whereOf(core: Core, thread: ThreadSummary): AgentWhere {
-  const project = core.projects.require(thread.projectId);
+  const project = thread.projectId === null ? null : core.projects.require(thread.projectId);
   return {
     threadId: thread.id,
     title: thread.title,
-    projectId: project.id,
-    projectPath: project.path,
+    projectId: project?.id ?? null,
+    projectPath: project?.path ?? null,
     cwd: thread.cwd,
     branch: thread.branch,
     // A thread only carries a branch when the core placed it in a worktree of
@@ -158,6 +159,12 @@ export function checkSurface(cwd: string, surface: PanelSurface): PanelSurface {
     }
     return { kind, url: parsed.href };
   }
+  if (kind === 'workflow') {
+    const runId = (asked as { runId?: unknown }).runId;
+    if (runId === undefined || runId === null) return { kind };
+    if (typeof runId !== 'string' || !/^wfr_[A-Za-z0-9_-]{1,64}$/.test(runId)) throw refused(`panel.open workflow runId: expected a run id from boite workflow list, got ${String(runId)}`, { runId });
+    return { kind, runId };
+  }
   return { kind: kind as 'trace' | 'tasks' };
 }
 
@@ -188,7 +195,10 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
  * here keeps the door in one file: `access.ts` says who may knock.
  */
 export function registerAgentMethods(core: Core): void {
+  core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
+  // The access check already held the call to the token's own thread.
+  core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));
   core.router.register('panel.open', (params) => {
     const thread = core.threads.require(params.threadId);
     const surface = checkSurface(thread.cwd, params.surface);

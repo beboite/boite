@@ -20,8 +20,8 @@ export interface PaletteItem {
 
 /** Threads shown before any typing: the most recent ones, whatever the project. */
 export const RECENT_THREADS = 8;
-/** The most rows the list ever holds. */
-export const PALETTE_LIMIT = 24;
+/** The most rows the list ever holds: every command still fits under the recent threads. */
+export const PALETTE_LIMIT = 32;
 
 function fold(text: string): string {
   return text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

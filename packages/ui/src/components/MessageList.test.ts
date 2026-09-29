@@ -1,8 +1,11 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import type { AgentLetter, Message } from '@boite/contracts';
-import MessageList, { windowStats } from './MessageList.svelte';
+import { DEFAULT_DELEGATION_CONFIG, type AgentLetter, type Message } from '@boite/contracts';
+import MessageList from './MessageList.svelte';
+import { windowStats } from '../lib/message-window';
+import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
+import { findHits } from '../lib/find';
 import { Store } from '../lib/store.svelte';
 
 /**
@@ -67,6 +70,42 @@ function restoreLayout(): void {
 
 let running: Record<string, unknown> | null = null;
 
+test('the parent timeline retains one team row, updates completion counts and opens the whole team', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const owner = new Store();
+  owner.attach(client);
+  try {
+    await owner.connect();
+    await owner.open('t-trace');
+    await owner.loadDelegation();
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
+    flushSync();
+    const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
+    expect(row.textContent).toContain('Started 2 agents');
+    expect(row.textContent).toContain('1/2 completed');
+    await owner.selectDelegatedAgent('t-team-running');
+    row.click();
+    flushSync();
+    expect(owner.panel.isOpen).toBe(true);
+    expect(owner.delegationSelectedAgentId).toBeNull();
+    const agent = owner.delegation!.agents.find(agent => agent.thread.id === 't-team-running')!;
+    agent.thread.status = 'idle';
+    agent.lastTurn!.status = 'done';
+    agent.lastTurn!.finishedAt = agent.thread.createdAt + 60_000;
+    flushSync();
+    expect(document.querySelectorAll('[data-testid=delegation-activity]')).toHaveLength(1);
+    expect(row.textContent).toContain('2/2 completed');
+    expect(row.querySelector('[data-testid=agent-elapsed]')?.textContent).toContain('1');
+    // A child transcript must not claim that it launched its siblings.
+    await unmount(running); running = null;
+    await owner.open('t-team-done');
+    await owner.loadDelegation();
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-team-done', messages: owner.openThread!.messages } });
+    flushSync();
+    expect(document.querySelector('[data-testid=delegation-activity]')).toBeNull();
+  } finally { owner.detach(); client.close(); }
+});
+
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
@@ -84,8 +123,38 @@ const store = {
   answer: async () => {},
   messagesBefore: null,
   loadingOlder: false,
-  loadOlder: async () => 0
+  loadOlder: async () => 0,
+  workflowsOf: () => []
 } as unknown as Store;
+
+test('a workflow the thread started is one card that opens its graph, and a step shows none', async () => {
+  const client = new FakeClient({ delayMs: 0, delegationDemo: true });
+  const owner = new Store();
+  owner.attach(client);
+  try {
+    await owner.connect();
+    await owner.open('t-trace');
+    await owner.loadWorkflows('t-trace');
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
+    flushSync();
+    const cards = document.querySelectorAll<HTMLButtonElement>('[data-testid=workflow-activity]');
+    expect(cards).toHaveLength(1);
+    const run = owner.workflowsOf('t-trace')[0]!;
+    expect(cards[0]!.textContent).toContain('Review the parser');
+    expect(cards[0]!.textContent).toContain('1/5 steps');
+    expect(cards[0]!.querySelectorAll('.phases i')).toHaveLength(4);
+    cards[0]!.click();
+    flushSync();
+    expect(owner.panel.active).toMatchObject({ kind: 'workflow', runId: run.id });
+    await unmount(running); running = null;
+    const step = run.nodes.find(node => node.id === 'review')!.instances[1]!.threadId!;
+    await owner.open(step);
+    await owner.loadWorkflows(step);
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: step, messages: owner.openThread!.messages } });
+    flushSync();
+    expect(document.querySelector('[data-testid=workflow-activity]')).toBeNull();
+  } finally { owner.detach(); client.close(); window.localStorage.clear(); }
+});
 
 test('system coordination messages show their display text outside the user bubble', () => {
   stubLayout(200);
@@ -148,6 +217,33 @@ test('agent letters join the timeline chronologically without exposing their del
   expect(document.querySelector('[data-letter-id="letter-out"]')?.getAttribute('data-direction')).toBe('outgoing');
 });
 
+test('delegation letters use local family identity when coordination has another core identity', () => {
+  stubLayout(200);
+  const letter: AgentLetter = {
+    id: 'delegation-user', origin: 'user',
+    from: { coreId: 'local', threadId: 't-short', title: 'Parent', machine: 'Boite', resources: '', status: 'idle', mode: 'team' },
+    to: { coreId: 'local', threadId: 't-child' }, toTitle: 'Reviewer', text: 'Check the parser.', replyTo: null,
+    createdAt: 20, expiresAt: 1000, status: 'received', error: null
+  };
+  const coordinated = {
+    ...store,
+    coordination: {
+      self: { coreId: 'real-core-id', threadId: 't-short' },
+      config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
+    },
+    delegation: {
+      rootThreadId: 't-short', config: DEFAULT_DELEGATION_CONFIG, agents: [], messages: [letter], turnsUsed: 0,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsdEquivalent: 0 }
+    }
+  } as unknown as Store;
+
+  running = mount(MessageList, { target: document.body, props: { store: coordinated, threadId: 't-short', messages: [] } });
+  flushSync();
+  const row = document.querySelector('[data-letter-id="delegation-user"]');
+  expect(row?.getAttribute('data-direction')).toBe('outgoing');
+  expect(row?.textContent).toContain('You sent to');
+});
+
 /** A store whose thread still has older messages behind the window. */
 function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
   store: Store;
@@ -166,6 +262,7 @@ function pagedStore(overrides: Partial<Record<string, unknown>> = {}): {
       paged['loadingOlder'] = true;
       return new Promise<number>(() => {});
     },
+    workflowsOf: () => [],
     ...overrides
   };
   return { store: paged as unknown as Store, calls: () => calls };
@@ -240,6 +337,128 @@ test('a long thread renders a window of messages and carries the rest in the spa
   const below = spacer('timeline-below');
   expect(above?.style.height).toBe(`${242 * ESTIMATE}px`);
   expect(below?.style.height).toBe(`${(500 - 266) * ESTIMATE}px`);
+});
+
+test('scrolled up, the way to the bottom shows with nothing new below, and takes the reader there', async () => {
+  const messages = thread(200);
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()).toBeNull();
+
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 4_000;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(jumpButton()).not.toBeNull();
+
+  jumpButton()!.click();
+  await settle();
+  expect(timeline.scrollTop).toBe(messages.length * ESTIMATE);
+  expect(jumpButton()).toBeNull();
+});
+
+test('what arrives while the reader is scrolled up is counted on the way back, and the count clears at the bottom', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  timeline.scrollTop = 0;
+  timeline.dispatchEvent(new Event('scroll'));
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()?.textContent?.trim()).toBe('Jump to latest');
+
+  const last = messages.at(-1)!;
+  messages.push({ ...JSON.parse(JSON.stringify(last)), id: 'm-new-1' }, { ...JSON.parse(JSON.stringify(last)), id: 'm-new-2' });
+  scrollHeight = messages.length * ESTIMATE;
+  await settle();
+  expect(jumpButton()?.textContent?.trim()).toBe('2 new messages');
+
+  jumpButton()!.click();
+  await settle();
+  expect(jumpButton()).toBeNull();
+  live.detach();
+  client.close();
+});
+
+test('a thread reopened where the reader left it, above the bottom, counts what arrives after', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  live.readingPositions.set('t-long', { top: 0, pinned: false, heights: new Map() });
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const jumpButton = () => document.querySelector<HTMLButtonElement>('[data-testid=jump-to-latest]');
+  expect(jumpButton()?.textContent?.trim()).toBe('Jump to latest');
+
+  messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: 'm-new-1' });
+  scrollHeight = messages.length * ESTIMATE;
+  await settle();
+  expect(jumpButton()?.textContent?.trim()).toBe('1 new message');
+  live.detach();
+  client.close();
+});
+
+test('Ctrl+F counts matches in messages the window has not drawn, walks to them, and Escape closes it', async () => {
+  window.localStorage.clear();
+  // jsdom measures no range; the bar only reads one to decide whether to scroll.
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  live.findOpen = true;
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  // The bar loads on first use.
+  const input = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLInputElement>('[data-testid=find-input]');
+    if (!found) throw new Error('the find bar is not drawn yet');
+    return found;
+  });
+  await settle();
+  expect(document.activeElement).toBe(input);
+
+  // The oldest message is far above the drawn window.
+  const first = messages[0]!;
+  expect(document.querySelector(`[data-mid="${first.id}"]`)).toBeNull();
+  const word = first.parts.flatMap((part) => (part.type === 'text' ? part.text.split(/\s+/) : [])).find((w) => /^[a-z]{6,}$/i.test(w))!;
+  const total = findHits(messages, word).length;
+  expect(total).toBeGreaterThan(0);
+  input.value = word;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  const count = () => document.querySelector('[data-testid=find-count]')!.textContent?.trim();
+  expect(count()).toBe(`${total} of ${total}`);
+
+  // One past the newest wraps to the oldest, which the window then draws.
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await settle();
+  expect(count()).toBe(`1 of ${total}`);
+  expect(document.querySelector(`[data-mid="${findHits(messages, word)[0]!.messageId}"]`)).not.toBeNull();
+
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await settle();
+  expect(live.findOpen).toBe(false);
+  expect(document.querySelector('[data-testid=find-bar]')).toBeNull();
+  live.detach();
+  client.close();
 });
 
 test('a short thread renders whole, with no spacer at all', async () => {
@@ -349,7 +568,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   last.state = 'streaming';
   await settle();
 
-  const beforeDeltas = { ...windowStats, ...layout };
+  const beforeDeltas = { ...windowStats, ...layout, ...turnProgressStats };
+  expect(turnProgressStats.finishedScans).toBeGreaterThan(0);
   const streamedAt = performance.now();
   for (let delta = 0; delta < 200; delta += 1) {
     part.text += ' token';
@@ -361,7 +581,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
     recomputes: windowStats.recomputes - beforeDeltas.recomputes,
     slots: windowStats.slots - beforeDeltas.slots,
     reads: layout.reads - beforeDeltas.reads,
-    writes: layout.writes - beforeDeltas.writes
+    writes: layout.writes - beforeDeltas.writes,
+    finishedScans: turnProgressStats.finishedScans - beforeDeltas.finishedScans
   };
 
   expect(articles().length).toBeLessThan(40);
@@ -370,6 +591,8 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   // The pin ran on the character count before this: two hundred of each.
   expect(deltas.reads).toBeLessThan(40);
   expect(deltas.writes).toBeLessThan(40);
+  // The receipts and reasoning of the other 399 messages are not rebuilt per token.
+  expect(deltas.finishedScans).toBe(0);
 
   const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]');
   const beforeScroll = { ...windowStats };
@@ -400,6 +623,28 @@ test('four hundred messages, two hundred deltas: the window and the pin stay put
   );
   // Shared CI runners need time for the full streaming and scrolling workload.
 }, 20_000);
+
+test('the second receipt waits for the first streamed character of the answer', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  await store.open('t-long');
+  const messages = store.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  messages.push({ id: 'm-ask', threadId: 't-long', turnId: 'turn-ask', role: 'user', parts: [{ type: 'text', text: 'go' }], state: 'complete', createdAt: Date.now() });
+  messages.push({ id: 'm-reply', threadId: 't-long', turnId: 'turn-ask', role: 'assistant', parts: [{ type: 'text', text: '' }], state: 'streaming', createdAt: Date.now() });
+  running = mount(MessageList, { target: document.body, props: { store, threadId: 't-long', messages } });
+  await settle();
+  const second = () => document.querySelector('[data-mid=m-ask] [data-testid=receipt-responded]');
+  expect(second()?.classList.contains('received')).toBe(false);
+  const part = messages.at(-1)?.parts[0];
+  if (part?.type !== 'text') throw new Error('the reply is a text part');
+  part.text += 'H';
+  await settle();
+  expect(second()?.classList.contains('received')).toBe(true);
+});
 
 test('a page in flight shows one line at the top of the list', async () => {
   const messages = thread(200);

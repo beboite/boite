@@ -23,9 +23,14 @@ export const EXIT_GRACE_MS = 500;
 
 /** Codex names no tool for a shell command, so the card carries the usual one. */
 export const COMMAND_TOOL_NAME = 'Bash';
+/** The Codex `sleep` item, drawn as a tool card. */
+export const SLEEP_TOOL_NAME = 'Sleep';
 
 /** Nor for a patch: `fileChange` is the apply-patch item under another name. */
 export const FILE_CHANGE_TOOL_NAME = 'ApplyPatch';
+
+/** `item/permissions/requestApproval`: a wider sandbox for the rest of the turn. */
+export const PERMISSIONS_TOOL_NAME = 'Permissions';
 
 // ---------------------------------------------------------------------------
 // The slice of the generated protocol this driver speaks
@@ -50,6 +55,26 @@ export interface CodexTurnRecord {
   id: string;
   status: CodexTurnStatus;
   error?: CodexTurnError | null;
+}
+
+/** `HookRunSummary`, what `hook/completed` carries (0.157.1), the fields read. */
+export interface CodexHookRun {
+  eventName: string;
+  sourcePath: string;
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped';
+  entries?: { kind: 'warning' | 'stop' | 'feedback' | 'context' | 'error'; text: string }[];
+}
+
+/** `HooksListResponse`: every hook Codex found for each cwd, and whether it trusts it. */
+export interface CodexHooksListed {
+  data?: {
+    hooks?: {
+      eventName: string;
+      sourcePath: string;
+      enabled?: boolean;
+      trustStatus: 'managed' | 'untrusted' | 'trusted' | 'modified';
+    }[];
+  }[];
 }
 
 /** `TokenUsageBreakdown`. */
@@ -104,6 +129,12 @@ export interface CodexItem {
   result?: unknown;
   error?: { message?: string } | null;
   contentItems?: unknown;
+  /** `agentMessage`: `async` when the agent asked without stopping. */
+  delivery?: string | null;
+  /** `agentMessage` with `delivery: "async"`: what it asks, with option labels. */
+  questions?: { title?: string; options?: string[] | null }[] | null;
+  /** `sleep`: how long the agent waits before it goes on. */
+  durationMs?: number;
 }
 
 /**
@@ -142,6 +173,13 @@ export const MODE_POLICY: Record<PermissionMode, { approvalPolicy: AskForApprova
   bypassPermissions: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
   dontAsk: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 };
+
+/** What `thread/start` and `thread/resume` answer beside the thread. */
+export interface CodexThreadOpened {
+  thread: { id: string };
+  model?: unknown;
+  modelProvider?: unknown;
+}
 
 export type Timer = ReturnType<typeof setTimeout>;
 

@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp';
+import { startDevUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: Awaited<ReturnType<typeof createServer>>;
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -21,8 +19,7 @@ async function capture(name: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent&long=1&machines=1`;
   page = await BrowserPage.launch({ url, windowSize: { width: 1310, height: 820 } });
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
@@ -34,6 +31,20 @@ test('header and project layout', async () => {
   if (process.env.BOITE_CAPTURE_BEFORE) return;
   expect(await page.evaluate(`document.querySelectorAll('${id('titlebar')}').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelector('${id('titlebar')}').contains(document.querySelector('${id('thread-title')}'))`)).toBe(true);
+  expect(await page.evaluate(`(() => {
+    const project = document.querySelector('${id('header-project')}').getBoundingClientRect();
+    const title = document.querySelector('${id('thread-title')}').getBoundingClientRect();
+    const sidebar = document.querySelector('${id('sidebar')}').getBoundingClientRect();
+    return project.right <= title.left && title.left >= sidebar.right;
+  })()`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 880, height: 820, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(440)');
+  await page.waitFor(`document.querySelector('${id('sidebar')}').getBoundingClientRect().width === 440`);
+  expect(await page.evaluate(`document.querySelector('${id('thread-title')}').getBoundingClientRect().left >= document.querySelector('${id('sidebar')}').getBoundingClientRect().right`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('header-wide-sidebar.png');
+  await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(280)');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
   await pointerClick(id('sidebar-toggle'));
   await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
   await capture('header-collapsed.png');
@@ -46,6 +57,7 @@ test('header and project layout', async () => {
     workspace.active.localCore = true;
     workspace.machines = [...workspace.machines].reverse();
   })()`);
+  await page.waitFor(`document.querySelector('${id('machine-status')}')`);
   await pointerClick(id('machine-status'));
   await page.waitFor(`document.querySelector('${id('machine-status-menu')}')`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('machine-status-menu')} [data-row]')).slice(0,2).map(el => el.textContent.trim())`)).toEqual(['All machines', 'This PC']);

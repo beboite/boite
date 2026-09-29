@@ -34,18 +34,28 @@ test.each([
   h.core.activity.pauseAll(threadId);
 });
 
-test('paused activity produces no new events when loaded or closed again', async () => {
+test('paused activity writes nothing when loaded or closed again', async () => {
   const client = await h.connect();
   const { threadId } = await echoThread(h, client);
-  h.core.activity.set({ threadId, goal: { objective: 'Wait' } });
-  h.core.activity.pauseAll(threadId);
-  const count = () => (h.core.journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type = 'thread.activity'").get() as { n: number }).n;
-  const before = count();
-  h.core.activity.close();
-  expect(count()).toBe(before);
-  const loaded = new ActivityStore(h.core);
-  loaded.close();
-  expect(count()).toBe(before);
+  let writes = 0;
+  const original = h.core.journal.setSetting.bind(h.core.journal);
+  h.core.journal.setSetting = (key, value) => {
+    if (key.startsWith('activity:')) writes += 1;
+    original(key, value);
+  };
+  try {
+    h.core.activity.set({ threadId, goal: { objective: 'Wait' } });
+    h.core.activity.pauseAll(threadId);
+    const before = writes;
+    expect(before).toBeGreaterThan(0);
+    h.core.activity.close();
+    expect(writes).toBe(before);
+    const loaded = new ActivityStore(h.core);
+    loaded.close();
+    expect(writes).toBe(before);
+    // The state lives in its settings row only: no event row carries it again.
+    expect((h.core.journal.db.query("SELECT COUNT(*) AS n FROM events WHERE type = 'thread.activity'").get() as { n: number }).n).toBe(0);
+  } finally { h.core.journal.setSetting = original; }
 });
 
 test('starting a turn does not decode historical messages to read its prompt', async () => {
@@ -199,6 +209,27 @@ test('a paired phone manages activity and receives task and pause events over RP
     expect((await phone.call('threads.get', { threadId })).activity?.tasks[0]?.text).toBe('Phone task');
     await phone.call('threads.activity.control', { threadId, kind: 'loop', action: 'remove' });
     expect((await phone.call('threads.get', { threadId })).activity?.loop).toBeNull();
+  } finally { phone.close(); }
+});
+
+test('only the owners and devices that have the thread open receive its activity', async () => {
+  const owner = await h.connect();
+  const watcher = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const { grant } = await owner.call('pairing.grant', {});
+  const phone = await connect(h.url, '', { grant, client: { name: 'pwa', version: 'test' } });
+  try {
+    const counts = { owner: 0, watcher: 0, phone: 0 };
+    owner.on('thread.activity', () => { counts.owner += 1; });
+    watcher.on('thread.activity', () => { counts.watcher += 1; });
+    phone.on('thread.activity', () => { counts.phone += 1; });
+    await watcher.call('threads.subscribe', { threadId });
+    h.core.activity.tasks(threadId, [{ id: 'a', text: 'one', status: 'in_progress' }]);
+    await waitFor(() => counts.watcher === 1);
+    // A round trip on each socket: anything sent before it has arrived.
+    await owner.call('threads.list', {});
+    await phone.call('threads.list', {});
+    expect(counts).toEqual({ owner: 0, watcher: 1, phone: 0 });
   } finally { phone.close(); }
 });
 

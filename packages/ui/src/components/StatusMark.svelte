@@ -58,4 +58,8 @@
     background: var(--color-danger);
     border-color: var(--color-danger);
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .mark.running { animation: none; } }
+  :global(html[data-motion='reduced']) .mark.running { animation: none; }
 </style>

@@ -1,9 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
+import { RpcFailure } from '../lib/client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
+import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
@@ -14,11 +17,105 @@ import { closeTour } from '../lib/onboarding.svelte';
 
 let running: Record<string, unknown> | null = null;
 
+const previewReference = { id: 'composer-element', url: 'https://example.test', selector: '#save', text: 'Save', bounds: { x: 0, y: 0, width: 80, height: 30 } };
+
+test('preview mentions insert at the caret inside prose and keep identical labels distinct', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Change this please');
+  input().setSelectionRange(7, 11);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value === 'Change @Save please');
+  expect(query('[data-testid="composer"] .input-wrap [data-testid="preview-reference"]').textContent).toBe('@Save');
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', { ...previewReference, id: 'other-element', selector: '#other' });
+  await waitFor(() => input().value === 'Change @Save please @Save');
+  expect(store.composerStates['t-trace']!.previewReferences?.map(ref => ref.id)).toEqual(['composer-element', 'other-element']);
+  await type('Change @Save please');
+  expect(store.composerStates['t-trace']!.previewReferences?.map(ref => ref.id)).toEqual(['composer-element']);
+  await type('Change @Sav please');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+});
+
+test('an intact preview mention never opens file completion, while editing it restores file completion', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const call = vi.spyOn(store.client!, 'call');
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value === '@Save');
+  input().focus();
+  for (const at of [2, 5]) {
+    input().setSelectionRange(at, at);
+    input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 90));
+    expect(mentionMenu()).toBeNull();
+    expect(call.mock.calls.filter(([method]) => method === 'projects.files')).toEqual([]);
+  }
+  await type('@Sav');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  await waitFor(() => call.mock.calls.some(([method]) => method === 'projects.files'));
+  expect(mentionMenu()).not.toBeNull();
+});
+
+test('preview references survive queuing and a failed drain, and stashing refuses without changing the draft', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('Change the selected control');
+  store.addPreviewReference('t-trace', previewReference);
+  const reference = store.composerStates['t-trace']!.previewReferences![0]!;
+  await waitFor(() => input().value.endsWith('@Save'));
+  input().focus();
+  press('s', { ctrlKey: true });
+  expect(store.error).toContain('cannot be stashed');
+  expect(input().value).toBe('Change the selected control @Save');
+  expect(store.composerStates['t-trace']?.previewReferences).toEqual([reference]);
+  const send = vi.spyOn(store, 'send').mockResolvedValue(false);
+  store.openThread!.status = 'running';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(store.composerStates['t-trace']!.queued[0]!.previewReferences).toEqual([reference]);
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.paused === true);
+  expect(send).toHaveBeenCalledWith('Change the selected control @Save', 't-trace', [], [reference]);
+  expect(store.composerStates['t-trace']!.text).toBe('Change the selected control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([reference]);
+});
+
+test('preview references remain after refused activity commands and return with recalled sent prompts', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  await type('/goal Change the control');
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value.endsWith('@Save'));
+  input().focus(); press('Enter');
+  await waitFor(() => !!store.error?.includes('references cannot be used'));
+  expect(store.composerStates['t-trace']!.previewReferences).toHaveLength(1);
+  await send('Change the control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences).toEqual([]);
+  expect(query('[data-role="user"] [data-testid="preview-reference"]').textContent).toBe('@Save');
+  input().focus(); press('ArrowUp');
+  await waitFor(() => input().value === 'Change the control @Save');
+  expect(store.composerStates['t-trace']!.previewReferences?.[0]?.id).toBe(previewReference.id);
+  await type('Change the control');
+  await waitFor(() => !document.querySelector('[data-testid="composer"] [data-testid="preview-reference"]'));
+  expect(input().value).toBe('Change the control');
+});
+
 afterEach(() => {
   if (running) unmount(running, { outro: false });
   running = null;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  // The device's work record is module state: the next test starts with no record.
+  work.load();
   vi.restoreAllMocks();
 });
 
@@ -219,7 +316,7 @@ function effortDots(): (string | null)[] {
 async function openDraft(): Promise<void> {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 }
 
 test('the reasoning chip reads the model default level and saves the pick on the open thread', async () => {
@@ -260,7 +357,7 @@ test('the reasoning chip remembers the level a draft picks', async () => {
     model: 'claude-opus-5',
     effort: 'xhigh'
   });
-  await waitFor(() => effortChip()?.textContent?.trim() === 'Extra high');
+  await waitFor(() => effortChip()?.textContent?.trim() === 'Xhigh');
 });
 
 test('the reasoning slider draws one dot per level and the arrows move it', async () => {
@@ -304,7 +401,7 @@ test('a model with no reasoning scale gets no chip at all', async () => {
   await openDraft();
   await waitFor(() => effortChip() !== null);
 
-  // Claude Haiku 4.5 is the one legacy model the descriptor gives no levels.
+  // Haiku 4.5 is the one legacy model the descriptor gives no levels.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=picker-legacy]').click();
@@ -313,7 +410,34 @@ test('a model with no reasoning scale gets no chip at all', async () => {
 
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   await waitFor(() => effortChip() === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Haiku 4.5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Haiku 4.5');
+});
+
+test('a first run shows the reasoning, mode and worktree chips at their defaults, with nothing to pin', async () => {
+  window.localStorage.setItem(WORK_STORAGE_KEY, JSON.stringify(freshWork()));
+  work.load();
+  await mountOnFake();
+  store.startDraft('p-boite');
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
+  // The calm preset hides nothing from the bar: every chip is there at the model's default.
+  await waitFor(() => effortChip() !== null);
+  query('[data-testid=composer-mode]');
+  expect(query('[data-testid=composer-worktree]').getAttribute('aria-pressed')).toBe('false');
+  expect(document.querySelector('[data-testid=composer-more]')).toBeNull();
+
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') !== null);
+  expect(document.querySelector('[data-testid=composer-pin-effort]')).toBeNull();
+  // Opus 5 has a fast mode: its switch sits in the popover's heading, before the level.
+  const heading = query('[data-testid=composer-effort-menu] .heading');
+  expect(heading.firstElementChild?.getAttribute('data-testid')).toBe('effort-speed');
+  expect(document.querySelector('[data-testid=effort-fast-mark]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed-label]')?.textContent === 'Fast');
+  // Switched on, the chip carries a bolt, so the choice shows with the popover shut.
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
+  query('[data-testid=effort-fast-mark]');
 });
 
 test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
@@ -415,6 +539,46 @@ test('Escape stops the running turn and sends pending input next', async () => {
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
 });
 
+test('Enter in the emptied composer sends the oldest pending prompt now, and the next one waits for its turn', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Hold on [permission]');
+  press('Enter');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const rpc = vi.spyOn(store.client!, 'call');
+  await type('Now please');
+  press('Enter');
+  await type('After that');
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 2);
+  expect(query('[data-testid=composer-queued]').textContent).toContain('Now please');
+  press('Enter');
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  const prompts = store.openThread!.messages.filter((message) => message.role === 'user').slice(-2)
+    .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
+  expect(prompts).toEqual(['Now please', 'After that']);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
+});
+
+test('Enter with text still queues, and Send now under the pending bubbles stops the turn', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Hold on [permission]');
+  press('Enter');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const rpc = vi.spyOn(store.client!, 'call');
+  await type('Queued by the button');
+  press('Enter');
+  await type('still typing');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 2);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  query<HTMLButtonElement>('[data-testid=composer-send-now]').click();
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+});
+
 test('goal and loop coexist above the composer with expandable agent tasks', async () => {
   await mountOnFake();
   await store.open('t-trace');
@@ -455,15 +619,16 @@ test('queued prompts stay on their thread and run as separate turns', async () =
   press('Enter');
   await waitFor(() => input().value === '');
   await store.open('t-descriptors');
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
-  expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
+  await waitFor(() => store.openThread?.id === 't-descriptors');
   await store.open('t-trace');
   await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 3 && !store.busy);
   expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(-2).map((m) => m.parts)).toEqual([
     [{ type: 'text', text: 'first queued prompt' }],
     [{ type: 'text', text: 'second queued prompt' }]
   ]);
+  // Both prompts have run, on t-trace: anything sent to the other thread was sent before them.
+  const other = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+  expect(other.messages.some((m) => m.parts.some((p) => p.type === 'text' && p.text.includes('queued prompt')))).toBe(false);
 });
 
 
@@ -500,9 +665,12 @@ test('a pending send cannot duplicate a turn or erase text typed for the next pr
   press('Enter');
   press('Enter');
   await type('still composing the next prompt');
+  paste(pngFile('next.png'));
+  await waitFor(() => input().value.includes('[Image 1]'));
   release();
   await waitFor(() => store.busy);
-  expect(input().value).toBe('still composing the next prompt');
+  expect(input().value).toBe('still composing the next prompt [Image 1] ');
+  expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
 });
 
@@ -546,9 +714,33 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
     `data:image/png;base64,${PIXEL}`
   );
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  expect(document.activeElement).toBe(input());
+  await type('Keep writing while looking');
+  expect(query<HTMLImageElement>('[data-testid=composer-image-preview] img').getAttribute('src')).toBe(`data:image/png;base64,${PIXEL}`);
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(input().value).toBe('Keep writing while looking');
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  input().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  query('[data-testid=composer-image-preview] img').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  expect(document.querySelector('[data-testid=composer-image-preview]')).not.toBeNull();
+  const outside = document.createElement('button');
+  document.body.appendChild(outside);
+  outside.focus();
+  outside.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(document.activeElement).toBe(outside);
+  expect(input().value).toBe('Keep writing while looking');
+  outside.remove();
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
 
   query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
+  expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
 
   paste(pngFile());
   await waitFor(() => chips().length === 1);
@@ -581,6 +773,47 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(document.querySelector('[data-testid=composer-attachments]')).toBeNull();
 });
 
+test('image references follow the caret, mixed attachments and removal without losing browser references', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await type('Before after');
+  input().setSelectionRange(7, 7);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  paste(pngFile('first.png'));
+  await waitFor(() => input().value === 'Before [Image 1] after');
+  paste(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
+  await waitFor(() => chips().length === 2);
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  store.addPreviewReference('t-trace', previewReference);
+  await waitFor(() => input().value.endsWith('@Save'));
+  paste(pngFile('second.png'));
+  await waitFor(() => input().value.endsWith('[Image 2] '));
+  const references = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=composer-image-reference]'));
+  expect(references().map(item => item.textContent)).toEqual(['[Image 1]', '[Image 2]']);
+  references()[1]!.dispatchEvent(new Event('pointerenter'));
+  await waitFor(() => chips()[2]!.classList.contains('highlighted'));
+  references()[1]!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]')?.textContent?.includes('second.png') === true);
+  chips()[0]!.querySelector<HTMLButtonElement>('[data-testid=composer-attachment-remove]')!.click();
+  await waitFor(() => references().length === 1);
+  expect(references()[0]!.textContent).toBe('[Image 1]');
+  expect(query('[data-testid=composer-image-preview]').textContent).toContain('second.png');
+  expect(query('[data-testid=composer-image-preview]').textContent).toContain('[Image 1]');
+  const browserReference = store.composerStates['t-trace']!.previewReferences![0]!;
+  expect(input().value.slice(browserReference.mention!.start, browserReference.mention!.end)).toBe('@Save');
+  const stop = vi.spyOn(store, 'stop').mockResolvedValue(undefined);
+  store.openThread!.status = 'running';
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(stop).not.toHaveBeenCalled();
+  references()[0]!.click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  store.startDraft();
+  await waitFor(() => store.draft !== null);
+  expect(document.querySelector('[data-testid=composer-image-preview]')).toBeNull();
+});
+
 test('sending waits for a file read so the attachment cannot land in the next prompt', async () => {
   await mountOnFake();
   await store.open('t-trace');
@@ -601,6 +834,44 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   await waitFor(() => store.openThread!.messages.length > before && !store.busy);
   const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+});
+
+test.each([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async accepted => {
+  await mountOnFake();
+  await store.open('t-trace');
+  paste(pngFile('sent.png'));
+  await waitFor(() => chips().length === 1);
+  await type('send this once [Image 1]');
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') {
+      await gate;
+      if (!accepted) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'send refused' });
+    }
+    return call(method, params);
+  });
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']!.sending);
+  paste(pngFile('next.png'));
+  await waitFor(() => chips().length === 2 && input().value.includes('[Image 2]'));
+  release();
+  await waitFor(() => !store.composerStates['t-trace']!.sending);
+  if (accepted) {
+    expect(input().value).toBe('[Image 1] ');
+    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
+    const sent = store.openThread!.messages.filter(message => message.role === 'user').at(-1)!;
+    expect(sent.parts[0]).toEqual({ type: 'text', text: 'send this once [Image 1]' });
+    expect(sent.parts.filter(part => part.type === 'image').map(part => part.alt)).toEqual(['sent.png']);
+  } else {
+    expect(store.error).toBe('send refused');
+    expect(input().value).toBe('send this once [Image 1] [Image 2] ');
+    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['sent.png', 'next.png']);
+  }
 });
 
 test('a file read uses the original provider even if the user switches threads', async () => {
@@ -687,8 +958,8 @@ test('permission menu offers three policies and preserves legacy modes until pic
   query('[data-testid=composer-mode]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
   const menu = query('[data-testid=composer-mode-menu]');
-  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Yolo', 'Auto decide', 'Ask']);
-  for (const [mode, label] of [['bypassPermissions', 'Yolo'], ['acceptEdits', 'Auto decide'], ['default', 'Ask']]) {
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Autonomous', 'Edit freely', 'Ask']);
+  for (const [mode, label] of [['bypassPermissions', 'Autonomous'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
     query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
     await waitFor(() => store.openThread?.permissionMode === mode);
     expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);
@@ -717,7 +988,7 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(document.body.textContent).toContain('Agent');
   expect(document.body.textContent).toContain('Boite');
 
-  await type('/sh');
+  await type('/sho');
   await waitFor(() => slashRows().length === 1);
   expect(slashRows()).toEqual(['shout']);
 
@@ -911,6 +1182,47 @@ test('a refused prompt keeps its place in the queue and the next send resumes it
     .slice(-3)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
   expect(sent).toEqual(['P1', 'P2', 'P3']);
+});
+
+test('a turn the core opened on its own holds the prompt, then sends it without an error', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  // The core has just opened a turn by itself (held answers to an asynchronous
+  // question) and this client has not heard of it yet: it still shows idle.
+  let refusals = 2;
+  const rpc = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    if (method === 'turns.start' && refusals-- > 0) {
+      const thread = { ...store.threads.find((row) => row.id === 't-trace')!, status: 'running' as const };
+      return Promise.reject(new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+        data: { threadId: 't-trace', reason: 'turn-in-flight', thread } }));
+    }
+    return call(method, params);
+  });
+
+  // Sent straight from the box: refused as early, so it waits in the queue.
+  await type('sent into a busy thread');
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
+  expect(input().value).toBe('');
+  expect(store.busy).toBe(true);
+  expect(store.error).toBeNull();
+
+  // That turn ends, the queue drains, and a second turn the core opened in
+  // between refuses it once more: it goes back at the head, still no error.
+  store.openThread!.status = 'idle';
+  await waitFor(() => refusals === 0 && store.busy);
+  expect(store.composerStates['t-trace']!.queued.map((entry) => entry.text)).toEqual(['sent into a busy thread']);
+  expect(store.composerStates['t-trace']!.paused).toBe(false);
+  expect(store.error).toBeNull();
+
+  store.openThread!.status = 'idle';
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && store.openThread!.messages.some((m) => m.role === 'user'
+    && m.parts.some((p) => p.type === 'text' && p.text === 'sent into a busy thread')));
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(3);
+  expect(store.error).toBeNull();
 });
 
 test('the mention menu never opens on the project the composer just left', async () => {

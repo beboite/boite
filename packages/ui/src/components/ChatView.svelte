@@ -1,11 +1,15 @@
 <script lang="ts">
-  import { ChevronDown } from '@lucide/svelte';
+  import { untrack } from 'svelte';
+  import { ChevronDown, FolderOpen } from '@lucide/svelte';
   import type { ProjectId } from '@boite/contracts';
-  import { type MenuItem } from '../lib/menu';
+  import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
+  import { experimentOn } from '../lib/experiments.svelte';
+  import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
+  import AgentDock from './AgentDock.svelte';
   import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -13,34 +17,69 @@
   let { store }: { store: Store } = $props();
 
   let thread = $derived(store.openThread);
+  // Whether other agents can reach this conversation. Off, it takes no room
+  // here: the setting lives in the Agents panel.
+  let threadId = $derived(thread?.id);
+  let agentSession = $derived(!!thread?.agentSessionId);
+  $effect(() => {
+    const id = threadId;
+    if (id && !agentSession) untrack(() => void store.loadCoordination(id, false));
+  });
+  let reachable = $derived(!!threadId && !agentSession && store.coordination?.self.threadId === threadId && store.coordination.config.mode !== 'off');
   let project = $derived(store.openProject);
   let draftChoice = $derived(store.defaultChoice());
   let draftModel = $derived(store.modelOf(draftChoice));
   let draftProvider = $derived(draftChoice ? store.providerOf(draftChoice.providerId) : null);
   let draftEffort = $derived(draftChoice?.effort ?? draftModel?.effort?.default ?? null);
-  let effortLabel = $derived(draftModel?.effort?.levels.find((level) => level.id === draftEffort)?.label ?? draftEffort);
+  let effortLabel = $derived.by(() => { const level = draftModel?.effort?.levels.find((level) => level.id === draftEffort); return level ? levelName(level) : draftEffort; });
   let modelLabel = $derived(draftModel?.name ?? draftChoice?.model ?? draftProvider?.name ?? '');
 
-  /** Every project, the draft's own marked: what the heading's dropdown lists. */
-  let projectItems = $derived<MenuItem[]>(
-    (workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => machine.store.projects.map((entry) => ({
-      id: JSON.stringify([machine.id, entry.id]),
-      label: entry.name,
-      hint: `${machine.label} · ${entry.path}`,
-      active: machine.store === store && entry.id === store.draft?.projectId
-    })))
-  );
+  const OPEN_FOLDER = 'open-folder';
+
+  /**
+   * Every machine's drafts first, whether the core has made them yet or not,
+   * then its projects, the draft's own marked, and for the owner the way to
+   * open a folder: what the heading's dropdown lists.
+   */
+  let projectItems = $derived<MenuItem[]>([
+    ...(workspace.machines.length ? workspace.machines : [{ id: '', label: '', store }]).flatMap(machine => {
+      const here = machine.store === store;
+      const drafts = machine.store.draftsProject;
+      // One machine names no machine: the path alone tells the projects apart.
+      const place = workspace.machines.length > 1 ? machine.label : '';
+      return [
+        {
+          id: JSON.stringify([machine.id, null]),
+          label: strings.drafts.name,
+          hint: place ? `${place} · ${strings.drafts.hint}` : strings.drafts.hint,
+          active: here && store.draftInDrafts
+        },
+        ...machine.store.projects.filter((entry) => entry.id !== drafts?.id && entry.archived !== true).map((entry) => ({
+          id: JSON.stringify([machine.id, entry.id]),
+          label: projectName(entry),
+          hint: place ? `${place} · ${entry.path}` : entry.path,
+          active: here && entry.id === store.draft?.projectId
+        }))
+      ];
+    }),
+    ...(store.owner ? [separator(), { id: OPEN_FOLDER, label: strings.drafts.pickFolder }] : [])
+  ]);
 
   function pickProject(id: string) {
-    const [machineId, projectId] = JSON.parse(id) as [string, ProjectId];
+    if (id === OPEN_FOLDER) {
+      store.projectPickerOpen = true;
+      return;
+    }
+    const [machineId, projectId] = JSON.parse(id) as [string, ProjectId | null];
     const target = workspace.machines.find(m => m.id === machineId)?.store ?? store;
     if (target === store) store.setDraftProject(projectId);
-    else void workspace.select(target, undefined, projectId);
+    else if (projectId !== null) void workspace.select(target, undefined, projectId);
+    else void workspace.select(target).then(() => target.startDraft(null));
   }
 </script>
 
 {#if !thread && !store.draft}
-  <div class="none">
+  <div class="none" data-testid="no-thread">
     <h1>{strings.thread.none}</h1>
     <p class="muted">{strings.thread.noneBody}</p>
   </div>
@@ -49,7 +88,7 @@
 
 
     {#if thread}
-      {#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}
+      {#if reachable}{#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}{/if}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->
@@ -72,7 +111,7 @@
             label={strings.thread.changeProject}
             testid="draft-project"
           >
-            &quot;{project?.name ?? ''}&quot;
+            &quot;{project ? projectName(project) : strings.drafts.name}&quot;
             <ChevronDown size={14} strokeWidth={2} />
           </Menu>
           {#if draftChoice}
@@ -83,12 +122,27 @@
       </div>
     {/if}
 
-    <Composer {store} centered={!thread} />
+    {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
+    {#if thread?.agentSessionId}
+      <!-- An agent's own thread is written to from its page, which the experiment gates. -->
+      {#if experimentOn('resident-agents')}<button class="ghost" onclick={() => store.showAgents()}>{strings.agents.heading}</button>{/if}
+    {:else}
+      <Composer {store} centered={!thread} />
+    {/if}
 
     <!-- The draft's heading and composer are one block in the middle of the
          column: the body above and this tail below share the free space. -->
     {#if !thread}
-      <div class="draft-tail"></div>
+      <div class="draft-tail">
+        <!-- In the drafts the agent gets a fresh folder; someone with work of
+             their own is one click from pointing it there instead. -->
+        {#if store.draftInDrafts && store.owner}
+          <button type="button" class="ghost small open-folder" data-testid="draft-open-folder" onclick={() => (store.projectPickerOpen = true)}>
+            <FolderOpen size={14} strokeWidth={1.75} />
+            {strings.drafts.openFolder}
+          </button>
+        {/if}
+      </div>
     {/if}
   </section>
 {/if}
@@ -128,6 +182,15 @@
   .draft-tail {
     flex: 1 1 0;
     min-height: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .open-folder {
+    margin-top: 10px;
+    gap: 6px;
+    color: var(--color-muted-foreground);
   }
 
   .start {

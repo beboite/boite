@@ -57,7 +57,7 @@ test('a queued turn keeps its original account and late completion cannot attach
   const { client, threadId, accountId } = await setup();
   h.core.settings.set({ maxConcurrentTurns: 1 });
   const blocker = await client.call('threads.create', {
-    projectId: h.core.threads.require(threadId).projectId, providerId: 'echo', accountId,
+    projectId: h.core.projects.require(h.core.threads.require(threadId).projectId).id, providerId: 'echo', accountId,
   });
   const seen: TurnContext[] = [];
   let finish!: (value: TurnResult) => void;
@@ -80,6 +80,40 @@ test('a queued turn keeps its original account and late completion cannot attach
   expect(h.core.threads.require(threadId).accountId).toBe('second-account');
   expect(h.core.threads.require(threadId).sessionId).toBeNull();
   expect(h.core.journal.getTurn(queued.id)?.execution?.accountId).toBe(accountId);
+});
+
+test('a turn stopped while the agent refuses to resume its lost session is not run again on a fresh one', async () => {
+  const { client, threadId } = await setup();
+  const seen: TurnContext[] = [];
+  const gate: { refuse: (() => void) | null } = { refuse: null };
+  restore = setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      seen.push(ctx);
+      if (ctx.sessionId === null) {
+        const id = ctx.emit.startMessage('assistant');
+        ctx.emit.part(id, 0, { type: 'text', text: 'first answer' });
+        ctx.emit.complete(id, 'complete');
+        return { stop() {}, done: Promise.resolve<TurnResult>({ status: 'done', sessionId: 'native-1', usage: null }) };
+      }
+      // A driver that reports the refusal as it came, whatever Stop said meanwhile.
+      const done = new Promise<TurnResult>((resolve) => {
+        gate.refuse = () => resolve({ status: 'error', sessionId: ctx.sessionId, usage: null, error: 'no conversation found', sessionLost: true });
+      });
+      return { stop() {}, done };
+    },
+  });
+  const first = await client.call('turns.start', { threadId, prompt: 'first' });
+  await waitFor(() => h.core.journal.getTurn(first.id)?.status === 'done');
+  const second = await client.call('turns.start', { threadId, prompt: 'second' });
+  await waitFor(() => gate.refuse !== null);
+  expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+  gate.refuse!();
+  await waitFor(() => h.core.journal.getTurn(second.id)?.finishedAt != null);
+  expect(h.core.journal.getTurn(second.id)).toMatchObject({ status: 'stopped', error: null });
+  expect(seen).toHaveLength(2);
+  // The lost id still goes: the next prompt starts fresh instead of failing on it again.
+  expect(h.core.threads.require(threadId)).toMatchObject({ sessionId: null, sessionGeneration: 1, status: 'idle' });
 });
 
 test('a stale model selection is refused before a prompt is journalled', async () => {
@@ -126,17 +160,39 @@ test('historical images travel before current attachments and unsupported image 
   expect(() => continuationInput(h.core.journal, threadId, 'new', input, { ...provider, capabilities: { ...provider.capabilities, images: false } })).toThrow('historical images');
 });
 
+test('delegation migration preserves threads from the prompt-cache schema', async () => {
+  const { threadId } = await setup();
+  const path = join(h.dataDir, 'cache-schema.db');
+  const legacy = new Journal(path);
+  legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'cached-session' });
+  legacy.db.exec('DROP TABLE delegated_agents; DROP TABLE delegation_messages; DROP INDEX threads_parent; ALTER TABLE threads DROP COLUMN parent_thread_id; PRAGMA user_version = 13;');
+  legacy.close();
+  const migrated = new Journal(path);
+  try {
+    const thread = migrated.getThread(threadId)!;
+    expect(thread.sessionId).toBe('cached-session');
+    expect(thread.parentThreadId).toBeUndefined();
+    expect(thread.promptCache).toBeNull();
+    migrated.putThread({ ...thread, parentThreadId: 'parent' });
+    expect(migrated.getThread(threadId)?.parentThreadId).toBe('parent');
+    expect(migrated.db.query('SELECT COUNT(*) AS count FROM delegated_agents').get()).toEqual({ count: 0 });
+  } finally { migrated.close(); }
+});
+
 test('migration preserves legacy native sessions and persists new selections and turn execution', async () => {
   const { client, threadId } = await setup();
   const path = join(h.dataDir, 'migration.db');
   const legacy = new Journal(path);
   legacy.putThread({ ...h.core.threads.require(threadId), sessionId: 'legacy-session' });
-  legacy.db.exec('DROP TABLE coordination_letters; DROP TABLE coordination_wakes; DROP TABLE turn_requests; ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
+  legacy.db.exec('DROP TABLE agent_entities; DROP TABLE agent_requests; ALTER TABLE threads DROP COLUMN agent_session_id;');
+  legacy.db.exec('DROP TABLE delegated_agents; DROP TABLE delegation_messages; DROP INDEX threads_parent; ALTER TABLE threads DROP COLUMN parent_thread_id;');
+  legacy.db.exec('DROP TABLE coordination_letters; DROP TABLE coordination_wakes; DROP TABLE turn_requests; ALTER TABLE threads DROP COLUMN prompt_cache; ALTER TABLE threads DROP COLUMN speed; ALTER TABLE threads DROP COLUMN session_generation; ALTER TABLE threads DROP COLUMN selection_version; ALTER TABLE turns DROP COLUMN execution; PRAGMA user_version = 8;');
   legacy.close();
   const migrated = new Journal(path);
   try {
     expect(migrated.getThread(threadId)?.sessionId).toBe('legacy-session');
     expect(migrated.getThread(threadId)?.sessionGeneration).toBe(0);
+    expect(migrated.getThread(threadId)?.promptCache).toBeNull();
   } finally { migrated.close(); }
   await client.call('threads.update', { threadId, accountId: 'second-account', model: 'echo' });
   const turn = await client.call('turns.start', { threadId, prompt: 'persist' });

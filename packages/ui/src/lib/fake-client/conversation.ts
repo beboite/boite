@@ -14,6 +14,11 @@ export const QUESTION_OPTIONS = [
   { id: 'long', label: 'Long', description: 'the whole prompt back' }
 ];
 
+/** What `[ask]` asks without stopping, the way `boite ask` would. */
+export const ASYNC_QUESTION_TEXT = 'Which port should the dev server take?';
+
+export const ASYNC_QUESTION_OPTIONS = ['5173', '4173'];
+
 export const DIFF_PATH = 'src/app.ts';
 
 export const DIFF_OLD = 'export function boot() {\n  return start();\n}';

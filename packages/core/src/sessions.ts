@@ -14,18 +14,54 @@
  * one way a core with no window of its own gets an owner that is not a process
  * reading its `core.json`: that session speaks as the `owner`, and is listed
  * and revoked like any other.
+ *
+ * A grant exchanged with a nonce stays answerable for the rest of its ten
+ * minutes: the answer carrying the session can be lost on a weak link, and the
+ * phone's retry, with the same grant and the same nonce, gets the same session
+ * back instead of "already used". The plaintext token of such a delivery lives
+ * in memory only, and goes the moment its key first opens the core.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { GRANT_QUERY_PARAM, GRANT_TTL_MS, PAIRING_ROLES } from '@boite/contracts';
 import type { PairedSession, PairingGrant, PairingRole, Principal, ThreadId } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { refused, unauthorized } from './errors.ts';
+import { invalidParams, refused, unauthorized } from './errors.ts';
 import { newId, newToken } from './ids.ts';
 
 interface Grant {
   expiresAt: number;
   role: PairingRole;
+}
+
+/** An exchange whose answer may not have arrived, kept until its grant would have expired. */
+interface Delivery {
+  nonceHash: Buffer;
+  id: string;
+  token: string;
+  role: PairingRole;
+  expiresAt: number;
+}
+
+/** A nonce shorter than this is no secret, so a hello carrying one is refused. */
+export const NONCE_MIN = 16;
+export const NONCE_MAX = 256;
+
+/**
+ * What is wrong with a hello's `nonce`, or null when it is a usable one. A bad
+ * nonce is refused rather than dropped: dropped, the grant would still work but
+ * only once, and the client would never learn its retry protection was off.
+ */
+export function nonceProblem(nonce: unknown): string | null {
+  if (typeof nonce !== 'string') return `nonce must be a string of ${NONCE_MIN} to ${NONCE_MAX} characters, got ${nonce === null ? 'null' : typeof nonce}`;
+  if (nonce.length < NONCE_MIN || nonce.length > NONCE_MAX) {
+    return `nonce must be ${NONCE_MIN} to ${NONCE_MAX} characters, got ${nonce.length}`;
+  }
+  return null;
+}
+
+function nonceHash(nonce: string): Buffer {
+  return createHash('sha256').update(nonce).digest();
 }
 
 export interface ClientIdentity {
@@ -53,6 +89,8 @@ export function hashToken(token: string): string {
 
 export class SessionStore {
   private readonly grants = new Map<string, Grant>();
+  /** Keyed by grant. */
+  private readonly deliveries = new Map<string, Delivery>();
 
   constructor(private readonly core: Core) {}
 
@@ -69,18 +107,28 @@ export class SessionStore {
   }
 
   pairingUrl(grant: string): string {
-    return `${this.core.settings.get().publicUrl ?? this.core.baseUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
+    return `${this.core.settings.get().publicUrl ?? this.core.reachableUrl()}/?${GRANT_QUERY_PARAM}=${grant}`;
   }
 
   /**
    * The grant becomes a session, once. A grant the core never issued, one
    * already exchanged and one past its time all fail the same way, by name:
-   * the link on the phone is what the user has to look at.
+   * the link on the phone is what the user has to look at. A retry that
+   * repeats the nonce of the first exchange gets that exchange's session.
    */
-  exchange(grant: string, client: ClientIdentity, now = Date.now()): { id: string; token: string; role: PairingRole } {
+  exchange(grant: string, client: ClientIdentity, now = Date.now(), nonce: string | null = null): { id: string; token: string; role: PairingRole } {
+    // Before anything is spent: a bad nonce leaves the grant as it was.
+    const problem = nonce === null ? null : nonceProblem(nonce);
+    if (problem !== null) throw invalidParams(problem, { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX });
     this.sweep(now);
     const known = this.grants.get(grant);
-    if (known === undefined) throw unauthorized('the pairing link was already used, expired, or never issued');
+    if (known === undefined) {
+      const delivery = this.deliveries.get(grant);
+      if (delivery !== undefined && nonce !== null && timingSafeEqual(delivery.nonceHash, nonceHash(nonce))) {
+        return { id: delivery.id, token: delivery.token, role: delivery.role };
+      }
+      throw unauthorized('the pairing link was already used, expired, or never issued');
+    }
     this.grants.delete(grant);
     const token = newToken();
     const id = newId('ses_');
@@ -96,6 +144,7 @@ export class SessionStore {
         last_seen_at: now,
       });
     });
+    if (nonce !== null) this.deliveries.set(grant, { nonceHash: nonceHash(nonce), id, token, role, expiresAt: known.expiresAt });
     this.core.bus.emit('sessions.updated', { sessionId: id, state: 'created' });
     return { id, token, role };
   }
@@ -104,6 +153,8 @@ export class SessionStore {
   authenticate(token: string, now = Date.now()): { id: string; role: PairingRole } | null {
     const row = this.core.journal.getSessionByHash(hashToken(token));
     if (row === null) return null;
+    // The phone holds its key: the grant is spent for good.
+    this.forgetDelivery(row.id);
     this.core.journal.touchSession(row.id, now);
     return { id: row.id, role: row.role };
   }
@@ -126,6 +177,7 @@ export class SessionStore {
     this.core.journal.append({ type: 'session.revoked', threadId: null, version: 1, payload: { id: sessionId } }, () => {
       this.core.journal.deleteSession(sessionId);
     });
+    this.forgetDelivery(sessionId);
     // The sockets first, so the event never reaches the client it is about.
     this.core.subscribers.closeSession(sessionId);
     this.core.bus.emit('sessions.updated', { sessionId, state: 'revoked' });
@@ -134,6 +186,15 @@ export class SessionStore {
   private sweep(now: number): void {
     for (const [grant, entry] of this.grants) {
       if (entry.expiresAt <= now) this.grants.delete(grant);
+    }
+    for (const [grant, entry] of this.deliveries) {
+      if (entry.expiresAt <= now) this.deliveries.delete(grant);
+    }
+  }
+
+  private forgetDelivery(sessionId: string): void {
+    for (const [grant, entry] of this.deliveries) {
+      if (entry.id === sessionId) this.deliveries.delete(grant);
     }
   }
 }

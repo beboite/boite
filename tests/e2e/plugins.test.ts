@@ -87,7 +87,8 @@ test('the recommended plugin installs, switches an account and uninstalls back t
   const account = `${row('kebacc-switcher')} ${id('plugin-pool')}[data-provider="claude"] ${id('plugin-account')}[data-email="personal@example.com"]`;
   await page.click(`${account} ${id('plugin-switch')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`); await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${account} ${id('plugin-switch')}').disabled`);
+  // The active login says so and has nothing to switch to.
+  await page.waitFor(`document.querySelector('${account} ${id('plugin-account-active')}') !== null && document.querySelector('${account} ${id('plugin-switch')}') === null`);
   await scrollTo(row('kebacc-switcher'));
   await capture('plugins-installed-desktop.png');
   await page.click(`${row('kebacc-switcher')} ${id('plugin-uninstall')}`);
@@ -97,12 +98,13 @@ test('the recommended plugin installs, switches an account and uninstalls back t
 
 test('in a 390 pixel column the page wraps instead of scrolling sideways', async () => {
   // The desktop shell never gets this narrow and the phone has its own settings,
-  // so the column is made here: the nav hidden, the page 390 pixels wide.
+  // so the column is made here: the nav hidden, the page 390 pixels wide. The
+  // section's frame edge goes too, or its two pixels come off the 390.
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 844, deviceScaleFactor: 1, mobile: false });
   await page.evaluate(`(() => {
     const style = document.createElement('style');
     style.id = 'plugins-column';
-    style.textContent = '.settings > nav { display: none !important; } .settings > section { flex: 0 0 390px !important; max-width: 390px; }';
+    style.textContent = '.settings > nav { display: none !important; } .settings > section { flex: 0 0 390px !important; max-width: 390px; border: none !important; }';
     document.head.append(style);
   })()`);
   const fits = `(() => { const el = document.querySelector('${id('plugins-page')}'); return el.getBoundingClientRect().width === 390 && el.scrollWidth <= el.clientWidth; })()`;

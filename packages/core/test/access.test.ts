@@ -46,6 +46,10 @@ async function pairedDevice(): Promise<Awaited<ReturnType<typeof connect>>> {
 }
 
 describe('the access gate', () => {
+  test('paired messages cannot impersonate a persistent agent session', () => {
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { threadId: 'thr_other' })).toThrow('threadId');
+    expect(() => assertAllowed('agents.message.send', deviceConnection(), { scope: { kind: 'agent', id: 'identity' } })).not.toThrow();
+  });
   test('agent sockets cannot receive owner broadcasts or another thread activity', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
@@ -58,6 +62,8 @@ describe('the access gate', () => {
       harness.core.bus.emit('thread.updated', harness.core.threads.require(threadId));
       harness.core.bus.emit('thread.activity', { threadId: 'another-thread', activity: { goal: null, loop: null, tasks: [] } });
       harness.core.bus.emit('thread.activity', { threadId, activity: { goal: null, loop: null, tasks: [] } });
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
       // The response follows every event on this socket, with no timing guess.
       await agent.call('agent.where', { threadId });
       expect(seen).toEqual(['thread.activity']);
@@ -65,7 +71,10 @@ describe('the access gate', () => {
   });
 
   test('device sockets receive readable state, but no login output, trace or diagnostics', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
     const phone = await pairedDevice();
+    await phone.call('threads.subscribe', { threadId });
     const seen: string[] = [];
     phone.onAny(name => seen.push(name));
     try {
@@ -73,9 +82,15 @@ describe('the access gate', () => {
       harness.core.bus.emit('core.log', { level: 'error', message: 'private diagnostic', at: Date.now() });
       harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
       harness.core.bus.emit('quotas.updated', []);
+      harness.core.bus.emit('quotas.progress', { requestId: 'private-read', quota: {
+        accountId: 'private-account', providerId: 'claude', providerName: 'Claude', label: 'Private', enabled: true,
+        status: 'ready', windows: [], checkedAt: 1, error: null,
+      } });
       harness.core.bus.emit('settings.updated', harness.core.settings.get());
+      harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
+      harness.core.bus.emit('delegation.changed', { threadId });
       await phone.call('settings.get', {});
-      expect(seen).toEqual(['settings.updated']);
+      expect(seen).toEqual(['settings.updated', 'delegation.changed']);
     } finally { phone.close(); }
   });
 
@@ -146,7 +161,7 @@ describe('the access gate', () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);
     const other = await harness.core.threads.create({
-      projectId: harness.core.threads.require(threadId).projectId,
+      projectId: harness.core.projects.require(harness.core.threads.require(threadId).projectId).id,
       providerId: 'echo',
       accountId: harness.core.threads.require(threadId).accountId,
       title: 'another thread',
@@ -226,6 +241,24 @@ describe('the access gate', () => {
       const finished = phone.next<'turn.finished'>('turn.finished', (turn) => turn.threadId === threadId, 10_000);
       await phone.call('turns.start', { threadId, prompt: 'from the phone' });
       expect((await finished).status).toBe('done');
+    } finally {
+      phone.close();
+    }
+  });
+
+  test('a thread the phone creates reaches the computer at once, without a subscription', async () => {
+    const owner = await harness.connect();
+    const project = await testProject(harness, owner);
+    const account = (await owner.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+    const phone = await pairedDevice();
+    try {
+      const created = owner.next<'thread.created'>('thread.created', (thread) => thread.title === 'from the phone', 5_000);
+      const thread = await phone.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'from the phone' });
+      expect((await created).id).toBe(thread.id);
+      // Its first turn moves the computer's row too, though the computer never opened it.
+      const updated = owner.next<'thread.updated'>('thread.updated', (row) => row.id === thread.id && row.status === 'idle' && row.lastUserMessageAt !== null, 10_000);
+      await phone.call('turns.start', { threadId: thread.id, prompt: 'hello' });
+      expect((await updated).id).toBe(thread.id);
     } finally {
       phone.close();
     }

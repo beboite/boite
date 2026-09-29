@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startDevUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let uiUrl: string;
 
@@ -16,10 +14,9 @@ async function settled() {
 beforeAll(async () => {
   const port = await freePort();
   uiUrl = `http://127.0.0.1:${port}`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
-  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="chat"]')`);
   await page.evaluate(`(async () => {
     const [{ workspace }, { FakeClient }] = await Promise.all([import('/src/lib/workspace.svelte.ts'), import('/src/lib/fake-client.ts')]);
     const local = workspace.active.client;
@@ -44,6 +41,8 @@ beforeAll(async () => {
     });
   })()`);
   await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 2`);
+  // Reachable by other agents now, the conversation shows its coordination bar.
+  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')`);
 }, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);

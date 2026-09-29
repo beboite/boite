@@ -152,6 +152,17 @@ test('an answered card folds to one line and asks nothing more', () => {
   expect(query('[data-testid=question-answer]').textContent).toBe('Short: one line please');
   expect(options()).toHaveLength(0);
   expect(document.querySelector('[data-testid=question-submit]')).toBeNull();
+  const toggle = query<HTMLButtonElement>('[data-testid=question-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=question-text]')).toBeNull();
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(query('[data-testid=question-text]').textContent).toBe('Which shape should the echo take?');
+  toggle.click();
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(query('[data-testid=question-text]').closest<HTMLElement>('.fold')?.inert).toBe(true);
 });
 
 test('a question whose turn ended says so instead of offering a button', () => {
@@ -173,4 +184,59 @@ test('a question whose turn ended says so instead of offering a button', () => {
   expect(document.querySelector('[data-testid=question-submit]')).toBeNull();
   expect(query('[data-testid=question-cancelled]').textContent).toContain('turn ended');
   expect(options()[0]?.disabled).toBe(true);
+});
+
+test('a card asked without waiting says so until it is answered', () => {
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: { text: 'Which port?', options: OPTIONS, allowText: true, multiple: false, async: true, answer: null, pending: true, submit: () => {} }
+  });
+  flushSync();
+  const card = query('[data-testid=question-card]');
+  expect(card.getAttribute('data-async')).toBe('true');
+  expect(card.textContent).toContain('Asks you, without waiting');
+  expect(document.querySelector('[data-testid=question-async-hint]')).not.toBeNull();
+});
+
+test('a send that failed gives the card back, and a second press sends again', async () => {
+  const sent: string[][] = [];
+  let answer!: (delivered: boolean) => void;
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: {
+      text: 'Which shape should the echo take?',
+      options: OPTIONS,
+      allowText: true,
+      multiple: false,
+      answer: null,
+      pending: true,
+      submit: (optionIds: string[]) => {
+        sent.push(optionIds);
+        return new Promise<boolean>((resolve) => { answer = resolve; });
+      }
+    }
+  });
+  flushSync();
+  options()[0]?.click();
+  flushSync();
+  submit().click();
+  flushSync();
+  // In flight: nothing can be pressed twice.
+  expect(submit().disabled).toBe(true);
+  expect(options()[0]?.disabled).toBe(true);
+
+  answer(false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(submit().disabled).toBe(false);
+  expect(options()[0]?.disabled).toBe(false);
+  expect(options()[0]?.getAttribute('aria-checked')).toBe('true');
+
+  submit().click();
+  flushSync();
+  expect(sent).toEqual([['short'], ['short']]);
+  answer(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(submit().disabled).toBe(true);
 });

@@ -1,28 +1,33 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { ChevronRight, Plus, RefreshCw, Terminal } from '@lucide/svelte';
-  import type { Account, AccountQuota, ProviderSummary } from '@boite/contracts';
-  import QuotaList from './QuotaList.svelte';
+  import type { Account, HarnessUpdate, ProviderSummary } from '@boite/contracts';
+  import ProviderVersion, { updatable } from './ProviderVersion.svelte';
   import ProviderIcon from './ProviderLogo.svelte';
-  import HarnessUpdatesCard from './HarnessUpdatesCard.svelte';
+  import ModelPicker from './ModelPicker.svelte';
+  import EffortSlider from './EffortSlider.svelte';
   import { confirm } from '../lib/confirm.svelte';
   import { bytes, percent } from '../lib/format';
-  import { nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
+  import { providerGroups, type ProviderRow } from '../lib/provider-family';
+  import { connected, nextAccountLabel, setupStep, signInTarget, type SetupStep } from '../lib/provider-setup';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
   /**
    * One row per provider, one next step per row: install what is missing, sign
-   * in when nothing is signed in, otherwise ready. Everything a second account,
-   * a quota or an uninstall needs sits behind the row's chevron.
+   * in when nothing is signed in, otherwise its version and the update when one
+   * is out. Connected providers come first; the rest wait below as the ways to
+   * add one. Accounts, the default model and the uninstall sit behind
+   * the row's chevron. A family (Antigravity and its CLI) is one row, each way
+   * in its own block inside it.
    */
   let { store }: { store: Store } = $props();
+  const uid = $props.id();
 
   /** One pending code per account, so two logins never share a field. */
   let codes = $state<Record<string, string>>({});
-  let quotas = $state<AccountQuota[]>([]);
-  let quotaBusy = $state(false);
   let open = $state<Record<string, boolean>>({});
   /** Providers whose install was asked for from a row: sign-in follows the download. */
   let chained = $state<Record<string, boolean>>({});
@@ -31,6 +36,12 @@
   let checking = $state<string | null>(null);
   let detecting = $state(false);
   let lastDetect = 0;
+  let checkingUpdates = $state(false);
+  let updatesBusy = $derived(checkingUpdates || store.harnessUpdates.some((update) => update.state === 'checking'));
+
+  let groups = $derived(providerGroups(store.providers, store.accounts));
+  /** With nothing connected yet, the ways in are the page's main actions. */
+  let firstRun = $derived(groups.connected.length === 0);
 
   /** Agents Boite cannot download: their own installer is one click away. */
   const setupUrls: Record<string, string> = {
@@ -46,13 +57,43 @@
   const fold = (): number =>
     window.matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'reduced' ? 0 : 180;
 
-  const loggingIn = (accountId: string): boolean => store.logins[accountId]?.state === 'running';
+  const loggingIn = (accountId: string): boolean =>
+    store.logins[accountId]?.state === 'running' || store.loginTerminals.includes(accountId);
+
+  /** xterm and its shell, loaded the first time a sign-in needs a terminal. */
+  const terminalView = () => import('./TerminalView.svelte');
+
+  /** A CLI that signs in through its own menu gets a real terminal with the command typed in. */
+  const inTerminal = (provider: ProviderSummary): boolean => provider.login !== false && provider.login.kind === 'terminal';
+
+  /** The row's sign-in, or an account's own button. */
+  async function startLogin(provider: ProviderSummary, account: Account) {
+    if (inTerminal(provider)) store.showLoginTerminal(account.id);
+    else await store.loginAccount(account.id);
+  }
 
   function stepOf(provider: ProviderSummary): SetupStep {
     return setupStep(provider, store.installOf(provider.id), store.accountsOf(provider.id), loggingIn);
   }
 
-  /** What the row says under the name. */
+  /** The member a row speaks for: one signed in, else one with a step Boite can take, else the head. */
+  function leadOf(row: ProviderRow): ProviderSummary {
+    return row.members.find((member) => connected(member, store.accountsOf(member.id)))
+      ?? row.members.find((member) => stepOf(member) !== 'manual')
+      ?? row.members[0]!;
+  }
+
+  /** Whether the chevron has anything to open: a row with nothing behind it draws none. */
+  function hasDetails(row: ProviderRow): boolean {
+    if (row.members.length > 1) return true;
+    const provider = row.members[0]!;
+    return store.accountsOf(provider.id).length > 0
+      || store.installOf(provider.id)?.state === 'installed'
+      || provider.executable !== null
+      || (provider.available && (provider.login !== false || !provider.alwaysIsolated));
+  }
+
+  /** What the row says under the name: state, never advice. */
   function stateText(provider: ProviderSummary, step: SetupStep): string {
     const install = store.installOf(provider.id);
     if (step === 'installing' && install) {
@@ -87,9 +128,13 @@
     return Math.min(100, (install.receivedBytes / install.totalBytes) * 100);
   }
 
-  function updatable(provider: ProviderSummary): boolean {
-    const install = store.installOf(provider.id);
-    return install?.state === 'installed' && install.available !== install.version;
+  const updateOf = (providerId: string): HarnessUpdate | undefined =>
+    store.harnessUpdates.find((update) => update.providerId === providerId);
+
+  async function checkUpdates() {
+    checkingUpdates = true;
+    try { await store.loadHarnessUpdates(true); }
+    finally { checkingUpdates = false; }
   }
 
   /** The login a row shows: the running one first, else the last that failed. */
@@ -98,14 +143,24 @@
     return accounts.find((account) => loggingIn(account.id)) ?? accounts.find((account) => store.logins[account.id]) ?? null;
   }
 
+  /** The account a provider's default model is kept under: the first signed in. */
+  function modelAccount(provider: ProviderSummary): Account | null {
+    if (provider.id === 'echo') return null;
+    const accounts = store.accountsOf(provider.id);
+    if (!connected(provider, accounts)) return null;
+    return accounts.find((account) => account.status === 'ok') ?? null;
+  }
+
   async function signIn(provider: ProviderSummary, another = false) {
     if (busy !== null) return;
     busy = provider.id;
     try {
       const accounts = store.accountsOf(provider.id);
-      const account = (another ? null : signInTarget(accounts))
+      // In a terminal the user's own CLI signs in, the way they would have typed it.
+      const own = inTerminal(provider) ? accounts.find((account) => account.isolationDir === null && account.status !== 'ok') : undefined;
+      const account = (another ? null : own ?? signInTarget(accounts))
         ?? await store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: false });
-      if (account) await store.loginAccount(account.id);
+      if (account) await startLogin(provider, account);
     } finally { busy = null; }
   }
 
@@ -150,20 +205,6 @@
     finally { detecting = false; }
   }
 
-  async function readQuotas(refresh = false) {
-    if (!store.client || quotaBusy) return;
-    quotaBusy = true;
-    try { quotas = await store.client.call('quotas.list', { refresh }); }
-    catch (error) { store.error = String(error); }
-    finally { quotaBusy = false; }
-  }
-
-  async function monitor(accountId: string, enabled: boolean) {
-    if (!store.client) return;
-    try { quotas = await store.client.call('quotas.configure', { accountId, enabled }); if (enabled) await readQuotas(); }
-    catch (error) { store.error = String(error); }
-  }
-
   /** The session file, then the agent itself: how many models it answers with. */
   async function verify(account: Account) {
     if (!store.client) return;
@@ -171,7 +212,7 @@
     try {
       await store.checkAccount(account.id);
       if (store.providerOf(account.providerId)?.available) {
-        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id });
+        const { models } = await store.client.call('providers.probe', { providerId: account.providerId, accountId: account.id, refresh: true });
         verified = { ...verified, [account.id]: models.length };
       }
     } catch (error) { store.error = String(error); }
@@ -198,8 +239,9 @@
   }
 
   onMount(() => {
-    void readQuotas();
-    const offQuotas = store.client?.on('quotas.updated', (rows) => { quotas = rows; });
+    // The core answers from its last reading and never runs the agents for a
+    // plain list: opening this page on a core that has not read them yet is the moment to.
+    if (store.client !== null && store.owner && store.harnessUpdates.length === 0 && !updatesBusy) void checkUpdates();
     // The download the row asked for is on disk. The core made the default
     // account before it said so, which means an existing command-line login already
     // reads as ready here and only a provider nobody is signed into goes on.
@@ -228,214 +270,368 @@
       }
     };
     window.addEventListener('focus', onFocus);
-    return () => { offQuotas?.(); offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
+    return () => { offProviders?.(); offInstall?.(); window.removeEventListener('focus', onFocus); chained = {}; };
   });
 </script>
+
+<!-- An update that failed says why, under the line it belongs to. -->
+{#snippet updateNote(provider: ProviderSummary)}
+  {@const update = updateOf(provider.id)}
+  {#if update?.state === 'failed'}
+    <p class="note bad" role="status">{update.message ?? strings.harnessUpdates.failed(update.name)}</p>
+  {/if}
+{/snippet}
+
+<!-- The one next step: install, repair, cancel, the installer's guide or the sign-in. -->
+{#snippet stepAction(provider: ProviderSummary, step: SetupStep, main: boolean)}
+  {@const install = store.installOf(provider.id)}
+  {#if step === 'install'}
+    <button class="small" class:primary={main} data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
+      {install?.state === 'failed' ? strings.install.retry : strings.install.action}
+    </button>
+  {:else if step === 'repair'}
+    <button class="small" class:primary={main} data-testid="install-repair" onclick={() => void repair(provider)}>{strings.install.repair}</button>
+  {:else if step === 'installing'}
+    <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}>{strings.install.cancel}</button>
+    {#if chained[provider.id]}<InfoTip topic={strings.providerSettings.step.installing} text={strings.providerSettings.thenSignIn} />{/if}
+  {:else if step === 'manual'}
+    {#if setupUrls[provider.id]}
+      <a class="button" href={setupUrls[provider.id]} target="_blank" rel="noreferrer" data-testid="provider-setup">{strings.providerSettings.setup}</a>
+    {/if}
+  {:else if step === 'sign-in'}
+    <button class="small" class:primary={main} data-testid="provider-sign-in" disabled={busy !== null} onclick={() => void signIn(provider)}>{strings.accounts.login}</button>
+  {/if}
+  {#if step === 'manual' || step === 'external'}
+    <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
+    <InfoTip
+      topic={provider.name}
+      text={(step === 'manual' ? strings.providerSettings.manualHint : strings.providerSettings.externalHint).replace('{provider}', provider.name)}
+    />
+  {/if}
+{/snippet}
+
+{#snippet progress(provider: ProviderSummary, step: SetupStep)}
+  {#if step === 'installing'}
+    {@const install = store.installOf(provider.id)}
+    <div
+      class="track"
+      data-testid="install-progress"
+      role="progressbar"
+      aria-label={strings.install.progress}
+      aria-valuenow={Math.round(ratioOf(provider))}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <span class="bar" class:indeterminate={install?.state !== 'downloading'} style="width: {ratioOf(provider)}%"></span>
+    </div>
+  {/if}
+{/snippet}
+
+<!-- A sign-in in progress stays on the row whether its details are open or not. -->
+{#snippet logins(provider: ProviderSummary)}
+  {@const accounts = store.accountsOf(provider.id)}
+  {@const loginAccount = shownLogin(provider)}
+  {@const login = loginAccount ? store.logins[loginAccount.id] : undefined}
+  {#each accounts.filter((account) => store.loginTerminals.includes(account.id)) as account (account.id)}
+    <div class="login" data-testid="account-login-terminal" data-account-id={account.id}>
+      <div class="screen">
+        {#await terminalView() then { default: TerminalView }}
+          <TerminalView
+            {store}
+            id="login:{account.id}"
+            start={(cols, rows) => store.loginTerminal(account.id, cols, rows)}
+            onexit={() => store.hideLoginTerminal(account.id)}
+            autofocus
+          />
+        {/await}
+      </div>
+      <div class="code">
+        <button type="button" class="quiet small" data-testid="account-login-terminal-close" onclick={() => void store.closeTerminal(`login:${account.id}`)}>
+          {strings.accounts.terminalDone}
+        </button>
+        <InfoTip topic={strings.accounts.terminalDone} text={strings.accounts.terminalHint} />
+      </div>
+    </div>
+  {/each}
+
+  {#if loginAccount && login}
+    <div class="login" data-testid="account-login-row" data-account-id={loginAccount.id}>
+      {#if login.state === 'running'}
+        {#if login.url}
+          <div class="code">
+            <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="account-login-url">
+              {strings.accounts.loginOpen}
+            </a>
+            <InfoTip topic={strings.accounts.loginOpen} text={strings.accounts.loginHint} />
+          </div>
+        {/if}
+        <p class="output" data-testid="account-login-output">
+          {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
+        </p>
+        <form class="code" onsubmit={(event) => void sendCode(event, loginAccount.id)}>
+          <input
+            data-testid="account-login-input"
+            placeholder={provider.login && provider.login.kind === 'acp'
+              ? strings.accounts.loginRedirectPlaceholder
+              : strings.accounts.loginInputPlaceholder}
+            value={codes[loginAccount.id] ?? ''}
+            oninput={(event) => (codes = { ...codes, [loginAccount.id]: event.currentTarget.value })}
+          />
+          <button type="submit" class="quiet small" data-testid="account-login-send">{strings.accounts.loginSend}</button>
+          <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
+            {strings.accounts.loginCancel}
+          </button>
+        </form>
+      {:else}
+        <p class="output bad" data-testid="account-login-output">{login.output}</p>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
+<!-- Everything behind the chevron for one descriptor: its accounts, the model
+     new threads start on, and where the agent runs from. Limits live on the
+     Limits page, not here. -->
+{#snippet memberBody(provider: ProviderSummary)}
+  {@const accounts = store.accountsOf(provider.id)}
+  {@const install = store.installOf(provider.id)}
+  {@const account = modelAccount(provider)}
+  {#if accounts.length > 0}
+    <div class="section-head">
+      <span class="section-label">{strings.providerSettings.accounts}</span>
+    </div>
+  {/if}
+  {#each accounts as entry (entry.id)}
+    <div class="account" data-testid="account-row" data-account-id={entry.id}>
+      <div class="account-line">
+        <div class="who">
+          <h3>{entry.identity ?? entry.label}</h3>
+          <p class="state">
+            <span class="kind">{entry.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
+            {#if entry.identity && entry.identity !== entry.label}<span>· {entry.label}</span>{/if}
+            {#if entry.status !== 'ok'}
+              <span class:bad={entry.status !== 'unknown'}>· {strings.accounts.status[entry.status]}</span>
+            {/if}
+          </p>
+        </div>
+        <div class="act">
+          {#if provider.available && provider.login && (entry.isolationDir !== null || inTerminal(provider)) && !loggingIn(entry.id)}
+            <button class="quiet small" data-testid="account-login" data-account-id={entry.id} onclick={() => void startLogin(provider, entry)}>
+              {entry.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
+            </button>
+          {/if}
+          <button class="quiet small" disabled={checking !== null} data-testid="account-verify" onclick={() => void verify(entry)}>{strings.providerSettings.check}</button>
+          <button class="quiet small" data-testid="account-remove" data-account-id={entry.id} onclick={() => void remove(entry)}>{strings.accounts.remove}</button>
+        </div>
+      </div>
+      {#if verified[entry.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[entry.id]))}</p>{/if}
+    </div>
+  {/each}
+
+  {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)))}
+    <div class="more">
+      {#if provider.login}
+        <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} />{strings.providerSettings.addAccount}</button>
+      {/if}
+      {#if !provider.alwaysIsolated && !accounts.some((entry) => entry.isolationDir === null)}
+        <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
+          <Terminal size={14} />{strings.providerSettings.useCli}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if account}
+    {@const model = store.defaultModelOf(provider, account.id)}
+    {@const info = store.modelsOf(provider.id, account.id).find((entry) => entry.id === model)}
+    {@const effort = store.defaultEffortOf(provider.id, account.id, model)}
+    <div class="section-head">
+      <span class="section-label">{strings.providerSettings.defaultModel}<InfoTip topic={strings.providerSettings.defaultModel} text={strings.settings.modelDefaultsHint} /></span>
+    </div>
+    <div class="default-model" data-testid="model-default" data-default-provider={provider.id}>
+      <ModelPicker
+        {store}
+        choice={{ providerId: provider.id, accountId: account.id, model, effort, permissionMode: 'default' }}
+        locked
+        single
+        onpick={(patch) => {
+          // A model belongs to its provider: a default is only ever one of this row's own.
+          if (!patch.model || (patch.providerId !== undefined && patch.providerId !== provider.id)) return;
+          store.setModelDefault(provider.id, account.id, patch.model, store.defaultEffortOf(provider.id, account.id, patch.model));
+        }}
+      />
+      {#if info?.effort?.levels.length}
+        <EffortSlider levels={info.effort.levels} active={effort} onpick={(level) => model && store.setModelDefault(provider.id, account.id, model, level)} />
+      {:else if effort}
+        <span class="pending-effort">{effort}</span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if install?.state === 'installed' || provider.executable}
+    <div class="section-head"><span class="section-label">{strings.providerSettings.installation}</span></div>
+    <dl class="facts">
+      {#if install?.state === 'installed'}
+        <div class="fact">
+          <dt>{strings.providerSettings.version}</dt>
+          <dd class="managed">
+            <span data-testid="install-status">{updatable(store, provider)
+              ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
+              : strings.install.upToDate.replace('{version}', install.version)}</span>
+            <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
+          </dd>
+        </div>
+      {/if}
+      {#if provider.executable}
+        <div class="fact">
+          <dt>{strings.providerSettings.executable}</dt>
+          <dd><code>{provider.executable}</code></dd>
+        </div>
+      {/if}
+    </dl>
+  {/if}
+{/snippet}
+
+{#snippet providerRow(row: ProviderRow, secondary: boolean)}
+  {@const lead = leadOf(row)}
+  {@const step = stepOf(lead)}
+  {@const install = store.installOf(lead.id)}
+  {@const main = !secondary || firstRun}
+  {@const foldable = hasDetails(row)}
+  <section
+    class="provider"
+    class:secondary
+    id="settings-provider-{row.id}"
+    data-testid="provider-settings"
+    data-provider-id={row.id}
+    data-step={step}
+    data-install={install?.state ?? 'none'}
+  >
+    <div class="line">
+      {#if foldable}
+        <!-- The whole name side folds the row, the chevron only says which way. -->
+        <button
+          class="summary"
+          class:open={open[row.id]}
+          aria-expanded={open[row.id] === true}
+          aria-label="{strings.providerSettings.details}: {row.name}"
+          data-testid="provider-details-toggle"
+          onclick={() => (open = { ...open, [row.id]: !open[row.id] })}
+        >
+          <span class="chevron"><ChevronRight size={16} strokeWidth={2.25} /></span>
+          <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
+          <span class="who">
+            <span class="name">{row.name}</span>
+            <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+              {stateText(lead, step)}
+            </span>
+          </span>
+        </button>
+      {:else}
+        <div class="summary still">
+          <span class="chevron blank"></span>
+          <ProviderIcon providerId={row.id} size={secondary ? 18 : 22} />
+          <span class="who">
+            <span class="name">{row.name}</span>
+            <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
+              <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
+              {stateText(lead, step)}
+            </span>
+          </span>
+        </div>
+      {/if}
+      <div class="act">
+        <!-- A provider still to add shows its one way in; its version waits until it is connected. -->
+        {#if !secondary}<ProviderVersion {store} provider={lead} main={main && step === 'ready'} installing={step === 'installing'} oninstall={() => void startInstall(lead, false)} />{/if}
+        {@render stepAction(lead, step, main)}
+      </div>
+    </div>
+    {#if !secondary}{@render updateNote(lead)}{/if}
+    {@render progress(lead, step)}
+    {#each row.members as member (member.id)}{@render logins(member)}{/each}
+
+    {#if open[row.id] && foldable}
+      <div class="details" data-testid="provider-details" transition:slide={{ duration: fold() }}>
+        {#if row.members.length > 1}
+          <!-- The way in that works first, then the others. -->
+          {#each [lead, ...row.members.filter((entry) => entry.id !== lead.id)] as member (member.id)}
+            {@const memberStep = stepOf(member)}
+            <div class="member" data-testid="provider-member" data-provider-id={member.id} data-step={memberStep}>
+              <div class="member-line">
+                <ProviderIcon providerId={member.id} size={16} />
+                <span class="who">
+                  <span class="member-name">{member.name}</span>
+                  <span class="state" data-testid="provider-state">
+                    <span class="dot" class:ok={memberStep === 'ready'} class:live={memberStep === 'installing' || memberStep === 'signing-in'}></span>
+                    {stateText(member, memberStep)}
+                  </span>
+                </span>
+                {#if member.id !== lead.id}
+                  <div class="act">
+                    <ProviderVersion {store} provider={member} installing={memberStep === 'installing'} oninstall={() => void startInstall(member, false)} />
+                    {@render stepAction(member, memberStep, false)}
+                  </div>
+                {/if}
+              </div>
+              {#if member.id !== lead.id}
+                {@render updateNote(member)}
+                {@render progress(member, memberStep)}
+              {/if}
+              {@render memberBody(member)}
+            </div>
+          {/each}
+        {:else}
+          {@render memberBody(lead)}
+        {/if}
+      </div>
+    {/if}
+  </section>
+{/snippet}
 
 <div class="page" data-testid="accounts-page">
   <header>
     <div>
-      <h1>{strings.providerSettings.heading}</h1>
-      <p>{strings.providerSettings.intro}</p>
+      <h1>{strings.providerSettings.heading}<InfoTip topic={strings.providerSettings.heading} text={strings.providerSettings.intro} /></h1>
     </div>
+    {#if store.owner}
+      <!-- Agent updates for this machine: two controls, the versions are on the rows. -->
+      <div class="updates">
+        <label class="auto" for="{uid}-auto">
+          <span id="{uid}-auto-name">{strings.providerSettings.autoUpdate}</span>
+          <InfoTip topic={strings.providerSettings.autoUpdate} text="{strings.harnessUpdates.intro} {strings.harnessUpdates.autoHint}." />
+          <input
+            id="{uid}-auto"
+            aria-labelledby="{uid}-auto-name"
+            type="checkbox"
+            role="switch"
+            class="switch-sm"
+            data-testid="setting-auto-update-harnesses"
+            checked={store.settings?.autoUpdateHarnesses ?? false}
+            onchange={(event) => void store.saveSettings({ autoUpdateHarnesses: event.currentTarget.checked })}
+          />
+        </label>
+        <button type="button" class="quiet small" data-testid="harness-updates-check" disabled={updatesBusy} onclick={() => void checkUpdates()}>
+          <RefreshCw size={13} />{updatesBusy ? strings.harnessUpdates.checking : strings.providerSettings.checkUpdates}
+        </button>
+      </div>
+    {/if}
   </header>
 
-  <HarnessUpdatesCard {store} />
+  {#if groups.connected.length > 0}
+    <div class="card flush list" data-testid="providers-connected">
+      {#each groups.connected as row (row.id)}{@render providerRow(row, false)}{/each}
+    </div>
+  {/if}
 
-  <div class="card flush list">
-    {#each store.providers as provider (provider.id)}
-      {@const step = stepOf(provider)}
-      {@const install = store.installOf(provider.id)}
-      {@const accounts = store.accountsOf(provider.id)}
-      {@const loginAccount = shownLogin(provider)}
-      {@const login = loginAccount ? store.logins[loginAccount.id] : undefined}
-      <section
-        class="provider"
-        id="settings-provider-{provider.id}"
-        data-testid="provider-settings"
-        data-provider-id={provider.id}
-        data-step={step}
-        data-install={install?.state ?? 'none'}
-      >
-        <div class="line">
-          <!-- The whole name side folds the row, the chevron only says which way. -->
-          <button
-            class="summary"
-            class:open={open[provider.id]}
-            aria-expanded={open[provider.id] === true}
-            aria-label="{strings.providerSettings.details}: {provider.name}"
-            data-testid="provider-details-toggle"
-            onclick={() => (open = { ...open, [provider.id]: !open[provider.id] })}
-          >
-            <span class="chevron"><ChevronRight size={16} strokeWidth={2.25} /></span>
-            <ProviderIcon providerId={provider.id} size={22} />
-            <span class="who">
-              <span class="name">{provider.name}</span>
-              <span class="state" class:bad={install?.state === 'failed' && step === 'install'} data-testid="provider-state">
-                <span class="dot" class:ok={step === 'ready'} class:live={step === 'installing' || step === 'signing-in'}></span>
-                {stateText(provider, step)}
-              </span>
-            </span>
-          </button>
-          <div class="act">
-            {#if step === 'install'}
-              <button class="primary small" data-testid="install-start" disabled={busy !== null} onclick={() => void startInstall(provider, true)}>
-                {install?.state === 'failed' ? strings.install.retry : strings.install.action}
-              </button>
-            {:else if step === 'repair'}
-              <button class="primary small" data-testid="install-repair" onclick={() => void repair(provider)}>{strings.install.repair}</button>
-            {:else if step === 'installing'}
-              <button class="quiet small" data-testid="install-cancel" onclick={() => void cancelInstall(provider)}>{strings.install.cancel}</button>
-            {:else if step === 'manual'}
-              {#if setupUrls[provider.id]}
-                <a class="button" href={setupUrls[provider.id]} target="_blank" rel="noreferrer" data-testid="provider-setup">{strings.providerSettings.setup}</a>
-              {/if}
-            {:else if step === 'sign-in'}
-              <button class="primary small" data-testid="provider-sign-in" disabled={busy !== null} onclick={() => void signIn(provider)}>{strings.accounts.login}</button>
-            {:else if step === 'ready' && updatable(provider)}
-              <button class="quiet small" data-testid="install-update" onclick={() => void startInstall(provider, false)}>{strings.install.update}</button>
-            {/if}
-            {#if step === 'manual' || step === 'external'}
-              <button class="quiet small" data-testid="providers-refresh" disabled={detecting} onclick={() => void detect()}>{strings.providerSettings.refresh}</button>
-            {/if}
-          </div>
-        </div>
-
-        {#if step === 'installing'}
-          <div
-            class="track"
-            data-testid="install-progress"
-            role="progressbar"
-            aria-label={strings.install.progress}
-            aria-valuenow={Math.round(ratioOf(provider))}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <span class="bar" class:indeterminate={install?.state !== 'downloading'} style="width: {ratioOf(provider)}%"></span>
-          </div>
-          {#if chained[provider.id]}<p class="hint" role="status">{strings.providerSettings.thenSignIn}</p>{/if}
-        {:else if step === 'manual'}
-          <p class="hint">{strings.providerSettings.manualHint.replace('{provider}', provider.name)}</p>
-        {:else if step === 'external'}
-          <p class="hint">{strings.providerSettings.externalHint.replace('{provider}', provider.name)}</p>
-        {/if}
-
-        {#if loginAccount && login}
-          <div class="login" data-testid="account-login-row" data-account-id={loginAccount.id}>
-            {#if login.state === 'running'}
-              {#if login.url}
-                <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="account-login-url">
-                  {strings.accounts.loginOpen}
-                </a>
-                <p class="hint">{strings.accounts.loginHint}</p>
-              {/if}
-              <p class="output" data-testid="account-login-output">
-                {login.output.length > 0 ? login.output : strings.accounts.loginStarting}
-              </p>
-              <form class="code" onsubmit={(event) => void sendCode(event, loginAccount.id)}>
-                <input
-                  data-testid="account-login-input"
-                  placeholder={provider.login && provider.login.kind === 'acp'
-                    ? strings.accounts.loginRedirectPlaceholder
-                    : strings.accounts.loginInputPlaceholder}
-                  value={codes[loginAccount.id] ?? ''}
-                  oninput={(event) => (codes = { ...codes, [loginAccount.id]: event.currentTarget.value })}
-                />
-                <button type="submit" class="quiet small" data-testid="account-login-send">{strings.accounts.loginSend}</button>
-                <button type="button" class="quiet small" data-testid="account-login-cancel" data-account-id={loginAccount.id} onclick={() => void store.cancelLogin(loginAccount.id)}>
-                  {strings.accounts.loginCancel}
-                </button>
-              </form>
-            {:else}
-              <p class="output bad" data-testid="account-login-output">{login.output}</p>
-            {/if}
-          </div>
-        {/if}
-
-        {#if open[provider.id]}
-          {@const quotaRows = quotas.filter((row) => row.providerId === provider.id && row.status !== 'unsupported')}
-          <div class="details" data-testid="provider-details" transition:slide={{ duration: fold() }}>
-            <div class="section-head">
-              <span class="section-label">{strings.providerSettings.accounts}</span>
-              {#if quotaRows.length > 0}
-                <button class="quiet small" disabled={quotaBusy} onclick={() => void readQuotas(true)}><RefreshCw size={13} />{strings.quotas.refresh}</button>
-              {/if}
-            </div>
-            {#if accounts.length === 0}<p class="hint">{strings.providerSettings.noAccounts}</p>{/if}
-            {#each accounts as account (account.id)}
-              {@const quota = quotaRows.find((row) => row.accountId === account.id)}
-              <div class="account" data-testid="account-row" data-account-id={account.id}>
-                <div class="account-line">
-                  <div class="who">
-                    <h3>{account.identity ?? account.label}</h3>
-                    <p class="state">
-                      <span class="kind">{account.isolationDir === null ? strings.providerSettings.default : strings.providerSettings.isolated}</span>
-                      {#if account.identity && account.identity !== account.label}<span>· {account.label}</span>{/if}
-                      {#if account.status !== 'ok'}
-                        <span class:bad={account.status !== 'unknown'}>· {strings.accounts.status[account.status]}</span>
-                      {/if}
-                    </p>
-                  </div>
-                  <div class="act">
-                    {#if provider.available && provider.login && account.isolationDir !== null && !loggingIn(account.id)}
-                      <button class="quiet small" data-testid="account-login" data-account-id={account.id} onclick={() => void store.loginAccount(account.id)}>
-                        {account.status === 'ok' ? strings.providerSettings.reconnect : strings.accounts.login}
-                      </button>
-                    {/if}
-                    <button class="quiet small" disabled={checking !== null} data-testid="account-verify" onclick={() => void verify(account)}>{strings.providerSettings.check}</button>
-                    <button class="quiet small" data-testid="account-remove" data-account-id={account.id} onclick={() => void remove(account)}>{strings.accounts.remove}</button>
-                  </div>
-                </div>
-                {#if verified[account.id] !== undefined}<p class="hint" role="status">{strings.providerSettings.models.replace('{count}', String(verified[account.id]))}</p>{/if}
-                {#if quota}
-                  <div class="quota">
-                    <label class="monitor"><span>{strings.quotas.monitor}</span><input type="checkbox" role="switch" data-testid="quota-monitor" checked={quota.enabled} onchange={(event) => void monitor(account.id, event.currentTarget.checked)} /></label>
-                    <QuotaList rows={[quota]} bare />
-                  </div>
-                {/if}
-              </div>
-            {/each}
-
-            {#if provider.available && (provider.login || (!provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)))}
-              <div class="more">
-                {#if provider.login}
-                  <button class="quiet small" data-testid="account-add" disabled={busy !== null} onclick={() => void signIn(provider, true)}><Plus size={14} />{strings.providerSettings.addAccount}</button>
-                {/if}
-                {#if !provider.alwaysIsolated && !accounts.some((account) => account.isolationDir === null)}
-                  <button class="quiet small" data-testid="account-use-cli" onclick={() => void store.addAccount({ providerId: provider.id, label: nextAccountLabel(provider, accounts), useDefaultLocation: true })}>
-                    <Terminal size={14} />{strings.providerSettings.useCli}
-                  </button>
-                {/if}
-              </div>
-            {/if}
-
-            {#if install?.state === 'installed' || provider.executable}
-              <div class="section-head"><span class="section-label">{strings.providerSettings.installation}</span></div>
-              <dl class="facts">
-                {#if install?.state === 'installed'}
-                  <div class="fact">
-                    <dt>{strings.providerSettings.version}</dt>
-                    <dd class="managed">
-                      <span data-testid="install-status">{updatable(provider)
-                        ? strings.install.updateAvailable.replace('{installed}', install.version).replace('{available}', install.available)
-                        : strings.install.upToDate.replace('{version}', install.version)}</span>
-                      <button class="quiet small" data-testid="install-remove" onclick={() => void uninstall(provider)}>{strings.install.remove}</button>
-                    </dd>
-                  </div>
-                {/if}
-                {#if provider.executable}
-                  <div class="fact">
-                    <dt>{strings.providerSettings.executable}</dt>
-                    <dd><code>{provider.executable}</code></dd>
-                  </div>
-                {/if}
-              </dl>
-            {/if}
-          </div>
-        {/if}
-      </section>
-    {/each}
-  </div>
+  {#if groups.rest.length > 0}
+    {#if groups.connected.length > 0}
+      <div class="group-heading"><h2>{strings.providerSettings.addHeading}</h2></div>
+    {/if}
+    <div class="card flush list" class:secondary-list={groups.connected.length > 0} data-testid="providers-add">
+      {#each groups.rest as row (row.id)}{@render providerRow(row, groups.connected.length > 0)}{/each}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -444,7 +640,13 @@
   .provider { padding: 12px 16px; display: grid; gap: 10px; }
   .provider + .provider { border-top: 1px solid var(--color-border); }
 
-  .line, .account-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  /* Providers still to add: lower, smaller, quieter, so the connected list leads. */
+  .provider.secondary { padding: 8px 16px; gap: 8px; }
+  .secondary .name { font-size: var(--text-sm); font-weight: 500; color: var(--color-muted-foreground); }
+  .secondary .summary:hover .name { color: var(--color-foreground); }
+  .secondary-list { background: transparent; }
+
+  .line, .account-line, .member-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .who { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; }
   .name { font-size: var(--text-base); font-weight: 600; color: var(--color-foreground); }
   h3 { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -466,7 +668,7 @@
     box-shadow: none;
     font-weight: normal;
   }
-  .summary:hover { background: var(--color-hover); }
+  button.summary:hover { background: var(--color-hover); }
   .summary:active:not(:disabled) { transform: none; }
   .chevron {
     display: grid;
@@ -478,6 +680,8 @@
     color: var(--color-muted-foreground);
     background: var(--color-surface-3);
   }
+  /* A row with nothing to open keeps the column, not the control. */
+  .chevron.blank { background: transparent; }
   .chevron :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
   .summary:hover .chevron, .summary.open .chevron { color: var(--color-foreground); }
   .summary.open .chevron :global(svg) { transform: rotate(90deg); }
@@ -485,6 +689,7 @@
   .state { margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .bad { color: var(--color-danger); }
   .hint { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .note { margin: 0 0 0 64px; font-size: var(--text-sm); }
 
   /* Hue is for status only: green once an account is signed in, amber while Boite works. */
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-subtle); }
@@ -492,6 +697,7 @@
   .dot.live { background: var(--color-live); }
 
   .act { display: flex; align-items: center; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
 
   /* A link that does a button's job: leaving for a sign-in page or an installer. */
   a.button {
@@ -511,13 +717,14 @@
   a.button.primary { background: var(--color-foreground); border-color: transparent; color: var(--color-on-foreground); justify-self: start; }
   a.button.primary:hover { opacity: 0.9; }
 
-
   .track { height: 2px; border-radius: 999px; background: var(--color-surface-3); overflow: hidden; }
   .bar { display: block; height: 100%; background: var(--color-foreground); transition: width var(--dur-2) var(--ease-out-quint); }
   /* Checking and unpacking give no byte count, so the bar sits full and pale. */
   .bar.indeterminate { width: 100% !important; opacity: 0.4; }
 
   .login { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-md); background: var(--color-surface-2); animation: rise var(--dur-3) var(--ease-out-quint); }
+  /* The terminal's own height: a menu of a dozen lines fits without a scroll. */
+  .screen { height: 280px; min-width: 0; border-radius: var(--radius-sm); overflow: hidden; }
   .output { margin: 0; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .code { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .code input { flex: 1; min-width: 0; max-width: 360px; }
@@ -525,9 +732,9 @@
   /* Under the name, not under the chevron: the fold reads as belonging to the row. */
   .details { display: grid; gap: 10px; margin-left: 32px; padding: 4px 0 6px; }
   .section-head { display: flex; align-items: center; justify-content: space-between; min-height: var(--control-sm); margin-top: 6px; }
+  .section-label { display: inline-flex; align-items: center; gap: 2px; }
   .account { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
   .kind { color: var(--color-muted-foreground); }
-  .quota { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--color-border); }
   .more { display: flex; gap: 6px; flex-wrap: wrap; }
   .facts { display: grid; gap: 6px; margin: 0; }
   .fact { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: baseline; font-size: var(--text-sm); }
@@ -536,14 +743,31 @@
   dd code { font-size: var(--text-xs); overflow-wrap: anywhere; }
   .managed { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
-  .monitor { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+  /* One block per way in to a family: its name and state, then what it holds. */
+  .member { display: grid; gap: 10px; padding-bottom: 12px; }
+  .member + .member { padding-top: 14px; border-top: 1px solid var(--color-border); }
+  .member-line { gap: 10px; }
+  .member-name { font-size: var(--text-sm); font-weight: 600; color: var(--color-foreground); }
 
-  /* General's switch, so the one toggle of this page is not a bare checkbox. */
-  .monitor input {
+  /* The composer's own picker and effort chip, locked to the provider of this row. */
+  .default-model { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pending-effort { color: var(--color-muted-foreground); font-size: var(--text-sm); text-transform: capitalize; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+
+  /* The page's update controls, small enough to sit beside the title, under it in a narrow window. */
+  header { flex-wrap: wrap; }
+  .updates { display: flex; align-items: center; gap: 12px; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+  .auto { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-muted-foreground); cursor: pointer; }
+  .auto input { margin-left: 4px; }
+
+  /* General's switch at the size of a row control, so no toggle here is a bare checkbox. */
+  .page input.switch-sm {
     flex: none;
     width: 28px;
     height: 16px;
+    min-height: 16px;
     margin: 0;
+    padding: 0;
+    border: 0;
     appearance: none;
     border-radius: 999px;
     background: var(--color-edge);
@@ -552,7 +776,7 @@
     transition: background var(--dur-2) var(--ease-out-quint);
   }
 
-  .monitor input::after {
+  .page input.switch-sm::after {
     content: '';
     position: absolute;
     top: 2px;
@@ -564,17 +788,21 @@
     transition: transform var(--dur-2) var(--ease-out-quint);
   }
 
-  .monitor input:checked { background: var(--color-foreground); }
-  .monitor input:checked::after { transform: translateX(12px); }
-  .monitor input:focus-visible { outline-offset: 3px; }
+  .page input.switch-sm:checked { background: var(--color-foreground); }
+  .page input.switch-sm:checked::after { transform: translateX(12px); }
+  .page input.switch-sm:focus-visible { outline-offset: 3px; }
 
   /* Phones never reach this page. Beside the settings nav a small window leaves
      the row about 480 px, where the action drops under the name. */
   @media (max-width: 900px) {
-    .line, .account-line { flex-wrap: wrap; }
-    .line .act, .account-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; padding-left: 64px; }
-    .account-line .act { padding-left: 0; }
+    .line, .account-line, .member-line { flex-wrap: wrap; }
+    /* A version alone stays beside the name; a version and its button take the next line, at the right. */
+    .line .summary { flex: 1 1 260px; }
+    .line .act { margin-left: auto; }
+    .account-line .act, .member-line .act { order: 3; flex-basis: 100%; justify-content: flex-start; }
+    .note { margin-left: 0; }
     .details { margin-left: 0; }
     .fact { grid-template-columns: 1fr; gap: 2px; }
+    .updates { justify-content: flex-start; }
   }
 </style>

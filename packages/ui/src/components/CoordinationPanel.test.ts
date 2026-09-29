@@ -17,12 +17,12 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
-async function show(principal: 'owner' | 'session' = 'owner'): Promise<Store> {
+async function show(principal: 'owner' | 'session' = 'owner', embedded = false): Promise<Store> {
   store = new Store();
   store.attach(new FakeClient({ delayMs: 0, principal, coreId: `core-${principal}` }));
   await store.connect();
   await store.open('t-trace');
-  component = mount(CoordinationPanel, { target: document.body, props: { store, threadId: 't-trace' } });
+  component = mount(CoordinationPanel, { target: document.body, props: { store, threadId: 't-trace', embedded } });
   await settle();
   return store;
 }
@@ -52,8 +52,32 @@ test('an owner configures a thread and sees the hourly budgets', async () => {
   expect(active.coordination?.config.paused).toBe(true);
 });
 
+test('a contact shows its status in the words the app speaks, not the raw value', async () => {
+  const active = await show();
+  const panel = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-panel"]')!;
+  panel.open = true;
+  panel.dispatchEvent(new Event('toggle'));
+  await settle();
+  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')!.click();
+  await settle();
+  active.coordinationDirectory = {
+    agents: [{ coreId: 'core-x', threadId: 't-x', title: 'Other', machine: 'box', resources: '', status: 'waiting', mode: 'team' }],
+    unavailable: []
+  };
+  await settle();
+  expect(document.querySelector('[data-testid="coordination-contact"] .contact-status')?.textContent).toBe('waiting for you');
+});
+
 test('a paired device reads coordination but cannot change it', async () => {
   await show('session');
   expect(document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')?.disabled).toBe(true);
   expect(document.body.textContent).toContain('Only the owner can change coordination');
+});
+
+test('the Agents panel copy is a row of its own, apart from the conversation bar', async () => {
+  const active = await show('owner', true);
+  expect(active.coordination?.config.mode).toBe('off');
+  expect(document.querySelector('[data-testid="coordination-panel"]')).toBeNull();
+  const settings = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-settings"]')!;
+  expect(settings.classList.contains('embedded')).toBe(true);
 });

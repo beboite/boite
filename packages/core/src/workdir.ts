@@ -217,6 +217,7 @@ export function languageOf(path: string): string | null {
 
 /** What a file no client can read as text is: a picture, a video, a sound, or bytes. */
 export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'binary'; mime: string } {
+  if (extensionOf(path) === 'pdf') return { kind: 'binary', mime: 'application/pdf' };
   return MEDIA.get(extensionOf(path)) ?? { kind: 'binary', mime: 'application/octet-stream' };
 }
 
@@ -228,7 +229,8 @@ export function mediaOf(path: string): { kind: 'image' | 'video' | 'audio' | 'bi
 export async function readFileContent(core: Core, cwd: string, path: string): Promise<FileContent> {
   const found = existingInside(cwd, path, 'file', 'files.read path');
   const modifiedAt = Math.round(found.stats.mtimeMs);
-  if (found.stats.size <= FILE_MAX_BYTES) {
+  const media = mediaOf(found.relative);
+  if (found.stats.size <= FILE_MAX_BYTES && media.mime === 'application/octet-stream') {
     const data = await readFile(found.absolute);
     if (!hasNul(data)) {
       // Past the cap here only by being written while it is read; the text is cut and said to be.
@@ -245,7 +247,6 @@ export async function readFileContent(core: Core, cwd: string, path: string): Pr
       };
     }
   }
-  const media = mediaOf(found.relative);
   const ticket = core.fileTickets.mint(found.absolute, media.mime);
   return {
     kind: media.kind,

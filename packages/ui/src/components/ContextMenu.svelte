@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { Closing } from '../lib/closing.svelte';
   import { contextMenu, type ContextMenuState } from '../lib/context-menu.svelte';
+  import { restoreFocus } from '../lib/focus';
   import type { MenuItem } from '../lib/menu';
 
   const GAP = 6;
@@ -13,13 +14,19 @@
   let left = $state(0);
   let top = $state(0);
 
+  /** Whether the menu is up, so its close hands the keyboard back once and only then. */
+  let opened = false;
+
   /** Opens at the pointer, then slides inside the viewport once its size is known. */
   $effect(() => {
     const current = contextMenu.current;
     if (!current) {
       popover.hide();
+      if (opened) untrack(giveBack);
+      opened = false;
       return;
     }
+    opened = true;
     held = current;
     popover.show();
     left = current.x;
@@ -34,13 +41,27 @@
   });
 
   function rows(): HTMLElement[] {
-    return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]')) : [];
+    return root ? Array.from(root.querySelectorAll<HTMLElement>('[data-row]:not(:disabled)')) : [];
   }
 
+  /**
+   * The rows go with the menu, and a focus left on the page lets the next
+   * Escape stop the running turn: it goes back to the opener, else the
+   * composer, unless something outside the menu took it meanwhile.
+   */
+  function giveBack() {
+    opened = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || root?.contains(active)) restoreFocus(contextMenu.returnTo);
+    contextMenu.returnTo = null;
+  }
+
+  /** The keyboard is back on the opener before the pick runs, so a dialog it opens returns there too. */
   function pick(item: MenuItem) {
     if (item.disabled || item.separator) return;
     const current = contextMenu.current;
     contextMenu.close();
+    giveBack();
     current?.onpick(item.id);
   }
 
@@ -52,8 +73,10 @@
 
   function onkeydown(event: KeyboardEvent) {
     if (!contextMenu.current) return;
+    // Caught on the way down, so the window's own Escape, which stops the turn, never hears it.
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       contextMenu.close();
       return;
     }
@@ -73,7 +96,7 @@
 
 <svelte:window
   onpointerdown={onWindowPointerdown}
-  onkeydown={onkeydown}
+  onkeydowncapture={onkeydown}
   onresize={() => contextMenu.close()}
   onblur={() => contextMenu.close()}
   onscrollcapture={(event) => {
@@ -108,10 +131,14 @@
           role="menuitem"
           tabindex="-1"
           disabled={item.disabled}
+          title={item.title}
           data-row
           data-value={item.id}
           onclick={() => pick(item)}
         >
+          {#if item.glyph}
+            <span class="glyph" aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>
+          {/if}
           <span class="label">{item.label}</span>
           {#if item.hint}
             <span class="hint">{item.hint}</span>
@@ -127,7 +154,10 @@
     position: fixed;
     z-index: 70;
     min-width: 200px;
-    max-width: 320px;
+    max-width: min(320px, calc(100vw - 12px));
+    max-height: calc(100dvh - 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 4px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
@@ -152,7 +182,7 @@
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-    height: var(--control);
+    min-height: var(--control);
     padding: 0 8px;
     border: none;
     border-radius: var(--radius-sm);
@@ -177,6 +207,22 @@
     color: var(--color-danger);
   }
 
+  .glyph {
+    display: flex;
+    flex: 0 0 16px;
+    color: var(--color-muted-foreground);
+  }
+
+  .danger .glyph {
+    color: inherit;
+  }
+
+  .label {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .row.active .label::after {
     content: '';
     display: inline-block;
@@ -195,6 +241,7 @@
   }
 
   .rule {
+    flex-shrink: 0;
     height: 1px;
     margin: 4px 6px;
     background: var(--color-border);

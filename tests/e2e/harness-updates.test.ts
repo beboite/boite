@@ -1,12 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
 
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let url: string;
 const id = (name: string) => `[data-testid="${name}"]`;
@@ -22,8 +20,7 @@ beforeAll(async () => {
   // The fake client is deliberately absent from production bundles.
   const port = await freePort();
   url = `http://127.0.0.1:${port}/?fake=1&updates=1&open=recent`;
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
 }, 60_000);
 beforeEach(async () => {
   page = await BrowserPage.launch({ url });
@@ -50,6 +47,11 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   // One card at a time on a phone, under the header.
   expect(await page.evaluate(`[...document.querySelectorAll('${id('harness-update-notice')}')].filter(card => card.offsetParent !== null).length`)).toBe(1);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= 390`)).toBe(true);
+  // Below the conversation's own header row: its title and toggles stay in reach.
+  expect(await page.evaluate(`(() => {
+    const card = [...document.querySelectorAll('${id('harness-update-notice')}')].find(card => card.offsetParent !== null).getBoundingClientRect();
+    return card.top >= document.querySelector('${id('thread-header')}').getBoundingClientRect().bottom;
+  })()`)).toBe(true);
   await capture('harness-updates-phone.png');
   await desktop();
 
@@ -58,24 +60,33 @@ test('an agent update is a pinned notice with Update and Skip, on a desktop and 
   await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   expect(await page.evaluate(`document.querySelectorAll('${id('harness-update-notice')}').length`)).toBe(1);
 
-  // Update turns the card into a progress card, then the core says it is current and the card leaves.
+  // Update takes the card away at once; the agent updates in the background.
   await page.click(`${notice('codex')} ${id('harness-update-run')}`);
-  await page.waitFor(`document.querySelector('${notice('codex')}')?.dataset.state === 'updating'`);
-  await capture('harness-updates-updating.png');
   await page.waitFor(`document.querySelector('${id('harness-update-notices')}') === null`);
 }, 20_000);
 
-test('Settings, Providers lists every agent, offers a skipped version again and carries the automatic switch', async () => {
+test('Settings, Providers shows every agent version on its row, offers a skipped version again and carries the automatic switch', async () => {
   await page.click(`${notice('claude')} ${id('harness-update-skip')}`);
   await page.waitFor(`document.querySelector('${notice('claude')}') === null`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
-  await page.waitFor(`document.querySelectorAll('${id('harness-update-row')}').length === 4`);
-  const text = await page.evaluate(`document.querySelector('${id('harness-updates-card')}').textContent`) as string;
+  await page.waitFor(`document.querySelectorAll('${id('provider-update')}').length === 4`);
+  const text = await page.evaluate(`document.querySelector('${id('accounts-page')}').textContent`) as string;
   expect(text).toContain('2.1.278 skipped');
-  expect(text).toContain('Up to date');
-  // An agent that cannot name its newest release offers its updater instead of a version.
-  expect(text).toContain('Checks by itself');
-  expect(await page.evaluate(`document.querySelector('[data-update-provider="antigravity"] ${id('harness-update-row-blind')}') !== null`)).toBe(true);
+  // The separate updates card is gone: every version sits on its provider's row.
+  expect(await page.evaluate(`document.querySelector('${id('harness-updates-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"]').closest('${id('provider-settings')}').dataset.providerId`)).toBe('opencode');
+  expect(await page.evaluate(`document.querySelector('[data-update-provider="opencode"] .version').title`)).toContain('Up to date');
+  // An agent that cannot name its newest release offers its updater instead of a version,
+  // on the one Antigravity row its CLI shares with the download Boite manages.
+  const cli = '[data-update-provider="antigravity-cli"]';
+  expect(await page.evaluate(`document.querySelector('${cli} .version').title`)).toContain('Checks by itself');
+  expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${cli}').closest('${id('provider-settings')}').dataset.providerId`)).toBe('antigravity');
+  // Its updater ran and exited clean: the row says so instead of offering it again.
+  await page.click(`${cli} ${id('harness-update-row-blind')}`);
+  await page.waitFor(`document.querySelector('${cli} ${id('harness-update-current')}')`);
+  expect(await page.evaluate(`document.querySelector('${cli} ${id('harness-update-row-blind')}') === null`)).toBe(true);
+  await capture('harness-update-blind-current.png');
 
   await page.click(id('setting-auto-update-harnesses'));
   await page.waitFor(`document.querySelector('${id('setting-auto-update-harnesses')}').checked`);

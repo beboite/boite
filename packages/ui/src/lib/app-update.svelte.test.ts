@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import type { AppUpdateBackend, UpdateChannel, UpdateClock, UpdateSnapshot } from './app-update.svelte';
-import { AppUpdater } from './app-update.svelte';
+import { AppUpdater, appName, appUpdater } from './app-update.svelte';
 
 function snapshot(overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot {
   return {
@@ -29,6 +29,25 @@ function backend(overrides: Partial<AppUpdateBackend> = {}): AppUpdateBackend {
     ...overrides
   };
 }
+
+test('a dismissed offer stays installable and a different version or channel is announced', () => {
+  const updater = new AppUpdater();
+  updater.snapshot = snapshot({ phase: 'ready', version: '2.1.0' });
+  try {
+    updater.dismiss();
+    expect(updater.announceReady).toBe(false);
+    expect(updater.ready).toBe(true);
+    updater.snapshot = snapshot({ phase: 'checking' });
+    updater.snapshot = snapshot({ phase: 'ready', version: '2.1.0' });
+    expect(updater.announceReady).toBe(false);
+    updater.snapshot = { ...updater.snapshot, version: '2.2.0' };
+    expect(updater.announceReady).toBe(true);
+    updater.snapshot = { ...updater.snapshot, version: '2.1.0', channel: 'nightly' };
+    expect(updater.announceReady).toBe(true);
+  } finally {
+    window.localStorage.removeItem('boite.app-update-dismissed');
+  }
+});
 
 class FakeClock implements UpdateClock {
   next = 1;
@@ -235,4 +254,15 @@ test('cleans up its listener and timers and stops scheduled checks when ready', 
   expect(unlisten).toHaveBeenCalledOnce();
   expect(clock.intervals.size).toBe(0);
   expect(clock.clearedIntervals).toHaveLength(1);
+});
+
+test('a nightly build calls itself boite (de nuit)', () => {
+  const before = appUpdater.snapshot;
+  try {
+    expect(appName()).toBe('Boite');
+    appUpdater.snapshot = snapshot({ currentVersion: '2.1.0-nightly.8', currentChannel: 'nightly' });
+    expect(appName()).toBe('boite (de nuit)');
+  } finally {
+    appUpdater.snapshot = before;
+  }
 });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { release, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { connect } from '../../packages/core/src/client.ts';
@@ -178,7 +178,8 @@ function readCoreFile(path: string): CoreFile | undefined {
 async function healthy(port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, {
-      signal: AbortSignal.timeout(1_000),
+      // A freshly started core may still be probing providers on a busy runner.
+      signal: AbortSignal.timeout(5_000),
     });
     return response.ok;
   } catch {
@@ -208,6 +209,7 @@ function killWebviewsOf(dataDir: string): void {
     ],
     stdout: 'ignore',
     stderr: 'ignore',
+    windowsHide: true,
   });
 }
 
@@ -221,6 +223,7 @@ function parentOf(pid: number): number | null {
     ],
     stdout: 'pipe',
     stderr: 'ignore',
+    windowsHide: true,
   });
   const parsed = Number(query.stdout.toString().trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -232,15 +235,20 @@ function parentOf(pid: number): number | null {
  * browser process with the installed app the user may have open. A debugging
  * port is only passed when the test drives the page.
  */
-function spawnHiddenShell(ownDataDir: string, debugPort?: number): number {
+function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = false): number {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
   delete env.BOITE_CORE_COMMAND;
   env.BOITE_SHELL_HIDDEN = '1';
+  env.BOITE_CORE_RESIDENT = resident ? '1' : '0';
   env.BOITE_DATA_DIR = ownDataDir;
+  env.BOITE_DRAFTS_DIR = join(ownDataDir, 'Documents', 'Boite');
   env.BOITE_ECHO = '1';
+  env.BOITE_HOST_AGENTS = '0';
+  // A hidden quota popup gives its page back after this long, not 45 s.
+  env.BOITE_QUOTA_IDLE_MS = '1500';
   delete env.BOITE_SHELL_DEBUG_PORT;
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
@@ -266,6 +274,43 @@ async function waitForHealthyCore(ownDataDir: string): Promise<CoreFile> {
 /** The webview exposes its page target before the IPC bridge is injected. */
 const TAURI_READY = "typeof window.__TAURI_INTERNALS__?.invoke === 'function'";
 
+shellTest('a resident core finishes agent work after shell exit, is adopted, and stops explicitly', async () => {
+  const ownDataDir = freshDataDir();
+  let shellPid = 0; let found: CoreFile | undefined; let ownPage: BrowserPage | undefined;
+  let client: Awaited<ReturnType<typeof connect>> | undefined;
+  try {
+    const port = await freePort(); shellPid = spawnHiddenShell(ownDataDir, port, true);
+    found = await waitForHealthyCore(ownDataDir);
+    client = await connect(`http://127.0.0.1:${found.port}`, found.token);
+    const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
+    const agent = await client.call('agents.profile.save', { value: { name: 'Background worker', domain: '', instructions: '', avatar: '', status: 'active', tools: ['messages'], accountIntegration: 'provider', selection: { providerId: 'echo', accountId: account.id, model: null, effort: null, permissionMode: 'default' } } });
+    ownPage = await BrowserPage.attach(port); await ownPage.waitFor(TAURI_READY);
+    const started = client.next('turn.started', () => true, 10000);
+    const finished = client.next('turn.finished', () => true, 15000);
+    await client.call('agents.message.send', { scope: { kind: 'agent', id: agent.id }, text: '[sleep:1500] finish after closing the window', recipientIds: [agent.id], requestId: 'resident_message_001' });
+    await started;
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quit_shell')`).catch(() => undefined);
+    await waitUntil(() => !pidAlive(shellPid), CORE_GONE_TIMEOUT_MS);
+    expect(pidAlive(shellPid)).toBe(false);
+    expect(await healthy(found.port)).toBe(true);
+    expect((await finished).status).toBe('done');
+    expect((await client.call('agents.snapshot', {})).work[0]?.status).toBe('done');
+    await ownPage.close(); ownPage = undefined;
+    const secondPort = await freePort(); shellPid = spawnHiddenShell(ownDataDir, secondPort, true);
+    ownPage = await BrowserPage.attach(secondPort); await ownPage.waitFor(TAURI_READY);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
+    expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
+    expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
+    await waitUntil(() => !pidAlive(found!.pid), CORE_GONE_TIMEOUT_MS);
+    expect(pidAlive(found.pid)).toBe(false);
+  } finally {
+    client?.close(); await ownPage?.close();
+    if (shellPid) killProcessTree(shellPid);
+    if (found && pidAlive(found.pid)) killProcessTree(found.pid);
+    await removeDirectory(ownDataDir);
+  }
+}, 60000);
+
 shellTest('close exits by default; the persisted setting hides instead; the native quota page connects', async () => {
   const ownDataDir = freshDataDir();
   let ownPid = 0;
@@ -277,6 +322,19 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     ownCore = await waitForHealthyCore(ownDataDir);
     ownPage = await BrowserPage.attach(port);
     await ownPage.waitFor(TAURI_READY);
+    // A first launch opens centred in the work area, not at Windows' cascade spot.
+    const main = await ownPage.evaluate<{ dx: number; dy: number }>(`(async () => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const [position, size, monitor] = await Promise.all([
+        invoke('plugin:window|outer_position', { label: 'main' }),
+        invoke('plugin:window|outer_size', { label: 'main' }),
+        invoke('plugin:window|primary_monitor')
+      ]);
+      const work = monitor.workArea;
+      return { dx: position.x + size.width / 2 - (work.position.x + work.size.width / 2), dy: position.y + size.height / 2 - (work.position.y + work.size.height / 2), position, size, work };
+    })()`);
+    expect(Math.abs(main.dx), JSON.stringify(main)).toBeLessThanOrEqual(16);
+    expect(Math.abs(main.dy), JSON.stringify(main)).toBeLessThanOrEqual(16);
     expect(await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('close_behavior')`)).toBe(false);
     await ownPage.waitFor(`document.querySelector('[data-testid="titlebar"] .close')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
@@ -288,14 +346,26 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     ownCore = await waitForHealthyCore(ownDataDir); ownPage = await BrowserPage.attach(secondPort);
     await ownPage.waitFor(`document.querySelector('[data-testid="nav-settings"]')`);
     await ownPage.click('[data-testid="nav-settings"]');
+    // Settings open on Home; the window's own switches live under General.
+    await ownPage.waitFor(`document.querySelector('[data-testid="settings-tab-general"]')`);
+    await ownPage.click('[data-testid="settings-tab-general"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]') && !document.querySelector('[data-testid="close-to-tray"]').disabled`);
     await ownPage.click('[data-testid="close-to-tray"]');
     await ownPage.waitFor(`document.querySelector('[data-testid="close-to-tray"]').checked`);
     await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-close-settings.png'));
     expect(JSON.parse(readFileSync(join(ownDataDir, 'shell-settings.json'), 'utf8')).close_to_tray).toBe(true);
+    // The tour leaves the title bar above its scrim: the window still drags and closes.
+    await ownPage.click('[data-testid="settings-tour"]');
+    await ownPage.waitFor(`document.querySelector('[data-testid="onboarding-step"]')`);
+    expect(await ownPage.evaluate(`(() => { const r = document.querySelector('[data-testid="titlebar"]').getBoundingClientRect(); return [0.25, 0.5, 0.75].every(at => !!document.elementFromPoint(r.left + r.width * at, r.top + r.height / 2)?.closest('[data-testid="titlebar"]')); })()`)).toBe(true);
+    await ownPage.screenshot(join(import.meta.dir, '.artifacts', 'shell-tour.png'));
+    await ownPage.click('[data-testid="onboarding-skip"]');
+    await ownPage.waitFor(`!document.querySelector('[data-testid="onboarding"]')`);
     await ownPage.evaluate(`document.querySelector('[data-testid="titlebar"] .close').click()`);
     expect(await healthy(ownCore.port)).toBe(true);
     expect(pidAlive(ownPid)).toBe(true);
+    // In the tray the page is hidden to WebView2 too, so it stops painting.
+    await ownPage.waitFor(`document.visibilityState === 'hidden'`);
 
     // Keep every real login out of this test. The popup still crosses real IPC and WS.
     const client = await connect(`http://127.0.0.1:${ownCore.port}`, ownCore.token);
@@ -305,7 +375,8 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
     popup = await BrowserPage.attach(secondPort, 'view=quotas');
     await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]') && !document.querySelector('[role="alert"]')`);
-    await popup.waitFor(`document.querySelectorAll('[data-testid="quota-provider"]').length === 5`);
+    // Every account is off, so the popup says there is nothing to read and offers the way to a provider.
+    await popup.waitFor(`document.querySelector('[data-testid="quota-empty"]') && document.querySelectorAll('[data-testid="quota-provider"]').length === 0`);
     expect(await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint').then(e => Boolean(e.url && e.token))`)).toBe(true);
     // The webview can be ready before Windows applies the native placement.
     // Poll the geometry itself; a timeout still reports all offending bounds.
@@ -329,6 +400,17 @@ shellTest('close exits by default; the persisted setting hides instead; the nati
     expect(geometry.inside, JSON.stringify(geometry)).toBe(true);
     await popup.screenshot(join(import.meta.dir, '.artifacts', 'shell-quota-popup.png'));
     await popup.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'hide'})`);
+    await popup.close(); popup = undefined;
+    // A popup left hidden gives its renderer back (BOITE_QUOTA_IDLE_MS), and
+    // the next show builds it again.
+    const quotaTargets = async () => ((await (await fetch(`http://127.0.0.1:${secondPort}/json/list`)).json()) as { url: string }[])
+      .filter(target => target.url.includes('view=quotas')).length;
+    const releaseBy = Date.now() + 15_000;
+    while (await quotaTargets() > 0 && Date.now() < releaseBy) await Bun.sleep(POLL_MS);
+    expect(await quotaTargets()).toBe(0);
+    await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('quota_window', {action:'show'})`);
+    popup = await BrowserPage.attach(secondPort, 'view=quotas');
+    await popup.waitFor(`document.querySelector('[data-testid="quota-popup"]')`);
     await popup.close(); popup = undefined;
     await quitShell(ownPage);
     await waitUntil(() => !pidAlive(ownPid), CORE_GONE_TIMEOUT_MS);
@@ -450,6 +532,27 @@ shellTest('the native updater reports its local version and refuses installation
   expect(refused).toContain('installed Windows x64');
 }, TIMEOUT);
 
+shellTest('the native file opener launches the original executable and rejects paths outside the thread', async () => {
+  if (!page) throw new Error('the shell did not expose its page');
+  await page.waitFor(TAURI_READY);
+  const executable = join(projectDir, 'game fixture.exe');
+  const compiler = Bun.spawn(['rustc', '--crate-name', 'file_open', join(import.meta.dir, 'fixtures', 'file-open.rs'), '-o', executable], {
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  const output = await new Response(compiler.stderr).text();
+  expect(await compiler.exited, output).toBe(0);
+  const marker = join(projectDir, 'game fixture.opened');
+  expect(existsSync(marker)).toBe(false);
+  await page.evaluate(`window.__TAURI_INTERNALS__.invoke('open_local_file', ${JSON.stringify({ directory: projectDir, path: 'game fixture.exe' })})`);
+  const deadline = Date.now() + 10_000;
+  while (!existsSync(marker) && Date.now() < deadline) await Bun.sleep(50);
+  expect(readFileSync(marker, 'utf8')).toBe('opened original file');
+  const outside = join(dataDir, 'outside.txt');
+  writeFileSync(outside, 'must never open');
+  const error = await page.evaluate<string>(`window.__TAURI_INTERNALS__.invoke('open_local_file', ${JSON.stringify({ directory: projectDir, path: outside })}).then(() => 'allowed', error => String(error))`);
+  expect(error).toContain('expected a file inside');
+}, TIMEOUT);
+
 shellTest(
   'the shipped webview refuses what the content security policy forbids',
   async () => {
@@ -492,7 +595,7 @@ shellTest(
   'a project, an echo thread and a turn go through the shell',
   async () => {
     // The dialog IPC is answered here so this test never puts a native window on screen.
-    await page?.waitFor(`document.querySelector('${testid('first-run')}')`);
+    await page?.waitFor(`document.querySelector('${testid('draft-open-folder')}')`);
     await page?.click(testid('add-project'));
     await page?.waitFor(`document.querySelector('[data-testid=pick-project]') && !document.querySelector('[data-testid=pick-project]').disabled`);
     await page?.evaluate(`document.fonts.ready`);
@@ -528,7 +631,7 @@ shellTest(
     // The echo agent's own title, written right after its first turn.
     await page?.waitFor(`${textOf('thread-title')} === 'Echo: shell turn'`, 30_000);
     await page?.waitFor(
-      `document.querySelector('${testid('thread-status')}').dataset.status === 'idle'`,
+      `document.querySelector('${testid('thread-header')}[data-status]').dataset.status === 'idle'`,
       30_000,
     );
 
@@ -621,6 +724,21 @@ shellTest('window controls draw maximize and restore without a second status ind
   }
 }, TIMEOUT);
 
+shellTest('Ctrl+= zooms the whole interface through the webview and Ctrl+0 puts it back', async () => {
+  const key = (value: string) => page?.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key:'${value}', ctrlKey:true, bubbles:true, cancelable:true }))`);
+  const width = Number(await page?.evaluate('window.innerWidth'));
+  try {
+    await key('=');
+    await page?.waitFor(`localStorage.getItem('boite.zoom') === '1.1'`);
+    // The webview's own zoom lays the page out on fewer CSS pixels: the capability let it through.
+    await page?.waitFor(`Math.abs(window.innerWidth - ${width} / 1.1) < 3`);
+    expect(await page?.evaluate('document.body.style.zoom')).toBe('');
+  } finally {
+    await key('0');
+    await page?.waitFor(`window.innerWidth === ${width} && localStorage.getItem('boite.zoom') === '1'`);
+  }
+}, TIMEOUT);
+
 shellTest('the machine picker opens a folder on the selected core and reports a lost connection', async () => {
   const remote = await startCore();
   const remoteClient = await connect(remote.url, remote.token);
@@ -634,7 +752,8 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.click(testid('machine-add'));
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
     await page?.click(testid('settings-back'));
-    await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.textContent.includes('2 machines connected')`);
+    // One machine draws no machine button; the second one brings it back.
+    await page?.waitFor(`document.querySelector('[data-testid=status-connection] [data-testid=machine-status]')`);
     await page?.click(testid('add-project'));
     await page?.waitFor(`document.querySelector('[data-testid=project-path]') && !document.querySelector('[data-testid=project-add]').disabled`);
     expect(await page?.evaluate(`!!document.querySelector('[data-testid=pick-project]')`)).toBe(true);
@@ -655,11 +774,13 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('shell turn')`);
     await remote.stop();
     await page?.waitFor(`document.querySelector('[data-testid=status-connection]')?.classList.contains('problem')`);
-    expect(await page?.evaluate(`document.querySelector('[data-testid=status-connection]').textContent`)).toContain('1 machine connected');
+    expect(await page?.evaluate(`document.querySelector('[data-testid=machine-status]').getAttribute('aria-label')`)).toContain('1 need attention');
     await page?.screenshot(join(import.meta.dir, '.artifacts', 'shell-machine-disconnected.png'));
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
     await page?.evaluate(`document.querySelector('[data-machine-id="${remote.url}"] [data-testid=machine-remove]').click()`);
+    await page?.waitFor(`document.querySelector('${testid('confirm-ok')}')`);
+    await page?.click(testid('confirm-ok'));
     await page?.click(testid('settings-back'));
   } finally { remoteClient.close(); await remote.stop(); }
 }, TIMEOUT);
@@ -803,6 +924,76 @@ shellTest(
   TIMEOUT,
 );
 
+shellTest('native preview references attach to the composer and highlight from sent history', async () => {
+  if (!page) throw new Error('shell is not ready');
+  const fixture = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch: () => new Response('<!doctype html><html><head><title>Preview fixture</title></head><body><button id="native-preview-target">Save changes</button></body></html>', { headers: { 'content-type': 'text/html' } })
+  });
+  const url = `http://127.0.0.1:${fixture.port}/preview`;
+  let child: BrowserPage | undefined;
+  try {
+    await page.click(testid('nav-settings'));
+    await page.click(testid('settings-tab-experiments'));
+    await page.click(testid('experiment-preview-comments'));
+    await page.click(testid('settings-back'));
+    await page.type(testid('composer-input'), 'Make clearer.');
+    await page.evaluate(`(() => { const input = document.querySelector('${testid('composer-input')}'); input.setSelectionRange(5, 5); input.dispatchEvent(new Event('select')); })()`);
+    await page.click(testid('panel-toggle'));
+    await page.waitFor(`document.querySelector('${testid('launch-browser')}')`);
+    await page.click(testid('launch-browser'));
+    await page.type(testid('browser-url'), url);
+    await page.evaluate(`document.querySelector('${testid('browser-url')}').closest('form').requestSubmit()`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('#native-preview-target')`);
+    await page.click(testid('preview-annotate'));
+    await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
+    // Even while the data-only picker is armed, a page gets no host commands.
+    const refused = await child.evaluate<string>(`(async () => {
+      if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
+      try { await window.__TAURI_INTERNALS__.invoke('core_endpoint'); return 'allowed'; }
+      catch { return 'refused'; }
+    })()`);
+    expect(refused).not.toBe('allowed');
+    await child.click('#native-preview-target');
+    await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
+    expect(await child.evaluate('location.href')).toBe(url);
+    const draft = await page.evaluate<string>(`document.querySelector('${testid('composer-input')}').value`);
+    expect(draft).toBe('Make @Save changes clearer.');
+    expect(await page.evaluate(`!!document.querySelector('${testid('preview-comment-form')}')`)).toBe(false);
+    await page.click(`${testid('composer')} ${testid('preview-reference')}`);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-reference.png'));
+    await clickWhenEnabled(testid('composer-send'));
+    await page.waitFor(`document.querySelector('[data-role="user"] ${testid('preview-reference')}')`);
+    await page.waitFor(`!document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-role="user"] ${testid('text-part')}')).at(-1).textContent`)).toBe('Make @Save changes clearer.');
+    await child.close();
+    child = undefined;
+    await page.click(testid('panel-tab-close'));
+    await waitForTargets(url, 0, 20_000);
+    // Closing the last tab already closes the panel. Its exit animation keeps
+    // the close button mounted briefly; clicking it would toggle the panel open.
+    await page.waitFor(`!document.querySelector('${testid('right-panel')}')`);
+    // A reference from history restores a closed tab, waits for the real page,
+    // then highlights its element in the newly created child webview.
+    await page.click(`[data-role="user"] ${testid('preview-reference')}`);
+    await waitForTargets(url, 1, 20_000);
+    child = await BrowserPage.attach(debugPort, url);
+    await child.waitFor(`document.querySelector('[data-boite-preview-highlight]')`);
+    expect(await child.evaluate('location.href')).toBe(url);
+    await page.screenshot(join(import.meta.dir, '.artifacts', 'preview-native-sent.png'));
+  } finally {
+    await child?.close();
+    // Closing the last tab destroys the child view and closes the panel.
+    if (await page.evaluate(`!!document.querySelector('${testid('panel-tab-close')}')`)) await page.click(testid('panel-tab-close'));
+    await page.type(testid('composer-input'), '');
+    fixture.stop(true);
+  }
+}, TIMEOUT);
+
 /**
  * The material itself is drawn by the compositor behind the window, so no
  * capture of this webview can show it. What is provable here is the half the UI
@@ -815,14 +1006,64 @@ async function reloadShellPage(): Promise<void> {
   await page?.waitFor(`document.querySelector('${testid('sidebar')}')`, 30_000);
 }
 
+/** `DWMWA_SYSTEMBACKDROP_TYPE` for each material from Windows build 22523. */
+const BACKDROP: Record<string, number> = { acrylic: 3, mica: 2, solid: 1 };
+
+/**
+ * A reader of `DWMWA_SYSTEMBACKDROP_TYPE` (38) on the shell's main window, run
+ * from this process: DWM answers for another process's window, hidden or not.
+ * The main window is the top-level window of `pid` titled after the product,
+ * never the quota popup.
+ */
+async function mainWindowBackdrop(pid: number): Promise<() => number> {
+  const { dlopen, FFIType, ptr } = await import('bun:ffi');
+  const user32 = dlopen('user32.dll', {
+    FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
+    GetWindowTextW: { args: [FFIType.ptr, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+  });
+  const dwm = dlopen('dwmapi.dll', {
+    DwmGetWindowAttribute: { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+  });
+  const owner = new Uint32Array(1);
+  const text = new Uint16Array(256);
+  let hwnd = user32.symbols.FindWindowExW(null, null, null, null);
+  while (hwnd) {
+    user32.symbols.GetWindowThreadProcessId(hwnd, ptr(owner));
+    const length = user32.symbols.GetWindowTextW(hwnd, ptr(text), text.length);
+    const title = String.fromCharCode(...text.subarray(0, length));
+    if (owner[0] === pid && /^boite/i.test(title) && title !== 'Boite quotas') break;
+    hwnd = user32.symbols.FindWindowExW(null, hwnd, null, null);
+  }
+  const main = hwnd;
+  if (!main) throw new Error(`the shell (pid ${pid}) has no main window to read the material of`);
+  return () => {
+    const value = new Uint32Array(1);
+    const result = dwm.symbols.DwmGetWindowAttribute(main, 38, ptr(value), 4);
+    if (result !== 0) throw new Error(`DwmGetWindowAttribute(38) on the main window failed: 0x${(result >>> 0).toString(16)}`);
+    return value[0] ?? 0;
+  };
+}
+
 shellTest(
   'the stored window material is stamped on every load, and solid stamps nothing',
   async () => {
+    // The list depends on the Windows build: solid always, mica from 22000,
+    // acrylic from 22523. Nothing off Windows. A runner on Windows Server 2022
+    // (20348) offers solid alone, and a stored mica then stamps nothing.
+    await page?.waitFor(TAURI_READY);
+    const supported = await page?.evaluate<string[]>(
+      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
+    );
+    if (process.platform === 'win32') expect(supported).toContain('solid');
+    else expect(supported).toEqual([]);
+    const mica = supported?.includes('mica') ?? false;
+
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'mica'); return null; })()`,
     );
     await reloadShellPage();
-    await page?.waitFor(`document.documentElement.dataset.glass === 'mica'`, 30_000);
+    await page?.waitFor(`document.documentElement.dataset.glass === ${mica ? "'mica'" : 'undefined'}`, 30_000);
 
     await page?.evaluate<null>(
       `(() => { window.localStorage.setItem('boite.glass', 'solid'); return null; })()`,
@@ -836,12 +1077,7 @@ shellTest(
     // The other half, which the UI swallows on purpose: the command is really
     // registered, it really reaches the window, and a material nobody defined is
     // refused by name rather than falling back on one.
-    const supported = await page?.evaluate<boolean>(
-      `window.__TAURI_INTERNALS__.invoke('window_material_supported')`,
-    );
-    expect(supported).toBe(process.platform === 'win32');
-
-    await invokeShell('window_material', { kind: 'mica' });
+    if (mica) await invokeShell('window_material', { kind: 'mica' });
     await invokeShell('window_material', { kind: 'solid' });
 
     let refusal = '';
@@ -851,6 +1087,18 @@ shellTest(
       refusal = error instanceof Error ? error.message : String(error);
     }
     expect(refusal).toContain('frosted');
+
+    // Every change between the offered materials, both ways: solid and back
+    // once left the window see-through with no backdrop. The command reads DWM
+    // back itself; from build 22523 this reads it again from outside the shell.
+    // The sequence ends on solid, the stored choice.
+    const kinds = supported ?? [];
+    const build = Number(release().split('.')[2] ?? 0);
+    const backdrop = process.platform === 'win32' && build >= 22523 ? await mainWindowBackdrop(shellPid) : null;
+    for (const kind of kinds.flatMap((from) => kinds.flatMap((to) => [from, to]))) {
+      await invokeShell('window_material', { kind });
+      if (backdrop) expect(`${kind}: ${backdrop()}`).toBe(`${kind}: ${BACKDROP[kind]}`);
+    }
   },
   TIMEOUT,
 );
@@ -893,7 +1141,7 @@ shellTest(
 
       // The shell alone, no `/T`: nothing walks the tree here, so only the Job
       // Object the shell owns can take the core down.
-      Bun.spawnSync(['taskkill', '/pid', String(shell), '/F'], { stdout: 'ignore', stderr: 'ignore' });
+      Bun.spawnSync(['taskkill', '/pid', String(shell), '/F'], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
 
       await waitUntil(() => !pidAlive(corePid), HARD_KILL_TIMEOUT_MS);
       expect(pidAlive(shell)).toBe(false);
@@ -962,9 +1210,18 @@ shellTest(
       await shellPage.waitFor(TAURI_READY);
       await shellPage.waitFor(`document.querySelector('[data-testid="titlebar"]')`);
 
-      // One tap: the hint comes and goes, nothing quits.
+      // One tap: the hint comes and goes, nothing quits. WebView2 drops a Ctrl
+      // chord sent in the first moments after load while plain keys get
+      // through, so the press repeats until the hint shows. A repeat that does
+      // land is key repeat, which the hold ignores, and the release comes well
+      // inside QUIT_HOLD_MS.
       await chord('keyDown');
-      await shellPage.waitFor(`document.querySelector('[data-testid="quit-hint"]')`);
+      for (const deadline = Date.now() + 15_000; ;) {
+        if (await shellPage.evaluate<boolean>(`!!document.querySelector('[data-testid="quit-hint"]')`)) break;
+        if (Date.now() > deadline) throw new Error('Ctrl+Q never reached the page');
+        await Bun.sleep(150);
+        await chord('keyDown');
+      }
       await chord('keyUp');
       await shellPage.waitFor(`!document.querySelector('[data-testid="quit-hint"]')`);
       await Bun.sleep(600);

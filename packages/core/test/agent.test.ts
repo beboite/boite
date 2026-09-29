@@ -251,6 +251,8 @@ describe('the task list', () => {
   test('threads.tasks.set reaches thread.activity and threads.tasks.get reads it back', async () => {
     const agent = await agentClient();
     try {
+      // Activity goes to the clients that have the thread open.
+      await client.call('threads.subscribe', { threadId });
       const activity = client.next<'thread.activity'>('thread.activity', (event) => event.threadId === threadId);
       const result = await agent.call('threads.tasks.set', {
         threadId,

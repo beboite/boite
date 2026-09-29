@@ -29,6 +29,14 @@ current level centred above the track. The track reaches the thumb and becomes
 more saturated at higher levels. Ultrathink belongs only to Claude and is offered
 when its SDK reports adaptive thinking.
 
+Claude Code also acts on two words typed anywhere in a prompt: `ultrathink`
+asks for the deepest thinking on that turn, and `ultracode` opts the turn into
+the Workflow tool when the account has workflows. When Claude Code runs a Claude
+model, the composer and the sent message draw them apart, `ultrathink` in the
+spectrum and `ultracode` in the accent. Another harness, or Claude Code routed
+to another model, reads them as plain words, and they stay plain there. `ultraplan` and `ultrareview` run on claude.ai and are not
+available through the SDK.
+
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
@@ -64,6 +72,21 @@ client as `boite.accent-hue` and colours reasoning, primary buttons, links and
 focus indicators. The file attachment button sits beside Send; keyboard help
 stays out of the chatbar.
 
+On Windows, Appearance also picks the window material from what the Windows
+build draws without lag: acrylic from build 22523, where DWM draws it as a
+system backdrop, mica from 22000, and solid always. Windows 10 offers solid
+alone, so the row is hidden there and the window opens opaque. A stored choice
+the build does not offer is shown and applied as solid. The shell refuses a
+material its build does not offer, because DWM accepts a value it cannot draw
+and the page would turn transparent over nothing.
+
+The shell sets every material, solid included, as one value of the DWM system
+backdrop and reads it back, so changes work in any order. It does not use
+Tauri's `set_effects`, whose clear (our solid) also sets the window's accent
+policy to disabled. That call is the only one the broken path made: a material
+picked after solid was stored by DWM, yet the window showed no backdrop and
+turned see-through.
+
 ## Context transfer
 
 The first prompt carries historical user and assistant text, tool outcomes and
@@ -83,7 +106,24 @@ journal remains unchanged.
 A thread whose last context reading is over 200,000 tokens asks before it moves
 to another account: the receiving agent gets these excerpts, not what the old
 session held, and a compaction summary is not part of them. A model change
-inside one account keeps its session and asks nothing.
+inside one account keeps its session.
+
+Moving a thread to another project uses the same transfer on every driver but
+Codex, whose resume takes the new folder and keeps its session. The seeded
+prompt says the thread moved during the conversation and that the latest move
+note names the folder it works in now ([moving a thread](development.md#moving-a-thread)).
+
+Keeping the session does not keep the provider's prompt cache. Measured on
+2026-09-22 with a four-turn probe per provider: a model change on Claude sent
+the conversation again uncached; on Codex every effort change missed (`high`,
+`low`, `low`, `medium`, `high` cached 9k, 13k, 39k, 8k and 31k of 31k to
+47k input tokens); on Claude Sonnet 5 an effort change kept the system prompt
+and tools but rewrote every message, while Claude Opus 5.5 kept its cache. Fast
+mode was not measured. So a change of model, effort or speed inside one account
+asks first when the last context reading is over 100,000 tokens and less than
+an hour old, the longest a provider keeps a cache. An older reading asks
+nothing: that cache is already gone. A change of account is the case above and
+asks only that question.
 
 Historical images use remaining slots within the eight-image turn limit. The
 current prompt's attachments take priority, then the most recent historical

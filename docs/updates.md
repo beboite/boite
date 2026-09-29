@@ -1,14 +1,18 @@
 # Desktop updates
 
-General settings contains the desktop update card. It names the installed
-version and channel, the available version, its publication date and release
-notes. When an update is ready, the title bar offers installation directly
-from the conversation, with a confirmation before restarting. A separate
-details action opens the update card.
+The sidebar footer has an update icon beside the other controls. Its popup
+names the release and how long ago it was published, links to its changelog on
+GitHub, and offers installation with a restart confirmation. Release channel
+options show the installed version and let you switch channels.
 
-## Boite and boite de nuit
+A dot marks an update ready to install. Hide reminder clears that dot for the
+version and channel, including after restarting the app. The icon stays
+available for installation; a different release lights the dot again.
+The settings navigation keeps the same icon at its foot.
 
-Choose Boite for regular releases, including the current beta, or boite de nuit
+## Boite and Boite Nightly
+
+Choose Boite for regular releases, including the current beta, or Boite Nightly
 for the daily build from `main`. A nightly publishes only when that commit has
 not already shipped and its CI checks pass. Nightlies may contain unfinished
 changes.
@@ -17,22 +21,33 @@ Changing the channel immediately checks for its newest signed release and
 downloads it. Returning from nightly to Boite permits a lower version. Both
 channels use the same install location, bundle identifier and `boite2` data
 directory. Projects, accounts and journal files stay in place. The Windows
-installer retains the name Boite; nightly builds use the boite de nuit title,
-tray tooltip and the violet and magenta icon.
+installer retains the name Boite. A nightly build calls itself boite (de nuit)
+in the window title and tray tooltip, and uses the violet and magenta icon. The
+title bar inside the window never shows the app's name: its room goes to the
+project, the thread or settings.
 
 Keep a backup before trying nightlies: retaining files does not make a future
 journal schema readable by an older release. Boite refuses a journal schema it
-cannot read. The separate `build:shell:dev` build still uses `com.boite.two.dev`
-and `boite2-dev`, and does not receive these updates. Older manually built
+cannot read: the core names the file and both schema versions on stderr, leaves
+the file untouched and exits with code 1. Cores built before this check open a
+newer journal anyway, so restore the backup before going back to one. The
+separate `build:shell:dev` build still uses `com.boite.two.dev` and `boite2-dev`, and does not receive these updates. Older manually built
 nightlies using that development identifier remain separate; their data is not
 silently moved.
 
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. A manual check is available in the card. Checks
-and downloads run one at a time. A ready update is kept until installation or
+then repeats every six hours. The popup's Check for updates button checks at
+once; it stays in the popup during a check, disabled, and only makes way for
+the download progress and the install action. Checks and downloads run one at
+a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.
+
+No request has a total deadline, because an installer on a slow link may take
+minutes. Each one gets 15 seconds to connect and fails after 30 seconds without
+receiving a byte, so a link that stops sending gives the updater back instead of
+holding it until the app restarts. The release listing is requested gzipped.
 
 Downloads show bytes received and a percentage when a total is known. The shell
 checks the updater signature before offering installation, writes the verified
@@ -42,14 +57,48 @@ before handing those bytes to Tauri's installer.
 
 Restarting always requires a click and an in-app confirmation. It interrupts
 agents owned by that desktop. Saved conversations remain; interrupted turns
-are not automatically retried. The Windows Job Object closes when the updater
-exits the shell, stopping its owned core and agents before replacement. A failed
-installer launch leaves that core running. A remote core or a separately started
-core is not terminated by the desktop updater.
+are not automatically retried. The local core is resident and outlives the
+shell, so before launching the installer the shell asks it to stop through its
+authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. Until
+the installer takes over, the shell refuses to start a core again, so the
+window's reconnect cannot relaunch the old executable. If the core cannot be
+stopped, nothing is installed and the popup shows why; if the installer cannot
+launch, the next reconnect starts the core again. A remote
+core is not touched by the desktop updater.
+
+The Windows installer stops the core of its own install too, for an update, a
+manual reinstall and an uninstall. Its hooks (`windows/hooks.nsh` and
+`windows/stop-core.ps1`) first close a running shell, with the installer's own
+"Boite is running" question: an open window would start the core again within
+seconds, from the file about to be replaced. They then find the
+`boite-core.exe` processes running that install's exact file, ask the one named
+in that channel's `core.json` (`boite2` or `boite2-dev`) to shut down, and end
+any still running after 15 seconds. Boite Dev's core runs another file and is
+left alone. No window opens. `scripts/ci/installer-hooks.test.ts` builds the
+hooks into the generated installer script and runs them over a shell that
+restarts its core; it needs a Windows `build:shell` first and is skipped
+without one.
+
+Both in-app updates and downloaded Windows installers replace an existing
+installation in place. They keep its Start menu and desktop shortcuts intact
+when the executable path is unchanged, preserving the shortcuts used by pinned
+entries. Switching between stable and nightly uses that same path. Removing
+Boite through Windows' installed apps still removes its shortcuts and pins.
+The custom NSIS template and its upstream version are documented in
+`apps/shell/src-tauri/windows/VENDOR.md`.
+
+When the new shell starts, it reads the version the running core reports on
+`/health`. A core of another version, left by an install that could not stop
+it, is stopped and replaced by the core shipped with the shell.
 
 Offline checks, missing releases, signature failures and installation failures
 appear in the card with a retry action. They do not display a system dialog or
-restart the application. A restart discards a previously downloaded cache and
+restart the application. A panic inside a check or a download ends the same
+way: an async Tauri command that panics never answers the window, so each one
+runs its work under `catch_unwind` and reports the panic as an error. Nightlies
+up to 2026-09-26 predate that guard and panic on every check while building
+the release client, so their card stays on "Checking for updates": replace
+them once with a manual install. A restart discards a previously downloaded cache and
 checks again. Only the channel preference persists in `update-channel.json`.
 
 ## Scope

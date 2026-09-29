@@ -1,4 +1,7 @@
 <script lang="ts">
+  // The phone's options sheet: the bar has no room for chips, so the effort,
+  // the speed, the permission mode and the worktree switch live in here. On a
+  // computer every one of them is a chip in the bar and this stays hidden.
   import { GitBranch, Paperclip, Plus, X } from '@lucide/svelte';
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
@@ -6,10 +9,13 @@
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { strings } from '../lib/strings';
+  import { levelName } from '../lib/format';
 
-  let { levels, effort, speeds, speed, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
+  let { levels, effort, speeds, speed, modes, modeLabel, modeHint, mode, worktree, canAttach, busy, onattach, oneffort, onspeed, onmode, onworktree } : {
     levels: EffortLevel[]; effort: string | null;
     speeds: { id: string; label: string }[]; speed: string | null;
+    /** The composer's list, the most open first; the panel reads it the other way. */
+    modes: PermissionMode[]; modeLabel: (mode: PermissionMode) => string; modeHint: (mode: PermissionMode) => string;
     mode: PermissionMode; worktree: boolean | null; canAttach: boolean; busy: boolean;
     onattach: () => void; oneffort: (id: string) => void;
     onspeed: (id: string | null) => void; onmode: (id: PermissionMode) => void;
@@ -17,14 +23,15 @@
   } = $props();
   const panel = new Closing();
   const mobile = new MediaQuery('(max-width: 720px)');
+  // The sheet belongs to a phone's width: widening the window closes it.
   $effect(() => { if (!mobile.current) panel.hide(); });
   let trigger = $state<HTMLButtonElement>();
   let content = $state<HTMLDivElement>();
-  const modes: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
+  let ordered = $derived([...modes].reverse());
   function close() { panel.hide(); trigger?.focus({ preventScroll: true }); }
   async function open() {
     panel.show(); await tick();
-    content?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    content?.querySelector<HTMLButtonElement>('button, input')?.focus({ preventScroll: true });
   }
   function keydown(event: KeyboardEvent) {
     if (!panel.open) return;
@@ -48,7 +55,7 @@
       {/if}
       {#if levels.length}
         <fieldset disabled={busy}><legend>{strings.composer.effortTitle}</legend><div class="choices">
-          {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="mobile-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} />{level.label}</label>{/each}
+          {#each levels as level (level.id)}<label class:selected={effort === level.id}><input type="radio" name="mobile-effort" value={level.id} checked={effort === level.id} onchange={() => oneffort(level.id)} />{levelName(level)}</label>{/each}
         </div></fieldset>
       {/if}
       {#if speeds.length}
@@ -56,10 +63,12 @@
           {#each [{ id: null, label: strings.composer.standardSpeed }, ...speeds] as entry (entry.id)}<label class:selected={speed === entry.id}><input type="radio" name="mobile-speed" checked={speed === entry.id} onchange={() => onspeed(entry.id)} />{entry.label}</label>{/each}
         </div></fieldset>
       {/if}
-      <fieldset disabled={busy}><legend>{strings.composer.mode}</legend><div class="choices permissions">
-        {#each modes as item (item)}<label class:selected={mode === item} title={strings.permissionModeLong[item]}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} />{strings.permissionMode[item]}</label>{/each}
-      </div><p class="hint">{strings.permissionModeLong[mode]}</p></fieldset>
-      {#if worktree !== null}<button class="worktree" aria-pressed={worktree} data-testid="composer-options-worktree" onclick={onworktree}><GitBranch size={19} /><span>{strings.composer.worktree}</span><span class="switch" class:on={worktree}></span></button>{/if}
+      {#if ordered.length > 0}<fieldset disabled={busy}><legend>{strings.composer.mode}</legend><div class="choices permissions">
+        {#each ordered as item (item)}<label class:selected={mode === item} title={modeHint(item)}><input type="radio" name="mobile-mode" value={item} checked={mode === item} onchange={() => onmode(item)} />{modeLabel(item)}</label>{/each}
+      </div><p class="hint">{modeHint(mode)}</p></fieldset>{/if}
+      {#if worktree !== null}
+        <button class="worktree" aria-pressed={worktree} data-testid="composer-options-worktree" onclick={onworktree}><GitBranch size={19} /><span>{strings.composer.worktree}</span><span class="switch" class:on={worktree}></span></button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -85,5 +94,10 @@
   .switch::after { content: ''; display: block; width: 12px; height: 12px; border-radius: var(--radius-xl); background: var(--color-foreground); transition: transform var(--dur-2); }
   .switch.on { background: var(--color-accent); }
   .switch.on::after { transform: translateX(12px); }
-  @media (max-width: 720px) { .options { display: block; flex: none; } .opener { width: var(--touch-target); height: var(--touch-target); border-radius: var(--radius-xl); } }
+  .worktree { margin-top: 12px; }
+
+  @media (max-width: 720px) {
+    .options { display: block; flex: none; }
+    .opener { width: var(--touch-target); height: var(--touch-target); border-radius: var(--radius-xl); }
+  }
 </style>

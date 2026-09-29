@@ -4,6 +4,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
+  import MemoryBanner from './MemoryBanner.svelte';
 
   /** More than this many at once would bury the thread; the settings page lists the rest. */
   const MOST = 3;
@@ -27,28 +28,30 @@
       for (const update of machine.store.harnessUpdates) {
         // A failure with nothing newer behind it is a failed check, which belongs to the settings page.
         const failedUpdate = update.state === 'failed' && update.latest !== null && update.latest !== update.current && update.skipped !== update.latest;
-        if (!update.pending && update.state !== 'updating' && !failedUpdate) continue;
+        // An update runs in the background once asked for: only a failure brings the notice back.
+        if (!update.pending && !failedUpdate) continue;
         out.push({ key: `${machine.id}::${update.providerId}`, machine: machine.label, store: machine.store, update });
       }
     }
     return out.slice(0, MOST);
   });
   let several = $derived(workspace.machines.length > 1);
+  let memoryMachines = $derived(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner && machine.store.memoryState && machine.store.memoryState !== 'ok'));
   /** A phone's settings are one narrow column: the notices wait for the conversation. */
   let offChat = $derived(workspace.active.page !== 'chat');
 </script>
 
-{#if notices.length > 0}
-  <div class="update-notices" class:off-chat={offChat} data-testid="harness-update-notices" role="region" aria-label={strings.harnessUpdates.heading}>
+{#if notices.length > 0 || memoryMachines.length > 0}
+  <div class="update-notices" class:off-chat={offChat && memoryMachines.length === 0} data-testid="harness-update-notices" role="region" aria-label={memoryMachines.length ? strings.resources.memory : strings.harnessUpdates.heading}>
+    {#each memoryMachines as machine (machine.id)}
+      <MemoryBanner state={machine.store.memoryState} stopped={machine.store.memoryStopped} machine={several ? machine.label : undefined} />
+    {/each}
     {#each notices as notice (notice.key)}
       {@const update = notice.update}
       <article class="notice" data-testid="harness-update-notice" data-update-provider={update.providerId} data-state={update.state}>
         <span class="logo"><ProviderLogo providerId={update.providerId} size={20} /></span>
         <div class="lines">
-          {#if update.state === 'updating'}
-            <span class="heading">{strings.harnessUpdates.updating(update.name)}</span>
-            <p>{strings.harnessUpdates.updatingHint}</p>
-          {:else if update.state === 'failed'}
+          {#if update.state === 'failed'}
             <span class="heading bad">{strings.harnessUpdates.failed(update.name)}</span>
             <p class="message">{update.message}</p>
           {:else}
@@ -58,18 +61,14 @@
             </p>
           {/if}
         </div>
-        {#if update.state === 'updating'}
-          <span class="bar" aria-hidden="true"></span>
-        {:else}
-          <div class="actions">
-            <button type="button" class="quiet small" data-testid="harness-update-skip" onclick={() => void notice.store.skipHarnessUpdate(update.providerId, update.latest)}>
-              {strings.harnessUpdates.skip}
-            </button>
-            <button type="button" class="primary small" data-testid="harness-update-run" onclick={() => void notice.store.updateHarness(update.providerId)}>
-              {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
-            </button>
-          </div>
-        {/if}
+        <div class="actions">
+          <button type="button" class="quiet small" data-testid="harness-update-skip" onclick={() => void notice.store.skipHarnessUpdate(update.providerId, update.latest)}>
+            {strings.harnessUpdates.skip}
+          </button>
+          <button type="button" class="primary small" data-testid="harness-update-run" onclick={() => void notice.store.updateHarness(update.providerId)}>
+            {update.state === 'failed' ? strings.harnessUpdates.retry : strings.harnessUpdates.update}
+          </button>
+        </div>
       </article>
     {/each}
   </div>
@@ -142,26 +141,8 @@
     gap: 6px;
   }
 
-  .bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-    background-size: 50% 100%;
-    background-repeat: no-repeat;
-    animation: slide 1.4s linear infinite;
-  }
-
-  @keyframes slide {
-    from { background-position: -100% 0; }
-    to { background-position: 300% 0; }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .notice, .bar { animation: none; }
-    .bar { background-size: 100% 100%; }
+    .notice { animation: none; }
   }
 
   /* A phone shows one at a time: answering it brings the next. */
@@ -172,6 +153,8 @@
       right: 16px;
       width: auto;
     }
+    /* A conversation adds its header row under the phone's own: the card sits below both. */
+    :global(.app.phone-chat) .update-notices { top: calc(56px + var(--titlebar, 44px) + 8px + env(safe-area-inset-top, 0px)); }
     .notice:nth-child(n + 2) { display: none; }
     .update-notices.off-chat { display: none; }
   }

@@ -2,12 +2,14 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
+import type { FakeClient } from './lib/fake-client';
 import { confirm } from './lib/confirm.svelte';
 import { store } from './lib/store.svelte';
 import { workspace } from './lib/workspace.svelte';
 import { setExperiment, writeExperiments } from './lib/experiments';
 import { storeEndpoint, upsertEnvironment } from './lib/endpoint';
 import { closeTour } from './lib/onboarding.svelte';
+import { work } from './lib/work-prefs.svelte';
 import { count } from './lib/format';
 
 // The opener plugin is the shell's system browser; nothing real may run here.
@@ -24,18 +26,22 @@ afterEach(() => {
   // Through the writer, so the reactive mirror hears the reset too.
   writeExperiments([]);
   window.localStorage.clear();
+  work.load();
   delete window.__TAURI_INTERNALS__;
   openUrl.mockClear();
 });
 
 // The first settings mount waits on the dynamic import of the whole settings
-// subtree: on a CI worker that one wait already took 1.2 s, against a budget of
-// 400 ticks. Poll long enough that a slow machine is not a failure.
-async function waitFor(check: () => boolean, attempts = 2000): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
+// subtree: on a CI worker that one wait already took 1.2 s. The wait stops at
+// a deadline well inside the test timeout (vitest.config.ts), so a slow wait
+// fails here with the page's text rather than as a bare "Test timed out".
+async function waitFor(check: () => boolean, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  if (check()) return;
   throw new Error(`gave up waiting, body was:\n${document.body.textContent ?? ''}`);
 }
 
@@ -131,7 +137,8 @@ test('the app mounts against the fake core, lists the seeded threads and opens t
   const text = document.body.textContent ?? '';
   expect(text).toContain('boite');
   expect(text).toContain('Port the scheduler');
-  expect(text).toContain('1 machine connected');
+  // One machine that is connected needs no word about it.
+  expect(text).not.toContain('1 machine connected');
   expect(document.querySelector('[data-testid=composer-input]')).not.toBeNull();
   expect(document.querySelectorAll('[data-testid=thread-row]').length).toBe(4);
   // The most recent thread opens on its own; nothing to click first.
@@ -159,6 +166,23 @@ test('the app opens on a new thread in the project last worked in', async () => 
   await store.openLanding();
   expect(store.draft).toBeNull();
   expect(store.page).toBe('settings');
+});
+
+test('a notification link opens its thread on boot, with no landing draft first', async () => {
+  const drafted = vi.spyOn(store, 'startDraft');
+  try {
+    await mountOnFake('/?fake=1&open=landing&thread=t-scheduler');
+    expect(store.openThread?.id).toBe('t-scheduler');
+    expect(drafted).not.toHaveBeenCalled();
+    // A reload after the jump lands as usual instead of replaying the link.
+    expect(new URLSearchParams(window.location.search).get('thread')).toBeNull();
+  } finally { drafted.mockRestore(); }
+});
+
+test('a notification link to a thread that is gone lands on the usual draft', async () => {
+  await mountOnFake('/?fake=1&open=landing&thread=t-gone');
+  expect(store.openThread).toBeNull();
+  expect(store.draft).not.toBeNull();
 });
 
 test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
@@ -204,13 +228,86 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
 
   await waitFor(() => store.openThread !== null && store.draft === null);
   expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('C:\\src\\.boite-worktrees\\notes\\fix-the-login');
+  expect(store.openThread?.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\fix-the-login');
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
   expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
   expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
   // The chip went with the draft.
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
 });
+
+test('a draft on a folder that is not a repository offers no worktree switch', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+  const project = store.projects.find((one) => one.id === store.draft?.projectId);
+  if (!project) throw new Error('the draft has no project');
+  project.repository = false;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') === null);
+  // A core older than the field says nothing, and the switch stays.
+  delete project.repository;
+  await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
+});
+
+test('a machine with no AI offers to connect one, and the composer keeps its text and lands on it', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Sort my holiday photos';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') !== null);
+  // The two services most people already pay for come first, each saying which plan it uses.
+  const services = Array.from(document.querySelectorAll('[data-testid=connect-service]')).map((row) => row.getAttribute('data-provider'));
+  expect(services.slice(0, 2)).toEqual(['claude', 'codex']);
+  expect(query('[data-testid=connect-dialog]').textContent).toContain('Uses a Claude Pro or Max plan');
+
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-install]').click();
+  // The download chains into the sign-in, which hands over a page to open and a field for its code.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') === null);
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('No AI connected');
+  expect(query<HTMLTextAreaElement>('[data-testid=composer-input]').value).toBe('Sort my holiday photos');
+});
+
+test('the keyboard stays in the connect dialog while its steps replace the button it pressed', async () => {
+  await mountOnFake('/?fake=1&uninstalled=1');
+  if (!store.draft) query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-connect]') !== null);
+  query<HTMLButtonElement>('[data-testid=composer-connect]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-service]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-service][data-provider=claude]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-install]') !== null);
+  const install = query<HTMLButtonElement>('[data-testid=connect-install]');
+  install.focus();
+  install.click();
+  const dialog = () => query('[data-testid=connect-dialog]');
+  await waitFor(() => document.querySelector('[data-testid=connect-step]')?.getAttribute('data-step') === 'installing');
+  await waitFor(() => dialog().contains(document.activeElement));
+  await waitFor(() => document.querySelector('[data-testid=connect-login-url]') !== null, 20_000);
+  await waitFor(() => dialog().contains(document.activeElement));
+  const code = query<HTMLInputElement>('[data-testid=connect-login-input]');
+  code.focus();
+  code.value = 'fake-code';
+  code.dispatchEvent(new Event('input', { bubbles: true }));
+  code.closest('form')!.requestSubmit();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  await waitFor(() => document.activeElement === document.querySelector('[data-testid=connect-use]'));
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+}, 30_000);
 
 test('the sidebar draft row hands the keyboard back to the composer', async () => {
   await mountOnFake();
@@ -255,9 +352,12 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   const rows = Array.from(
     document.querySelectorAll<HTMLButtonElement>('[data-testid=draft-project-menu] [data-row]')
   );
-  expect(rows.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual(['p-boite', 'p-notes']);
+  // The drafts lead, made or not, and opening a folder closes the list.
+  const places = rows.filter((row) => row.dataset['value']!.startsWith('['));
+  expect(places.map((row) => JSON.parse(row.dataset['value']!)[1])).toEqual([null, 'p-boite', 'p-notes']);
+  expect(rows.at(-1)?.dataset['value']).toBe('open-folder');
 
-  rows[0]?.click();
+  places[1]?.click();
   await waitFor(() => store.draft?.projectId === 'p-boite');
   await waitFor(() => (query('[data-testid=draft-empty]').textContent ?? '').includes('boite'));
   // The draft row moved with it, and the composer took the keyboard back.
@@ -274,13 +374,13 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   await waitFor(() => store.draft !== null);
 
   // A draft opens on the first available provider, its default model.
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  // One tile per provider, in the core's order, the one whose files are still to
-  // download included: it is picked like any other and its column says why.
-  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'antigravity', 'codex', 'pi', 'grok', 'muse']);
+  // One tile per provider an account answers for, in the core's order: the
+  // one still to download or sign into is Settings' business, one tile away.
+  expect(tiles()).toEqual(['favorites', 'claude', 'echo', 'opencode', 'codex', 'pi', 'grok', 'muse', 'antigravity-cli', 'more']);
   // Claude is the shown one and has two logins, so they sit beside its name.
   expect(seats()).toEqual(['claude::a-claude-main', 'claude::a-claude-side']);
   expect(shownModels()).toEqual(['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5']);
@@ -289,10 +389,6 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=echo]').click();
   await waitFor(() => shownModels().length === 1);
   expect(seats()).toEqual([]);
-
-  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
-  expect(shownModels()).toEqual([]);
 
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=claude]').click();
   await waitFor(() => shownModels().length === 3);
@@ -303,7 +399,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   query<HTMLButtonElement>('[data-instance="claude::a-claude-side"]').click();
   query<HTMLButtonElement>('[data-model="claude-opus-5"]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5 · Second seat');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5 · Second seat');
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'On the second seat';
@@ -319,7 +415,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -363,7 +459,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
@@ -394,7 +490,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect((document.activeElement as HTMLElement).getAttribute('data-model')).toBe('anthropic/claude-sonnet-5');
   press('Enter');
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Sonnet 5');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Sonnet 5');
 
   // A query nothing answers says so, and Escape clears it before it closes anything.
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
@@ -425,7 +521,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
-  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Claude Opus 5') === true);
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
 
   await waitFor(() => document.querySelector('[data-testid=composer-effort]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-effort]').click();
@@ -441,9 +537,9 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   // Picking a level keeps the popover open: it is a setting of the model, not a choice of its own.
   expect(document.querySelector('[data-testid=composer-effort-menu]')).not.toBeNull();
   // The level reads on its own chip; the picker's label names the model alone.
-  expect(query('[data-testid=composer-picker]').textContent).toContain('Claude Opus 5');
-  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Extra high');
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  expect(query('[data-testid=composer-picker]').textContent).toContain('Opus 5');
+  expect(query('[data-testid=composer-picker]').textContent).not.toContain('Xhigh');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
 
   // The dots are filled up to the one that is live, and no further.
   const filled = Array.from(document.querySelectorAll('[data-dot]')).filter((dot) => dot.classList.contains('on'));
@@ -454,7 +550,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
 
   // The draft carries the effort into the thread the first send creates.
   query<HTMLButtonElement>('[data-testid=composer-effort-menu] [data-value=xhigh]').click();
-  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Extra high');
+  await waitFor(() => query('[data-testid=composer-effort]').textContent?.trim() === 'Xhigh');
   press('Escape');
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'Think harder about the caps';
@@ -473,10 +569,15 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Archive']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Move to project', 'Archive']);
+  // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
+  expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  // t-bench waits on a permission: archiving it would drop that card, so the app asks first.
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
 });
@@ -610,6 +711,9 @@ test('removing a project asks first, and Cancel keeps it', async () => {
   const head = query('[data-project-id="p-notes"][data-testid=project-row]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=remove]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=remove]').click();
   await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') !== null);
   expect(document.querySelector('[data-testid=confirm-dialog]')?.textContent).toContain('notes');
@@ -654,14 +758,104 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
-test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
+test('Ctrl+J opens the shell of the thread under the chat, hides it again, and its cross ends the shell', async () => {
+  await mountOnFake();
+  await waitFor(() => store.openThread !== null);
+  const threadId = store.openThread!.id;
+  const chord = () => new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true });
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector(`[data-testid=terminal][data-terminal-id="terminal:${threadId}"]`) !== null);
+  // xterm draws what the fake shell printed: its prompt, in the thread's folder.
+  await waitFor(() => query('[data-testid=terminal-drawer]').textContent?.includes('PS ') === true);
+  expect(query('[data-testid=terminal-toggle]').classList.contains('on')).toBe(true);
+  expect(query<HTMLButtonElement>('[data-testid=terminal-toggle]').title).toContain('Ctrl+J');
+
+  // Back from a dropped socket, the view asks the core for the shell again.
+  const reopen = vi.spyOn(store, 'openTerminal');
+  store.connection = 'connecting';
+  flushSync();
+  store.connection = 'ready';
+  flushSync();
+  await waitFor(() => reopen.mock.calls.length === 1);
+  expect(reopen.mock.calls[0]?.[0]).toBe(threadId);
+  reopen.mockRestore();
+
+  expect(document.body.dispatchEvent(chord())).toBe(false);
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+
+  query<HTMLButtonElement>('[data-testid=terminal-toggle]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') !== null);
+  query<HTMLButtonElement>('[data-testid=terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]') === null);
+  expect(store.terminalShown(threadId)).toBe(false);
+});
+
+test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=nav-settings]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
+  query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
+  await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
+  await openProviderDetails('opencode');
+
+  // The user's own OpenCode login gets the button too: the terminal is theirs to answer.
+  const button = query<HTMLButtonElement>('[data-provider-id=opencode] [data-testid=account-login]');
+  expect(button.getAttribute('data-account-id')).toBe('a-opencode');
+  button.click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=account-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=account-login-terminal]').textContent?.includes('Select provider') === true);
+  expect(query('[data-testid=account-login-terminal]').textContent).toContain('opencode auth login');
+  // No piped login and its code field while the terminal holds the sign-in.
+  expect(document.querySelector('[data-testid=account-login-row]')).toBeNull();
+  expect(query('[data-provider-id=opencode]').getAttribute('data-step')).toBe('signing-in');
+
+  query<HTMLButtonElement>('[data-testid=account-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=account-login-terminal]') === null);
+  await waitFor(() => query('[data-provider-id=opencode]').getAttribute('data-step') === 'ready');
+
+  query<HTMLButtonElement>('[data-testid=settings-back]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings]') === null);
+});
+
+test('the guided connection signs OpenCode in from a terminal too, then hands it to the composer', async () => {
+  await mountOnFake();
+  // Signed out since: the dialog has a sign-in to offer.
+  await waitFor(() => store.accountOf('a-opencode') !== null);
+  store.accountOf('a-opencode')!.status = 'unauthenticated';
+  store.openConnect('opencode');
+  await waitFor(() => document.querySelector('[data-testid=connect-sign-in]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-sign-in]').click();
+  // The user's own OpenCode login, in a terminal: its menu is not something a pipe can answer.
+  await waitFor(() => document.querySelector('[data-testid=connect-login-terminal] [data-testid=terminal]') !== null);
+  expect(query('[data-testid=connect-login-terminal] [data-testid=terminal]').getAttribute('data-terminal-id')).toBe('login:a-opencode');
+  await waitFor(() => query('[data-testid=connect-login-terminal]').textContent?.includes('opencode auth login') === true);
+  expect(query('[data-testid=connect-step]').getAttribute('data-step')).toBe('signing-in');
+  expect(document.querySelector('[data-testid=connect-login-input]')).toBeNull();
+  // Escape inside the terminal steps back in the CLI's menu; it does not close the dialog.
+  query('[data-testid=connect-login-terminal] [data-testid=terminal]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.querySelector('[data-testid=connect-dialog]')).not.toBeNull();
+
+  query<HTMLButtonElement>('[data-testid=connect-login-terminal-close]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null);
+  query<HTMLButtonElement>('[data-testid=connect-use]').click();
+  await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
+  expect(store.accountOf('a-opencode')?.status).toBe('ok');
+});
+
+test('the composer wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');
 
   // 31k of 200k, just compacted: the ring reads 16 percent and the divider says what went.
   await waitFor(() => document.querySelector('[data-testid=context-meter]') !== null);
   const meter = query('[data-testid=context-meter]');
-  expect(meter.textContent?.trim()).toBe('16%');
+  expect(meter.closest('[data-testid=composer]')).not.toBeNull();
+  expect(query('[data-testid=context-trigger]').textContent?.trim()).toBe('');
+  expect(meter.dataset.percent).toBe('16');
   expect(meter.dataset.level).toBe('low');
   query<HTMLButtonElement>('[data-testid=context-trigger]').click();
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
@@ -722,6 +916,63 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.textContent).toContain('21140');
   expect(row.textContent).toContain('CPU time');
   expect(row.querySelector('.command')?.textContent).toContain('claude');
+});
+
+test('hiding the trace card takes it off the launcher and leaves an open trace tab alone', async () => {
+  await mountOnFake();
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => store.openThread?.id === 't-trace');
+  store.panel.closeAll();
+  store.panel.open('trace');
+  await waitFor(() => document.querySelector('[data-testid=trace-panel]') !== null);
+  work.show('panel.trace', false);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.querySelector('[data-testid=trace-panel]')).not.toBeNull();
+
+  store.panel.closeAll();
+  store.togglePanel();
+  await waitFor(() => document.querySelector('[data-testid=panel-launcher]') !== null);
+  expect(document.querySelector('[data-testid=launch-trace]')).toBeNull();
+  expect(document.querySelector('[data-testid=launch-files]')).not.toBeNull();
+  work.show('panel.trace', true);
+  await waitFor(() => document.querySelector('[data-testid=launch-trace]') !== null);
+});
+
+test("a header button's right click hides it, and the Appearance page brings it back", async () => {
+  // The settings page scrolls to the card it was opened on; jsdom draws nothing to scroll.
+  Element.prototype.scrollIntoView ??= vi.fn();
+  work.showPreset('developer');
+  // With a team on the thread, since Team shows only where there is one.
+  await mountOnFake('/?fake=1&team=1');
+  await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
+  query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') !== null);
+
+  query('[data-testid=terminal-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=hide]').click();
+  await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') === null);
+  expect(work.current.hidden).toEqual(['header.terminal']);
+
+  // The same button's menu, on another one, leads to the page that lists them all.
+  // Team shows once that team has loaded.
+  await waitFor(() => document.querySelector('[data-testid=agents-toggle]') !== null);
+  query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
+  await waitFor(() => document.querySelector('[data-testid=settings-buttons]') !== null);
+  expect(store.settingsTab).toBe('appearance');
+  const terminal = query<HTMLInputElement>('[data-testid="control-header.terminal"]');
+  expect(terminal.checked).toBe(false);
+  // Neither preset is lit once the buttons are the device's own.
+  expect(query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed')).toBe('false');
+  terminal.click();
+  expect(work.current.hidden).toEqual([]);
+  await waitFor(() => query('[data-testid=controls-preset-developer]').getAttribute('aria-pressed') === 'true');
+  query<HTMLButtonElement>('[data-testid=controls-preset-everyday]').click();
+  expect(work.current.hidden).toEqual(['header.terminal', 'panel.trace']);
+  await waitFor(() => !query<HTMLInputElement>('[data-testid="control-header.terminal"]').checked);
 });
 
 test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
@@ -1189,25 +1440,72 @@ test('outside the shell the same link goes through window.open', async () => {
   }
 });
 
-test('a ctrl-click on an external link is left alone', async () => {
+test.each([false, true])('a ctrl-click uses the opener only in the shell: %s', async (shell) => {
   const opened = vi.fn(() => null);
   const original = window.open;
   window.open = opened as unknown as typeof window.open;
   try {
     const link = await loginLink();
-    window.__TAURI_INTERNALS__ = {};
+    if (shell) window.__TAURI_INTERNALS__ = {};
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
     link.dispatchEvent(click);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(openUrl).not.toHaveBeenCalled();
+    if (shell) expect(openUrl).toHaveBeenCalledWith(LOGIN_URL);
+    else expect(openUrl).not.toHaveBeenCalled();
     expect(opened).not.toHaveBeenCalled();
-    expect(click.defaultPrevented).toBe(false);
+    expect(click.defaultPrevented).toBe(shell);
 
     await backToChat();
   } finally {
     window.open = original;
   }
+});
+
+async function sendPrompt(text: string): Promise<void> {
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+}
+
+test('an async question waits in the dock above the composer, stacked, and the timeline keeps a line to it', async () => {
+  await mountOnFake();
+  query<HTMLButtonElement>('[data-testid=new-thread]').click();
+  await waitFor(() => store.draft !== null);
+
+  await sendPrompt('[ask] one');
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 1);
+  await waitFor(() => store.openThread?.status === 'idle');
+  await sendPrompt('[ask] two');
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 2);
+
+  // The newest comes up, behind a pager; the timeline holds a line per question, no card.
+  expect(query('[data-testid=activity-question-index]').textContent).toBe('2 of 2');
+  expect(document.querySelectorAll('[data-testid=question-docked]').length).toBe(2);
+  expect(document.querySelector('[data-testid=timeline] [data-testid=question-card]')).toBeNull();
+  const visible = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid=activity-question]')).filter((el) => !el.hidden);
+  expect(visible().length).toBe(1);
+  const newest = visible()[0]?.dataset.question;
+  query<HTMLButtonElement>('[data-testid=activity-question-prev]').click();
+  await waitFor(() => query('[data-testid=activity-question-index]').textContent === '1 of 2');
+  expect(visible()[0]?.dataset.question).not.toBe(newest);
+
+  // Answered from the dock, it leaves it and folds to its answer in the timeline.
+  const first = visible()[0]!;
+  first.querySelector<HTMLButtonElement>('[data-testid=question-option]')?.click();
+  await waitFor(() => !first.querySelector<HTMLButtonElement>('[data-testid=question-submit]')?.disabled);
+  first.querySelector<HTMLButtonElement>('[data-testid=question-submit]')?.click();
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 1);
+  expect(document.querySelector('[data-testid=activity-question-index]')).toBeNull();
+  await waitFor(() => document.querySelectorAll('[data-testid=question-docked]').length === 1);
+
+  // Folded, a click on its line in the timeline opens it again.
+  query<HTMLButtonElement>('[data-testid=activity-question-toggle]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'false');
+  query<HTMLButtonElement>('[data-testid=question-docked]').click();
+  await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'true');
 });
 
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
@@ -1253,13 +1551,74 @@ test('a tool card shows the input as the model types it, then switches to the pa
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
   expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);
-  expect(card.querySelector('.line')?.textContent).toBe('echo streamed');
+  expect(card.querySelector('.line')?.textContent).toBe('Ran 1 command');
 
   card.querySelector<HTMLButtonElement>('[data-testid=tool-toggle]')?.click();
   await waitFor(() => card.querySelector('[data-testid=tool-input]') !== null);
   const shown = card.querySelector('[data-testid=tool-input]')?.textContent ?? '';
   expect(shown).toContain('"command": "echo streamed"');
   expect(shown).not.toBe(STREAMED_TOOL_INPUT);
+});
+
+test('a finished answer lists the files it changed, and a row opens one in the panel', async () => {
+  await mountOnFake();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'fix it [diff]';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => document.querySelector('[data-testid=turn-files]') !== null);
+  // Folded: the count and the lines added and removed, the list on a click.
+  const toggle = query<HTMLButtonElement>('[data-testid=turn-files-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.querySelector('[data-testid=turn-lines]')?.textContent).toBe('+2-1');
+  expect(document.querySelector('[data-testid=turn-file-folder]')).toBeNull();
+  toggle.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file-folder]') !== null);
+  const folder = query<HTMLButtonElement>('[data-testid=turn-file-folder]');
+  expect(folder.textContent).toContain('src');
+  expect(folder.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=turn-file]')).toBeNull();
+  folder.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') !== null);
+  expect(folder.getAttribute('aria-expanded')).toBe('true');
+  query<HTMLButtonElement>('[data-testid=turn-files-expand]').click();
+  await waitFor(() => query('[data-testid=turn-files-expand]').getAttribute('aria-label') === 'Collapse all folders');
+  query<HTMLButtonElement>('[data-testid=turn-files-expand]').click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') === null);
+  folder.click();
+  await waitFor(() => document.querySelector('[data-testid=turn-file]') !== null);
+  const row = query('[data-testid=turn-files] li[data-change]');
+  expect(row.querySelector('.name')?.textContent).toBe('app.ts');
+  expect(row.querySelector('[data-testid=turn-file-change]')?.textContent?.trim()).toBe('Changed');
+  // A browser has no file manager to hand the path to.
+  expect(row.querySelector('[data-testid=turn-file-reveal]')).toBeNull();
+
+  row.querySelector<HTMLButtonElement>('[data-testid=turn-file]')?.click();
+  await waitFor(() => document.querySelector('[data-testid=file-text]') !== null);
+  expect(query('[data-testid=file-path]').textContent).toContain('src/app.ts');
+
+  // A text file downloads as what the editor shows.
+  const created: Blob[] = [];
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = (blob: Blob) => { created.push(blob); return 'blob:turn-file'; };
+  URL.revokeObjectURL = () => {};
+  const click = HTMLAnchorElement.prototype.click;
+  let downloaded = '';
+  HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) { downloaded = this.download; };
+  try {
+    query<HTMLButtonElement>('[data-testid=file-download-text]').click();
+  } finally {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    HTMLAnchorElement.prototype.click = click;
+  }
+  expect(downloaded).toBe('app.ts');
+  expect(await created[0]?.text()).toBe(query<HTMLTextAreaElement>('[data-testid=file-text]').value);
+  store.panel.closeAll();
 });
 
 test('a tool card shows the diff, the markdown and the image it produced', async () => {
@@ -1271,11 +1630,16 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
-  // Folded, each of the three cards says what it carries.
-  await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 3);
+  // The edit comes open on its diff and counts its lines on its own line; the
+  // other two are folded and say what they carry.
+  await waitFor(() => document.querySelectorAll('[data-testid=tool-document-chip]').length === 2);
   expect(
     Array.from(document.querySelectorAll('[data-testid=tool-document-chip]')).map((el) => el.textContent)
-  ).toEqual(['1 diff', '1 doc', '1 doc']);
+  ).toEqual(['1 doc', '1 doc']);
+  expect(query('[data-testid=tool-diff-counts]').textContent?.replace(/\s+/g, ' ').trim()).toBe('+2 -1');
+  expect(query('[data-testid=tool-card][data-family=edit] [data-testid=tool-toggle]').getAttribute('aria-expanded')).toBe('true');
+  // A diff says it all: no raw input under it.
+  expect(document.querySelector('[data-testid=tool-card][data-family=edit] [data-testid=tool-input]')).toBeNull();
 
   // Open every card that carries documents.
   for (const chip of Array.from(document.querySelectorAll('[data-testid=tool-document-chip]'))) {
@@ -1308,7 +1672,7 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   expect(image.alt).toBe('one pixel');
 });
 
-test('a provider Boite installs says so in the picker and sends you to Settings, then becomes pickable', async () => {
+test('a provider Boite installs waits in Settings, one tile away, and joins the rail once signed in', async () => {
   await mountOnFake();
   // An open thread locks its provider; a draft is where another one can be picked.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
@@ -1316,29 +1680,29 @@ test('a provider Boite installs says so in the picker and sends you to Settings,
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
 
-  // Nothing is on the machine yet: the tile is pickable and its column says why
-  // it offers no model. The download itself lives on the Accounts page.
-  query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') !== null);
-  expect(document.querySelector('[data-testid=install-start]')).toBeNull();
-  expect(shownModels()).toEqual([]);
-
-  query<HTMLButtonElement>('[data-testid=picker-install-settings]').click();
+  // Nothing is on the machine yet, so the rail leaves it out and its last
+  // tile goes where it is installed and signed into.
+  expect(document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]')).toBeNull();
+  query<HTMLButtonElement>('[data-testid=picker-more-providers]').click();
   await waitFor(() => store.page === 'settings' && store.settingsTab === 'accounts');
   // The picker closed on the way out.
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
 
-  // The fake ticks for about two seconds, then the provider is one tile like any other.
+  // The fake ticks for about two seconds; installed is not yet signed in, so the rail still waits.
   await store.installProvider('antigravity');
-  await waitFor(() => store.installOf('antigravity')?.state === 'installed', 2000);
+  await waitFor(() => store.installOf('antigravity')?.state === 'installed');
   store.showChat();
   await waitFor(() => document.querySelector('[data-testid=composer-picker]') !== null);
-
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
+  expect(document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]')).toBeNull();
+
+  // Signed in, it is one tile like any other, in the open rail too.
+  store.accounts = store.accounts.map((account) => account.id === 'a-antigravity' ? { ...account, status: 'ok' as const } : account);
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu] [data-provider=antigravity]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=antigravity]').click();
-  await waitFor(() => document.querySelector('[data-testid=picker-not-installed]') === null);
-  await waitFor(() => shownModels().length > 0);
+  // Its models are read once it is shown: Claude's leave the column first.
+  await waitFor(() => shownModels().length > 0 && !shownModels().includes('claude-opus-5'));
 
   expect(shownModels()).not.toContain('default');
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-model]').click();
@@ -1355,16 +1719,33 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(query('[data-testid=settings-tab-accounts]').textContent?.trim()).toBe('Providers');
 
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
-  const absent = '[data-testid=provider-settings][data-provider-id=antigravity]';
-  await waitFor(() => document.querySelector(absent) !== null);
+  // One Antigravity row: its CLI is signed in, so the row reads ready and the
+  // download Boite manages waits inside it.
+  const family = '[data-testid=provider-settings][data-provider-id=antigravity]';
+  await waitFor(() => document.querySelector(family) !== null);
+  expect(document.querySelectorAll(family)).toHaveLength(1);
+  expect(document.querySelector('[data-testid=provider-settings][data-provider-id=antigravity-cli]')).toBeNull();
+  expect(query(family).getAttribute('data-step')).toBe('ready');
+  await openProviderDetails('antigravity');
+  const absent = `${family} [data-testid=provider-member][data-provider-id=antigravity]`;
+  expect(document.querySelector(`${family} [data-testid=provider-member][data-provider-id=antigravity-cli]`)).not.toBeNull();
 
   // Nothing on the machine: the size rides in the words, the button is one verb.
   expect(query(absent).getAttribute('data-step')).toBe('install');
   expect(query(`${absent} [data-testid=provider-state]`).textContent?.trim()).toBe('Not installed · 447 MB');
   expect(query(`${absent} [data-testid=install-start]`).textContent?.trim()).toBe('Install');
 
-  // Down and one release behind: the row offers Update, the details name both versions.
+  // The fake's OpenCode runs from the user's own install, so its own updater
+  // owns the version and the row offers no Update beside it.
   const behind = '[data-testid=provider-settings][data-provider-id=opencode]';
+  await waitFor(() => store.harnessUpdates.some((update) => update.providerId === 'opencode'));
+  expect(store.harnessUpdates.find((update) => update.providerId === 'opencode')?.route).toBe('self');
+  expect(document.querySelector(`${behind} [data-testid=install-update]`)).toBeNull();
+
+  // With Boite's copy the one that runs, down and one release behind: the row
+  // offers Update, the details name both versions.
+  store.harnessUpdates = store.harnessUpdates.filter((update) => update.providerId !== 'opencode');
+  await waitFor(() => document.querySelector(`${behind} [data-testid=install-update]`) !== null);
   expect(query(`${behind} [data-testid=install-update]`).textContent?.trim()).toBe('Update');
   await openProviderDetails('opencode');
   expect(query(`${behind} [data-testid=install-status]`).textContent?.trim()).toBe('Version 0.4.12 · 0.5.0 is available');
@@ -1376,8 +1757,7 @@ test('the Providers page says where each managed install stands and offers Updat
   expect(document.querySelector(`${behind} [data-testid=install-cancel]`)).not.toBeNull();
 
   await waitFor(
-    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0',
-    2000
+    () => document.querySelector(`${behind} [data-testid=install-status]`)?.textContent?.trim() === 'Installed by Boite · version 0.5.0'
   );
   expect(document.querySelector('[data-testid=install-update]')).toBeNull();
 
@@ -1426,6 +1806,8 @@ test('the project menu carries no import until the session-import experiment is 
   const head = query<HTMLElement>('[data-testid=project-row][data-project-id="p-boite"]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=copy]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=back]') !== null);
   expect(document.querySelector('[data-testid=context-menu] [data-value=import]')).toBeNull();
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
@@ -1433,6 +1815,8 @@ test('the project menu carries no import until the session-import experiment is 
   // The switch on the Experiments page is what puts the row in, no reload.
   setExperiment('session-import', true);
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
 });
 
@@ -1444,6 +1828,8 @@ test('Import a Claude Code session in the project menu lists the transcripts and
 
   const head = query<HTMLElement>('[data-testid=project-row][data-project-id="p-boite"]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=import]').click();
 
@@ -1469,6 +1855,8 @@ test('Import a Claude Code session in the project menu lists the transcripts and
 
   // Escape closes the dialog when it is open again.
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=import]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=import]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=import-row]').length === 2);
@@ -1477,20 +1865,23 @@ test('Import a Claude Code session in the project menu lists the transcripts and
   await waitFor(() => document.querySelector('[data-testid=import-dialog]') === null);
 });
 
-test('the chat header keeps the mark and the title, the status word riding the mark', async () => {
+test('the chat header keeps the title alone, and the rows say what each agent is doing', async () => {
   // The store is the singleton every test shares: a draft left open by another
   // one would keep the boot from opening a thread at all.
   store.draft = null;
   await mountOnFake();
 
-  // The word used to sit beside the title and repeat what the mark already says.
+  // The status is the row's to say: the header repeats neither a word nor a dot.
   expect(document.querySelector('[data-testid=thread-status-label]')).toBeNull();
-
-  const mark = query('[data-testid=thread-status]');
-  expect(mark.getAttribute('data-status')).toBe('idle');
-  expect(mark.getAttribute('title')).toBe('idle');
-  expect(mark.getAttribute('aria-label')).toBe('idle');
+  expect(document.querySelector('[data-testid=thread-header] .mark')).toBeNull();
+  expect(query('[data-testid=thread-header]').getAttribute('data-status')).toBe('idle');
   expect(query('[data-testid=thread-title]').textContent?.trim()).toBe(store.openThread?.title);
+
+  // No dot on any row; a thread waiting on the user says so in words.
+  expect(document.querySelector('[data-testid=thread-row] .mark')).toBeNull();
+  const waiting = query('[data-testid=thread-row][data-thread-id=t-scheduler] [data-testid=thread-state]');
+  expect(waiting.dataset['state']).toBe('waiting');
+  expect(waiting.textContent?.trim()).toBe('Needs you');
 });
 
 test('Add another account names the account itself and goes straight to the sign-in', async () => {
@@ -1537,7 +1928,31 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   await waitFor(() => document.querySelector('[data-testid=account-login-cancel]') !== null);
   query<HTMLButtonElement>('[data-testid=account-login-cancel]').click();
   await waitFor(() => document.querySelector('[data-testid=account-login-row]') === null);
+  // The core ends a cancelled login as failed, not done: the store drops the row all the same.
+  expect(store.logins).toEqual({});
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
+});
+
+test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
+  await mountOnFake();
+  const client = store.client!;
+  const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
+  expect(account.status).toBe('unauthenticated');
+  const [project] = await client.call('projects.list', {});
+  const thread = await client.call('threads.create', { projectId: project!.id, providerId: 'claude', accountId: account.id, title: 'Signed out' });
+  await waitFor(() => store.threads.some((entry) => entry.id === thread.id));
+  await store.open(thread.id);
+  await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
+});
+
+test('an error line of the core log shows the error toast, a warning does not', async () => {
+  await mountOnFake();
+  const fake = store.client as unknown as FakeClient;
+  // Events reach the store as they are sent, so the warning has been handled once this returns.
+  fake.emitCoreLog('warn', 'the disk is slow');
+  expect(store.error).toBeNull();
+  fake.emitCoreLog('error', 'the scheduler failed');
+  await waitFor(() => document.querySelector('[data-testid=error-toast]')?.textContent?.includes('the scheduler failed') === true);
 });
 
 test('account lifecycle provider metadata gates login and the command-line login', async () => {
@@ -1606,27 +2021,120 @@ test('browser Add project keeps refused paths and Escape returns to its button',
   }
 });
 
-test('first run uses the same path form to open its first project', async () => {
-  await mountOnFake();
+/** The app as a first launch sees it: no project, no thread, nothing open. */
+async function emptyCore(): Promise<void> {
   store.projects = [];
+  store.threads = [];
   store.openThread = null;
   store.draft = null;
-  await waitFor(() => document.querySelector('[data-testid=first-run]') !== null);
-  query<HTMLButtonElement>('[data-testid=add-project]').click();
+  await store.openWhereLeft();
+}
+
+test('the phone cannot manage an unrelated project from a draft without a folder', async () => {
+  await mountOnFake();
+  expect(store.projects.length).toBeGreaterThan(0);
+  store.startDraft(null);
+  await waitFor(() => query('[data-testid=mobile-project]').textContent?.includes('Drafts') === true);
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+  store.startDraft('p-boite');
+  await waitFor(() => document.querySelector('[data-testid=mobile-project-actions]') !== null);
+  await store.open('t-trace');
+  if (!store.openThread) throw new Error('the thread did not open');
+  store.openThread.projectId = null;
+  flushSync();
+  expect(store.openProject).toBeNull();
+  expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
+});
+
+test('the phone cannot archive an already archived project or offer a misleading undo', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const project = store.openProject!;
+  const archive = vi.spyOn(store, 'archiveProject');
+  const openManagement = async () => {
+    query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+    await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+    query<HTMLButtonElement>('[data-value=manage]').click();
+    await waitFor(() => document.querySelector('[data-value=archive-project]') !== null);
+  };
+  try {
+    await openManagement();
+    // Another client can archive the project while this menu stays open.
+    store.projects = store.projects.map(p => p.id === project.id ? { ...p, archived: true } : p);
+    flushSync();
+    query<HTMLButtonElement>('[data-value=archive-project]').click();
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+    expect(archive).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid=undo-toast]')).toBeNull();
+    await openManagement();
+    expect(query<HTMLButtonElement>('[data-value=archive-project]').disabled).toBe(true);
+  } finally {
+    archive.mockRestore();
+  }
+});
+
+test('first run opens a draft in the drafts, and the first send makes them', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => store.draft !== null);
+  expect(store.draft?.projectId).toBeNull();
+  expect(query('[data-testid=draft-project]').textContent).toContain('Drafts');
+  // A draft in the drafts has no repository to branch.
+  expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+
+  const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
+  input.value = 'Write a letter to the bank';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
+  query<HTMLButtonElement>('[data-testid=composer-send]').click();
+
+  await waitFor(() => store.openThread !== null && store.draft === null);
+  const drafts = store.draftsProject;
+  expect(drafts?.kind).toBe('drafts');
+  expect(store.openThread?.projectId).toBe(drafts?.id);
+  expect(store.openThread?.cwd).toMatch(/Documents\\Boite\\\d{4}-\d{2}-\d{2} Write a letter to the bank$/);
+});
+
+test('first run keeps opening a folder one click away', async () => {
+  await mountOnFake();
+  await emptyCore();
+  await waitFor(() => document.querySelector('[data-testid=draft-open-folder]') !== null);
+  query<HTMLButtonElement>('[data-testid=draft-open-folder]').click();
   await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
   await type(query<HTMLInputElement>('[data-testid=project-path]'), 'D:\\work\\first-project');
   query<HTMLButtonElement>('[data-testid=project-add]').click();
-  await waitFor(() => store.draft !== null);
-  expect(store.openProject?.path).toBe('D:\\work\\first-project');
-  expect(document.querySelector('[data-testid=first-run]')).toBeNull();
+  await waitFor(() => store.openProject?.path === 'D:\\work\\first-project');
+  expect(store.draftInDrafts).toBe(false);
+  expect(document.querySelector('[data-testid=draft-open-folder]')).toBeNull();
+});
+
+test('not a developer, New thread still follows the project on screen', async () => {
+  await mountOnFake();
+  work.choose('everyday');
+  // Work in two folders: each New thread stays in the folder on screen.
+  await store.open('t-descriptors');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-notes');
+  store.startDraft('p-boite');
+  store.startDraft();
+  expect(store.draft?.projectId).toBe('p-boite');
+  // In the drafts, it stays in the drafts; with nothing on screen, the drafts too.
+  store.startDraft(null);
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
+  store.draft = null;
+  store.startDraft();
+  expect(store.draftInDrafts).toBe(true);
 });
 
 test('an ACP login accepts the phone redirect URL through the login input', async () => {
   await mountOnFake();
   store.showSettings('accounts');
   await store.installProvider('antigravity');
-  await waitFor(() => store.providerOf('antigravity')?.available === true, 2000);
-  // Installed and nobody signed in: the row's one button is the sign-in.
+  await waitFor(() => store.providerOf('antigravity')?.available === true);
+  // Installed and nobody signed in: its block in the Antigravity row offers the sign-in.
+  await openProviderDetails('antigravity');
   const loginButton = '[data-provider-id=antigravity] [data-testid=provider-sign-in]';
   await waitFor(() => document.querySelector(loginButton) !== null);
   query<HTMLButtonElement>(loginButton).click();
@@ -1688,15 +2196,14 @@ test('a dialog waiting for an answer holds the window chords', async () => {
  * be offered them, once as the desktop, which must still have every one.
  */
 
-/** Everything owner-only that is drawn without leaving the chat. */
-const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]', '[data-testid=panel-toggle]'];
+/** Everything owner-only that is drawn without leaving the chat. The panel is not: its Agents and Workflows surfaces are the device's to follow. */
+const OWNER_ONLY_IN_CHAT = ['[data-testid=add-project]'];
 
-/** Everything owner-only on the settings nav and its General page. */
+/** Everything owner-only on the settings nav and its Machines page. */
 const OWNER_ONLY_IN_SETTINGS = [
   '[data-testid=settings-tab-accounts]',
   '[data-testid=settings-tab-plugins]',
   '[data-testid=settings-tab-resources]',
-  '[data-testid=settings-add-project]',
   '[data-testid=setting-listen-on-lan]',
   '[data-testid=pairing-mint]'
 ];
@@ -1722,20 +2229,21 @@ test('a paired device is offered none of the affordances the core refuses it', a
   for (const id of OWNER_ONLY_COMMANDS) expect(commands).not.toContain(id);
   store.paletteOpen = false;
 
-  // The project's own menu: no Remove, and no transcript import behind it.
-  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  // The phone's project menu: no Remove, and no transcript import behind it.
+  query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
+  expect(menuValues()).toEqual(['back', 'archive-project']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
-  store.showSettings();
-  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-card]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).toBeNull();
   // A screen that loses a control keeps the line saying whose app has it.
-  const settingsText = document.body.textContent ?? '';
-  expect(settingsText).toContain('Folders are added and removed from the app the core runs in.');
-  expect(settingsText).toContain('This device is paired with a key of its own.');
+  expect(document.body.textContent ?? '').toContain('This device is paired with a key of its own.');
   expect(store.error).toBeNull();
 });
 
@@ -1754,12 +2262,18 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'remove']);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
+  expect(menuValues()).toEqual(['back', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
+  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
 
-  store.showSettings();
-  await waitFor(() => document.querySelector('[data-testid=settings-page]') !== null);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
   for (const selector of OWNER_ONLY_IN_SETTINGS) expect(document.querySelector(selector)).not.toBeNull();
   store.showSettings('resources');
   await waitFor(() => document.querySelector('[data-testid=resources-page]') !== null);
@@ -1787,9 +2301,30 @@ test('machines coexist and disconnecting a remote leaves the primary connected',
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 2);
   expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid=machine-rename]')).map(input => input.value)).toContain('Builder');
   query<HTMLButtonElement>('[data-testid=machine-remove]').click();
+  // Forgetting a machine asks first; the answer is the in-app dialog's.
+  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
   await waitFor(() => document.querySelectorAll('[data-testid=machine-card]').length === 1);
   expect(store.connection).toBe('ready');
   expect(workspace.active).toBe(store);
+});
+
+test('a machine filter whose machine goes away lists the remaining machine again', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const threads = () => document.querySelectorAll('[data-thread-id]').length;
+  await waitFor(() => threads() > 0 && document.querySelector('[data-testid=machine-status]') !== null);
+  const everything = threads();
+  const remote = workspace.machines.find((machine) => machine.store !== store)!;
+  query<HTMLButtonElement>('[data-testid=machine-status]').click();
+  await waitFor(() => document.querySelector(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`) !== null);
+  query<HTMLButtonElement>(`[data-testid=machine-status-menu] [data-value="${remote.id}"]`).click();
+  await waitFor(() => threads() < everything);
+  workspace.machines = workspace.machines.filter((machine) => machine !== remote);
+  flushSync();
+  // One machine draws no machine button, so a filter left on the gone one could never be cleared.
+  expect(document.querySelector('[data-testid=machine-status]')).toBeNull();
+  expect(threads()).toBeGreaterThan(0);
 });
 
 test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {
@@ -1838,4 +2373,11 @@ test('sending waits for reconnect history to finish loading', async () => {
     await loading;
     expect(await sending).toBe(true);
   } finally { release(); spy.mockRestore(); }
+});
+
+test('the title counts the threads that wait on the user or finished unread', async () => {
+  await mountOnFake();
+  await waitFor(() => /^\(\d+\) /.test(document.title));
+  const waiting = document.querySelectorAll('[data-testid=sidebar] [data-state=waiting]').length;
+  expect(Number(/^\((\d+)\)/.exec(document.title)?.[1])).toBeGreaterThanOrEqual(Math.max(1, waiting));
 });

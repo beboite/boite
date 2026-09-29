@@ -10,98 +10,23 @@
  * process its thread launched. It is the narrowest of the three: it reaches
  * `AGENT_METHODS` and only ever on its own thread.
  *
- * The two lists below are the whole boundary, so this is the one place to read
- * when asking what a stolen phone, or an agent that went off, is worth. A
- * method that is in neither is the owner's: a new method added tomorrow is
- * refused to both until someone decides otherwise, on purpose.
+ * The device lists live in `packages/contracts/src/access.ts`, where the
+ * in-memory client reads them too; the agent list is below. Together they are
+ * the whole boundary: read them when asking what a stolen phone, or an agent
+ * that went off, is worth. A method that is in neither is the owner's: a new
+ * method added tomorrow is refused to both until someone decides otherwise,
+ * on purpose.
  */
 
-import type { RpcEventName, RpcMethodName } from '@boite/contracts';
+import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';
 import { refused } from './errors.ts';
 import type { Connection } from './router.ts';
 
-/**
- * What a paired device reaches. Read this as the phone's screen: the sidebar,
- * a thread, the composer, the cards an agent raises, and the settings it only
- * displays. Nothing here writes outside a thread, names a path, starts a
- * process of its own or changes what the core trusts.
- */
-export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
-  // Coordination is visible with the conversation; only the owner enables it.
-  'collaboration.get',
-  'collaboration.directory',
-  // Dictation uses the owner's configured engine. Devices cannot change paths or credentials.
-  'speech.status',
-  'speech.transcribe',
-  'speech.cancel',
-  // Its own pairing, so a phone can show itself in the device list.
-  'sessions.list',
-  // Each authenticated pairing manages only its own push destination.
-  'push.status',
-  'push.subscribe',
-  'push.unsubscribe',
-  'push.test',
-  // The sidebar and the composer's `@`.
-  'projects.list',
-  'projects.files',
-  // What a thread needs to name its agent.
-  'providers.list',
-  'accounts.list',
-  // The threads themselves.
-  'threads.list',
-  'threads.pullRequest', // Read-only branch metadata shown on the same phone thread cards.
-  'threads.create',
-  'threads.get',
-  // A phone can manage continued prompts in the same thread it can already send to.
-  'threads.activity.set',
-  'threads.activity.control',
-  'messages.list',
-  'threads.update',
-  'threads.retitle',
-  'threads.compact', // A paired device can request the same session maintenance as the desktop.
-  'threads.archive',
-  'threads.pin',
-  'threads.markRead',
-  'threads.subscribe',
-  'threads.unsubscribe',
-  'turns.start',
-  'turns.stop',
-  // The point of carrying the phone: answering the agent from anywhere.
-  'permissions.list',
-  'permissions.answer',
-  'questions.list',
-  'questions.answer',
-  // Read-only screens.
-  'scheduler.get',
-  'usage.get',
-  // Sums of the same finished turns per day, provider and model. The thread
-  // titles it names are the ones `threads.list` already shows the device.
-  'usage.history',
-  'settings.get',
-  'keybindings.get',
-]);
+export { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS };
 
 export function isDeviceMethod(method: RpcMethodName): boolean {
   return DEVICE_METHODS.has(method);
 }
-
-/** Push events must not bypass the read permissions enforced on RPC calls. */
-export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
-  'collaboration.changed', 'thread.activity',
-  'project.added', 'project.removed',
-  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands',
-  'turn.started', 'turn.finished',
-  'message.started', 'message.delta', 'message.part', 'message.completed',
-  'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
-  'scheduler.updated', 'accounts.updated', 'accounts.removed',
-  'settings.updated', 'keybindings.updated', 'sessions.updated',
-  'providers.updated', 'providers.installProgress', 'providers.probed',
-]);
-
-/** The server also checks the thread or project scope of these agent events. */
-export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
-  'thread.activity', 'todos.updated', 'collaboration.changed',
-]);
 
 export function mayReceiveEvent(name: RpcEventName, connection: Connection): boolean {
   if (connection.identity.principal === 'owner') return true;
@@ -113,16 +38,42 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * token that sits in the environment of a process the user did not write. Read
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
- * the files around it. Nothing here writes a file, starts a process, reads
- * another thread or changes what the core trusts, and every call is held to the
- * thread whose token it carries.
+ * the files around it. Delegation can start a child only on owner-approved
+ * routes within that thread's team budget. Every call is held to the token's
+ * thread; team methods check the relationship before reaching a child. None
+ * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
+  ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
+  ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],
+  ['agents.message.send', 'a bounded message as this agent to recipients in its current conversation'],
+  ['agents.memory.save', 'scoped memory with mandatory provenance, no widening of access'],
+  ['agents.task.acquire', 'atomic self-assignment inside the current authorized mission'],
+  ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
+  ['agents.artifact.add', 'versioned results from the current mission and working directory'],
+  ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
+  ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
+  ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
+  ['delegation.send', 'messages only between this parent and its direct children'],
+  ['delegation.stop', 'stop its own children or itself, never unrelated work'],
+  ['workflows.list', 'the runs of its own thread, or of its parent for a step'],
+  ['workflows.get', 'one run of its own thread, or of its parent for a step'],
+  ['workflows.check', 'validating a plan against its own approved profiles, without starting anything'],
+  ['workflows.start', 'a graph of child threads on owner-approved profiles, held to the same team budget and concurrency as delegation'],
+  ['workflows.extend', 'more steps on a run it started, under the same checks'],
+  ['workflows.control', 'pause, stop or retry runs it started; resuming a paused team stays with the owner'],
+  ['workflows.output', 'the structured result of the step this thread is, checked against its declared shape'],
+  ['workflows.templates.list', 'the plans kept for its own project'],
+  ['workflows.templates.save', 'keeping a new plan for its own project, never replacing a saved one; a template runs only through workflows.start'],
   ['collaboration.get', 'its own coordination inbox and remaining budget, never other conversations'],
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
+  ['agent.move', 'its own thread into a project the owner already registered, applied when its turn ends; never another thread, never a folder the owner did not add'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
+  ['questions.ask', 'a question card on its own thread that it does not wait on; the answer comes back as a message'],
+  ['artifacts.publish', 'explicitly sharing a bounded snapshot from its own working directory in its own conversation'],
   ['threads.tasks.set', 'the plan the tasks surface draws, from an agent whose protocol carries no todo tool'],
   ['threads.tasks.get', 'the same plan read back, so a new process continues the list it did not write'],
   ['todos.list', 'the project cards, shared with the other threads of the project'],
@@ -157,6 +108,7 @@ export function assertAllowed(method: RpcMethodName, connection: Connection, par
     }
     return;
   }
+  if (method === 'agents.message.send' && (params as { threadId?: unknown } | null | undefined)?.threadId !== undefined) throw refused('agents.message.send: paired devices must omit threadId and speak as the user');
   if (isDeviceMethod(method)) return;
   throw refused(`${method} is for the owner only`, { method, principal: identity.principal });
 }

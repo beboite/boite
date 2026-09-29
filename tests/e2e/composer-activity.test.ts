@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startDevUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 const id = (name: string) => `[data-testid="${name}"]`;
 async function size(phone: boolean) {
@@ -24,8 +22,7 @@ async function command(text: string) {
 }
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('${id('new-thread')}')`);
   await size(false);
@@ -44,7 +41,7 @@ test('commands are colored with aligned wrapping and three permission choices', 
     await page.type(id('composer-input'), '/goal Verify the composer');
     await page.click(id('composer-mode'));
     await page.waitFor(`document.querySelector('${id('composer-mode-menu')}')`);
-    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['Yolo', 'Auto decide', 'Ask']);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['Autonomous', 'Edit freely', 'Ask']);
     expect(await page.evaluate(`(() => { const r=document.querySelector('${id('composer-mode-menu')}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
     await capture(phone ? 'commands-permissions-phone' : 'commands-permissions-desktop');
     await page.evaluate(`document.querySelector('${id('composer-mode-menu')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`);
@@ -69,13 +66,13 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 test('the draft sentence follows worktree, permissions, model and effort on desktop and phone', async () => {
   await page.click(id('new-thread'));
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Claude Opus 5')`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}')?.textContent.includes('Opus 5')`);
   await page.click(id('composer-worktree'));
   await page.click(id('composer-mode'));
   await page.click(`${id('composer-mode-menu')} [data-value="bypassPermissions"]`);
   await page.click(id('composer-picker'));
   await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
-  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Claude Sonnet 5')`);
+  await page.waitFor(`document.querySelector('${id('draft-sentence')}').textContent.includes('Sonnet 5')`);
   await page.waitFor(`!document.querySelector('${id('composer-picker-menu')}')`);
   await page.click(id('composer-picker'));
   await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
@@ -89,7 +86,7 @@ test('the draft sentence follows worktree, permissions, model and effort on desk
   const sentence = await page.evaluate<string>(`document.querySelector('${id('draft-sentence')}').textContent`);
   expect(sentence).toContain('in a worktree');
   expect(sentence).toContain('with all permissions');
-  expect(sentence).toContain('Claude Opus 5');
+  expect(sentence).toContain('Opus 5');
   expect(sentence).toContain('High effort');
   await capture('composer-draft-desktop');
   await size(true);
@@ -99,16 +96,29 @@ test('the draft sentence follows worktree, permissions, model and effort on desk
   await size(false);
 }, 30_000);
 
-test('default models can be changed in General on desktop and phone', async () => {
+test('default models can be changed on each provider row in Providers', async () => {
   await page.click(id('nav-settings'));
-  await page.click(id('settings-tab-general'));
-  await page.waitFor(`document.querySelector('${id('model-defaults-settings')}')`);
+  await page.click(id('settings-tab-accounts'));
+  // Each connected provider keeps its default model behind its row's chevron.
+  for (const provider of ['claude', 'codex', 'grok']) {
+    const toggle = `${id('provider-settings')}[data-provider-id="${provider}"] ${id('provider-details-toggle')}`;
+    await page.click(toggle);
+    await page.waitFor(`document.querySelector('[data-default-provider="${provider}"]')`);
+  }
+  expect(await page.evaluate(`document.querySelector('${id('model-defaults-settings')}') === null`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('GPT 5.6 Sol');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="codex"]').textContent`)).toContain('medium');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('Grok 4.6');
   expect(await page.evaluate(`document.querySelector('[data-default-provider="grok"]').textContent`)).toContain('high');
   const row = '[data-default-provider="claude"]';
   await page.click(`${row} ${id('composer-picker')}`);
+  // A provider's default is one of its own models: the picker opens on them, with no other provider to switch to.
+  await page.waitFor(`document.querySelector('${id('composer-picker-menu')} [data-model]')`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-picker-menu')} .rail') === null`)).toBe(true);
+  expect(await page.evaluate(`[...document.querySelectorAll('${id('composer-picker-menu')} [data-model]')].every(entry => entry.dataset.model.startsWith('claude-'))`)).toBe(true);
+  // With no composer around it, the menu opens under its own button.
+  expect(await page.evaluate(`document.querySelector('${id('composer-picker-menu')}').getBoundingClientRect().top >= document.querySelector('${row} ${id('composer-picker')}').getBoundingClientRect().bottom`)).toBe(true);
+  await capture('model-default-single');
   await page.click(`${id('composer-picker-menu')} [data-model="claude-sonnet-5"]`);
   await page.waitFor(`document.querySelector('${row} ${id('composer-picker')}').textContent.includes('Sonnet 5')`);
   expect(await page.evaluate(`JSON.parse(localStorage.getItem('boite.model-defaults:v1')).claude.model`)).toBe('claude-sonnet-5');
@@ -116,17 +126,22 @@ test('default models can be changed in General on desktop and phone', async () =
   await page.click(`${row} ${id('composer-picker')}`);
   await page.click(`${id('composer-picker-menu')} [data-model="claude-opus-5"]`);
   await capture('model-defaults-desktop');
-  await size(true);
-  await capture('model-defaults-phone');
-  await size(false);
+  // Put the rows back the way the page opens, for the tests that follow.
+  for (const provider of ['claude', 'codex', 'grok']) await page.click(`${id('provider-settings')}[data-provider-id="${provider}"] ${id('provider-details-toggle')}`);
   await page.click(id('settings-back'));
 }, 30_000);
 
 test('tasks stay folded until requested and never move the reading position', async () => {
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(async ({store}) => { await store.open('t-trace'); })`);
   await page.waitFor(`document.querySelector('${id('timeline')}')`);
+  // Opening the thread schedules layout measurements and scroll restoration.
+  // Finish those before choosing the reading position this test must preserve.
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
-  const before = await page.evaluate(`(() => { const el = document.querySelector('${id('timeline')}'); const r = el.getBoundingClientRect(); return {top:r.top,height:r.height,scroll:el.scrollTop}; })()`);
+  await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  const before = await page.evaluate<{ top: number; height: number; scroll: number }>(`(() => { const el = document.querySelector('${id('timeline')}'); const r = el.getBoundingClientRect(); return {top:r.top,height:r.height,scroll:el.scrollTop}; })()`);
+  expect(before.scroll).toBe(0);
   await page.evaluate(`import('/src/lib/store.svelte.ts').then(({store}) => { store.openThread.activity = {goal:{objective:'Verify queued prompts',status:'paused',iterations:1,error:null},loop:null,tasks:[
     {id:'check-input',text:'Check queued input and attachments',status:'completed'},
     {id:'test-stop',text:'Verify Escape sends queued prompts',status:'in_progress'},
@@ -193,4 +208,19 @@ test('completed goals and tasks fade after the next prompt and new tasks return'
     await capture(phone ? 'tasks-latest-visible-phone' : 'tasks-latest-visible-desktop');
     expect(await page.evaluate(`(() => { const messages = document.querySelectorAll('[data-mid]'); const last = messages[messages.length-1].getBoundingClientRect(); const activity = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); return last.bottom <= activity.top; })()`)).toBe(true);
   }
+}, 30_000);
+
+test('a question open in the dock keeps the last answer readable above it', async () => {
+  await size(false);
+  await command('Pick one [ask] for me');
+  await page.waitFor(`document.querySelector('${id('activity-question')}:not([hidden])')`);
+  await page.waitFor(`!document.querySelector('${id('composer-stop')}')`);
+  const lastAboveDock = `(() => { const messages = document.querySelectorAll('[data-mid]'); const last = messages[messages.length-1].getBoundingClientRect(); const activity = document.querySelector('${id('thread-activity')}').getBoundingClientRect(); return last.bottom <= activity.top; })()`;
+  for (const phone of [false, true]) {
+    await size(phone);
+    await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = document.querySelector('${id('timeline')}').scrollHeight`);
+    await capture(phone ? 'question-dock-latest-phone' : 'question-dock-latest-desktop');
+    expect(await page.evaluate(lastAboveDock)).toBe(true);
+  }
+  await size(false);
 }, 30_000);

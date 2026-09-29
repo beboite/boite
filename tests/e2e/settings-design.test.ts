@@ -1,19 +1,10 @@
 import { expect, test } from "bun:test";
 import { BrowserPage, freePort } from "./lib/cdp";
-import { join } from "node:path";
-import { createRequire } from "node:module";
-
-const uiRequire = createRequire(join(import.meta.dir, "../../packages/ui/package.json"));
-const { createServer } = await import(uiRequire.resolve("vite"));
+import { startUi } from "./lib/ui.ts";
 
 test("settings reveal sections and protection switches persist across navigation", async () => {
   const port = await freePort();
-  const server = await createServer({
-    root: join(import.meta.dir, "../../packages/ui"),
-    server: { host: "127.0.0.1", port, strictPort: true },
-    clearScreen: false,
-  });
-  await server.listen();
+  const server = await startUi(port);
   const page = await BrowserPage.launch({
     url: `http://127.0.0.1:${port}/?fake=1&open=recent`,
     windowSize: { width: 1440, height: 1000 },
@@ -26,7 +17,7 @@ test("settings reveal sections and protection switches persist across navigation
   }
   try {
     await page.click("[data-testid=nav-settings]");
-    await page.waitFor('document.querySelector("[data-testid=settings-page]")');
+    await page.waitFor('document.querySelector("[data-testid=settings-home]")');
     await settled();
     await page.screenshot("tests/e2e/.artifacts/settings-after.png");
     await page.click("[data-testid=settings-tab-resources]");
@@ -34,14 +25,20 @@ test("settings reveal sections and protection switches persist across navigation
       'document.querySelector("[data-testid=setting-focus-guard]")',
     );
     await settled();
+    // Only pages several screens long list their sections: Protection and General fit without them.
     expect(
       await page.evaluate(
         'document.querySelector("[data-testid=settings-tab-resources]").getAttribute("aria-expanded")',
       ),
-    ).toBe("true");
+    ).toBeNull();
     expect(
       await page.evaluate(
         'document.querySelector("[data-testid=settings-tab-general]").getAttribute("aria-expanded")',
+      ),
+    ).toBeNull();
+    expect(
+      await page.evaluate(
+        'document.querySelector("[data-testid=settings-tab-usage]").getAttribute("aria-expanded")',
       ),
     ).toBe("false");
     await page.screenshot("tests/e2e/.artifacts/protection-desktop.png");
@@ -49,12 +46,19 @@ test("settings reveal sections and protection switches persist across navigation
     await page.waitFor(
       '!document.querySelector("[data-testid=setting-mute-agents]").checked',
     );
+    await page.click("[data-testid=setting-reap-orphans]");
+    await page.waitFor(
+      '!document.querySelector("[data-testid=setting-reap-orphans]").checked',
+    );
     await page.click("[data-testid=settings-tab-general]");
     await page.click("[data-testid=settings-tab-resources]");
     await page.waitFor(
       '!document.querySelector("[data-testid=setting-mute-agents]").checked',
     );
-    expect(await page.evaluate('document.fonts.check("14px Geist")')).toBe(
+    await page.waitFor(
+      '!document.querySelector("[data-testid=setting-reap-orphans]").checked',
+    );
+    expect(await page.evaluate('document.fonts.check("14px Inter")')).toBe(
       true,
     );
     await page.send("Emulation.setDeviceMetricsOverride", {

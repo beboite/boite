@@ -17,6 +17,8 @@
  * the shell this module is a class nobody constructs.
  */
 import type { BrowserBridge, BrowserEvent, SurfaceRect } from './browser-bridge';
+import type { PreviewReference } from '@boite/contracts';
+import { currentZoom } from './zoom';
 
 /** The one event the shell emits for every surface. `src/browser.rs` sends it. */
 const EVENT = 'browser://event';
@@ -27,6 +29,12 @@ function reasonOf(error: unknown): string {
   if (typeof error === 'string') return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** CSS pixels to the window's logical pixels, under an interface zoom of `factor`. */
+export function scaleRect(rect: SurfaceRect | null, factor: number): SurfaceRect | null {
+  if (!rect || factor === 1) return rect;
+  return { x: rect.x * factor, y: rect.y * factor, width: rect.width * factor, height: rect.height * factor };
 }
 
 /** The key a repeated `setBounds` is skipped on. */
@@ -42,6 +50,8 @@ export class TauriBridge implements BrowserBridge {
   #queues = new Map<string, Promise<void>>();
   #bounds = new Map<string, string>();
   #live = new Set<string>();
+  #loaded = new Set<string>();
+  isReady(id: string): boolean { return this.#loaded.has(id); }
   #boot: Promise<Invoke> | null = null;
 
   create(id: string, url: string): void {
@@ -51,6 +61,7 @@ export class TauriBridge implements BrowserBridge {
   }
 
   navigate(id: string, url: string): void {
+    this.#loaded.delete(id);
     this.#run(id, 'browser_navigate', { url });
   }
 
@@ -67,16 +78,18 @@ export class TauriBridge implements BrowserBridge {
   }
 
   /**
-   * The rectangle goes over as it comes off `getBoundingClientRect`: the window
-   * and the page share one scale factor, so CSS pixels are the logical pixels
-   * `LogicalPosition` and `LogicalSize` want, and nothing is converted.
+   * The rectangle comes off `getBoundingClientRect` in CSS pixels. At 100 % the
+   * window and the page share one scale factor, so those are the logical pixels
+   * `LogicalPosition` and `LogicalSize` want; the interface zoom (`lib/zoom.ts`)
+   * makes one CSS pixel that many logical ones, so the rectangle is scaled by it.
    */
   setBounds(id: string, rect: SurfaceRect | null): void {
     if (!this.#live.has(id)) return;
-    const key = boundsKey(rect);
+    const scaled = scaleRect(rect, currentZoom());
+    const key = boundsKey(scaled);
     if (this.#bounds.get(id) === key) return;
     this.#bounds.set(id, key);
-    this.#run(id, 'browser_set_bounds', { rect });
+    this.#run(id, 'browser_set_bounds', { rect: scaled });
   }
 
   setZoom(id: string, factor: number): void {
@@ -84,10 +97,24 @@ export class TauriBridge implements BrowserBridge {
     this.#run(id, 'browser_set_zoom', { factor });
   }
 
+  annotate(id: string, requestId: string | null): void {
+    if (!this.#live.has(id)) return;
+    this.#run(id, 'browser_annotate', { requestId });
+  }
+
+  highlight(id: string, requestId: string, reference: PreviewReference): void {
+    if (!this.#live.has(id)) {
+      this.#emit({ type: 'highlight-result', id, requestId, error: 'unavailable' });
+      return;
+    }
+    this.#run(id, 'browser_highlight', { requestId, reference });
+  }
+
   destroy(id: string): void {
     if (!this.#live.has(id)) return;
     this.#run(id, 'browser_destroy', {});
     this.#live.delete(id);
+    this.#loaded.delete(id);
     this.#bounds.delete(id);
   }
 
@@ -124,7 +151,11 @@ export class TauriBridge implements BrowserBridge {
         await invoke<null>(command, { id, ...args });
       })
       .catch((error: unknown) => {
-        this.#emit({ type: 'failed', id, reason: reasonOf(error) });
+        if (command === 'browser_highlight' && typeof args.requestId === 'string') {
+          this.#emit({ type: 'highlight-result', id, requestId: args.requestId, error: reasonOf(error) });
+        } else if (command === 'browser_annotate' && typeof args.requestId === 'string') {
+          this.#emit({ type: 'selection-failed', id, requestId: args.requestId, reason: reasonOf(error) });
+        } else this.#emit({ type: 'failed', id, reason: reasonOf(error) });
       });
     this.#queues.set(id, next);
     void next.then(() => {
@@ -133,6 +164,10 @@ export class TauriBridge implements BrowserBridge {
   }
 
   #emit(event: BrowserEvent): void {
+    if (event.type === 'loading') {
+      if (event.loading) this.#loaded.delete(event.id);
+      else this.#loaded.add(event.id);
+    }
     for (const handler of this.#handlers) handler(event);
   }
 }

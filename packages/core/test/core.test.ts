@@ -7,6 +7,7 @@ import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
 import { lockDataDir, parseFlags, resolveHost } from '../src/main.ts';
 import { dataDirName, defaultDataDir, resolveDataDir } from '../src/paths.ts';
+import { processPlatform } from '../src/platform/index.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
 
 let harness: TestCore;
@@ -23,7 +24,7 @@ describe('projects', () => {
   test('removing a project drains turns and deletes its projection rows', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    const projectId = harness.core.threads.require(threadId).projectId;
+    const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
     await client.call('turns.start', { threadId, prompt: '[sleep:60000]', clientRequestId: 'remove-request' });
     expect(harness.core.journal.turnRequest(threadId, 'remove-request')).not.toBeNull();
     await client.call('projects.remove', { projectId });
@@ -36,7 +37,7 @@ describe('projects', () => {
   test('removing a project stops remaining processes before deleting their rows', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
-    const projectId = harness.core.threads.require(threadId).projectId;
+    const projectId = harness.core.projects.require(harness.core.threads.require(threadId).projectId).id;
     harness.core.procs.spawnChild(threadId, process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: harness.dataDir });
     await client.call('projects.remove', { projectId });
     expect(harness.core.procs.liveCount(threadId)).toBe(0);
@@ -68,15 +69,21 @@ describe('settings', () => {
     const client = await harness.connect();
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
+      worktreeStorage: { mode: 'project', directory: null },
       maxConcurrentTurns: 6,
       perAccountConcurrency: 2,
       warmProcessMinutes: 0,
       listenOnLan: false,
       agentCpuCapPercent: 75,
+      agentMemoryBudgetPercent: 60,
       threadMemoryCapMb: 0,
+      memoryReserveMb: 0,
       focusGuard: true,
       muteAgents: true,
+      reapOrphans: true,
       autoUpdateHarnesses: false,
+      // Off only because the harness turns it off; a missing value reads as on.
+      asyncQuestions: false,
     });
 
     const next = await client.call('settings.set', { maxConcurrentTurns: 3 });
@@ -158,6 +165,7 @@ describe('ids and flags', () => {
   test('the flags follow the documented defaults', () => {
     expect(parseFlags([])).toEqual({
       port: 0,
+      portExplicit: false,
       host: '127.0.0.1',
       hostExplicit: false,
       dataDir: undefined,
@@ -165,6 +173,7 @@ describe('ids and flags', () => {
     });
     expect(parseFlags(['--port', '8080', '--lan'])).toEqual({
       port: 8080,
+      portExplicit: true,
       host: '0.0.0.0',
       hostExplicit: true,
       dataDir: undefined,
@@ -172,6 +181,7 @@ describe('ids and flags', () => {
     });
     expect(parseFlags(['--host', '10.0.0.2', '--data-dir', 'D:/data'])).toEqual({
       port: 0,
+      portExplicit: false,
       host: '10.0.0.2',
       hostExplicit: true,
       dataDir: 'D:/data',
@@ -304,6 +314,38 @@ describe('the data directory lock', () => {
     writeFileSync(file, 'half a write and a power cut', 'utf8');
     const release = lockDataDir(dir);
     expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
+  });
+
+  test('a live pid worn by a process that started after the lock is not the core that wrote it', () => {
+    // What a reboot left: the lock of a core from the night before, its pid now a browser tab.
+    const file = join(dir, 'core.lock');
+    const lockedAt = Date.parse('2026-09-27T03:29:39Z');
+    writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt }), 'utf8');
+    const release = lockDataDir(dir, () => Date.parse('2026-09-27T11:35:07Z'));
+    expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
+  });
+
+  test('a holder that started before its lock, within the clock margin, or at a time nobody can read keeps it', () => {
+    const lockedAt = Date.now();
+    for (const started of [lockedAt - 300, lockedAt + 500, null]) {
+      writeFileSync(join(dir, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: lockedAt }), 'utf8');
+      expect(() => lockDataDir(dir, () => started)).toThrow(`another core is already running on ${dir}`);
+    }
+  });
+
+  // macOS has no procfs and no start time to read, so the real platform only answers on the other two.
+  test.skipIf(process.platform === 'darwin')('the platform reads when a live process started', () => {
+    const started = processPlatform.startedAt(process.pid);
+    expect(started).not.toBeNull();
+    expect(started!).toBeLessThanOrEqual(Date.now());
+    expect(started!).toBeGreaterThanOrEqual(Date.now() - process.uptime() * 1000 - 2000);
+    expect(processPlatform.startedAt(DEAD_PID)).toBeNull();
+    // A lock older than the parent process names it, and the real reading takes it over.
+    writeFileSync(join(dir, 'core.lock'), JSON.stringify({ pid: process.ppid, startedAt: 0 }), 'utf8');
+    const release = lockDataDir(dir);
+    expect(JSON.parse(readFileSync(join(dir, 'core.lock'), 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
     release();
   });
 });

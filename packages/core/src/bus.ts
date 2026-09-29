@@ -21,6 +21,13 @@ export class Bus {
   private readonly listeners = new Set<BusListener>();
   private readonly pending = new Map<string, PendingDelta>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private reporting = false;
+  /**
+   * Where a throwing listener is reported. One listener's error must neither
+   * skip the listeners after it nor escape the delta timer, which would end the
+   * process.
+   */
+  onError: (message: string) => void = (message) => console.error(message);
 
   onAny(listener: BusListener): () => void {
     this.listeners.add(listener);
@@ -75,7 +82,22 @@ export class Bus {
   }
 
   private dispatch(name: RpcEventName, payload: EventPayload): void {
-    for (const listener of this.listeners) listener(name, payload);
+    for (const listener of this.listeners) {
+      try {
+        listener(name, payload);
+      } catch (error) {
+        // A report is itself an event: a listener that throws on it too must not loop.
+        if (this.reporting) continue;
+        this.reporting = true;
+        try {
+          this.onError(`event listener failed on ${name}: ${error instanceof Error ? error.message : String(error)}`);
+        } catch {
+          // Nothing left to report to.
+        } finally {
+          this.reporting = false;
+        }
+      }
+    }
   }
 }
 

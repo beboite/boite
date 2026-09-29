@@ -9,6 +9,7 @@
 
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { startAccent } from './accent';
+import { startFonts } from './fonts';
 
 export type Theme = 'system' | 'dark' | 'light' | 'grain';
 
@@ -83,9 +84,10 @@ export function setTheme(theme: Theme): void {
  */
 export function startTheme(): () => void {
   const stopAccent = startAccent();
+  const stopFonts = startFonts();
   applyTheme(readTheme());
   const stopExperiments = subscribeExperiments(() => applyTheme(readTheme()));
-  if (typeof window.matchMedia !== 'function') return () => { stopExperiments(); stopAccent(); };
+  if (typeof window.matchMedia !== 'function') return () => { stopExperiments(); stopAccent(); stopFonts(); };
   const query = window.matchMedia(LIGHT_QUERY);
   const onchange = () => {
     if (readTheme() === 'system') applyTheme('system');
@@ -94,6 +96,7 @@ export function startTheme(): () => void {
   return () => {
     stopExperiments();
     stopAccent();
+    stopFonts();
     query.removeEventListener('change', onchange);
   };
 }

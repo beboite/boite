@@ -1,131 +1,102 @@
-import { statSync } from 'node:fs';
+import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
-import { activityPrompt } from './activity-prompt.ts';
-import { relative, resolve } from 'node:path';
-import { attachmentError, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
 import type {
   Account,
   AccountId,
-  AgentCommand,
   Attachment,
+  PreviewReference,
   ImageMimeType,
   Message,
   MessageId,
   MessagePart,
-  MessageRole,
-  ModelInfo,
   PermissionRequest,
   Project,
-  Protocol,
+  ProjectId,
   ProviderDescriptor,
-  QuestionAnswer,
   QuestionRequest,
   RequestId,
   RpcParams,
   Thread,
   ThreadId,
+  ThreadRewind,
   ThreadStatus,
   ThreadSummary,
   Turn,
   TurnId,
+  TurnInFlightData,
 } from '@boite/contracts';
-import { agentEnvOf } from './agent.ts';
 import type { Core } from './core.ts';
-import { messageOf, notFound, refused } from './errors.ts';
+import { threadTerminalId } from './terminals.ts';
+import { notFound, refused } from './errors.ts';
 import { newId } from './ids.ts';
-import { PullRequests } from './pull-requests.ts';
-import { assertDriverRunnable, getDriver, probedModelsOf, releaseThread } from './drivers/index.ts';
-import type {
-  EmitSink,
-  PermissionTicket,
-  QuestionAsk,
-  QuestionTicket,
-  TurnContext,
-  TurnHandle,
-  TurnResult,
-} from './drivers/types.ts';
-import type { SpawnedChild, SpawnOptions } from './procs.ts';
-import { cleanAgentTitle, textOf, titleFromPrompt } from './titles.ts';
-import { prepareAttachments, fileReference } from './attachments.ts';
-import { continuationInput } from './continuation.ts';
+import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
+import { AgentState } from './threads/agent-state.ts';
+import { ThreadBranching } from './threads/branching.ts';
+import { ThreadCards } from './threads/cards.ts';
+import { DeferredInput } from './threads/deferred.ts';
+import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
+import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
+import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
+import { ThreadRecovery } from './threads/recovery.ts';
+import { ThreadTitles } from './threads/retitle.ts';
+import { readMemoryEvents } from './threads/memory-read.ts';
+import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
+import { TurnContexts } from './threads/turn-context.ts';
+import { TurnRunner } from './threads/turn-runner.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
-function titleOf(title: string | undefined): string {
-  return title !== undefined && title.length > 0 ? title : 'New thread';
-}
-
 /**
- * The working directory a client asked for, resolved and kept inside the
- * project. The agent runs there, so an unchecked string is a way to point any
- * process at any directory on the machine: the worktree path the core builds
- * itself is the one exception, and it never comes through `params.cwd`.
+ * The threads of this core: what the RPC and the other modules call. Each part
+ * under `threads/` owns its own state; the store builds them and hands them
+ * itself, so a part reaches another through it.
  */
-function checkCwd(project: Project, cwd: string): string {
-  const resolved = resolve(cwd);
-  const inside = relative(resolve(project.path), resolved);
-  if (inside.startsWith('..') || resolve(inside) === inside) {
-    throw refused('the working directory must be inside the project', {
-      cwd: resolved,
-      projectPath: project.path,
-    });
-  }
-  let stat;
-  try {
-    stat = statSync(resolved);
-  } catch (error) {
-    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { cwd: resolved });
-  }
-  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { cwd: resolved });
-  return resolved;
-}
-
-/**
- * The attachments of a turn, or the refusal: the provider takes none, too
- * many, a format no agent reads, a body that is not base64, one over the cap.
- * Each refusal names the attachment by its index and what was expected.
- */
-function checkAttachmentArray(attachments: Attachment[]): void {
-  if (!Array.isArray(attachments)) throw refused('attachments must be an array');
-  attachments.forEach((attachment, index) => {
-    if (!attachment || typeof attachment !== 'object') throw refused(`attachment ${index + 1}: expected an object`);
-  });
-}
-
-export function checkAttachments(attachments: Attachment[], provider: ProviderDescriptor): void {
-  const error = attachmentError(attachments, provider);
-  if (error) throw refused(error.message, error.data);
-}
-
-/** What a turn a dead core left behind says, once the next core has closed it. */
-export const CRASH_WHILE_RUNNING = 'The core stopped while this turn was running; send the prompt again.';
-export const CRASH_WHILE_QUEUED = 'The core stopped while this turn was queued; send the prompt again.';
-
-interface PendingPermission {
-  request: PermissionRequest;
-  resolve: (decision: 'allow' | 'deny') => void;
-}
-
-interface PendingQuestion {
-  request: QuestionRequest;
-  /** Null is the cancel: the turn ended before the user answered. */
-  resolve: (answer: QuestionAnswer | null) => void;
-}
-
 export class ThreadStore {
-  private readonly handles = new Map<ThreadId, TurnHandle>();
-  private readonly permissions = new Map<RequestId, PendingPermission>();
-  private readonly questions = new Map<RequestId, PendingQuestion>();
-  /**
-   * What each thread's agent last said it takes as `/name`. Memory only: the
-   * list belongs to the agent process, so a fresh core learns it again on the
-   * next turn, and nothing here is worth a journal row.
-   */
-  private readonly commands = new Map<ThreadId, AgentCommand[]>();
-  /** The threads a title is being written for right now: a second ask is refused, not doubled. */
-  private readonly retitling = new Set<ThreadId>();
+  /** Internal-only entry: callers supply an already authorized workspace, never a fabricated project. */
+  createAgentSession(agent: AgentProfile, sessionId: string, cwd: string, projectId: string | null = null, branch: string | null = null): ThreadSummary {
+    const provider = this.core.providers.require(agent.selection.providerId);
+    const account = this.core.accounts.require(agent.selection.accountId);
+    if (account.providerId !== provider.id) throw refused('agent account belongs to another provider');
+    const now = Date.now();
+    const thread: ThreadSummary = {
+      id: newId('thr_'), projectId, agentSessionId: sessionId, title: agent.name, titleSource: 'user',
+      ...agent.selection, speed: null, cwd, branch, status: 'idle', unread: false, archived: false, pinned: false,
+      sessionId: null, sessionGeneration: 0, selectionVersion: 0, load: null, context: null, createdAt: now, updatedAt: now,
+    };
+    this.core.journal.append({ type: 'thread.created', threadId: thread.id, version: 1, payload: thread }, () => this.core.journal.putThread(thread));
+    return thread;
+  }
 
-  constructor(private readonly core: Core) {}
+  /** Runs each turn and owns the handles of the running ones. */
+  readonly runner: TurnRunner;
+  /** Builds what a driver gets for a turn. */
+  readonly contexts: TurnContexts;
+  /** Permission and question cards. */
+  readonly cards: ThreadCards;
+  /** Held asynchronous answers and wakes. */
+  readonly deferred: DeferredInput;
+  /** Commands, background tasks and context the agent reported. */
+  readonly agentState: AgentState;
+  readonly titles: ThreadTitles;
+  /** `threads.rewind` and `threads.fork`. */
+  readonly branching: ThreadBranching;
+  /** `threads.move`. */
+  readonly moves: ThreadMove;
+  private readonly recovery: ThreadRecovery;
+
+  constructor(private readonly core: Core) {
+    this.runner = new TurnRunner(core, this);
+    this.contexts = new TurnContexts(core, this);
+    this.cards = new ThreadCards(core, this);
+    this.deferred = new DeferredInput(core, this);
+    this.agentState = new AgentState(core);
+    this.titles = new ThreadTitles(core, this);
+    this.branching = new ThreadBranching(core, this);
+    this.moves = new ThreadMove(core, this);
+    this.recovery = new ThreadRecovery(core);
+  }
 
   // -- reads ----------------------------------------------------------------
 
@@ -163,7 +134,9 @@ export class ThreadStore {
       ...thread,
       ...(tail === null || after === undefined ? {} : { messagesFrom: after }),
       messages: page.messages,
-      commands: this.commands.get(threadId) ?? [],
+      memoryEvents: readMemoryEvents(this.core.journal, threadId),
+      commands: this.agentState.commands.get(threadId) ?? [],
+      background: this.agentState.background.get(threadId) ?? [],
       activity: this.core.activity.get(threadId),
       messagesBefore: page.before,
       // The turns of that page and the ones still in flight, never the whole history.
@@ -212,6 +185,9 @@ export class ThreadStore {
       throw refused('cwd and worktree exclude each other: a worktree is the working directory', { cwd: params.cwd });
     }
     const { project, provider, account } = this.check(params);
+    if (project.kind === 'drafts') {
+      throw refused('a draft has no worktree: the drafts folder is not a git repository', { projectId: project.id });
+    }
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
     checkEffort(provider, account.id, model, params.effort ?? null);
     checkSpeed(provider, account.id, model, params.speed ?? null);
@@ -225,29 +201,36 @@ export class ThreadStore {
     }
   }
 
-  create(params: CreateParams, placed?: { id: ThreadId; branch: string }): ThreadSummary {
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
 
     const now = Date.now();
     const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    const effort = checkEffort(provider, account.id, model, params.effort ?? null);
+    const speed = checkSpeed(provider, account.id, model, params.speed ?? null);
+    // A worktree's directory is the core's own and uses the configured storage;
+    // anything a client names has to be inside it. A draft with no directory
+    // named gets a new folder of its own, made once everything else passed.
+    const cwd =
+      params.cwd !== undefined && params.cwd.length > 0
+        ? placed !== undefined
+          ? params.cwd
+          : checkCwd(project, params.cwd)
+        : project.kind === 'drafts'
+          ? makeDraftFolder(project.path, draftFolderName(titleOf(params.title), new Date(now)))
+          : project.path;
     const thread: ThreadSummary = {
       id: placed?.id ?? newId('thr_'),
+      ...(placed?.parentThreadId ? { parentThreadId: placed.parentThreadId } : {}),
       projectId: project.id,
       title: titleOf(params.title),
       titleSource: 'prompt',
       providerId: provider.id,
       accountId: account.id,
       model,
-      effort: checkEffort(provider, account.id, model, params.effort ?? null),
-      speed: checkSpeed(provider, account.id, model, params.speed ?? null),
-      // A worktree's directory is the core's own and sits beside the project;
-      // anything a client names has to be inside it.
-      cwd:
-        params.cwd !== undefined && params.cwd.length > 0
-          ? placed !== undefined
-            ? params.cwd
-            : checkCwd(project, params.cwd)
-          : project.path,
+      effort,
+      speed,
+      cwd,
       branch: placed?.branch ?? null,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
@@ -264,6 +247,8 @@ export class ThreadStore {
       this.core.journal.putThread(thread);
     });
     this.core.bus.emit('thread.created', thread);
+    // A thread started in a project put away says the project is in use again.
+    if (project.archived === true) this.core.projects.archive(project.id, false);
     return thread;
   }
 
@@ -401,13 +386,14 @@ export class ThreadStore {
     const switched = account.id !== thread.accountId;
     const provider = this.core.providers.require(account.providerId);
     if (switched) {
-      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account);
+      assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), account, () => this.core.providers.launcherScriptOnly(provider.id));
       next.accountId = account.id;
       next.providerId = provider.id;
       next.model = checkModel(provider, account.id, params.model === undefined ? defaultModel(provider) : params.model);
       next.effort = null;
       next.speed = null;
       next.sessionId = null;
+      next.sessionResumeAt = null;
       next.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       next.context = null;
     }
@@ -427,8 +413,11 @@ export class ThreadStore {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
     if (switched) {
-      if (!['queued', 'running', 'waiting'].includes(thread.status)) releaseThread(thread.id);
-      this.commands.delete(thread.id);
+      if (!['queued', 'running', 'waiting'].includes(thread.status)) {
+        this.releaseAgent(thread.id);
+        this.agentState.noteBackground(thread.id, []);
+      }
+      this.agentState.commands.delete(thread.id);
       this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
     }
     return this.save(next, 'thread.updated');
@@ -445,12 +434,23 @@ export class ThreadStore {
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
+      this.moves.forget(threadId);
+      this.core.delegation.stop(threadId);
       this.core.scheduler.stop(threadId);
-      releaseThread(threadId);
-      this.commands.delete(threadId);
+      this.releaseAgent(threadId);
+      this.agentState.commands.delete(threadId);
+      this.agentState.noteBackground(threadId, []);
+      // Nobody answers a card on a thread put away, and no turn should start from one.
+      this.cards.clearQuestionsOf(threadId, true);
+      this.deferred.deferredAnswers.delete(threadId);
+      this.deferred.pendingWakes.delete(threadId);
+      void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    return this.save({ ...thread, archived }, 'thread.archived');
+    const saved = this.save({ ...thread, archived }, 'thread.archived');
+    // The sidebar counts a project's archived threads; a sub-thread is not one of them.
+    if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    return saved;
   }
 
   markRead(threadId: ThreadId): void {
@@ -473,84 +473,15 @@ export class ThreadStore {
    * log and the same fallback, never a failed call. Refused by name on a
    * thread with no prompt yet, or while an earlier ask is still running.
    */
-  async retitle(threadId: ThreadId): Promise<ThreadSummary> {
-    const thread = this.require(threadId);
-    if (this.retitling.has(threadId)) {
-      throw refused('a title is already being written for this thread', { threadId });
-    }
-    let first: Message | undefined;
-    let answer: Message | undefined;
-    for (const message of this.core.journal.walkMessages(threadId)) {
-      if (first === undefined && message.role === 'user') first = message;
-      if (answer === undefined && message.role === 'assistant' && textOf(message).length > 0) answer = message;
-      if (first !== undefined && answer !== undefined) break;
-    }
-    if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId });
-    const prompt = textOf(first);
-    const provider = this.core.providers.require(thread.providerId);
-    const account = this.core.accounts.require(thread.accountId);
-    const driver = getDriver(provider.protocol);
-
-    this.retitling.add(threadId);
-    let agentTitle: string | null = null;
-    try {
-      if (driver.title !== undefined) {
-        const raw = await driver.title({
-          thread,
-          provider,
-          account,
-          accountEnv: this.core.accounts.accountEnv(account, provider),
-          prompt,
-          answer: answer === undefined ? '' : textOf(answer),
-          spawnChild: this.leasedSpawnChild(threadId, provider),
-          log: (level, message) => {
-            this.core.log(level, message);
-          },
-        });
-        agentTitle = raw === null ? null : cleanAgentTitle(raw);
-      }
-    } catch (error) {
-      this.core.log('warn', `no title from ${provider.name} for thread ${threadId}: ${messageOf(error)}`);
-    } finally {
-      this.retitling.delete(threadId);
-    }
-    if (this.core.journal.isClosed()) return thread;
-
-    // The thread as it stands now: a rename that landed during the ask is the
-    // user's, and the agent's words do not go over it. Asking again on a name
-    // the user typed earlier is still allowed, since that ask is his own.
-    const current = this.require(threadId);
-    if (current.titleSource === 'user' && current.title !== thread.title) return this.withLoad(current);
-    if (agentTitle !== null) return this.save({ ...current, title: agentTitle, titleSource: 'agent' }, 'thread.updated');
-    const fromPrompt = titleFromPrompt(prompt);
-    if (fromPrompt.length === 0 || (fromPrompt === current.title && current.titleSource === 'prompt')) {
-      return this.withLoad(current);
-    }
-    return this.save({ ...current, title: fromPrompt, titleSource: 'prompt' }, 'thread.updated');
-  }
-
-  /**
-   * The first finished turn of a thread still called by its prompt gets the
-   * agent's title, when the driver writes one. Not awaited by the turn: the
-   * title lands as its own `thread.updated`, seconds later on a real agent.
-   */
-  private autoTitle(threadId: ThreadId, turnId: TurnId): void {
-    const thread = this.core.journal.getThread(threadId);
-    if (thread === null || thread.archived || thread.titleSource !== 'prompt') return;
-    const provider = this.core.providers.get(thread.providerId);
-    if (provider === undefined || getDriver(provider.protocol).title === undefined) return;
-    const done = this.core.journal.listTurns(threadId).filter((turn) => turn.status === 'done');
-    if (done.length !== 1 || done[0]?.id !== turnId) return;
-    void this.retitle(threadId).catch((error: unknown) => {
-      this.core.log('warn', `no title for thread ${threadId}: ${messageOf(error)}`);
-    });
+  retitle(threadId: ThreadId): Promise<ThreadSummary> {
+    return this.titles.retitle(threadId);
   }
 
   compact(threadId: ThreadId, expectedSelectionVersion?: number): Turn {
     const thread = this.require(threadId);
     const protocol = this.core.providers.require(thread.providerId).protocol;
     if (!thread.sessionId) throw refused('this thread has no native session to compact', { threadId });
-    if (protocol === 'acp' && !this.commands.get(threadId)?.some((command) => command.name === 'compact')) {
+    if (protocol === 'acp' && !this.agentState.commands.get(threadId)?.some((command) => command.name === 'compact')) {
       throw refused('this agent has not advertised a compact command', { threadId });
     }
     // agy's print mode refuses every interactive-only slash command, `/compact` among them.
@@ -558,14 +489,36 @@ export class ThreadStore {
     return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: 'compact' | 'coordination', activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string): Turn {
+  /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
+  rewind(threadId: ThreadId, messageId: MessageId): ThreadRewind {
+    return this.branching.rewind(threadId, messageId);
+  }
+
+  /** A new thread with the history up to and including a message (`threads/branching.ts`). */
+  fork(threadId: ThreadId, messageId: MessageId, worktree: boolean): Promise<ThreadSummary> {
+    return this.branching.fork(threadId, messageId, worktree);
+  }
+
+  /** Move a thread and its sub-threads to another project (`threads/move.ts`). */
+  move(threadId: ThreadId, projectId: ProjectId, stopBackground?: boolean): Promise<ThreadSummary> {
+    return this.moves.userMove(threadId, projectId, stopBackground);
+  }
+
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
+    if (thread.agentSessionId && operation !== 'compact') {
+      const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
+      if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');
+    }
     checkAttachmentArray(attachments);
+    const referenceError = previewReferencesError(previewReferences, prompt);
+    if (referenceError) throw refused(referenceError);
+    previewReferences = structuredClone(previewReferences);
     let fingerprint = '';
     if (clientRequestId !== undefined) {
       if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
-      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name])])).digest('hex');
+      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
       const existing = this.core.journal.turnRequest(threadId, clientRequestId);
       if (existing) {
         if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
@@ -575,8 +528,9 @@ export class ThreadStore {
     }
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.handles.has(threadId)) {
-      throw refused('this thread already has an in-flight turn', { threadId });
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {
+      const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: this.withLoad(thread) };
+      throw refused('this thread already has an in-flight turn', data);
     }
     const provider = this.core.providers.require(thread.providerId);
     if (this.core.updates.updating(thread.providerId)) {
@@ -586,12 +540,17 @@ export class ThreadStore {
       provider.protocol,
       this.core.providers.summary(thread.providerId),
       this.core.accounts.require(thread.accountId),
+      () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
     const now = Date.now();
+    // The first message after a move carries the note to the agent. A compact
+    // or a slash command goes to the agent as the command alone, so the note
+    // waits for the next real message.
+    const moved = operation === 'compact' || prompt.trimStart().startsWith('/') ? null : pendingMove(this.core, threadId);
     const turn: Turn = {
       id: newId('trn_'),
       threadId,
@@ -604,6 +563,7 @@ export class ThreadStore {
       execution: {
         providerId: thread.providerId, accountId: thread.accountId, model: thread.model,
         effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
+        ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
       },
@@ -612,9 +572,9 @@ export class ThreadStore {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: operation === 'coordination' ? 'system' : 'user',
+      role: systemOperation(operation) ? 'system' : 'user',
       parts: [
-        { type: 'text', text: prompt, ...(operation === 'coordination' ? { displayText: 'Agent coordination' } : {}), ...(activity ? { activity } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -627,10 +587,14 @@ export class ThreadStore {
     };
 
     this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
+      this.core.delegation.reserveTurn(threadId, operation);
       this.core.journal.putTurn(turn);
       this.core.journal.putMessage(message);
+      if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
       if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
     });
+    // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
+    if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
     if (!activity && !operation) this.core.activity.userPrompt(threadId);
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
@@ -642,7 +606,25 @@ export class ThreadStore {
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
     this.core.coordination.pause(threadId);
-    return this.core.scheduler.stop(threadId);
+    const childrenStopped = this.core.delegation.stop(threadId) + this.core.workflows.stopRoot(threadId, 'Stopped with its thread');
+    if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;
+    // No turn left, but the agent still runs work in the background: Stop ends
+    // the agent process, and that work with it.
+    if ((this.agentState.background.get(threadId)?.length ?? 0) === 0) return false;
+    this.releaseAgent(threadId);
+    this.agentState.noteBackground(threadId, []);
+    return true;
+  }
+
+  /**
+   * Ends the thread's agent process outside a turn (Stop on an idle thread, an
+   * archive, an account switch, a stopped child agent, a provider update) and
+   * sweeps what it leaves. A command the agent ran in the background survives
+   * its exit, and with no `turn.finished` to follow nothing else would sweep it.
+   */
+  releaseAgent(threadId: ThreadId): void {
+    releaseThread(threadId);
+    this.core.procs.sweepSoon(threadId);
   }
 
   stopQueuedCoordination(threadId: ThreadId): boolean {
@@ -650,16 +632,22 @@ export class ThreadStore {
     return queued === undefined ? false : this.core.scheduler.stop(threadId);
   }
 
-  canSteer(threadId: string): boolean { return typeof this.handles.get(threadId)?.steer === 'function'; }
+  canSteer(threadId: string): boolean { return typeof this.runner.handles.get(threadId)?.steer === 'function'; }
 
   async steer(threadId: string, text: string): Promise<boolean> {
-    const handle = this.handles.get(threadId);
-    if (!handle?.steer) return false;
+    const handle = this.runner.handles.get(threadId);
+    if (!handle?.steer || this.runner.steering.has(threadId)) return false;
     const turn = this.core.journal.listTurns(threadId).find(t => t.status === 'running');
     if (!turn) return false;
-    const submitted = await handle.steer(text);
-    if (submitted) this.noteCoordination(threadId, turn.id, text);
-    return submitted;
+    this.runner.steering.add(threadId);
+    try {
+      const submitted = await handle.steer(text);
+      if (submitted && !this.core.journal.isClosed()) this.noteCoordination(threadId, turn.id, text);
+      return submitted;
+    } finally {
+      this.runner.steering.delete(threadId);
+      void this.deferred.memory.flushRunning(threadId);
+    }
   }
 
   noteCoordination(threadId: string, turnId: string, text: string): void {
@@ -670,15 +658,7 @@ export class ThreadStore {
   }
 
   stopRunning(threadId: ThreadId): boolean {
-    const handle = this.handles.get(threadId);
-    if (handle === undefined) return false;
-    // An open card is what the driver is parked on. Aborting without answering
-    // it leaves that await pending for good: the turn never finishes, the
-    // thread stays `waiting`, and Stop does nothing the user can see.
-    this.clearPermissionsOf(threadId);
-    this.clearQuestionsOf(threadId);
-    handle.stop();
-    return true;
+    return this.runner.stopRunning(threadId);
   }
 
   markQueuedStopped(turnId: TurnId): void {
@@ -693,708 +673,48 @@ export class ThreadStore {
     if (turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
   }
 
-  // -- crash recovery -------------------------------------------------------
-
-  /**
-   * A core that dies mid-turn leaves that turn `running` or `queued` in the
-   * journal, and the next start comes up with an empty scheduler: nothing would
-   * ever finish it, so the thread would read as busy forever. Every such turn
-   * becomes an error here, through the same events a failing turn writes, before
-   * the server accepts a connection. Nothing is retried: the prompt is in the
-   * journal and the user sends it again.
-   */
+  /** Closes the turns a stopped core left `running` or `queued` (`threads/recovery.ts`). */
   recoverStuckTurns(): number {
-    const stuck = this.core.journal.unfinishedTurns();
-    for (const turn of stuck) {
-      const previous = turn.status;
-      this.core.journal.db.transaction(() => {
-        this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
-        if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
-      })();
-      this.core.log(
-        'warn',
-        `recovered turn ${turn.id} of thread ${turn.threadId}, left ${previous} by a stopped core`,
-      );
-    }
-    for (const thread of this.core.journal.listThreads()) {
-      if (['queued', 'running', 'waiting'].includes(thread.status)) {
-        this.save({ ...thread, status: 'idle' }, 'thread.finished');
-      }
-    }
-    return stuck.length;
+    return this.recovery.recoverStuckTurns();
   }
 
-  private failStuckTurn(turn: Turn, reason: string): void {
-    const threadId = turn.threadId;
-    const thread = this.core.journal.getThread(threadId);
-    if (thread !== null) {
-      // The turn's own messages, and only the ones still open: a caret left
-      // blinking on a message nobody will ever write to again is the visible half
-      // of this bug.
-      const streaming = this.core.journal
-        .listMessages(threadId)
-        .filter((message) => message.turnId === turn.id && message.state === 'streaming');
-      const carrier = streaming.at(-1) ?? this.openRecoveryMessage(turn);
-      const index = carrier.parts.length;
-      const part: MessagePart = { type: 'error', message: reason };
-      this.core.journal.append(
-        { type: 'message.part', threadId, version: 1, payload: { messageId: carrier.id, partIndex: index, part } },
-        () => {
-          this.core.journal.setMessagePart(carrier.id, index, part);
-        },
-      );
-      this.core.bus.emit('message.part', { threadId, messageId: carrier.id, partIndex: index, part });
-      for (const message of streaming) if (message.id !== carrier.id) this.closeAsError(threadId, message.id);
-      this.closeAsError(threadId, carrier.id);
-    }
-
-    const finished: Turn = { ...turn, status: 'error', finishedAt: Date.now(), error: reason };
-    this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
-      this.core.journal.putTurn(finished);
-    });
-    this.core.bus.emit('turn.finished', finished);
-
-    if (thread === null) return;
-    this.save({ ...thread, status: 'idle' }, 'thread.finished');
+  runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
+    return this.runner.runTurn(turnId, threadId);
   }
 
-  /** A queued turn never opened a message; the error needs one to live in. */
-  private openRecoveryMessage(turn: Turn): Message {
-    const message: Message = {
-      id: newId('msg_'),
-      threadId: turn.threadId,
-      turnId: turn.id,
-      role: 'assistant',
-      parts: [],
-      state: 'streaming',
-      createdAt: Date.now(),
-    };
-    this.core.journal.append(
-      { type: 'message.started', threadId: turn.threadId, version: 1, payload: message },
-      () => {
-        this.core.journal.putMessage(message);
-      },
-    );
-    this.core.bus.emit('message.started', message);
-    return message;
-  }
+  // -- cards (`threads/cards.ts`) ---------------------------------------------
 
-  private closeAsError(threadId: ThreadId, messageId: MessageId): void {
-    this.core.journal.append(
-      { type: 'message.completed', threadId, version: 1, payload: { messageId, state: 'error' } },
-      () => {
-        this.core.journal.setMessageState(messageId, 'error');
-      },
-    );
-    this.core.bus.emit('message.completed', { threadId, messageId, state: 'error' });
-  }
-
-  // -- the turn itself ------------------------------------------------------
-
-  async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
-    const queued = this.core.journal.getTurn(turnId);
-    const selected = this.core.journal.getThread(threadId);
-    if (queued === null || selected === null) return;
-    if (queued.execution?.operation === 'coordination' && !this.core.coordination.prepareWake(threadId, turnId)) {
-      this.markQueuedStopped(turnId);
-      return;
-    }
-    const thread = { ...selected, ...queued.execution };
-
-    const running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
-    this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
-      this.core.journal.putTurn(running);
-    });
-    this.core.bus.emit('turn.started', running);
-    this.setStatus(threadId, 'running');
-
-    let result: TurnResult;
-    try {
-      const provider = this.core.providers.require(thread.providerId);
-      const account = this.core.accounts.require(thread.accountId);
-      const driver = getDriver(provider.protocol);
-      const handle = driver.startTurn(this.makeContext(thread, provider, account, running));
-      this.handles.set(threadId, handle);
-      result = await handle.done;
-      if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
-    } catch (error) {
-      result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
-    } finally {
-      this.handles.delete(threadId);
-    }
-
-    if (this.core.journal.isClosed()) return;
-    this.core.journal.flushDeltas();
-    this.core.bus.flush();
-    this.clearPermissionsOf(threadId);
-    this.clearQuestionsOf(threadId);
-
-    const finished: Turn = {
-      ...running,
-      status: result.status === 'done' ? 'done' : result.status,
-      finishedAt: Date.now(),
-      usage: result.usage,
-      error: result.error ?? null,
-    };
-    this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
-      this.core.journal.putTurn(finished);
-    });
-    this.core.bus.emit('turn.finished', finished);
-
-    if (result.status === 'error') {
-      this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`);
-    }
-
-    const current = this.core.journal.getThread(threadId);
-    if (current === null) return;
-    const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
-    if (current.archived || !sameSession) releaseThread(threadId);
-    const next: ThreadSummary = {
-      ...current,
-      sessionId: sameSession ? result.sessionId ?? current.sessionId : current.sessionId,
-      status: result.status === 'error' ? 'error' : 'idle',
-      unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
-    };
-    this.save(next, 'thread.finished');
-    if (result.status !== 'done') this.core.coordination.pause(threadId);
-    if (result.status === 'done' && sameSession && !queued.execution?.operation) this.autoTitle(threadId, turnId);
-  }
-
-  /**
-   * The requests still waiting for an answer, oldest first. Answering one or
-   * finishing its turn takes it out, so what this returns is what a client has
-   * to show, whether it was subscribed when the request fired or not.
-   */
   listPermissions(threadId?: ThreadId): PermissionRequest[] {
-    const pending = [...this.permissions.values()].map((entry) => entry.request);
-    const scoped = threadId === undefined ? pending : pending.filter((r) => r.threadId === threadId);
-    return scoped.sort((a, b) => a.createdAt - b.createdAt);
-  }
-
-  /**
-   * Is anything of this thread still waiting on the user? An agent can run two
-   * tools at once and raise a card for each, so answering one does not mean the
-   * turn is running again.
-   */
-  private waitingOn(threadId: ThreadId): boolean {
-    for (const entry of this.permissions.values()) if (entry.request.threadId === threadId) return true;
-    for (const entry of this.questions.values()) if (entry.request.threadId === threadId) return true;
-    return false;
+    return this.cards.listPermissions(threadId);
   }
 
   answerPermission(params: { requestId: RequestId; decision: 'allow' | 'deny' }): void {
-    const pending = this.permissions.get(params.requestId);
-    if (pending === undefined) throw notFound(`unknown permission request ${params.requestId}`, params);
-    this.permissions.delete(params.requestId);
-    const threadId = pending.request.threadId;
-    this.core.journal.append(
-      { type: 'permission.resolved', threadId, version: 1, payload: { ...params } },
-      () => undefined,
-    );
-    this.core.bus.emit('permission.resolved', { requestId: params.requestId, threadId, decision: params.decision });
-    this.setStatus(threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
-    pending.resolve(params.decision);
+    this.cards.answerPermission(params);
   }
 
-  /**
-   * The questions still waiting for an answer, oldest first. The same rule as
-   * the permissions: answering one or finishing its turn takes it out, so a
-   * client that was not subscribed when it fired still draws the card.
-   */
   listQuestions(threadId?: ThreadId): QuestionRequest[] {
-    const pending = [...this.questions.values()].map((entry) => entry.request);
-    const scoped = threadId === undefined ? pending : pending.filter((q) => q.threadId === threadId);
-    return scoped.sort((a, b) => a.createdAt - b.createdAt);
+    return this.cards.listQuestions(threadId);
   }
 
-  answerQuestion(params: {
-    threadId: ThreadId;
-    questionId: RequestId;
-    optionIds: string[];
-    text?: string;
-  }): void {
-    const pending = this.questions.get(params.questionId);
-    if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
-    const request = pending.request;
-    if (request.threadId !== params.threadId) {
-      throw refused('the question belongs to another thread', {
-        questionId: params.questionId,
-        threadId: params.threadId,
-        expected: request.threadId,
-      });
-    }
+  answerQuestion(params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string }): void {
+    this.cards.answerQuestion(params);
+  }
 
-    const known = new Set(request.options.map((option) => option.id));
-    const unknown = params.optionIds.filter((id) => !known.has(id));
-    if (unknown.length > 0) {
-      throw refused('the question does not offer these options', {
-        questionId: request.id,
-        unknown,
-        expected: [...known],
-      });
-    }
-    if (!request.multiple && params.optionIds.length > 1) {
-      throw refused('the question takes one option', { questionId: request.id, optionIds: params.optionIds });
-    }
-    const text = params.text ?? '';
-    if (text.length > 0 && !request.allowText) {
-      throw refused('the question takes no free text', { questionId: request.id });
-    }
-    if (params.optionIds.length === 0 && text.length === 0) {
-      throw refused('an answer needs an option or some text', { questionId: request.id });
-    }
-
-    const answer: QuestionAnswer = text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
-    this.questions.delete(request.id);
-    this.core.journal.append(
-      {
-        type: 'question.answered',
-        threadId: request.threadId,
-        version: 1,
-        payload: { questionId: request.id, answer },
-      },
-      () => undefined,
-    );
-    this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer });
-    this.setStatus(request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
-    pending.resolve(answer);
+  askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {
+    return this.cards.askAsync(params);
   }
 
   // -- internals ------------------------------------------------------------
 
-  private makeContext(
-    thread: ThreadSummary,
-    provider: ProviderDescriptor,
-    account: Account,
-    turn: Turn,
-  ): TurnContext {
-    const threadId = thread.id;
-    const env = this.core.accounts.accountEnv(account, provider);
-    const emit: EmitSink = {
-      startMessage: (role: MessageRole): MessageId => {
-        const message: Message = {
-          id: newId('msg_'),
-          threadId,
-          turnId: turn.id,
-          role,
-          parts: [],
-          state: 'streaming',
-          createdAt: Date.now(),
-        };
-        this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
-          this.core.journal.putMessage(message);
-        });
-        this.core.bus.emit('message.started', message);
-        return message.id;
-      },
-      delta: (messageId: MessageId, partIndex: number, text: string): void => {
-        this.core.journal.appendDelta(threadId, messageId, partIndex, text);
-        this.core.bus.emit('message.delta', { threadId, messageId, partIndex, text });
-      },
-      part: (messageId: MessageId, partIndex: number, part: MessagePart): void => {
-        this.core.journal.append(
-          { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
-          () => {
-            this.core.journal.setMessagePart(messageId, partIndex, part);
-          },
-        );
-        this.core.bus.emit('message.part', { threadId, messageId, partIndex, part });
-      },
-      complete: (messageId: MessageId, state: Message['state']): void => {
-        this.core.journal.append(
-          { type: 'message.completed', threadId, version: 1, payload: { messageId, state } },
-          () => {
-            this.core.journal.setMessageState(messageId, state);
-          },
-        );
-        this.core.bus.emit('message.completed', { threadId, messageId, state });
-      },
-    };
-
-    const input = this.lastUserInput(threadId, turn.id);
-    const continued = thread.sessionId === null && (thread.sessionGeneration ?? 0) > 0
-      ? continuationInput(this.core.journal, threadId, turn.id, input, provider, part => fileReference(this.core.dataDir, part))
-      : input;
-    const prepared = prepareAttachments(this.core.dataDir, continued);
-    return {
-      thread,
-      account,
-      provider,
-      turn,
-      prompt: prepared.prompt + (turn.execution?.operation === 'compact' ? '' : this.core.coordination.instructions(threadId)),
-      coordination: () => this.core.coordination.take(threadId, turn.id),
-      attachments: prepared.attachments,
-      sessionId: thread.sessionId,
-      sessionBefore: this.sessionBefore(thread, turn.id),
-      accountEnv: env,
-      warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
-      emit,
-      log: (level, message) => {
-        this.core.log(level, message);
-      },
-      commands: (list: AgentCommand[]) => {
-        if ((this.require(threadId).sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) this.noteCommands(threadId, list);
-      },
-      context: (use) => {
-        if ((this.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.noteContext(threadId, use);
-      },
-      tasks: (list) => this.core.activity.tasks(threadId, list),
-      requestPermission: (toolName: string, input: unknown, description: string | null): PermissionTicket =>
-        this.requestPermission(thread, turn, toolName, input, description),
-      askQuestion: (ask: QuestionAsk): QuestionTicket => this.askQuestion(thread, turn, ask),
-      // Every driver reaches the launcher through these two, so this is the one
-      // place a lease on the provider's managed files can be held for the life
-      // of an agent process, warm sessions included. `providers.uninstall`
-      // refuses while the count is above zero. It is also where the thread's
-      // own door goes into the environment: everything a thread launches finds
-      // the core, its token and the `boite` CLI, grandchildren included.
-      spawn: (cmd: string, args: string[], opts?: SpawnOptions) => {
-        const spawned = this.core.procs.spawn(threadId, cmd, args, {
-          ...opts,
-          env: agentEnvOf(this.core, threadId, { ...(opts?.env ?? process.env), ...env }),
-        });
-        const installs = this.core.providers.installs;
-        installs.acquire(provider.id);
-        void spawned.exited.finally(() => {
-          installs.release(provider.id);
-        });
-        return spawned;
-      },
-      spawnChild: this.leasedSpawnChild(threadId, provider),
-      killTree: () => {
-        this.core.procs.killTree(threadId);
-      },
-    };
-  }
-
-  /** `procs.spawnChild` under the thread, holding the provider's install lease for the child's life. */
-  private leasedSpawnChild(
-    threadId: ThreadId,
-    provider: ProviderDescriptor,
-  ): (cmd: string, args: string[], opts?: SpawnOptions) => SpawnedChild {
-    return (cmd, args, opts) => {
-      // The SDK drivers hand a whole environment here, so the agent's own
-      // variables are merged onto theirs rather than added to `process.env`.
-      const child = this.core.procs.spawnChild(threadId, cmd, args, {
-        ...opts,
-        env: agentEnvOf(this.core, threadId, opts?.env ?? process.env),
-      });
-      const installs = this.core.providers.installs;
-      installs.acquire(provider.id);
-      let released = false;
-      const drop = (): void => {
-        if (released) return;
-        released = true;
-        installs.release(provider.id);
-      };
-      child.once('exit', drop);
-      child.once('error', drop);
-      return child;
-    };
-  }
-
-  private requestPermission(
-    thread: ThreadSummary,
-    turn: Turn,
-    toolName: string,
-    input: unknown,
-    description: string | null,
-  ): PermissionTicket {
-    const request: PermissionRequest = {
-      id: newId('req_'),
-      threadId: thread.id,
-      turnId: turn.id,
-      toolName,
-      input,
-      description,
-      createdAt: Date.now(),
-    };
-    let resolve: (decision: 'allow' | 'deny') => void = () => undefined;
-    const promise = new Promise<'allow' | 'deny'>((done) => {
-      resolve = done;
-    });
-    this.permissions.set(request.id, { request, resolve });
-    this.core.journal.append(
-      { type: 'permission.requested', threadId: thread.id, version: 1, payload: request },
-      () => undefined,
-    );
-    this.setStatus(thread.id, 'waiting');
-    this.core.bus.emit('permission.requested', request);
-    return Object.assign(promise, { requestId: request.id });
-  }
-
-  private askQuestion(thread: ThreadSummary, turn: Turn, ask: QuestionAsk): QuestionTicket {
-    const request: QuestionRequest = {
-      id: newId('qst_'),
-      threadId: thread.id,
-      turnId: turn.id,
-      text: ask.text,
-      options: ask.options,
-      allowText: ask.allowText,
-      multiple: ask.multiple,
-      createdAt: Date.now(),
-    };
-    let resolve: (answer: QuestionAnswer | null) => void = () => undefined;
-    const promise = new Promise<QuestionAnswer | null>((done) => {
-      resolve = done;
-    });
-    this.questions.set(request.id, { request, resolve });
-    this.core.journal.append(
-      { type: 'question.asked', threadId: thread.id, version: 1, payload: request },
-      () => undefined,
-    );
-    this.setStatus(thread.id, 'waiting');
-    this.core.bus.emit('question.asked', request);
-    return Object.assign(promise, { questionId: request.id });
-  }
-
-  /** The turn ended with a question still open: it is cancelled, so the driver settles. */
-  private clearQuestionsOf(threadId: ThreadId): void {
-    for (const [id, pending] of [...this.questions]) {
-      if (pending.request.threadId !== threadId) continue;
-      this.questions.delete(id);
-      this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
-      pending.resolve(null);
-    }
-  }
-
-  /** The turn ended with a card still open: it is denied, and every client is told so. */
-  private clearPermissionsOf(threadId: ThreadId): void {
-    for (const [id, pending] of [...this.permissions]) {
-      if (pending.request.threadId !== threadId) continue;
-      this.permissions.delete(id);
-      // Without this the card stays on screen with live buttons, and pressing
-      // one answers `unknown permission request`.
-      this.core.bus.emit('permission.resolved', { requestId: id, threadId, decision: 'deny' });
-      pending.resolve('deny');
-    }
-  }
-
-  /** The user message of the turn, read back from the journal: the text and the images it carried. */
-  /** What the agent session this turn resumes already used, summed over its recorded turns. */
-  private sessionBefore(thread: ThreadSummary, turnId: TurnId): { costUsd: number; tokens: number } {
-    const before = { costUsd: 0, tokens: 0 };
-    if (thread.sessionId === null) return before;
-    for (const earlier of this.core.journal.listTurns(thread.id)) {
-      if (earlier.id === turnId || earlier.usage === null) continue;
-      if (earlier.execution?.sessionGeneration !== (thread.sessionGeneration ?? 0)) continue;
-      before.costUsd += earlier.usage.costUsdEquivalent ?? 0;
-      before.tokens += earlier.usage.inputTokens + earlier.usage.outputTokens + earlier.usage.cacheReadTokens + earlier.usage.cacheWriteTokens;
-    }
-    return before;
-  }
-
-  private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[] } {
-    const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
-    const message = operation === 'coordination'
-      ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
-      : this.core.journal.lastUserMessage(threadId, turnId);
-    if (message !== null) {
-      const attachments: Attachment[] = [];
-      for (const part of message.parts) {
-        if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
-        if (part.type === 'image') {
-          attachments.push({ kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt });
-        }
-      }
-      return {
-        prompt: message.parts.map((part) => part.type === 'text' ? part.activity ? activityPrompt(part.activity.kind, part.text, part.activity.iteration) : part.text : '').join(''),
-        attachments,
-      };
-    }
-    return { prompt: '', attachments: [] };
-  }
-
-  /**
-   * The agent's command list, whole, as a driver reports it. A name listed
-   * twice keeps its first entry, an empty or non-string name is dropped, and
-   * the same list twice is no event: the clients only hear a change.
-   */
-  private noteCommands(threadId: ThreadId, list: AgentCommand[]): void {
-    const seen = new Set<string>();
-    const commands: AgentCommand[] = [];
-    for (const entry of list) {
-      const name = typeof entry.name === 'string' ? entry.name.trim().replace(/^\//, '') : '';
-      if (name.length === 0 || seen.has(name)) continue;
-      seen.add(name);
-      commands.push({
-        name,
-        description: typeof entry.description === 'string' && entry.description.length > 0 ? entry.description : null,
-        hint: typeof entry.hint === 'string' && entry.hint.length > 0 ? entry.hint : null,
-      });
-    }
-    const before = this.commands.get(threadId);
-    if (before !== undefined && JSON.stringify(before) === JSON.stringify(commands)) return;
-    this.commands.set(threadId, commands);
-    this.core.bus.emit('thread.commands', { threadId, commands });
-  }
-
-  /** The context meter, whole numbers only: a driver that misreads its agent writes nothing. */
-  private noteContext(threadId: ThreadId, use: Omit<import('@boite/contracts').ContextUse, 'at'>): void {
-    const tokens = Number.isFinite(use.tokens) && use.tokens >= 0 ? Math.round(use.tokens) : null;
-    if (tokens === null) return;
-    const window = use.window !== null && Number.isFinite(use.window) && use.window > 0 ? Math.round(use.window) : null;
-    const thread = this.core.journal.getThread(threadId);
-    if (thread === null) return;
-    const breakdown = use.breakdown && Object.values(use.breakdown).every(n => Number.isFinite(n) && n >= 0)
-      && Math.abs(use.breakdown.input + use.breakdown.cache + use.breakdown.output - tokens) <= 1 ? use.breakdown : undefined;
-    this.save({ ...thread, context: { tokens, window, ...(breakdown ? {breakdown} : {}), at: Date.now() } }, 'thread.context');
-  }
-
   private setStatus(threadId: ThreadId, status: ThreadStatus): void {
-    const thread = this.core.journal.getThread(threadId);
-    if (thread === null || thread.status === status) return;
-    this.save({ ...thread, status }, 'thread.status');
+    setThreadStatus(this.core, threadId, status);
   }
 
   private save(thread: ThreadSummary, eventType: string): ThreadSummary {
-    const next: ThreadSummary = { ...thread, updatedAt: Date.now() };
-    this.core.journal.append({ type: eventType, threadId: next.id, version: 1, payload: next }, () => {
-      this.core.journal.putThread(next);
-    });
-    const summary = this.withLoad(next);
-    this.core.bus.emit('thread.updated', summary);
-    return summary;
+    return saveThread(this.core, thread, eventType);
   }
 
   private withLoad(thread: ThreadSummary): ThreadSummary {
-    return { ...thread, load: this.core.procs.loadOf(thread.id) };
+    return withLoad(this.core, thread);
   }
-}
-
-/** The protocols whose models come from the agent, not from the descriptor. */
-const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver', 'muse', 'pi', 'agy'];
-
-/**
- * What this account may run: the descriptor's models, plus the ones the last
- * probe read from the agent for a provider that owns its own list. Nothing is
- * probed here; a model the agent could list but nobody asked for is not offered
- * yet.
- */
-function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInfo[] {
-  const probed = probedModelsOf(provider.protocol, provider.id, accountId);
-  if (probed === null) return provider.models;
-  const known = new Set(probed.map((model) => model.id));
-  return [...probed, ...provider.models.filter((model) => !known.has(model.id))];
-}
-
-/**
- * Null is always allowed and means the provider's own default. Anything else
- * must be a model the descriptor lists or one the last probe read.
- */
-function checkModel(provider: ProviderDescriptor, accountId: AccountId, model: string | null): string | null {
-  if (model === null) return null;
-  const models = modelsFor(provider, accountId);
-  if (models.some((entry) => entry.id === model)) return model;
-  throw refused(
-    PROBED_PROTOCOLS.includes(provider.protocol)
-      ? 'the agent has not listed this model: open the model picker so Boite reads its models first'
-      : 'the provider does not offer this model',
-    { providerId: provider.id, accountId, model, expected: models.map((entry) => entry.id) },
-  );
-}
-
-/**
- * Null is always allowed and means the model's own default. Anything else must
- * be one of the levels that model lists, from the descriptor or from the probe,
- * or the call is refused.
- */
-function checkEffort(
-  provider: ProviderDescriptor,
-  accountId: AccountId,
-  model: string | null,
-  effort: string | null,
-): string | null {
-  if (effort === null) return null;
-  const levels = modelsFor(provider, accountId).find((entry) => entry.id === model)?.effort?.levels ?? [];
-  if (levels.some((level) => level.id === effort)) return effort;
-  throw refused('the model does not offer this reasoning effort', {
-    providerId: provider.id,
-    model,
-    effort,
-    expected: levels.length === 0 ? 'null: this model has no effort levels' : levels.map((level) => level.id),
-  });
-}
-
-/**
- * The effort a thread already carries was checked when it was chosen. A probed
- * scale lives in memory, so after a core restart it may not be read yet: only a
- * scale that is known and lacks the level refuses the turn.
- */
-function checkStoredEffort(
-  provider: ProviderDescriptor,
-  accountId: AccountId,
-  model: string | null,
-  effort: string | null,
-): void {
-  if (effort === null) return;
-  const known = modelsFor(provider, accountId).find((entry) => entry.id === model)?.effort;
-  if (known === undefined) return;
-  checkEffort(provider, accountId, model, effort);
-}
-
-function defaultModel(provider: ProviderDescriptor): string | null {
-  const preferred = provider.models.find((model) => model.default === true);
-  if (preferred !== undefined) return preferred.id;
-  return provider.models[0]?.id ?? null;
-}
-
-export function registerThreadMethods(core: Core): void {
-  const pullRequests = new PullRequests(core);
-  core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId));
-  core.router.register('threads.compact', (params) => core.threads.compact(params.threadId, params.expectedSelectionVersion));
-  core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', (params) =>
-    params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
-  );
-  core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
-  core.router.register('messages.list', (params) => core.threads.messages(params));
-  core.router.register('threads.update', (params) => core.threads.update(params));
-  core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));
-  core.router.register('threads.archive', (params) =>
-    core.threads.archive(params.threadId, params.archived !== false),
-  );
-  core.router.register('threads.pin', (params) => core.threads.pin(params.threadId, params.pinned !== false));
-  core.router.register('threads.markRead', (params) => {
-    core.threads.markRead(params.threadId);
-    return { ok: true } as const;
-  });
-  core.router.register('threads.subscribe', (params, ctx) => {
-    core.threads.require(params.threadId);
-    ctx.connection.subscriptions.add(params.threadId);
-    return { ok: true } as const;
-  });
-  core.router.register('threads.unsubscribe', (params, ctx) => {
-    ctx.connection.subscriptions.delete(params.threadId);
-    return { ok: true } as const;
-  });
-  core.router.register('turns.start', (params) =>
-    core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId),
-  );
-  core.router.register('turns.stop', (params) => {
-    core.activity.pauseAll(params.threadId);
-    return { stopped: core.threads.stopTurn(params.threadId) };
-  });
-  core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
-  core.router.register('permissions.answer', (params) => {
-    core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });
-    return { ok: true } as const;
-  });
-  core.router.register('questions.list', (params) => core.threads.listQuestions(params.threadId));
-  core.router.register('questions.answer', (params) => {
-    core.threads.answerQuestion({
-      threadId: params.threadId,
-      questionId: params.questionId,
-      optionIds: params.optionIds,
-      ...(params.text === undefined ? {} : { text: params.text }),
-    });
-    return { ok: true } as const;
-  });
-}
-
-function checkSpeed(provider: ProviderDescriptor, accountId: string, model: string | null, speed: string | null): string | null {
-  if (speed === null) return null;
-  const options = modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds ?? [];
-  if (options.some(option => option.id === speed)) return speed;
-  throw refused('the model does not offer this speed', { providerId: provider.id, model, speed, expected: options.map(option => option.id) });
 }

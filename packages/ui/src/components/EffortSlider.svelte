@@ -4,12 +4,15 @@
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { strings } from '../lib/strings';
+  import { levelName } from '../lib/format';
 
   /**
    * The reasoning chip and its popover: one dot per level of the model's scale,
    * filled up to the active one. A click on a dot or its name, a drag along the
    * track, or the arrows move it, and none of them close the popover: the level
-   * is a setting of the model the composer already runs.
+   * is a setting of the model the composer already runs. A model with a fast
+   * mode puts its switch at the top left of the popover, and the chip carries
+   * a bolt while it is on.
    */
   let {
     levels,
@@ -141,15 +144,10 @@
     {onkeydown}
   >
     <Brain size={14} strokeWidth={1.75} />
-    {current?.label ?? selectedSpeed?.label ?? strings.composer.standardSpeed}
+    {current ? levelName(current) : selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed}
+    <!-- A fast mode switched on stays in sight with the popover closed. -->
+    {#if current && selectedSpeed}<span class="fast-mark" data-testid="effort-fast-mark" title={levelName(selectedSpeed)}><Zap size={12} fill="currentColor" /></span>{/if}
   </button>
-
-  {#if speeds.length > 0}
-    <button type="button" class="chip speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? selectedSpeed?.label ?? strings.composer.standardSpeed} onclick={cycleSpeed}>
-      <Zap size={15} fill={selectedSpeed ? 'currentColor' : 'none'} />
-      {#if selectedSpeed}<span data-testid="effort-speed-label">{selectedSpeed.label}</span>{/if}
-    </button>
-  {/if}
 
   {#if popover.shown}
     <div
@@ -160,12 +158,18 @@
       aria-label={strings.composer.effortTitle}
       data-testid="composer-effort-menu"
       use:popover.attach
-      use:floating={{ anchor: () => trigger ?? null, mobileOnly: true, dismiss: () => popover.hide() }}
+      use:floating={{ anchor: () => trigger ?? null, placement: 'top', dismiss: () => popover.hide() }}
       onanimationend={popover.end}
       {onkeydown}
     >
       <div class="heading">
-        <span class="level">{current?.label ?? strings.composer.standardSpeed}</span>
+        {#if speeds.length > 0}
+          <button type="button" class="speed" class:active={!!selectedSpeed} data-testid="effort-speed" aria-label={strings.composer.speed} aria-pressed={!!selectedSpeed} title={selectedSpeed?.description ?? (selectedSpeed ? levelName(selectedSpeed) : strings.composer.standardSpeed)} onclick={cycleSpeed}>
+            <Zap size={14} fill={selectedSpeed ? 'currentColor' : 'none'} />
+            {#if selectedSpeed}<span data-testid="effort-speed-label">{levelName(selectedSpeed)}</span>{/if}
+          </button>
+        {/if}
+        <span class="level">{current ? levelName(current) : strings.composer.standardSpeed}</span>
       </div>
 
       {#if levels.length > 0}
@@ -179,7 +183,7 @@
         aria-valuemin={0}
         aria-valuemax={last}
         aria-valuenow={index}
-        aria-valuetext={current?.label ?? ''}
+        aria-valuetext={current ? levelName(current) : ''}
         data-testid="effort-track"
         onkeydown={ontrackkeydown}
         {onpointerdown}
@@ -191,7 +195,7 @@
           <span class="progress" style="width: calc({offset(index)} + 12px)"></span>
           <span class="thumb" style="left: {offset(index)}"></span>
           {#each levels as level, at (level.id)}
-            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={level.label} aria-label={level.label} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
+            <button type="button" class="dot" class:on={at <= index} data-dot={level.id} data-value={level.id} title={levelName(level)} aria-label={levelName(level)} tabindex="-1" style="left: {offset(at)}" onclick={() => pick(at)}></button>
           {/each}
         </div>
       </div>
@@ -202,14 +206,16 @@
 </div>
 
 <style>
-.effort { position: relative; display: inline-flex; gap: 4px; }
+.effort { position: relative; display: inline-flex; }
 .trigger { cursor: pointer; height: var(--control-sm); }
 .trigger:hover, .trigger[aria-expanded='true'] { background: var(--color-surface-3); color: var(--color-foreground); }
+.fast-mark { display: inline-flex; margin-left: -2px; color: var(--color-accent); }
 .popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40; width: 280px; padding: 10px 12px 12px; background: var(--color-surface-3); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); animation: pop var(--dur-2) var(--ease-out-quint); transform-origin: bottom left; }
 .popover.closing { animation-name: pop-out; pointer-events: none; }
-.heading { display: flex; justify-content: center; align-items: center; min-height: 22px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
-.level { white-space: nowrap; }
-.speed { height: var(--control-sm); color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
+/* Three columns: the fast switch on the left, the level in the middle whatever the switch's width. */
+.heading { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 24px; margin-bottom: 8px; color: var(--color-foreground); font-size: var(--text-sm); font-weight: 600; }
+.level { grid-column: 2; white-space: nowrap; }
+.speed { grid-column: 1; justify-self: start; display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-left: -4px; padding: 0 6px; border: none; border-radius: var(--radius-md); background: transparent; font-size: var(--text-xs); font-weight: 500; color: var(--color-muted-foreground); transition: color var(--dur-2), background var(--dur-2), box-shadow var(--dur-2); }
 .speed :global(svg) { transition: transform var(--dur-2) var(--ease-out-quint); }
 .speed:hover { color: var(--color-accent); background: var(--color-accent-soft); box-shadow: 0 0 12px var(--color-accent-soft); }
 .speed:hover :global(svg) { transform: rotate(-12deg) scale(1.16); }

@@ -11,6 +11,18 @@ const PROVIDERS = ['claude', 'codex', 'opencode', 'pi', 'grok', 'antigravity', '
 const MODES = ['off', 'basic', 'enhanced'] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INTERVAL = 300_000;
+export const RELAY = 'https://boite-v2-telemetry.nefreex.workers.dev';
+
+/**
+ * Only published builds default to the relay. Their CI bundles the core with
+ * `--env=BOITE_RELEASE_*` and BOITE_RELEASE_TELEMETRY=1, which inlines the flag.
+ * A run from sources or a local build reads it at runtime, where it is unset,
+ * so a scratch data directory never counts as a new installation.
+ * BOITE_TELEMETRY_URL, read at runtime, still overrides either default.
+ */
+export function relayFor(release: boolean, override: string | undefined): string {
+  return override ?? (release ? RELAY : '');
+}
 interface Consent {
   mode: TelemetryState['mode'];
   anonymousId: string;
@@ -66,7 +78,8 @@ export class Telemetry {
   private unsubscribe: () => void;
   private mutation: Promise<unknown> = Promise.resolve();
 
-  constructor(private core: Core, private endpoint = process.env.BOITE_TELEMETRY_URL ?? 'https://boite-v2-telemetry.nefreex.workers.dev', private send: typeof fetch = fetch) {
+  // Literal `process.env` reads, so that Bun can inline the release flag.
+  constructor(private core: Core, private endpoint = relayFor(process.env.BOITE_RELEASE_TELEMETRY === '1', process.env.BOITE_TELEMETRY_URL), private send: typeof fetch = fetch) {
     if (endpoint) {
       let url: URL;
       try { url = new URL(endpoint); }

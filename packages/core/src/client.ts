@@ -17,6 +17,8 @@ export interface ConnectOptions {
   requestTimeoutMs?: number;
   /** Say hello with a pairing grant instead of the token; `session` then carries what came back. */
   grant?: string;
+  /** Sent with the grant, so a retry after a lost answer gets the same session back. */
+  nonce?: string;
   /** Extra upgrade headers. The bench names a `Host` here to be served as a remote client. */
   headers?: Record<string, string>;
 }
@@ -110,10 +112,22 @@ export async function connect(url: string, token: string, options: ConnectOption
     for (const handler of listeners.get('*') ?? []) handler({ event: frame.method, payload: frame.params });
   });
 
+  /**
+   * Waiters of `next`. A close the owner asked for drops them without settling:
+   * nobody listens any more, and a timer left running would reject seconds later
+   * into whatever runs then. A close from the other side rejects them at once.
+   */
+  const watchers = new Set<{ cancel(): void; fail(error: Error): void }>();
+  let ownerClosed = false;
+
   socket.addEventListener('close', () => {
     closed = true;
     for (const waiter of pending.values()) waiter.reject(new Error('the socket closed'));
     pending.clear();
+    for (const watcher of [...watchers]) {
+      if (ownerClosed) watcher.cancel();
+      else watcher.fail(new Error('the socket closed'));
+    }
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -133,7 +147,7 @@ export async function connect(url: string, token: string, options: ConnectOption
   }).catch(error => { socket.close(); throw error; });
 
   const hello = (await send('hello', {
-    ...(options.grant === undefined ? { token } : { grant: options.grant }),
+    ...(options.grant === undefined ? { token } : { grant: options.grant, ...(options.nonce === undefined ? {} : { nonce: options.nonce }) }),
     protocolVersion: PROTOCOL_VERSION,
     client: options.client ?? { name: 'test', version: '2.0.0-beta.1' },
   }, Math.max(1, deadline - Date.now())).catch(error => { socket.close(); throw error; })) as { core: CoreInfo; principal: Principal; session?: { id: string; token: string }; threadId?: ThreadId };
@@ -178,21 +192,28 @@ export async function connect(url: string, token: string, options: ConnectOption
       waitMs = 5000,
     ): Promise<RpcEvents[E]> {
       return new Promise<RpcEvents[E]>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          off();
-          reject(new Error(`timed out waiting for ${event}`));
-        }, waitMs);
+        if (closed) {
+          reject(new Error('the client is closed'));
+          return;
+        }
+        const watcher = {
+          cancel(): void { clearTimeout(timer); off(); watchers.delete(watcher); },
+          fail(error: Error): void { watcher.cancel(); reject(error); },
+        };
+        const timer = setTimeout(() => watcher.fail(new Error(`timed out waiting for ${event}`)), waitMs);
         const off = on(event, (payload) => {
           const typed = payload as RpcEvents[E];
           if (predicate !== undefined && !predicate(typed)) return;
-          clearTimeout(timer);
-          off();
+          watcher.cancel();
           resolve(typed);
         });
+        watchers.add(watcher);
       });
     },
     close(): void {
       closed = true;
+      ownerClosed = true;
+      for (const watcher of [...watchers]) watcher.cancel();
       socket.close();
     },
   };

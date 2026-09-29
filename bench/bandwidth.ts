@@ -75,7 +75,7 @@ async function settle(): Promise<void> {
   await Bun.sleep(RTT_MS + 120);
 }
 
-/** The ten calls of `Store.#load`, all in flight at once, as the UI sends them. */
+/** The ten calls of `Connection.#load` (`packages/ui/src/lib/store/connection.svelte.ts`), all in flight at once, as the UI sends them. */
 async function boot(client: CoreClient): Promise<void> {
   await Promise.all([
     client.call('projects.list', {}),

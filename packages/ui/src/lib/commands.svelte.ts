@@ -6,10 +6,15 @@
  */
 
 import type { KeybindingCommand } from '@boite/contracts';
+import { archiveThread, reopenLastArchived } from './archive';
+import { lastAnswer } from './message-display';
+import { sidebarRows } from './sidebar-rows.svelte';
+import { workspace } from './workspace.svelte';
+import { projectView } from './project-view.svelte';
 import { experimentOn } from './experiments.svelte';
 import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
-import { strings } from './strings';
+import { fill, strings } from './strings';
 import type { Store } from './store.svelte';
 import { setTheme } from './theme';
 
@@ -25,7 +30,8 @@ const OWNER_COMMANDS = new Set<string>([
   'files',
   'tasks',
   'providers',
-  'pair'
+  'pair',
+  'terminal'
 ]);
 
 /** True while this row is a command the agent reported, not one of Boite's. */
@@ -61,19 +67,30 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     items.push(row('pin', open.pinned ? strings.palette.unpin : strings.palette.pin, 'favourite top'));
     items.push(row('rename', strings.palette.rename, 'title'));
     items.push(row('retitle', strings.palette.retitle, 'title agent name'));
+    items.push(row('find', strings.keyboard.commands.find, 'search text ctrl+f'));
+    items.push(row('copy-answer', strings.keyboard.commands.copyAnswer, 'clipboard reply response'));
     items.push(row('panel', strings.palette.panel, 'browser surface'));
+    // Following a run is open to a paired device; starting one is the owner's, in the surface.
+    items.push({ id: 'workflows', kind: 'command', label: strings.palette.workflows, keywords: 'workflow steps graph plan run' });
     // The three read the working directory or the project's todos, which
     // `packages/core/src/access.ts` refuses to a paired device.
     if (store.owner) {
       items.push(row('changes', strings.palette.changes, 'git diff working tree'));
       items.push(row('files', strings.palette.files, 'tree directory explorer'));
       items.push(row('tasks', strings.palette.tasks, 'todo goal loop'));
+      // A button put away in Appearance stays here: the palette is the way back to it.
       items.push(row('trace', strings.palette.trace, 'processes load'));
+      items.push(row('terminal', strings.palette.terminal, 'shell console powershell cmd bash'));
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
+  // The Agents page is an experiment: off, the row would lead nowhere.
+  if (experimentOn('resident-agents')) items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
   items.push(row('settings', strings.palette.settings, 'preferences'));
-  items.push(row('appearance', strings.palette.appearance, 'theme material'));
+  items.push(row('appearance', strings.palette.appearance, 'theme material buttons toolbar'));
+  // The one way back to an archived thread: no chord, so written like the tour.
+  items.push({ id: 'archived', kind: 'command', label: strings.settings.archived.heading, keywords: 'archive restore unarchive old hidden' });
+  items.push(row('reopen-thread', strings.keyboard.commands.reopenThread, 'undo closed restore unarchive last'));
   if (store.owner) {
     items.push(row('providers', strings.palette.providers, 'accounts login install'));
     items.push(row('pair', strings.palette.pair, 'phone link devices'));
@@ -116,6 +133,11 @@ export function commandLabel(id: KeybindingCommand): string {
     case 'theme-system': return strings.palette.themeSystem;
     case 'archive': return strings.palette.archive;
     case 'import-session': return strings.palette.importSession;
+    case 'terminal': return strings.palette.terminal;
+    case 'reopen-thread': return strings.keyboard.commands.reopenThread;
+    case 'copy-answer': return strings.keyboard.commands.copyAnswer;
+    case 'find': return strings.keyboard.commands.find;
+    default: return fill(strings.keyboard.commands.thread, { n: id.slice('thread-'.length) });
   }
 }
 
@@ -129,7 +151,12 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
   // too: these five are the owner's, whatever key was pressed.
   if (!store.owner && OWNER_COMMANDS.has(id)) return;
   switch (id) {
-    case 'new-thread': store.showChat(); store.startDraft(); break;
+    case 'new-thread': {
+      const selected = workspace.view === 'recent' ? projectView.selected(workspace.machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))) : undefined;
+      if (selected) void workspace.select(selected.machine.store, undefined, selected.project.id);
+      else { store.showChat(); store.startDraft(); }
+      break;
+    }
     case 'palette': store.paletteOpen = !store.paletteOpen; break;
     case 'add-project':
       store.projectPickerOpen = true;
@@ -137,21 +164,34 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'pin': if (open) void store.pin(open.id, !open.pinned); break;
     case 'rename': store.showChat(); store.renameRequested = true; break;
     case 'retitle': if (open) void store.retitle(open.id); break;
-    case 'panel': store.showChat(); store.panel.toggle(); break;
+    case 'panel': store.showChat(); store.togglePanel(); break;
     case 'trace': store.showChat(); store.panel.toggleKind('trace'); break;
     case 'changes': store.showChat(); store.panel.toggleKind('changes'); break;
     case 'files': store.showChat(); store.panel.toggleKind('files'); break;
     case 'tasks': store.showChat(); store.panel.toggleKind('tasks'); break;
+    case 'workflows': store.showChat(); store.panel.toggleKind('workflow'); break;
+    case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
+    case 'agents': store.showAgents(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
+    case 'archived': store.showSettings('general', 'archived'); break;
     case 'providers': store.showSettings('accounts'); break;
-    case 'pair': store.showSettings('general'); break;
+    case 'pair': store.showSettings('machines', 'devices'); break;
     case 'tour': store.showChat(); openTour(); break;
     case 'theme-dark': setTheme('dark'); break;
     case 'theme-light': setTheme('light'); break;
     case 'theme-system': setTheme('system'); break;
-    case 'archive': if (open) void store.archive(open.id); break;
+    case 'archive': if (open) void archiveThread(store, open.id); break;
+    case 'reopen-thread': void reopenLastArchived(store); break;
+    case 'copy-answer': if (open) { const text = lastAnswer(open.messages); if (text) void store.copy(text); } break;
+    case 'find': if (open) { store.showChat(); store.findOpen = true; store.findRequest += 1; } break;
+    case 'thread-1': case 'thread-2': case 'thread-3': case 'thread-4': case 'thread-5':
+    case 'thread-6': case 'thread-7': case 'thread-8': case 'thread-9': {
+      const target = sidebarRows.list[Number(id.slice('thread-'.length)) - 1];
+      if (target) { store.showChat(); void workspace.select(target.store, target.threadId); }
+      break;
+    }
     case 'import-session': {
       // The open thread's project, else the draft's, else the first one.
       const projectId = open?.projectId ?? store.draft?.projectId ?? store.projects[0]?.id;

@@ -41,6 +41,36 @@ The same environment goes to every process of that account: a turn, a probe, a
 login. That is why the map lives on the OS profile rather than in a driver, and
 why a new provider needs no code to get isolation.
 
+## What an isolated account shares
+
+Isolation moves the whole configuration directory, so without more an isolated
+account runs with none of the user's settings, hooks, skills or instructions.
+The descriptor's `shared` block ([providers.md](providers.md#hooks-and-shared-configuration))
+names what it takes from the user's own directory, and the core lays it out
+before every spawn (`packages/core/src/profile-share.ts`):
+
+- A directory is linked: a junction on Windows, a symlink elsewhere. The account
+  sees the user's `skills` or `plugins` as they are now, and an edit through the
+  link lands in the user's own directory.
+- A file is copied, so an agent that rewrites its settings writes its own copy.
+  The next spawn replaces a copy that differs from the source; the user's file
+  wins over the agent's edit. A copy listed under `retarget` has the source's
+  paths rewritten to the account's own.
+- Something already there that Boite did not put there is set aside once as
+  `<name>.own-<date>`, never deleted. A file or directory the user removed from
+  their own directory goes from the account too, as long as it is still what
+  Boite put there.
+- A path with a link between it and the account directory is not shared, since
+  whatever went through the link would land outside the account.
+- `.boite-shared.json` in the account directory records the links and the hash
+  of each copy, which is how Boite tells its own work from the account's.
+
+A path that fails is logged once and shown under the account in Settings >
+Brain > Hooks; the spawn goes on without it. The login files never move: a
+share that would cover one is refused when the descriptor loads. The default
+account needs none of this, since it runs on the user's own directory. A test
+core (`BOITE_HOST_AGENTS=0`) shares nothing.
+
 ## The default account
 
 An account whose `isolationDir` is null runs on the provider's own default
@@ -66,14 +96,17 @@ statuses:
 
 | Status | Meaning |
 |---|---|
-| `unknown` | never checked, or the provider is not available on this machine |
+| `unknown` | never checked, the provider is not available on this machine, or its session file is missing on an OS where the login can live outside any file (Claude on macOS, whose login is in the Keychain) |
 | `ok` | the session file is there |
 | `unauthenticated` | the directory exists and the session file does not |
 | `error` | the check itself failed, with the reason |
 
 The check runs when an account is added, when it is asked for, and after a login
-process exits. Its result reaches every client as `accounts.updated`, so a second
-shell or a phone follows it without a reload. `auth.identity`, where a descriptor
+process exits. A changed status reaches every client as `accounts.updated`, so a
+second shell or a phone follows it without a reload. A check asked for that
+finds the same status answers with the account and writes and sends nothing, so
+the Accounts page checking on every focus costs no journal row and keeps the
+cached model lists; a new account and a finished login are always sent. `auth.identity`, where a descriptor
 provides it, is what turns a status into a name the picker can show.
 
 ## The login flow
@@ -115,6 +148,62 @@ A login that insists on opening a browser window of its own is one Boite points 
 a launcher that does nothing, through the profile's `BROWSER` variable, so the link
 goes to the page and never to a window over the user's work.
 
+## The guided connection
+
+Nobody should meet "no provider" as a dead end. When the composer has nothing
+to pick, its model chip becomes `Connect an AI` and opens `ConnectFlow.svelte`:
+Claude and Codex first, each naming the plan it uses, the other agents below.
+Choosing one walks the same steps as its row on the Providers page
+(`lib/provider-setup.ts`), one at a time: the download when Boite can fetch the
+agent, its own installer page otherwise, then the sign-in with the page to open
+and the field for a code. An agent whose login is a menu (see below) gets the
+same terminal as on the Providers page, inside the dialog. A download asked for
+here goes on to the sign-in by itself. Once the account answers, `Use <provider>` moves the composer to it
+through `store.useProvider`, the same remembered choice a pick in the model
+picker writes, and the text being typed stays where it was.
+
+Each step replaces the button that led to it, so the dialog moves the keyboard
+to the new step's first control whenever focus has fallen out of it: a
+keyboard user goes from `Install` to `Cancel`, to the sign-in link, then to
+`Use <provider>` without reaching for the mouse. On a phone the dialog is a
+sheet at the bottom of the screen, and its last button stays above the home
+indicator.
+
+An account that answered `unauthenticated` gets a `Sign in again` chip beside
+the model chip, and an error in its thread carries the same button. Both open
+the dialog on that account, so the login lands on it instead of creating a
+second one; a default-location account, which Boite never logs in, is told to
+sign in from the agent's own window and check again, unless its login runs in a
+terminal, which is then the user's own CLI answering. A paired phone gets
+neither button and reads `No AI connected` on the chip: `accounts.*` and
+`providers.install` are the owner's.
+
+## Signing in from a terminal
+
+Some login commands are a menu drawn in the terminal: `opencode auth login`
+asks which provider to add, with arrow keys, a search field and a key to paste.
+Piped output turns that into escape codes and gives the user nothing to answer
+with. A descriptor that sets `login.terminal: true` gets a real shell instead,
+the same one as the thread terminal ([terminal.md](terminal.md)):
+
+1. `accounts.loginTerminal` starts the shell in a pseudo-terminal under
+   `login:<accountId>`, with the account's environment and the isolation
+   directory (or the home directory for the default account) as its working
+   directory. Calling it again attaches to the running one.
+2. Once the prompt goes quiet, the core types the login command into it, as the
+   user would have: `& 'C:\path\opencode.exe' auth login` in PowerShell.
+3. The Providers page draws the shell under the provider's row. The user
+   answers the CLI there and closes the terminal once signed in, or types `exit`.
+4. When the shell exits, the core rechecks the account and `accounts.updated`
+   follows. `accounts.loginCancel` closes the shell too.
+
+The default account may sign in this way, unlike a piped login: the command runs
+in plain view, in the user's own CLI, which is what they would have typed in a
+terminal of their own. A sign-in from a row goes to the default account first
+when it is not signed in, then to an isolated account nobody is signed into,
+then to a new one. OpenCode and Grok use it; the phone has no Providers page
+and no terminal.
+
 ## What the core refuses, and why
 
 - The provider has no `login` block. Nothing to run, so the answer is a refusal
@@ -122,9 +211,12 @@ goes to the page and never to a window over the user's work.
   is a slash command inside its own interface, with no command-line equivalent.
 - A login is already running for that account. One at a time, or two processes
   race on one credentials file.
-- The account uses the provider's own default location. That login is the user's
-  own CLI, outside Boite, and running it from here would write into the real
-  configuration directory the user is logged into. The refusal says so.
+- The account uses the provider's own default location and the login is piped.
+  That login is the user's own CLI, outside Boite, and running it unseen would
+  write into the real configuration directory the user is logged into. The
+  refusal says so. A terminal login is the exception above.
+- `accounts.loginTerminal` for a provider without `login.terminal`, or while a
+  piped login runs for that account. Refused by name, with the field.
 - The login command is empty, or its executable does not resolve. Refused at the
   spawn, naming what was tried.
 - An account of its own, for a provider whose profile has no isolation variable
@@ -143,40 +235,67 @@ descriptor's `close.processes` names what to close first, which matters for an
 agent that keeps a background process on its configuration directory. An account
 that runs under `node` names nothing there, because the process in the job is
 `node` and killing every `node` on the machine is not a thing Boite will ever do.
+The shared links are removed before the directory, so deleting the account
+never walks into the user's own `skills` or `plugins`.
 
 ## Quotas and account pools
 
 Providers shows one row per provider and its next step. A row's chevron opens
 its accounts: sign in again for an isolated one, Check (the session file, then a
 model probe), Remove, quotas, `Add another account`, which names the account
-after the provider and starts its sign-in, and `Use my command-line login` when
-no account uses the default location. Default-location accounts keep their
+after the provider and starts its sign-in, `Use my command-line login` when
+no account uses the default location, and the provider's default model and
+effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
 credentials file. Keychain-only Claude credentials are not supported. Codex quotas
 come from `account/rateLimits/read`, without starting a conversation.
 
-The tray Usage window always lists Claude, Codex, Antigravity, Grok and OpenCode
-Go. Each row shows the lowest remaining limit across its monitored accounts and
-the next reported reset. Open a row for individual windows, account names and
-monitoring switches. Missing accounts lead to Providers.
+The tray Usage window and Settings, Limits list only the providers with a
+signed-in account whose limits are monitored. Each tray row shows the lowest
+remaining limit across those accounts and the next reported reset; opening it
+shows each window's own bar and reset time, by account when there are several.
+Monitoring switches live under Tracked accounts on Settings, Limits: one per
+signed-in account with limits to read, the Antigravity CLI source included.
+Settings, Providers shows no usage, and the tray has no switch. With nothing
+signed in, both offer to connect a provider. The last reading stays on screen
+while the next one loads, from this browser's storage after a restart.
 
-The tray popup opens after 500 ms of continuous hover. Leaving the icon cancels
+The tray popup opens after 100 ms of continuous hover. Leaving the icon cancels
 that opening; a click does not bypass the delay. On Windows it stays inside the
 monitor's work area, above a bottom taskbar. Auto-hidden taskbars reserve their
 full height even while sliding offscreen. The popup keeps its position when the
-taskbar retracts and allows moving from the icon into the popup before closing.
+taskbar retracts and allows moving from the icon into the popup and back before
+closing. Hovering the icon of an open popup leaves it as it is. While it is open
+the shell reads the pointer every 150 ms and closes it after two readings in a
+row outside the icon, the popup and the gap between them. It does not wait for
+the tray's leave event, which Windows often never sends: the popup then stayed
+up and the next hover could not open it again. For the same reason a move over
+the icon starts a hover as an entry does: without that leave event the tray
+reports no entry again, only moves. The popup is an
+opaque window: Windows 11 rounds its corners and draws its border, Windows 10
+keeps it square.
 
 Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
-percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
+percentage from the Grok CLI billing endpoint. Expired xAI logins renew silently
+when they contain a refresh token, issuer and client ID. Boite saves renewed
+tokens in the same file, preserves other logins and shares concurrent renewals.
+A billing response of 401 triggers one renewal and retry; 403 keeps the access
+error. A rejected refresh token requires `grok login --device-auth`.
+The [billing format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs)
+also carries legacy credit amounts. Boite accepts those amounts when no percentage
+is reported. An omitted proto3 percentage with a dated credits period means zero
+usage; a missing report or malformed percentage stays unavailable. The compact
+quota view shows each account's failure reason beneath its provider, including
+login and network failures.
 OpenCode Go reads the `opencode-go` API login in the account's
 `XDG_DATA_HOME/opencode/auth.json`; a default account can also use
 `OPENCODE_API_KEY`. It requests rolling, weekly and monthly limits from the Go
 usage API. It never substitutes another provider's login or local token totals.
 
 Antigravity uses a separate, opt-in `Antigravity CLI` source. Install `agy` 1.1.11
-or later and sign in once, then expand Antigravity in the tray and enable the
-switch. Boite reads `agy -p /usage --output-format json` in a temporary directory,
+or later and sign in once, then turn on `agy command-line login` under Tracked
+accounts in Settings, Limits. Boite reads `agy -p /usage --output-format json` in a temporary directory,
 with a version check, output limit and timeout. It does not send a model prompt.
 The report belongs to the CLI login on the core's computer, not an isolated ACP
 account. Its reserved quota id is `quota:antigravity-cli`; disabling monitoring

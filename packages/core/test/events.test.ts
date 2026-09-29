@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { startTestCore } from './harness.ts';
@@ -59,6 +59,22 @@ test('a second connection sees settings, providers, projects and accounts change
   await actor.call('accounts.remove', { accountId: second.id });
   expect((await accountRemoved).accountId).toBe(second.id);
 
+  // A reload that changes nothing tells nobody; a new descriptor on disk does.
+  const providersDir = join(harness.dataDir, 'providers');
+  mkdirSync(providersDir, { recursive: true });
+  const profile = { detect: {}, executable: [], isolation: {} };
+  writeFileSync(join(providersDir, 'echo-copy.json'), JSON.stringify({
+    id: 'echo-copy',
+    schemaVersion: 1,
+    name: 'Echo copy',
+    shortName: 'Copy',
+    protocol: 'echo',
+    roots: ['{isolationDir}'],
+    profiles: { windows: profile, linux: profile, macos: profile },
+    auth: { kind: 'none' },
+    models: [{ id: 'echo', name: 'Echo', default: true }],
+    capabilities: { approvals: true, hooks: false, checkpoint: false, images: false, planMode: false, resume: true },
+  }));
   const providersUpdated = watcher.next('providers.updated');
   const reloaded = await actor.call('providers.reload', {});
   const seen = await providersUpdated;

@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
 
-const uiRequire = createRequire(join(import.meta.dir, '../../packages/ui/package.json'));
-const { createServer } = await import(uiRequire.resolve('vite'));
-let server: { listen(): Promise<unknown>; close(): Promise<void> };
+let server: { close(): Promise<void> };
 let page: BrowserPage;
 let origin = '';
 
@@ -48,8 +46,7 @@ async function openLimits() {
 
 beforeAll(async () => {
   const port = await freePort();
-  server = await createServer({ root: join(import.meta.dir, '../../packages/ui'), server: { host: '127.0.0.1', port, strictPort: true }, clearScreen: false });
-  await server.listen();
+  server = await startUi(port);
   origin = `http://127.0.0.1:${port}`;
   page = await BrowserPage.launch({ url: `${origin}/?fake=1`, windowSize: { width: 1280, height: 800 } });
   await scheme('dark');
@@ -125,7 +122,9 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await viewport(390, 844, true);
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=usage-chart] svg path')`);
   expect(await fits()).toBe(true);
-  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header p').getBoundingClientRect().height > 0`)).toBe(true);
+  // The bar above names the page and carries its info mark; the page's own title steps aside.
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-settings-info]').getBoundingClientRect().height > 0`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=usage-page] > header').getBoundingClientRect().height`)).toBe(0);
   await capture('usage-phone-dark.png');
 
   await page.evaluate(`document.querySelector('[data-testid=usage-chart]').scrollIntoView({ block: 'center' })`);

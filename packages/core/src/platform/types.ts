@@ -17,6 +17,8 @@ export interface ProcessSample {
   processes: number;
   cpuPercent: number;
   memoryBytes: number;
+  /** Working set for the UI; private commit for the Windows governor. */
+  workingSets?: { pid: number; bytes: number; committedBytes?: number; exe?: string }[];
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -24,11 +26,15 @@ export interface ProcessEventSink {
   started(threadId: string, pid: number, info: NativeProcessInfo): void;
   exited(threadId: string, pid: number, exit: NativeProcessExit): void;
   note(threadId: string, message: string): void;
+  memoryLimit(threadId: string | null, kind: 'thread-cap' | 'budget'): void;
 }
 
 export interface ProcessLimits {
   agentCpuCapPercent: number;
+  /** Effective MB limits, with auto settings already resolved against physical RAM. */
+  budgetMb: number;
   threadMemoryCapMb: number;
+  memoryReserveMb: number;
 }
 
 /** What the registry wants to hear about. Set once by `ProcRegistry`. */
@@ -57,14 +63,30 @@ export interface GuardStatus {
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
-  release(): void;
+  /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
+  release(): Promise<void>;
   capability(): TraceCapability;
   applySettings(settings: Settings): void;
   attach(threadId: string, pid: number): boolean;
   terminate(threadId: string): boolean;
+  /** One process the thread's job reported, through the handle held since its start. */
+  terminateProcess(threadId: string, pid: number): boolean;
   terminateUnassigned(pid: number): void;
   sample(threadId: string): ProcessSample | null;
+  /** Null `availableBytes` when the OS gives no honest reading; the reserve check then sits out. */
+  machineMemory(): { totalBytes: number; availableBytes: number | null } | null;
   pidAdded(threadId: string, pid: number): void;
   pidRemoved(threadId: string, pid: number): void;
+  /** A turn is starting: have the process drain and the protections ready before its first process. */
+  warm(): void;
+  /** The registry forgot an idle thread: drop what the platform keeps for it. */
+  forget(threadId: string): void;
   guardStatus(): GuardStatus;
+  /**
+   * When the process that holds `pid` now started, in ms since the epoch, or
+   * null when none does or the OS will not say. A pid given back is handed out
+   * again, so this is what tells the process that wrote a pid down from the one
+   * wearing it today.
+   */
+  startedAt(pid: number): number | null;
 }

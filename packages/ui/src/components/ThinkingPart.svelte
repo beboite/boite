@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { ChevronRight } from '@lucide/svelte';
+  import { Brain, ChevronRight } from '@lucide/svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { paragraphBlocks, currentThought } from '../lib/message-display';
+  import { ParagraphScan, currentThought } from '../lib/message-display';
   import { strings } from '../lib/strings';
 
   let { text, live = false }: { text: string; live?: boolean } = $props();
@@ -17,8 +17,10 @@
   });
 
   let current = $derived(currentThought(text));
-  let body = $derived(paragraphBlocks(current.text, live).join('\n\n'));
-  let preview = $derived(current.title ?? strings.chat.thinking);
+  // One block per paragraph, like Prose: a new paragraph renders alone and the
+  // earlier ones keep their nodes, folded or not.
+  const scan = new ParagraphScan();
+  let blocks = $derived(scan.blocks(current.text, live));
 </script>
 
 <div class="thinking" data-testid="thinking-part">
@@ -30,17 +32,21 @@
     title={open ? strings.chat.thinkingHide : strings.chat.thinkingShow}
     onclick={() => (open = !open)}
   >
-    <span class="caret" class:open><ChevronRight size={13} strokeWidth={2} /></span>
-    <span class="label">{preview}</span>
+    <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
+    <span class="label">{strings.chat.thinking}</span>
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}
+    <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
   </button>
 
   <div class="fold" class:open inert={!open}>
     <div class="clip">
       {#if built}
-        <div class="body" data-testid="thinking-text">{@html renderMarkdown(body)}</div>
+        <div class="body" data-testid="thinking-text">
+          {#if blocks.length === 0 && current.title}<div class="paragraph">{current.title}</div>{/if}
+          {#each blocks as block, index (index)}<div class="paragraph">{@html renderMarkdown(block)}</div>{/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -49,19 +55,23 @@
 <style>
   .thinking {
     max-width: 100%;
+    padding-left: var(--activity-padding);
+    margin-bottom: var(--chat-part-gap);
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    min-height: var(--control-sm);
+    gap: var(--activity-gap);
+    min-height: var(--control);
     height: auto;
     max-width: 100%;
-    padding: 0 8px 0 4px;
+    padding: var(--activity-padding);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
   }
+
+  .glyph { display: inline-flex; flex: none; width: var(--activity-glyph); justify-content: center; color: var(--color-subtle); }
 
   .head:hover:not(:disabled) {
     color: var(--color-foreground);
@@ -78,7 +88,7 @@
   }
 
   .label {
-    font-weight: 500;
+    font-weight: 400;
     text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -114,12 +124,16 @@
   }
 
   .body {
-    margin: 2px 0 0 8px;
-    padding: 8px;
-    border-left: 2px solid var(--color-border);
+    margin: 4px 0 8px calc(var(--activity-padding) + var(--activity-glyph) / 2);
+    padding: 4px var(--activity-padding) 4px calc(var(--activity-glyph) / 2 + var(--activity-gap));
+    border-left: 1px solid var(--color-border);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
     white-space: pre-wrap;
     word-break: break-word;
   }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  :global(html[data-motion='reduced']) .dot { animation: none; }
 </style>

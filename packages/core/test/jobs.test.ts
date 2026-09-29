@@ -3,6 +3,9 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import { RpcErrorCode } from '@boite/contracts';
 import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
+import { cpuRateOfGlobalJob, memoryLimitOfJob } from '../src/platform/windows/jobs.ts';
+import { resolveMemoryLimits } from '../src/memory-limits.ts';
+import { processPlatform } from '../src/platform/index.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -51,11 +54,26 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  harness.core.procs.killAll();
+  await harness.core.procs.killAll();
   await harness.stop();
 });
 
 describeWindows('windows job objects', () => {
+  test('global and thread memory limits are resolved and updated on existing jobs', async () => {
+    const client = await harness.connect();
+    const child = harness.core.procs.spawn('memory-cap', 'ping', ['-n', '30', '127.0.0.1']);
+    const totalBytes = processPlatform.machineMemory()!.totalBytes;
+    for (const [percent, cap] of [[60, 0], [10, 1048576], [25, 300], [90, 0], [60, 0]] as const) {
+      await client.call('settings.set', { agentMemoryBudgetPercent: percent, threadMemoryCapMb: cap });
+      const resolved = resolveMemoryLimits(harness.core.settings.get(), totalBytes);
+      expect(memoryLimitOfJob(null)).toEqual({ flags: 0x2200, bytes: Math.floor(Math.min(resolved.budgetMb * 1048576 * 1.1, totalBytes * 0.9) / 4096) * 4096 });
+      expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
+    harness.core.procs.killTree('memory-cap');
+    await child.exited;
+  });
+
   test('the whole tree a turn launches is traced, measured and killed', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -103,6 +121,9 @@ describeWindows('windows job objects', () => {
     await until('a thread.updated carrying the load', () => loads.some((entry) => entry.load?.processes === 2), 3000);
     const pushed = loads.find((entry) => entry.load?.processes === 2);
     expect(pushed?.load?.memoryBytes).toBeGreaterThan(0);
+    // The turn waits on the ping: a client replaces its row with the push, so the push keeps the row's clock.
+    expect(pushed?.status).toBe('running');
+    expect(pushed?.runningSince).toEqual(expect.any(Number));
 
     const killed = await client.call('resources.killTree', { threadId });
     expect(killed.killed).toBe(2);
@@ -114,6 +135,30 @@ describeWindows('windows job objects', () => {
       expect(record.cpuMs).not.toBeNull();
       expect(record.exitedAt).not.toBeNull();
     }
+  }, 30000);
+
+  test('the orphan sweep stops a ping whose shell exited and keeps one whose shell runs', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const procs = harness.core.procs;
+    const kept = procs.spawn(threadId, 'cmd', ['/c', 'ping -n 30 127.0.0.1']);
+    const left = procs.spawn(threadId, 'cmd', ['/c', 'start /b ping -n 30 127.0.0.1']);
+
+    await until('both pings to be reported', () => procs.liveOf(threadId).filter(isPing).length === 2, 10000);
+    await until('the detaching shell to leave the registry',
+      () => !procs.liveOf(threadId).some((record) => record.pid === left.record.pid), 10000);
+    const pings = procs.liveOf(threadId).filter(isPing);
+    const orphan = pings.find((record) => record.parentPid === left.record.pid) as ProcessRecord;
+    const control = pings.find((record) => record.parentPid === kept.record.pid) as ProcessRecord;
+    expect(orphan).toBeDefined();
+    expect(control).toBeDefined();
+
+    // Read as the timer would, past the grace that follows a turn.
+    expect(procs.sweepOrphans(threadId, Date.now() + 60_000)).toEqual([orphan.pid]);
+    await until('the orphan to be gone', () => !isRunning(orphan.pid), 5000);
+    await until('its exit to be reported', () => !procs.liveOf(threadId).some((record) => record.pid === orphan.pid), 5000);
+    expect(isRunning(control.pid)).toBe(true);
+    expect(isRunning(kept.record.pid)).toBe(true);
   }, 30000);
 
   test('a grandchild that outlives its parent is still traced and still killed', async () => {
@@ -140,9 +185,37 @@ describeWindows('windows job objects', () => {
     expect(killed.killed).toBeGreaterThan(0);
     await until('the detached ping to be killed', () => !isRunning(ping?.pid as number), 2000);
   }, 30000);
+
+  test('a CPU cap set to 0 or 100 at runtime lifts the cap the global job already had', async () => {
+    const client = await harness.connect();
+    const threadId = 'cpu-cap';
+    // A process in a thread job is what builds the global job the cap lives on.
+    const child = harness.core.procs.spawn(threadId, 'ping', ['-n', '30', '127.0.0.1']);
+    expect(cpuRateOfGlobalJob()).not.toBeNull();
+
+    const rateAfter = async (percent: number): Promise<{ flags: number; rate: number } | null> => {
+      await client.call('settings.set', { agentCpuCapPercent: percent });
+      return cpuRateOfGlobalJob();
+    };
+    // ENABLE | HARD_CAP, and the rate in hundredths of a percent.
+    expect(await rateAfter(3)).toEqual({ flags: 0x5, rate: 300 });
+    expect(await rateAfter(0)).toEqual({ flags: 0, rate: 0 });
+    expect(await rateAfter(40)).toEqual({ flags: 0x5, rate: 4000 });
+    expect(await rateAfter(100)).toEqual({ flags: 0, rate: 0 });
+
+    harness.core.procs.killTree(threadId);
+    await child.exited;
+  }, 30000);
 });
 
 describe('job settings', () => {
+  test('memory settings default to auto and persist explicit values', async () => {
+    const client = await harness.connect();
+    expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 60, memoryReserveMb: 0 });
+    await client.call('settings.set', { agentMemoryBudgetPercent: 25, memoryReserveMb: 256 });
+    expect(await client.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 25, memoryReserveMb: 256 });
+  });
+
   test('the CPU cap is a percentage and refuses anything past 100', async () => {
     const client = await harness.connect();
 

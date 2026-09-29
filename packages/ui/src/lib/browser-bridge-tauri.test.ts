@@ -60,3 +60,18 @@ test('a failed destroy reports its error and lets the same id be created again',
     'browser_create', 'browser_destroy', 'browser_create'
   ]);
 });
+
+test('native selection arms only a live surface and reports failure to its matching request', async () => {
+  invoke.mockImplementation(async (command) => {
+    if (command === 'browser_annotate') throw new Error('injection refused');
+  });
+  const bridge = new TauriBridge();
+  const events: unknown[] = [];
+  bridge.on(event => events.push(event));
+  bridge.annotate('closed', 'ignored');
+  bridge.create('active', 'https://example.test');
+  bridge.annotate('active', 'request-a');
+  await vi.waitFor(() => expect(events).toHaveLength(1));
+  expect(invoke).toHaveBeenNthCalledWith(2, 'browser_annotate', { id: 'active', requestId: 'request-a' });
+  expect(events).toEqual([{ type: 'selection-failed', id: 'active', requestId: 'request-a', reason: 'injection refused' }]);
+});

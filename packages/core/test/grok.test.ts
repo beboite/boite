@@ -228,6 +228,20 @@ describe('grok', () => {
     expect(trace.filter((record) => record.exitedAt === null)).toEqual([]);
   });
 
+  test('a probe naming a model with no scale of its own starts one process, not one per call', async () => {
+    const client = await startCore();
+    const { accountId } = await grokAccount(client);
+    const processes = (): number => fakeLog().split('\n').filter((line) => line === 'initialize').length;
+
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId });
+    expect(processes()).toBe(1);
+    // `default` is listed without a scale: the agent keeps its own model.
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId, model: 'default' });
+    expect(processes()).toBe(2);
+    await client.call('providers.probe', { providerId: 'grok-fake', accountId, model: 'default' });
+    expect(processes()).toBe(2);
+  });
+
   test('the model and the effort go out as one session/set_model, never as a config option', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await grokThread(client, 'grok-4.5', 'medium');
@@ -373,6 +387,43 @@ describe('grok', () => {
     // an agent that lists no modes either.
     expect(fakeLog()).not.toContain('set_mode');
     expect(logs.filter((line) => line.includes('no session mode matches'))).toEqual([]);
+  });
+
+  test('an async answer reaches the running turn through _x.ai/interject, not at its end', async () => {
+    const client = await startCore();
+    const threadId = await grokThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[steer]' });
+    await waitFor(() => fakeLog().includes('steer waiting'));
+
+    harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
+    expect((await finished).status).toBe('done');
+    expect(loggedLines('interject ')).toEqual([JSON.stringify('> Which database?\n\nSQLite')]);
+    expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    const text = parts.find((part) => part.type === 'text');
+    expect(text?.type === 'text' ? text.text : '').toBe('heard: > Which database?\n\nSQLite');
+    // Taken in the turn: no second turn carries it again.
+    expect(thread.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  test('an older Grok without _x.ai/interject holds the answer for the turn after', async () => {
+    const client = await startCore();
+    process.env['GROK_FAKE_NO_INTERJECT'] = '1';
+    try {
+      const threadId = await grokThread(client);
+      const working = client.next('message.part', (event) => event.part.type === 'thinking', 20000);
+      await client.call('turns.start', { threadId, prompt: '[slow]' });
+      await working;
+
+      harness?.core.threads.deferred.deliverAnswer(threadId, 'SQLite');
+      await waitFor(() => harness?.core.threads.deferred.deferredAnswers.has(threadId) === true);
+      expect(loggedLines('interject ')).toEqual([]);
+      await client.call('turns.stop', { threadId });
+    } finally {
+      delete process.env['GROK_FAKE_NO_INTERJECT'];
+    }
   });
 
   test('a permission is asked and answered, and the tool call is drawn', async () => {

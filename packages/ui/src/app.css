@@ -8,7 +8,7 @@
   font-family: 'Geist';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/Geist-Variable.woff2') format('woff2');
 }
 
@@ -16,13 +16,149 @@
   font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 100 900;
-  font-display: block;
+  font-display: swap;
   src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+}
+
+/*
+ * The faces Settings, Appearance offers beside Geist (lib/fonts.ts), Inter
+ * the default, from Fontsource's variable builds, each cut into latin and latin extended: a file
+ * is fetched only once a glyph of its range is drawn in that face, so a face
+ * nobody picked costs this rule and nothing else. Licences beside them.
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/AtkinsonHyperlegibleNext-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/AtkinsonHyperlegibleNext-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Figtree-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Figtree';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Figtree-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/SourceSans3-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/SourceSans3-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/DMSans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/DMSans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
 :root {
   --color-background: #101013;
-  --color-titlebar: #0d0d10;
+  /* The window's frame: title bar and rails on one grey, the work
+     inset in cards of the page colour with an edge that reads. */
+  --color-frame: #1a1a1d;
+  --color-frame-edge: rgba(255, 255, 255, 0.11);
   --color-surface: #151518;
   --color-surface-2: #1b1b1f;
   --color-surface-3: #232327;
@@ -32,8 +168,9 @@
   --color-hover: rgba(255, 255, 255, 0.05);
   --color-active: rgba(255, 255, 255, 0.09);
   --color-foreground: #ececf1;
+  /* Both text tiers clear 4.5:1 on every surface in both themes: subtle carries paths and timestamps (lib/contrast.test.ts). */
   --color-muted-foreground: #a2a2ad;
-  --color-subtle: #6f6f7a;
+  --color-subtle: #8c8c96;
   --color-selection: rgba(228, 228, 231, 0.18);
   --accent-hue: 260;
   --color-accent: oklch(68% 0.19 var(--accent-hue));
@@ -73,13 +210,33 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* A framed card's corner, and the frame between two cards and the window edge. */
+  --radius-frame: 10px;
+  --frame-gap: 8px;
 
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.05);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.05);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-frame: 0 3px 8px rgb(0 0 0 / 0.24);
 
-  --font-sans: 'Geist', 'Inter', ui-sans-serif, system-ui, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
-  --font-mono: 'Geist Mono', 'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+  --font-fallback: ui-sans-serif, system-ui, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+  --font-mono-fallback: 'Cascadia Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  /* Every face Settings, Appearance offers, one stack each: the pick swaps
+     `--font-sans` or `--font-mono` below, and each tile of the picker is drawn
+     in its own. */
+  --face-geist: 'Geist', var(--font-fallback);
+  --face-inter: 'Inter', var(--font-fallback);
+  --face-plex: 'IBM Plex Sans', var(--font-fallback);
+  --face-atkinson: 'Atkinson Hyperlegible Next', var(--font-fallback);
+  --face-figtree: 'Figtree', var(--font-fallback);
+  --face-source: 'Source Sans 3', var(--font-fallback);
+  --face-dm: 'DM Sans', var(--font-fallback);
+  --face-system: 'Segoe UI Variable Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --face-mono-geist: 'Geist Mono', var(--font-mono-fallback);
+  --face-mono-jetbrains: 'JetBrains Mono', var(--font-mono-fallback);
+  --face-mono-system: var(--font-mono-fallback);
+  --font-sans: var(--face-inter);
+  --font-mono: var(--face-mono-geist);
 
   --text-xs: 12px;
   --text-sm: 13px;
@@ -105,6 +262,15 @@
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   --input: 34px;
   --touch-target: 44px;
+  /* Shared alignment for tool, reasoning and answered-question disclosures. */
+  --activity-gap: 8px;
+  --activity-padding: 4px;
+  --activity-glyph: 20px;
+  --activity-indent: calc(var(--activity-padding) + var(--activity-glyph) + var(--activity-gap));
+  --chat-part-gap: 4px;
+  --chat-block-gap: 12px;
+  /* The timeline's left margin, which the message outline rail sits in. */
+  --outline-room: 38px;
   --settings-width: 880px;
   --settings-padding: 24px;
 
@@ -116,10 +282,33 @@
   color-scheme: dark;
 }
 
+/* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big
+   screen, or the whole window. The reading column stamps nothing. */
+html[data-chat-width='wide'] {
+  --content: 1180px;
+  --prose: 1040px;
+}
+html[data-chat-width='full'] {
+  --content: 100%;
+  --prose: 100%;
+}
+
+/* The face picked under Settings, Appearance (lib/fonts.ts); Inter, the default, stamps nothing. */
+[data-font='geist'] { --font-sans: var(--face-geist); }
+[data-font='plex'] { --font-sans: var(--face-plex); }
+[data-font='atkinson'] { --font-sans: var(--face-atkinson); }
+[data-font='figtree'] { --font-sans: var(--face-figtree); }
+[data-font='source'] { --font-sans: var(--face-source); }
+[data-font='dm'] { --font-sans: var(--face-dm); }
+[data-font='system'] { --font-sans: var(--face-system); }
+[data-mono='jetbrains'] { --font-mono: var(--face-mono-jetbrains); }
+[data-mono='system'] { --font-mono: var(--face-mono-system); }
+
 /* Light, stamped by `lib/theme.ts` and by the boot script of `index.html`; dark stamps nothing. */
 [data-theme='light'] {
   --color-background: #f3f3f6;
-  --color-titlebar: #eeeef2;
+  --color-frame: #e7e7ec;
+  --color-frame-edge: rgba(0, 0, 0, 0.12);
   --color-surface: #fafafb;
   --color-surface-2: #ffffff;
   --color-surface-3: #ebebef;
@@ -128,8 +317,8 @@
   --color-hover: rgba(0, 0, 0, 0.045);
   --color-active: rgba(0, 0, 0, 0.08);
   --color-foreground: #1c1c21;
-  --color-muted-foreground: #66666f;
-  --color-subtle: #8b8b95;
+  --color-muted-foreground: #50505a;
+  --color-subtle: #67676f;
   --color-selection: rgba(28, 28, 33, 0.14);
   --color-live: #ca8a04;
   --color-success: #16a34a;
@@ -149,7 +338,16 @@
   --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
+  --shadow-frame: 0 2px 6px rgb(0 0 0 / 0.07);
   color-scheme: light;
+}
+
+/* Safari 15.4 to 16.1 have oklch but not color-mix: the shared accent tint keeps
+   its 18 percent there, and the few one-off mixes simply draw no tint. */
+@supports not (color: color-mix(in oklch, red 50%, blue)) {
+  :root {
+    --color-accent-soft: oklch(68% 0.19 var(--accent-hue) / 0.18);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -160,6 +358,8 @@
   }
 }
 
+/* The same, forced from the page: the tests set it, since jsdom has no media
+   queries. Components that loop forever guard both. */
 html[data-motion='reduced'] {
   --dur-1: 0.01ms;
   --dur-2: 0.01ms;
@@ -195,19 +395,17 @@ body {
   height: 100%;
 }
 
-/* The tray window has no opaque canvas outside its rounded panel. Clip the
- * body's theme textures too, including Grain's fixed pseudo-elements. */
-:root[data-view='quotas'],
-:root[data-view='quotas'] body {
-  background: transparent;
-}
-
-html[data-view='quotas'] body {
-  clip-path: inset(0 round var(--radius-lg));
-}
-
 ::selection {
   background: var(--color-selection);
+}
+
+/* Ctrl+F in a thread: every match, and the one the arrows are on. */
+::highlight(boite-find) {
+  background: color-mix(in oklch, var(--color-live) 35%, transparent);
+}
+::highlight(boite-find-current) {
+  background: var(--color-live);
+  color: var(--color-accent-ink);
 }
 
 button,
@@ -375,6 +573,11 @@ textarea:focus-visible {
   border-color: color-mix(in srgb, var(--color-foreground) 35%, var(--color-edge));
 }
 
+/* Forced colors drop the shadows and border tints that mark focus here, so every focused control gets the system's own ring. */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; outline-offset: 2px; }
+}
+
 textarea {
   height: auto;
   padding: 8px 10px;
@@ -504,6 +707,22 @@ details.disclosure[open] > summary::before {
   color: var(--color-subtle);
 }
 
+/* The prompt words Claude Code acts on (lib/message-display.ts): ultrathink in
+   the spectrum, the way the CLI paints it, ultracode in the accent. No weight
+   change: the composer's mirror has to keep the textarea's glyph widths. */
+.keyword-ultrathink {
+  background: var(--accent-spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.keyword-ultracode {
+  color: var(--color-accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 /* One tracking for every uppercase label, table headers included: 0.06em. */
 .section-label {
   font-size: var(--text-xs);
@@ -588,10 +807,12 @@ tr:last-child td {
 
 /*
  * Every settings category speaks one grammar, desktop and phone alike: the
- * page scrolls on its own; its header carries the title, an optional intro
- * paragraph and the page's one action; a card holds a title, an optional hint
- * straight under it, then its rows. A page keeps in its own style only what
- * no other page has.
+ * page scrolls on its own; its header carries the title and the page's one
+ * action; a card holds a title, then its rows. What a page, a card or a row
+ * is for sits behind an "i" beside its title (`InfoTip.svelte`), so the
+ * page reads as a list of settings. A `.hint` line in view is for a state or
+ * an answer: an error, a count, what to do because something is missing. A
+ * page keeps in its own style only what no other page has.
  */
 .page {
   height: 100%;
@@ -742,26 +963,94 @@ tr:last-child td {
   gap: 8px;
 }
 
-/* Scrollbars, thin and quiet like the family. */
+/* A quiet thumb with a wider drag target; the track stays transparent. */
+:root {
+  --color-scrollbar: color-mix(in srgb, var(--color-foreground) 22%, transparent);
+  --color-scrollbar-hover: color-mix(in srgb, var(--color-foreground) 36%, transparent);
+  --color-scrollbar-active: color-mix(in srgb, var(--color-foreground) 50%, transparent);
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-edge) transparent;
+  scrollbar-color: var(--color-scrollbar) transparent;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Some Firefox versions recognize the track selector without thumb styling. */
+@supports selector(::-webkit-scrollbar-thumb) {
+  @media (forced-colors: none) {
+    /* Standard non-auto values override the custom thumb in Chromium. */
+    * {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      min-height: 32px;
+      min-width: 32px;
+      background: var(--color-scrollbar);
+      border-radius: var(--radius-sm);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background-color: var(--color-scrollbar-hover);
+      border-width: 2px;
+    }
+
+    ::-webkit-scrollbar-thumb:active {
+      background-color: var(--color-scrollbar-active);
+    }
+
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-button {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+  }
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--color-edge);
-  border-radius: 4px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+@media (forced-colors: active) {
+  * {
+    scrollbar-color: auto;
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+/* ------------------------------------------------------------------------- */
+/* The frame                                                                  */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Since 2026-09-28 the window is a frame around its work: the title bar and the
+ * rails (sidebar, settings nav, agents rail) stand on one grey with no line
+ * between them, and each working surface (the chat, the right panel, a
+ * settings page, an agent) is a card of the page colour inset `--frame-gap`
+ * from the window edge and from its neighbour, rounded, its 1 px edge strong
+ * enough to read as the outline. The phone keeps a flat page: 8 px of frame
+ * around a 375 px screen is room taken from the text.
+ */
+@media (min-width: 721px) {
+  .app {
+    background: var(--color-frame);
+  }
+
+  .framed {
+    background: var(--color-background);
+    border: 1px solid var(--color-frame-edge);
+    border-radius: var(--radius-frame);
+    box-shadow: var(--shadow-frame);
+    overflow: clip;
+  }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -848,20 +1137,34 @@ html[data-theme='grain'] body::after {
  * fade, the lightest the chrome ever stands on: `--color-foreground` reads at
  * 7.6:1 on the title bar, 7.0:1 on the sidebar and 7.4:1 on the chat.
  */
-html[data-theme='grain'] .titlebar {
-  background: color-mix(in oklab, var(--color-titlebar) 70%, transparent);
+/* Framed, the frame is one slab and every card another: the rails paint nothing
+   of their own, so the fade is laid under two layers at most. */
+@media (min-width: 721px) {
+  html[data-theme='grain'] .app {
+    background: color-mix(in oklab, var(--color-frame) 70%, transparent);
+  }
+
+  html[data-theme='grain'] .framed {
+    background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  }
 }
 
-html[data-theme='grain'] .sidebar,
-html[data-theme='grain'] .panel,
-html[data-theme='grain'] .settings nav {
-  background: color-mix(in oklab, var(--color-surface) 70%, transparent);
-}
+@media (max-width: 720px) {
+  html[data-theme='grain'] .titlebar {
+    background: color-mix(in oklab, var(--color-frame) 70%, transparent);
+  }
 
-html[data-theme='grain'] .chat,
-html[data-theme='grain'] .settings > section,
-html[data-theme='grain'] .first-run {
-  background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  html[data-theme='grain'] .sidebar,
+  html[data-theme='grain'] .panel,
+  html[data-theme='grain'] .settings nav {
+    background: color-mix(in oklab, var(--color-surface) 70%, transparent);
+  }
+
+  html[data-theme='grain'] .chat,
+  html[data-theme='grain'] .settings > section,
+  html[data-theme='grain'] .first-run {
+    background: color-mix(in oklab, var(--color-background) 62%, transparent);
+  }
 }
 
 html[data-theme='grain'] .composer {
@@ -891,19 +1194,31 @@ html[data-glass] #app {
   background: transparent;
 }
 
-html[data-glass] .titlebar {
-  background: color-mix(in oklab, var(--color-titlebar) 80%, transparent);
+@media (min-width: 721px) {
+  html[data-glass] .app {
+    background: color-mix(in oklab, var(--color-frame) 80%, transparent);
+  }
+
+  html[data-glass] .framed {
+    background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  }
 }
 
-html[data-glass] .sidebar,
-html[data-glass] .panel,
-html[data-glass] .settings nav {
-  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
-}
+@media (max-width: 720px) {
+  html[data-glass] .titlebar {
+    background: color-mix(in oklab, var(--color-frame) 80%, transparent);
+  }
 
-html[data-glass] .chat,
-html[data-glass] .first-run {
-  background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  html[data-glass] .sidebar,
+  html[data-glass] .panel,
+  html[data-glass] .settings nav {
+    background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+  }
+
+  html[data-glass] .chat,
+  html[data-glass] .first-run {
+    background: color-mix(in oklab, var(--color-background) 90%, transparent);
+  }
 }
 
 html[data-glass] .composer {
@@ -912,6 +1227,17 @@ html[data-glass] .composer {
 }
 
 /* Keyframes shared by the components. */
+.motion-panel { animation: rise var(--dur-3) var(--ease-out-quint); }
+.motion-panel.closing { animation: rise-out var(--dur-2) var(--ease-out-quint); pointer-events: none; }
+.motion-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-3) var(--ease-out-quint); }
+.motion-fold.expanded { grid-template-rows: 1fr; }
+.motion-fold > div { min-height: 0; overflow: hidden; }
+
+@keyframes rise-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(4px); }
+}
+
 @keyframes rise {
   from {
     opacity: 0;
@@ -991,10 +1317,13 @@ input[type=checkbox][role=switch]:checked { background: var(--color-foreground);
 input[type=checkbox][role=switch]:checked::after { transform: translateX(16px); background: var(--color-background); }
 input[type=checkbox][role=switch]:focus-visible { outline: 2px solid var(--color-foreground); outline-offset: 4px; }
 input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; }
+/* Under a finger the outline rail is a touch target wide (MessageOutline.svelte): the text starts past it. */
+@media (pointer: coarse) { :root { --outline-room: calc(var(--touch-target) + 4px); } }
 @media (max-width: 720px) {
-  .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); }
-  [data-mobile-sheet='true'] { position: fixed !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
+  .mobile-sheet-backdrop { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--color-scrim); animation: fade var(--dur-2) var(--ease-out-quint); }
+  .mobile-sheet-backdrop.closing { animation-name: fade-out; pointer-events: none; }
+  [data-mobile-sheet='true'] { position: fixed !important; max-width: none !important; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border-radius: var(--radius-xl) !important; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  :root { --settings-padding: 18px; --control: var(--touch-target); --control-sm: var(--touch-target); --control-lg: var(--touch-target); --input: var(--touch-target); --row: var(--touch-target); }
   input, textarea { font-size: var(--text-md); }
   button.icon { min-width: var(--touch-target); min-height: var(--touch-target); }
   .composer-wrap { padding-bottom: max(10px, env(safe-area-inset-bottom)); }

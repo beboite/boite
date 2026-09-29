@@ -11,14 +11,14 @@ import { unavailable } from '../errors.ts';
 import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TurnContext, TurnHandle } from './types.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, TurnContext, TurnHandle } from './types.ts';
 
 /**
  * A driver whose module is imported on its first turn. The Claude and ACP
  * drivers load their SDK that way; the Codex one carries its own transport, so
  * the whole module is what stays out of core start.
  */
-function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
+function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean } = {}): Driver {
   let loaded: Driver | null = null;
   const ready = async (): Promise<Driver> => {
     if (loaded === null) loaded = await load();
@@ -26,6 +26,10 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>): Driver {
   };
   return {
     protocol,
+    // Declared up front, since `writesTitles` asks before anything is loaded.
+    ...(options.titles === true
+      ? { title: async (ctx: TitleContext): Promise<string | null> => (await ready()).title?.(ctx) ?? null }
+      : {}),
     startTurn(ctx: TurnContext): TurnHandle {
       let inner: TurnHandle | null = null;
       let stopped = false;
@@ -82,7 +86,7 @@ const DRIVERS = new Map<Protocol, Driver>([
   ],
   [
     'codex-appserver',
-    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver())),
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true }),
   ],
   ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
@@ -97,18 +101,32 @@ export function getDriver(protocol: Protocol): Driver {
   return driver;
 }
 
+/** Whether this protocol's agent writes thread titles (`Driver.title`). */
+export function writesTitles(protocol: Protocol): boolean {
+  return DRIVERS.get(protocol)?.title !== undefined;
+}
+
 /** Called before a turn is queued so the refusal reaches the caller, not only the journal. */
 export function assertDriverRunnable(
   protocol: Protocol,
   provider: ProviderSummary | undefined,
   account: Account,
+  /** The launcher script PATH holds instead of a program, asked only once the provider reads as missing. */
+  launcherScript: () => string | null = () => null,
 ): void {
   if (!RUNNABLE.has(protocol)) throw unavailable(`no driver for protocol ${protocol}`, { protocol });
   if (provider === undefined || !provider.available) {
-    throw unavailable(`the provider ${account.providerId} is not available on this machine`, {
-      providerId: account.providerId,
-      executable: provider?.executable ?? null,
-    });
+    const script = provider === undefined ? null : launcherScript();
+    throw unavailable(
+      script === null
+        ? `the provider ${account.providerId} is not available on this machine`
+        : `the provider ${account.providerId} is not available on this machine: PATH has only the launcher script ${script}, which Boite cannot start. Install the agent's own program, or let Boite install it`,
+      {
+        providerId: account.providerId,
+        executable: provider?.executable ?? null,
+        ...(script === null ? {} : { launcherScript: script }),
+      },
+    );
   }
   if (account.status === 'unauthenticated') {
     throw unavailable(`the account ${account.label} is not logged in`, {

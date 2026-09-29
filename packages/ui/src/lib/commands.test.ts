@@ -4,6 +4,7 @@ import { setExperiment, writeExperiments } from './experiments';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { THEME_STORAGE_KEY } from './theme';
+import { work } from './work-prefs.svelte';
 
 /**
  * The one list and the one dispatcher the palette and the composer's slash menu
@@ -30,16 +31,21 @@ function ids(): string[] {
 }
 
 test('the list carries every app command, the thread ones only while one is open', async () => {
-  // The import row rides behind its experiment, off until the switch is on.
+  // The import and Agents rows ride behind their experiments, off until the switch is on.
   expect(ids()).not.toContain('import-session');
+  expect(ids()).not.toContain('agents');
   setExperiment('session-import', true);
+  setExperiment('resident-agents', true);
   expect(ids()).toEqual([
     'new-thread',
     'add-project',
     'import-session',
     'sidebar',
+    'agents',
     'settings',
     'appearance',
+    'archived',
+    'reopen-thread',
     'providers',
     'pair',
     'tour',
@@ -56,14 +62,21 @@ test('the list carries every app command, the thread ones only while one is open
     'pin',
     'rename',
     'retitle',
+    'find',
+    'copy-answer',
     'panel',
+    'workflows',
     'changes',
     'files',
     'tasks',
     'trace',
+    'terminal',
     'sidebar',
+    'agents',
     'settings',
     'appearance',
+    'archived',
+    'reopen-thread',
     'providers',
     'pair',
     'tour',
@@ -102,6 +115,22 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   store.showChat();
   runCommand(store, 'no-such-command', false);
   expect(store.page).toBe('chat');
+});
+
+test('a hidden trace card stays in the palette, and Agents opens its page', async () => {
+  await store.open('t-descriptors');
+  // The palette is the way back to a button put away in Appearance.
+  work.show('panel.trace', false);
+  expect(ids()).toContain('trace');
+  runCommand(store, 'trace', false);
+  expect(store.panel.surfaces.some((surface) => surface.kind === 'trace')).toBe(true);
+  work.show('panel.trace', true);
+
+  runCommand(store, 'agents', false);
+  expect(store.page).toBe('chat');
+  setExperiment('resident-agents', true);
+  runCommand(store, 'agents', false);
+  expect(store.page).toBe('agents');
 });
 
 test('slashName reads the word a row completes to', () => {

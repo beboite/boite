@@ -41,6 +41,9 @@ export function seedThreads() {
     sessionId: 'sess-trace',
     load: null,
     context: null,
+    // Measured from the page's own clock, so the timer behind the
+    // `prompt-cache` experiment reads warm with about half an hour left.
+    promptCache: { at: Date.now() - 29 * 60_000, ttlSeconds: 3600, source: 'reported', readTokens: 12_400, model: 'echo-1', accountId: 'a-echo' },
     createdAt: T0,
     updatedAt: T0 + 60_000,
     turns: [
@@ -96,6 +99,17 @@ export function seedThreads() {
           {
             type: 'text',
             text: 'Both events carry the pid, the exe, the CPU time and the peak memory, so the table can be filled without a second call.'
+          },
+          {
+            // The plan a plan-mode turn hands over, read in its own card.
+            type: 'tool',
+            toolId: 'tool-seed-plan',
+            name: 'ExitPlanMode',
+            input: {
+              plan: '# Trace tab\n\n1. Read `trace.get` once when the tab opens.\n2. Keep the rows live from `process.started` and `process.exited`.\n3. Show the `TraceCapability` note above the table on Linux and macOS.\n\nNo new RPC: both events already carry the pid, the exe, the CPU time and the peak memory.'
+            },
+            output: null,
+            status: 'done'
           }
         ],
         state: 'complete',
@@ -275,7 +289,9 @@ export function seedThreads() {
           },
           // The agent compacted on its way out: the divider under the answer.
           { type: 'compaction', trigger: 'auto', preTokens: 184_000, postTokens: 31_000 },
-          { type: 'text', text: 'The loader test now names that case too.' }
+          { type: 'text', text: 'The loader test now names that case too.' },
+          // The user's own PostToolUse hook ended the turn there: the line under the answer.
+          { type: 'hook', event: 'PostToolUse', outcome: 'stopped', message: 'Lint failed in src/descriptors.ts. Stopping here so you can look.' }
         ],
         state: 'complete',
         createdAt: T0 + 320_000
