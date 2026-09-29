@@ -46,6 +46,16 @@ test('a provider background-agent list confirms live work without duplicating it
   expect(collectNativeAgents([{ part, at: 1, turnStatus: 'done' }], [])[0]?.status).toBe('unknown');
 });
 
+test('a grouped background launch stays separate from children whose live state is not reported', () => {
+  const part = tool({ name: 'subagent', input: { tasks: [{ agent: 'reviewer', task: 'Check' }, { agent: 'writer', task: 'Document' }], run_in_background: true }, status: 'done' });
+  const agents = collectNativeAgents([{ part, at: 1, turnId: 'group', turnStatus: 'done' }], [{ id: 'group-task', toolId: part.toolId, kind: 'agent', description: 'Review group', startedAt: 2 }]);
+  expect(agents).toEqual([
+    expect.objectContaining({ id: 'group:call-1:0', status: 'unknown', task: 'Check' }),
+    expect.objectContaining({ id: 'group:call-1:1', status: 'unknown', task: 'Document' }),
+    expect.objectContaining({ id: 'group-task', status: 'running', name: 'Review group' }),
+  ]);
+});
+
 test('reused tool IDs retain separate child invocations across turns and the background list follows its original launch', () => {
   const first = tool({ input: { prompt: 'First review', run_in_background: true }, status: 'done', output: 'Launched' });
   const second = tool({ input: { prompt: 'Second review' }, status: 'done', output: 'Second result' });
@@ -54,6 +64,8 @@ test('reused tool IDs retain separate child invocations across turns and the bac
   expect(agents).toHaveLength(2);
   expect(agents.map(agent => [agent.task, agent.status, agent.result])).toEqual([['First review', 'running', undefined], ['Second review', 'done', 'Second result']]);
   expect(new Set(agents.map(agent => agent.id)).size).toBe(2);
+  const later = collectNativeAgents(entries, [{ id: 'task-2', toolId: second.toolId, kind: 'agent', description: 'Second review', startedAt: 4 }]);
+  expect(later.map(agent => [agent.task, agent.status])).toEqual([['First review', 'unknown'], ['Second review', 'running']]);
   const nativeEntries = [
     { part: tool({ nativeAgents: [{ id: 'stable-provider-id', status: 'running' }] }), at: 1, turnId: 'first' },
     { part: tool({ nativeAgents: [{ id: 'stable-provider-id', status: 'done', result: 'Checked' }] }), at: 3, turnId: 'second' },

@@ -43,9 +43,13 @@ export function collectNativeAgents(entries: Iterable<NativeAgentEntry>, backgro
       agents.set(agent.id, agent);
     }
   }
+  const launches = [...agents.values()];
   for (const task of background) {
     if (task.kind !== 'agent') continue;
-    const previous = [...agents.values()].reverse().find(agent => agent.toolId === task.toolId && agent.startedAt <= task.startedAt);
+    const eligible = launches.filter(agent => agent.toolId === task.toolId && agent.startedAt <= task.startedAt);
+    const latestStart = eligible.reduce((latest, agent) => Math.max(latest, agent.startedAt), -Infinity);
+    const latest = eligible.filter(agent => agent.startedAt === latestStart);
+    const previous = latest.length === 1 ? latest[0] : undefined;
     const id = previous?.id ?? task.id;
     agents.set(id, { ...previous, id, name: previous?.name ?? task.description, status: 'running', result: undefined, toolId: previous?.toolId ?? task.toolId ?? task.id, startedAt: previous?.startedAt ?? task.startedAt });
   }

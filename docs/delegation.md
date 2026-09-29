@@ -29,6 +29,8 @@ or stop them: these records are not Boite conversations. Explicit provider IDs
 join updates across turns; inferred tool IDs are scoped to a turn so repeated
 tool IDs keep separate invocations. No token
 total is invented for children whose usage the provider does not separate.
+Background acknowledgements for a group stay at group level when they do not
+identify an individual child.
 
 Codex collaboration calls and subagent activity become persisted tool parts.
 Child-thread text and tools stay out of the parent's answer. Claude Agent/Task
