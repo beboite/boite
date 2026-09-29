@@ -6,6 +6,7 @@
   import { workspace } from '../lib/workspace.svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
+  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { moveBlocked, moveItems, pendingLine, pickMoveItem, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { separator } from '../lib/menu';
   import { focusOnMount } from '../lib/actions';
@@ -106,7 +107,8 @@
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),
-        { id: 'archive', label: strings.sidebar.archive, danger: true }
+        { id: 'archive', label: strings.sidebar.archive },
+        ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
       ],
       (action) => {
         if (action === 'open') void workspace.select(owner, thread.id);
@@ -117,6 +119,7 @@
         if (action === 'copy') void owner.copy(thread.cwd);
         pickMoveItem(owner, thread, action);
         if (action === 'archive') void archiveThread(owner, thread.id);
+        if (action === 'delete') void deleteThread(owner, thread);
       }
     );
   }

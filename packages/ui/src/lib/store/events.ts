@@ -95,19 +95,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.todos = { ...s.todos, [projectId]: todos };
   });
   on('thread.removed', ({ threadId }) => {
-    s.threads = s.threads.filter((t) => t.id !== threadId);
-    requests.dropRequestsOf(threadId);
-    // A thread that left Boite takes its panel layout and composer with it.
-    threads.forgetThread(threadId);
-    if (s.openThread?.id !== threadId) return;
-    s.openThread = null;
-    // The two steps `archive()` takes when the thread on screen goes: the
-    // socket lets it go, and the chat lands on the next thread rather than
-    // on the empty card.
-    void (async () => {
-      await threads.unsubscribe();
-      await s.openWhereLeft();
-    })();
+    void threads.removed(threadId).catch(error => ctx.fail(error));
   });
 
   on('turn.started', (turn) => threads.upsertTurn(turn.threadId, turn));

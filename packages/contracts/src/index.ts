@@ -2419,6 +2419,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
+  /**
+   * Permanently remove a conversation and its sub-threads after stopping their
+   * work. Messages, turns and traces leave the journal. Project folders,
+   * worktrees and native provider transcripts stay on disk. Owner only;
+   * persistent agent sessions must be managed through Agents.
+   */
+  'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
   'threads.markRead': { params: { threadId: ThreadId }; result: { ok: true } };

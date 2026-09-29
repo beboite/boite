@@ -8,6 +8,7 @@
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
+  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { projectMenu } from '../lib/project-menu';
   import { separator, type MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
@@ -71,7 +72,8 @@
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       separator(),
-      { id: 'archive', label: strings.sidebar.archive, danger: true }
+      { id: 'archive', label: strings.sidebar.archive },
+      ...(canDeleteThread(owner, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
     ];
   }
   /** Thread ids can collide between machines: the row's own store acts. */
@@ -79,6 +81,7 @@
     if (action === 'pin') void owner.pin(thread.id, !thread.pinned);
     else if (action === 'retitle') void owner.retitle(thread.id);
     else if (action === 'archive') void archiveThread(owner, thread.id);
+    else if (action === 'delete') void deleteThread(owner, thread);
   }
   async function pickProject(key: string) {
     if (key === 'add-project') { store.projectPickerOpen = true; return; }

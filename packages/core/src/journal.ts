@@ -269,19 +269,26 @@ export class Journal {
 
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
-    const removed = new Set(rows.map((row) => row.id));
-    this.stream.forgetThreads(removed);
+    const ids = rows.map(row => row.id);
+    this.deleteThreads(ids);
+    return ids;
+  }
+
+  deleteThreads(threadIds: string[]): void {
+    this.stream.forgetThreads(new Set(threadIds));
     // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
-    for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
-      this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
-    }
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'activity:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'move-note:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'memory-notices:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
-    return rows.map((row) => row.id);
+    this.db.transaction(() => {
+      for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+        const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
+        for (const id of threadIds) query.run(id);
+      }
+      for (const id of threadIds) {
+        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        this.db.query('DELETE FROM threads WHERE id = ?').run(id);
+      }
+    })();
   }
 
   // -- sessions -------------------------------------------------------------

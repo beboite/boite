@@ -10,6 +10,7 @@ import type {
   ThreadSummary
 } from '@boite/contracts';
 import { fitsReadingCache } from '../reading-cache';
+import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
 import { lastIndexById, mergeResumed, patchRow, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
@@ -449,6 +450,34 @@ export class Threads {
     } catch (error) {
       this.ctx.fail(error);
     }
+  }
+
+  async removeThread(threadId: ThreadId): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client) return false;
+    try {
+      await client.call('threads.remove', { threadId });
+      await this.removed(threadId);
+      return true;
+    } catch (error) {
+      this.ctx.fail(error);
+      return false;
+    }
+  }
+
+  /** Applied to this machine only, for both RPC answers and removal events. */
+  async removed(threadId: ThreadId): Promise<void> {
+    const s = this.ctx.store;
+    this.threads = this.threads.filter(t => t.id !== threadId);
+    forgetArchivedThread(s, threadId);
+    this.ctx.requests.dropRequestsOf(threadId);
+    this.forgetThread(threadId);
+    if (this.#openTarget === threadId) { this.openGeneration++; this.#openTarget = null; }
+    if (s.delegationThread?.id === threadId) s.delegationThread = null;
+    if (this.openThread?.id !== threadId) return;
+    this.openThread = null;
+    await this.unsubscribe();
+    await s.openWhereLeft();
   }
 
   // -------------------------------------------------------------------------

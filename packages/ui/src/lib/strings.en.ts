@@ -463,6 +463,9 @@ export const strings = {
     unpin: 'Unpin',
     pinned: 'Pinned',
     archive: 'Archive',
+    delete: 'Delete',
+    deleteTitle: 'Delete this thread?',
+    deleteBody: '"{title}" and its sub-threads will be permanently deleted from Boite. Running agents will stop. This cannot be undone. Project files and Git branches will be kept.',
     archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
     archivedToast: 'Archived "{title}"',

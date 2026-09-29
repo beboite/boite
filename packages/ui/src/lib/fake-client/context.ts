@@ -315,7 +315,7 @@ export class FakeContext {
 
   thread(threadId: ThreadId): Thread {
     const thread = this.threads.get(threadId);
-    if (!thread) throw this.notFound('thread', threadId);
+    if (!thread) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no such thread: ${threadId}`, data: { threadId } });
     return thread;
   }
 

@@ -252,6 +252,13 @@ export class FakeWorkflows {
     for (const run of this.#runs.values()) if (run.rootThreadId === rootId && (run.status === 'running' || run.status === 'paused')) this.#stop(run, reason);
   }
 
+  forget(rootId: ThreadId): void {
+    const ids = new Set([...this.#runs.values()].filter(run => run.rootThreadId === rootId).map(run => run.id));
+    for (const id of ids) this.#runs.delete(id);
+    for (const [key, request] of this.#requests) if (ids.has(request.runId)) this.#requests.delete(key);
+    for (const [threadId, step] of this.#steps) if (ids.has(step.runId)) this.#steps.delete(threadId);
+  }
+
   #rootOf(threadId: ThreadId): Thread {
     const thread = this.host.thread(threadId);
     return thread.parentThreadId ? this.host.thread(thread.parentThreadId) : thread;

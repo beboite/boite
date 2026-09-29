@@ -26,8 +26,8 @@ export const ECHO_COMMANDS: AgentCommand[] = [
 export const SHOUT = 'shout';
 
 /** A refusal worded like the core's, so a screen tested here shows what the real one would. */
-export function refusal(message: string): RpcFailure {
-  return new RpcFailure({ code: RpcErrorCode.Refused, message });
+export function refusal(message: string, data?: Record<string, unknown>): RpcFailure {
+  return new RpcFailure({ code: RpcErrorCode.Refused, message, ...(data === undefined ? {} : { data }) });
 }
 
 /** The core's `checkText` in `todos.ts`: a card needs text, and a line of it. */
