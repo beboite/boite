@@ -6,7 +6,7 @@
   /**
    * The prompts waiting behind the running turn, drawn where they will land: a
    * user bubble on the right, outline only and dashed, since it has not gone
-   * yet. A click takes one back into the box; Send now sends the oldest.
+   * yet. A click takes one back into the box; Send now sends them together.
    */
   let {
     queued,

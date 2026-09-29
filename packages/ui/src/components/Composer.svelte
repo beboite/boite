@@ -479,10 +479,8 @@
   );
 
   /**
-   * Send now: the oldest pending prompt goes instead of waiting for the turn
-   * to end. The turn is stopped, the way Escape stops it, and the queue's own
-   * drain sends that prompt once the thread is idle; the ones behind it still
-   * wait for its turn. A queue a refusal held is resumed too.
+   * Send now stops the current turn and sends all queued prompts together once
+   * the thread is idle. A queue held after a refusal is resumed too.
    */
   function sendQueuedNow() {
     const state = composer;

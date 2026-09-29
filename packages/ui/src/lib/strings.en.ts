@@ -1011,8 +1011,8 @@ export const strings = {
     /** A refused send held the pending messages until the user sends again. */
     queuedPaused: 'Held after a refused send',
     sendNow: 'Send now',
-    sendNowHint: 'Stops the current turn and sends the oldest pending message. Enter in the empty composer does the same.',
-    retryQueuedHint: 'Sends the oldest pending message again. Enter in the empty composer does the same.',
+    sendNowHint: 'Stops the current turn and sends all pending messages together. Enter in the empty composer does the same.',
+    retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
     models: 'Models',
     searchModels: 'Search models',
@@ -1248,6 +1248,12 @@ export const strings = {
     critical: 'A memory limit was crossed. Boite stops large processes when it can to free memory.',
     stopped: 'Boite stopped a process to free memory.',
     onMachine: (name: string) => `On ${name}`,
+    killTitle: 'Process stopped to free memory',
+    killReason: {
+      'thread-quota': (limit: string) => `This conversation exceeded its ${limit} memory limit.`,
+      budget: (limit: string) => `The agents exceeded their ${limit} shared memory budget.`,
+      machine: (limit: string) => `Available memory fell below the ${limit} reserve.`,
+    },
     killed: {
       'thread-quota': (exe: string, size: string, limit: string) => `Boite stopped ${exe} (${size}): this conversation exceeded its memory quota (${limit}). Try again with fewer things running at once.`,
       budget: (exe: string, size: string, limit: string) => `Boite stopped ${exe} (${size}): the agents exceeded their shared memory budget (${limit}). Try again with fewer things running at once.`,

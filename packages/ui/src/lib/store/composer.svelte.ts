@@ -253,7 +253,7 @@ export class Composer {
           }
           throw error;
         });
-        if (s.openThread?.id === threadId) s.openThread.activity = accepted;
+        if (this.ctx.client === client && s.openThread?.id === threadId) s.openThread.activity = accepted;
         return true;
       }
       const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);
@@ -288,9 +288,11 @@ export class Composer {
         if (this.ctx.client !== client || this.pendingSends.get(threadId) !== sent) throw error;
         return start();
       });
-      this.pendingSends.delete(threadId);
+      if (this.ctx.client === client) this.pendingSends.delete(threadId);
       return true;
     } catch (error) {
+      // A detached client's answer must not restore input or thread rows into its replacement.
+      if (this.ctx.client !== client) return false;
       const early = turnInFlight(error);
       if (early) {
         this.holdBehind(early, { text: prompt, attachments, ...(previewReferences.length ? { previewReferences } : {}) });
