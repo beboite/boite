@@ -1577,6 +1577,11 @@ export const fr: Translation = {
   },
 
   experiments: {
+    whip: {
+      title: 'Fouet',
+      hint: 'Un bouton en bas à gauche secoue la fenêtre Boite à chaque coup. Dans un navigateur ou une fenêtre maximisée, il secoue toute l’interface. Respecte la réduction des animations',
+      action: 'Fouetter'
+    },
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
