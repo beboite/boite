@@ -614,10 +614,12 @@ test('goal and loop coexist above the composer with expandable agent tasks', asy
   expect(query('[data-testid=activity-loop] .objective').getAttribute('title')).toBe('Check CI');
 });
 
-test('queued prompts stay on their thread and run as separate turns', async () => {
+test('queued prompts run on their thread without reopening it', async () => {
   await mountOnFake();
   await store.open('t-trace');
-  store.openThread!.status = 'running';
+  await store.send('question');
+  await waitFor(() => store.openThread?.status === 'waiting');
+  const question = store.pendingQuestions.find(item => item.threadId === 't-trace')!;
   await type('first queued prompt');
   press('Enter');
   await type('second queued prompt');
@@ -625,8 +627,11 @@ test('queued prompts stay on their thread and run as separate turns', async () =
   await waitFor(() => input().value === '');
   await store.open('t-descriptors');
   await waitFor(() => store.openThread?.id === 't-descriptors');
+  await store.answerQuestion('t-trace', question.id, [], 'Continue');
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
+  expect(store.openThread?.id).toBe('t-descriptors');
   await store.open('t-trace');
-  await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 3 && !store.busy);
+  await waitFor(() => store.openThread!.messages.filter((m) => m.role === 'user').length === 4 && !store.busy);
   expect(store.openThread!.messages.filter((m) => m.role === 'user').slice(-2).map((m) => m.parts)).toEqual([
     [{ type: 'text', text: 'first queued prompt' }],
     [{ type: 'text', text: 'second queued prompt' }]
@@ -1141,8 +1146,10 @@ test('queued prompts survive settings and wait for a ready connection', async ()
   const rpc = vi.spyOn(store.client!, 'call');
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  store.page = 'settings';
+  await waitFor(() => document.querySelector('[data-testid=composer-input]') === null);
   store.connection = 'ready';
-  await waitFor(() => store.busy);
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toEqual([
     ['turns.start', { threadId: 't-trace', prompt: 'queue through settings', expectedSelectionVersion: 0, clientRequestId: expect.stringMatching(/^[a-f0-9]{32}$/) }]
   ]);

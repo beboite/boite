@@ -42,8 +42,8 @@
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
-  /** The second line only exists when it says something: a project, a pull request, a machine. */
-  let meta = $derived(showProject || pullRequest !== null || showMachine);
+  /** Only a project or pull request needs a second line; the machine stays beside the title. */
+  let meta = $derived(showProject || pullRequest !== null);
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
 
@@ -162,6 +162,12 @@
       ondblclick={rename}
     >
       <span class="headline">
+        {#if showMachine}
+          <span class="machine" class:offline={owner.connection !== 'ready'}
+            title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
+            <MachineIcon icon={machine.icon} os={owner.core?.os} />
+          </span>
+        {/if}
         <span class="title">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
@@ -177,12 +183,6 @@
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
-      {/if}
-      {#if showMachine}
-        <span class="machine" class:offline={owner.connection !== 'ready'}
-          title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}>
-          <MachineIcon icon={machine.icon} os={owner.core?.os} />
-        </span>
       {/if}
     </div>
     {/if}
@@ -318,8 +318,10 @@
     flex: 1;
   }
   .machine {
+    display: inline-flex;
+    align-items: center;
     flex: none;
-    margin-left: auto;
+    color: var(--color-muted-foreground);
   }
   .machine.offline {
     color: var(--color-danger);

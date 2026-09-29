@@ -126,10 +126,11 @@ palette, also available with Ctrl+K, without a permanent search field.
 It matches thread titles, project names and machine names across connected
 hosts. The draft's project picker also includes every connected host.
 
-Cards have a title row and a second row for the project and machine icon. The
-machine name remains in the tooltip and accessible label. An associated PR
-appears as a green underlined number immediately before the machine icon; no
-placeholder appears when there is no PR. PR
+With several machines connected, cards show the machine icon beside the title.
+The machine name remains in the tooltip and accessible label. A second row
+appears only for the project or an associated PR, shown as a green underlined
+number. Connecting another machine leaves cards without project or PR metadata
+at their single-machine height. No placeholder appears when there is no PR. PR
 metadata comes from the execution machine's `gh pr list`, using the worktree
 branch or the current branch of the working directory. Non-repositories and
 detached checkouts have no PR. The core asks once per repository, not per

@@ -202,6 +202,11 @@
     color: var(--color-foreground);
   }
 
+  .trigger:hover:not(.ghost):not(.text),
+  .trigger[aria-expanded='true']:not(.ghost):not(.text) {
+    background: var(--control-glaze) var(--color-control-hover);
+  }
+
   /* A word inside a sentence, not a control parked in one: it takes the type
      and the colour of whatever it sits in and only fills under the pointer. */
   .trigger.text {

@@ -485,7 +485,7 @@
 
   .trigger:hover,
   .trigger[aria-expanded='true'] {
-    background: var(--color-surface-3);
+    background: var(--control-glaze) var(--color-control-hover);
     color: var(--color-foreground);
   }
 
