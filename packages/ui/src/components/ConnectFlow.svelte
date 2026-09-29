@@ -273,9 +273,10 @@
               {#if login?.url}
                 <a class="button primary" href={login.url} target="_blank" rel="noreferrer" data-testid="connect-login-url">{strings.accounts.loginOpen}</a>
                 <p class="muted">{strings.connect.signInNote}</p>
+                {#if provider.login && provider.login.kind === 'device'}<p class="muted" style="white-space: pre-line" data-testid="connect-login-code">{login.output}</p>{/if}
                 <form class="code" onsubmit={(event) => void sendCode(event)}>
-                  <input data-testid="connect-login-input" placeholder={provider.login && provider.login.kind === 'acp' ? strings.accounts.loginRedirectPlaceholder : strings.accounts.loginInputPlaceholder} bind:value={code} />
-                  <button type="submit" class="quiet small">{strings.accounts.loginSend}</button>
+                  {#if provider.login && provider.login.kind !== 'device'}<input data-testid="connect-login-input" placeholder={provider.login && provider.login.kind === 'acp' ? strings.accounts.loginRedirectPlaceholder : strings.accounts.loginInputPlaceholder} bind:value={code} />
+                  <button type="submit" class="quiet small">{strings.accounts.loginSend}</button>{:else}<span class="muted">{strings.providerSettings.deviceHint}</span>{/if}
                 </form>
               {:else}
                 <p class="muted" role="status">{strings.accounts.loginStarting}</p>

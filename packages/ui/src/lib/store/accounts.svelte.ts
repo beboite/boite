@@ -105,6 +105,15 @@ export class Accounts {
     this.logins = snapshot;
   }
 
+  async renameAccount(accountId: string, label: string): Promise<boolean> {
+    if (!this.ctx.client) return false;
+    try {
+      const account = await this.ctx.client.call('accounts.rename', { accountId, label });
+      this.accounts = this.accounts.map(entry => entry.id === account.id ? account : entry);
+      return true;
+    } catch (error) { this.ctx.fail(error); return false; }
+  }
+
   async removeAccount(accountId: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
@@ -150,14 +159,16 @@ export class Accounts {
     }
   }
 
-  async checkAccount(accountId: string): Promise<void> {
+  async checkAccount(accountId: string, refresh = false): Promise<Account | null> {
     const client = this.ctx.client;
-    if (!client) return;
+    if (!client) return null;
     try {
-      const account = await client.call('accounts.check', { accountId });
+      const account = await client.call('accounts.check', { accountId, ...(refresh ? { refresh: true } : {}) });
       this.accounts = this.accounts.map((a) => (a.id === account.id ? account : a));
+      return account;
     } catch (error) {
       this.ctx.fail(error);
+      return null;
     }
   }
 

@@ -288,6 +288,18 @@ all 20 targeted tests in 7.19 seconds. The additional `ui.test.ts` end-to-end
 run passed 21 tests and 150 assertions in 24.97 seconds. Its question desktop
 capture and Markdown desktop/phone captures were opened after regeneration.
 
+After resolving the test conflicts with `c3b0333a`, a fresh production build
+emits a 519,499-byte UI entry, 3,363,249 bytes of UI files and an 823,664-byte
+core main bundle. All three retained upstream limits pass. `bun run check`
+passes with zero Svelte errors or warnings. The affected accounts, Codex,
+terminal, line and Windows-job scenarios pass all 99 core tests; six UI suites
+pass 128 tests in 8.03 seconds. These integration checks do not replace the
+dated paired resource measurements above.
+The accounts/settings end-to-end set passes ten tests and 52 assertions in
+35.48 seconds. Fresh provider-detail desktop/narrow and login desktop/phone
+captures were opened; labels and account actions fit, and phone provider
+administration remains hidden.
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero
@@ -312,8 +324,12 @@ capture and Markdown desktop/phone captures were opened after regeneration.
   mutation or explicit persistence; the extended scenario failed before the fix.
 - Live native-agent reads leave both current and unrelated SQL rows unchanged;
   stale persisted tools cannot override live updates. Pagination and restart pass.
-- The 32 MiB line guard uses CPU time with its original 300 ms floor and 20x
-  yardstick. Its old quadratic scanner control failed at 516 ms; the real file passes all 13 tests.
+- The earlier 32 MiB CPU guard rejected the quadratic control at 516 ms with
+  its original 300 ms floor and 20x yardstick. Integrating `c3b0333a` retains
+  the base's deterministic scanned-input bound: the quadratic control submits
+  8,640,266,252 characters to newline searches against a 33,554,444-character
+  limit and fails while its full-record assertions pass. The real file passes
+  all 13 tests.
 - `bun test packages/core/test/linux-load.test.ts
   bench/process-load.test.ts bench/streaming-load.test.ts --timeout 60000`:
   23 tests passed. New cases verify fresh CPU ticks between topology refreshes,
@@ -325,6 +341,9 @@ isolated first-case runs, complete three-case file and full-suite rerun passed.
 Named timeout diagnostics now distinguish live processes from retained jobs;
 the 20-ID, five-second and kernel-handle assertions remain unchanged. No native
 ownership fix is claimed from that unreproduced timeout.
+Integrating `c3b0333a` also retains the base's pipe draining and garbage
+collection before the kernel-handle comparison. The combined check preserves
+the named diagnostics, 20 IDs, five-second windows and leak threshold.
 
 The suite exposed short-lived fixture races in queue admission, install leases
 and an extension dialog. Tests now hold the queue slot/process until release

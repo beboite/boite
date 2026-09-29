@@ -335,8 +335,8 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
-  login: false | { kind: 'command' | 'acp' | 'terminal' };
+  /** How Boite starts login: a piped command, ACP, a terminal or a device-code protocol. */
+  login: false | { kind: 'command' | 'acp' | 'terminal' | 'device' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
   /** Where the managed install stands, null when this profile has no `install` block. */
@@ -2283,7 +2283,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
     result: Account;
   };
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
-  'accounts.check': { params: { accountId: AccountId }; result: Account };
+  'accounts.rename': { params: { accountId: AccountId; label: string }; result: Account };
+  /** Refresh the provider's login when requested; never uses a model catalogue as authentication. */
+  'accounts.check': { params: { accountId: AccountId; refresh?: boolean }; result: Account };
   /**
    * Start the provider's login command for this account. Refused when the
    * provider has no `login` block, when the account uses the provider's own
