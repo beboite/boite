@@ -65,6 +65,45 @@ afterEach(async () => {
 });
 
 describe('accounts', () => {
+  test('piped sign-in links and output contain no terminal control sequences', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const script = join(harness.dataDir, 'colored-login.ts');
+    writeFileSync(script, `console.log('\\x1b[4mhttps://example.invalid/device\\x1b[0m');`);
+    harness.core.providers.require(providerId).login = { command: [process.execPath, script] };
+    const account = await client.call('accounts.add', { providerId, label: 'Colored login' });
+    const line = client.next('account.login', event => event.accountId === account.id && event.url !== null);
+    await client.call('accounts.login', { accountId: account.id });
+    expect(await line).toMatchObject({ url: 'https://example.invalid/device', output: 'https://example.invalid/device' });
+  });
+
+  test('a fresh Claude check reads the CLI login and email instead of trusting a session file', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const descriptor = harness.core.providers.require(providerId);
+    descriptor.protocol = 'claude-sdk';
+    const script = join(harness.dataDir, 'claude-auth-status.ts');
+    writeFileSync(script, `console.log(JSON.stringify({ loggedIn: process.argv.includes('--json'), email: 'work@example.com' }));`);
+    for (const profile of Object.values(descriptor.profiles)) {
+      if (profile) { profile.executable = [{ kind: 'path', value: 'bun' }]; profile.launch = { args: [script] }; }
+    }
+    const account = await client.call('accounts.add', { providerId, label: 'Claude check' });
+    expect(account.status).toBe('unauthenticated');
+    expect(await client.call('accounts.check', { accountId: account.id, refresh: true })).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+    expect(harness.core.procs.liveCount(`check:${account.id}`)).toBe(0);
+    expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
+  });
+
+  test('renaming preserves the account and broadcasts the trimmed label', async () => {
+    const client = await harness.connect();
+    const account = await client.call('accounts.add', { providerId: 'echo', label: 'Before' });
+    const updated = client.next('accounts.updated', entry => entry.id === account.id && entry.label === 'Work');
+    expect(await client.call('accounts.rename', { accountId: account.id, label: ' Work ' })).toEqual({ ...account, label: 'Work' });
+    expect((await updated).label).toBe('Work');
+    await expect(client.call('accounts.rename', { accountId: account.id, label: ' ' })).rejects.toThrow('label');
+    expect(harness.core.accounts.require(account.id).label).toBe('Work');
+  });
+
   test('first start creates one default account per available provider', async () => {
     const client = await harness.connect();
     const accounts = await client.call('accounts.list', {});

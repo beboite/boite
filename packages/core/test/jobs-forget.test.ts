@@ -71,23 +71,40 @@ describeWindows('thread jobs of forgotten threads', () => {
     }
     // One warm-up spawn builds the global job, the port and the Worker, which
     // stay for the life of the core and are not what this measures.
-    const warm = procs.spawn('warm-up', 'cmd', ['/c', 'exit 0']);
-    await warm.exited;
+    // Drain both output pipes before counting native handles. An exited Bun
+    // subprocess can still own its unread pipe handles until garbage collection.
+    const exitQuietly = async (id: string) => {
+      const child = procs.spawn(id, 'cmd', ['/c', 'exit 0']);
+      await Promise.all([
+        new Response(child.proc.stdout).text(),
+        new Response(child.proc.stderr).text(),
+        child.exited,
+      ]);
+    };
+    await exitQuietly('warm-up');
     await waitFor(() => threadJobCount() === 0, 5000);
     const jobsBefore = threadJobCount();
+    Bun.gc(true);
     const handlesBefore = handleCount();
 
     const ids: string[] = [];
     for (let index = 0; index < SPAWNS; index += 1) {
       const id = `plugin:fetch:${index}`;
       ids.push(id);
-      await procs.spawn(id, 'cmd', ['/c', 'exit 0']).exited;
+      await exitQuietly(id);
     }
     expect(threadJobCount()).toBeGreaterThan(jobsBefore);
     await waitFor(() => ids.every((id) => procs.liveCount(id) === 0), 5000);
 
     await waitFor(() => threadJobCount() === jobsBefore, 5000);
-    // The kernel's own count, the way the leak was measured: one handle per id.
+    // Bun owns a process handle until the exited subprocess is collected.
+    // Collect those wrappers before comparing kernel counts; a leaked native
+    // Job Object cannot be reclaimed by Bun's garbage collector.
+    await waitFor(() => {
+      Bun.gc(true);
+      return handleCount() - handlesBefore < SPAWNS / 2;
+    }, 5000);
+    // Preserve the kernel assertion: one leaked Job Object per id still fails.
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
 

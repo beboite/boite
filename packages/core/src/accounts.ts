@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { stripVTControlCharacters } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import type { Account, AccountId, ProviderDescriptor, ProviderId, RpcEvents, TerminalState } from '@boite/contracts';
 import type { Core } from './core.ts';
@@ -23,6 +24,7 @@ const SIGN_IN_LINK = /oauth|authorize|redirect_uri|client_id|user_code|\/device|
 const CALLBACK_TIMEOUT_MS = 10_000;
 
 interface LoginRun {
+  cancelled?: boolean;
   done: Promise<void>;
   /** The CLI form: a piped process whose stdin takes a pasted code. */
   spawned: SpawnedPipedProcess | null;
@@ -86,6 +88,7 @@ function refuseUnisolable(provider: ProviderDescriptor): void {
 }
 
 export class AccountStore {
+  private readonly checks = new Map<AccountId, Promise<Account>>();
   private readonly logins = new Map<AccountId, LoginRun>();
   /** The share problems last logged per account, so a spawn repeats a warning only when it changed. */
   private readonly shareLog = new Map<AccountId, string>();
@@ -150,6 +153,7 @@ export class AccountStore {
       throw refused('the account isolationDir must be its own directory under accounts', { accountId, field: 'isolationDir' });
     }
     await this.loginCancel(accountId);
+    await this.checks.get(accountId)?.catch(() => {});
     checkAgentReferences();
     // Cancelling yields to RPC work; a new thread may have claimed this account.
     if (this.core.scheduler.activeAccountIds().includes(accountId) || this.core.journal.listThreads().some((thread) => thread.accountId === accountId)) {
@@ -187,6 +191,61 @@ export class AccountStore {
     this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => {
       this.core.journal.putAccount(next);
     });
+    this.core.bus.emit('accounts.updated', next);
+    return next;
+  }
+
+  rename(accountId: AccountId, label: string): Account {
+    if (typeof label !== 'string' || !label.trim() || label.trim().length > 100) {
+      throw invalidParams('label must contain 1 to 100 characters', { field: 'label', expected: '1 to 100 characters' });
+    }
+    const next = { ...this.require(accountId), label: label.trim() };
+    this.core.journal.append({ type: 'account.renamed', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
+    this.core.bus.emit('accounts.updated', next);
+    return next;
+  }
+
+  async verify(accountId: AccountId): Promise<Account> {
+    const pending = this.checks.get(accountId);
+    if (pending) return pending;
+    const promise = this.verifyConnection(accountId).finally(() => this.checks.delete(accountId));
+    this.checks.set(accountId, promise);
+    return promise;
+  }
+
+  private async verifyConnection(accountId: AccountId): Promise<Account> {
+    const account = this.require(accountId);
+    const provider = this.core.providers.require(account.providerId);
+    if (provider.protocol !== 'codex-appserver' && provider.protocol !== 'claude-sdk') return this.check(accountId);
+    const profile = profileFor(provider);
+    const executable = profile ? resolveExecutable(profile) : null;
+    if (!executable) throw refused(`${provider.name} is not installed`, { accountId, field: 'executable' });
+    const threadId = `check:${accountId}`;
+    let result: Pick<Account, 'status' | 'identity'>;
+    this.core.providers.installs.acquire(provider.id);
+    try {
+      const read = provider.protocol === 'codex-appserver'
+        ? (await import('./drivers/codex/auth.ts')).readCodexAccount
+        : (await import('./drivers/claude/auth.ts')).readClaudeAccount;
+      result = await read({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+        cwd: account.isolationDir ?? this.core.dataDir, env: agentEnv(provider, this.accountEnv(account, provider)),
+        spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(threadId, cmd, args, opts), onLine: () => {},
+      });
+    } catch (error) {
+      this.saveCheck(accountId, { status: 'error', identity: null });
+      throw refused(`connection check failed: ${messageOf(error)}`, { accountId });
+    } finally {
+      try { await this.core.procs.stopAndWait(threadId); }
+      finally { this.core.providers.installs.release(provider.id); }
+    }
+    return this.saveCheck(accountId, result);
+  }
+
+  private saveCheck(accountId: AccountId, result: Pick<Account, 'status' | 'identity'>): Account {
+    const current = this.require(accountId);
+    if (current.status === result.status && current.identity === result.identity) return current;
+    const next = { ...current, ...result };
+    this.core.journal.append({ type: 'account.checked', threadId: null, version: 1, payload: next }, () => this.core.journal.putAccount(next));
     this.core.bus.emit('accounts.updated', next);
     return next;
   }
@@ -292,6 +351,7 @@ export class AccountStore {
 
     const isolationDir = account.isolationDir;
     mkdirSync(isolationDir, { recursive: true });
+    if (provider.protocol === 'codex-appserver') return this.codexLogin(account, provider);
     if (provider.login.acp !== undefined) return this.acpLogin(account, provider, provider.login.acp.methodId);
 
     const argv = provider.login.command;
@@ -429,6 +489,34 @@ export class AccountStore {
     return { ok: true };
   }
 
+  private codexLogin(account: Account, provider: ProviderDescriptor): { ok: true } {
+    const profile = profileFor(provider);
+    const executable = profile ? resolveExecutable(profile) : null;
+    if (!executable) throw refused(`${provider.name} is not installed`, { accountId: account.id });
+    const run: LoginRun = { spawned: null, acp: null, url: null, lastLine: '', done: Promise.resolve() };
+    this.logins.set(account.id, run);
+    this.core.providers.installs.acquire(provider.id);
+    this.emitLogin(account.id, 'running', '', run);
+    run.done = (async () => {
+      try {
+        const { runCodexLogin } = await import('./drivers/codex/auth.ts');
+        // Cancellation may have arrived while the module loaded.
+        if (run.cancelled) { this.logins.delete(account.id); this.emitLogin(account.id, 'failed', 'Sign-in cancelled', run, 1); return; }
+        const login = runCodexLogin({ executable, args: [...launchPrefix(profile), ...(profile?.launch?.args ?? [])],
+          cwd: account.isolationDir!, env: agentEnv(provider, this.accountEnv(account, provider)),
+          spawnChild: (cmd, args, opts) => this.core.procs.spawnChild(loginThreadId(account.id), cmd, args, opts),
+          onLine: line => this.onLoginLine(account.id, line),
+        });
+        run.acp = login;
+        await this.finishAcpLogin(account.id, run, login);
+      } catch (error) {
+        this.logins.delete(account.id);
+        this.emitLogin(account.id, 'failed', messageOf(error), run, 1);
+      } finally { this.core.providers.installs.release(provider.id); }
+    })();
+    return { ok: true };
+  }
+
   loginStates(): RpcEvents['account.login'][] {
     return [...this.logins].map(([accountId, run]) => ({
       accountId, state: 'running', output: run.lastLine, url: run.url, exitCode: null,
@@ -440,6 +528,7 @@ export class AccountStore {
     await this.core.terminals.close(loginThreadId(accountId));
     const run = this.logins.get(accountId);
     if (run !== undefined) {
+      run.cancelled = true;
       this.core.procs.killTree(loginThreadId(accountId));
       run.acp?.kill();
       await run.done;
@@ -457,15 +546,19 @@ export class AccountStore {
     acp.kill();
     this.core.procs.killTree(loginThreadId(accountId));
     await acp.exited;
+    if (!this.core.journal.isClosed()) {
+      try {
+        const provider = this.core.providers.require(this.require(accountId).providerId);
+        if (!run.cancelled && provider.protocol === 'codex-appserver') {
+          const checked = await this.verify(accountId);
+          if (failure === null && checked.status !== 'ok') failure = 'Codex finished signing in but the account is not connected. Retry the connection.';
+        } else this.check(accountId, true);
+      } catch (error) { failure ??= messageOf(error); }
+    }
     this.logins.delete(accountId);
+    if (run.cancelled) failure = 'Sign-in cancelled';
     if (failure !== null) run.lastLine = failure;
     this.emitLogin(accountId, failure === null ? 'done' : 'failed', run.lastLine, run, failure === null ? 0 : 1);
-    if (this.core.journal.isClosed()) return;
-    try {
-      this.check(accountId, true);
-    } catch {
-      // the account was removed while its login ran
-    }
   }
 
   /**
@@ -483,6 +576,9 @@ export class AccountStore {
   loginInput(accountId: AccountId, text: string): { ok: true } {
     const run = this.logins.get(accountId);
     if (run === undefined) throw refused(`no login is running for ${accountId}`, { accountId });
+    if (this.core.providers.require(this.require(accountId).providerId).protocol === 'codex-appserver') {
+      throw refused('enter the displayed code on the Codex sign-in page', { accountId, field: 'text' });
+    }
     if (run.acp !== null) {
       const pasted = loopbackCallback(text);
       if (pasted === null) {
@@ -532,10 +628,12 @@ export class AccountStore {
   /** Every login still running, killed with the core. */
   async closeLogins(): Promise<void> {
     await Promise.all([...this.logins.keys()].map((accountId) => this.loginCancel(accountId)));
+    await Promise.allSettled([...this.checks.values()]);
   }
 
   /** One line of a login's output, whichever form it takes. */
   private onLoginLine(accountId: AccountId, line: string): void {
+    line = stripVTControlCharacters(line).trim();
     const run = this.logins.get(accountId);
     if (run === undefined || line.length === 0) return;
     run.lastLine = line;
@@ -579,14 +677,18 @@ export class AccountStore {
     };
     await Promise.all([pumpLines(spawned.proc.stdout, onLine), pumpLines(spawned.proc.stderr, onLine)]);
     const exitCode = await spawned.exited;
-    this.logins.delete(accountId);
-    this.emitLogin(accountId, exitCode === 0 ? 'done' : 'failed', run.lastLine, run, exitCode);
-    if (this.core.journal.isClosed()) return;
+    if (this.core.journal.isClosed()) { this.logins.delete(accountId); return; }
+    let failure = exitCode === 0 ? null : run.lastLine;
     try {
-      this.check(accountId, true);
-    } catch {
-      // the account was removed while its login ran
-    }
+      const provider = this.core.providers.require(this.require(accountId).providerId);
+      if (!run.cancelled && provider.protocol === 'claude-sdk') {
+        const checked = await this.verify(accountId);
+        if (failure === null && checked.status !== 'ok') failure = 'The sign-in finished but the account is not connected. Retry the connection.';
+      } else this.check(accountId, true);
+    } catch (error) { failure ??= messageOf(error); }
+    this.logins.delete(accountId);
+    if (run.cancelled) failure = 'Sign-in cancelled';
+    this.emitLogin(accountId, failure === null ? 'done' : 'failed', failure ?? run.lastLine, run, failure === null ? 0 : exitCode || 1);
   }
 
   private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
@@ -632,7 +734,8 @@ export function registerAccountMethods(core: Core): void {
     await core.accounts.remove(params.accountId);
     return { ok: true } as const;
   });
-  core.router.register('accounts.check', (params) => core.accounts.check(params.accountId));
+  core.router.register('accounts.rename', params => core.accounts.rename(params.accountId, params.label));
+  core.router.register('accounts.check', (params) => params.refresh === true ? core.accounts.verify(params.accountId) : core.accounts.check(params.accountId));
   core.router.register('accounts.login', (params) => core.accounts.login(params.accountId));
   core.router.register('accounts.logins', () => core.accounts.loginStates());
   core.router.register('accounts.loginTerminal', (params) =>

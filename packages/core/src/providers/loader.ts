@@ -60,8 +60,9 @@ export interface ProviderLoadResult {
 }
 
 /** How a client starts this provider's login, if it can. */
-function loginSummary(login: ProviderLogin | undefined): ProviderSummary['login'] {
+function loginSummary(login: ProviderLogin | undefined, protocol?: ProviderDescriptor['protocol']): ProviderSummary['login'] {
   if (login === undefined) return false;
+  if (protocol === 'codex-appserver') return { kind: 'device' };
   if (login.acp !== undefined) return { kind: 'acp' };
   return { kind: login.terminal === true ? 'terminal' : 'command' };
 }
@@ -87,7 +88,7 @@ export function summarize(entry: LoadedProvider, installs: InstallManager, dataD
     source: entry.source,
     available,
     executable,
-    login: loginSummary(entry.descriptor.login),
+    login: loginSummary(entry.descriptor.login, entry.descriptor.protocol),
     alwaysIsolated: entry.descriptor.isolation?.alwaysIsolated === true,
     models: entry.descriptor.models,
     capabilities: entry.descriptor.capabilities,

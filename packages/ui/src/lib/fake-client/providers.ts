@@ -109,7 +109,7 @@ export const PROBED_MODELS: ModelInfo[] = [
 ];
 
 export const PROBE_PROVIDERS: Pick<ProviderSummary, 'id' | 'name' | 'protocol' | 'login'>[] = [
-  { id: 'codex', name: 'Codex', protocol: 'codex-appserver', login: { kind: 'command' } },
+  { id: 'codex', name: 'Codex', protocol: 'codex-appserver', login: { kind: 'device' } },
   { id: 'pi', name: 'pi', protocol: 'pi', login: false },
   { id: 'grok', name: 'Grok', protocol: 'acp', login: { kind: 'command' } },
   { id: 'muse', name: 'Muse Code', protocol: 'muse', login: { kind: 'command' } }
