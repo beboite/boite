@@ -358,7 +358,8 @@ test(
 
     await page.click(`${testid('question-option')}[data-option=short]`);
     await page.type(testid('question-text-input'), 'one line please');
-    await clickWhenEnabled(testid('question-submit'));
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
 
     await page.waitFor(
       `document.querySelector('${testid('question-card')}').dataset.state === 'answered'`,
