@@ -279,6 +279,7 @@ export class Journal {
     }
     this.db.query("DELETE FROM settings WHERE key IN (SELECT 'activity:' || id FROM threads WHERE project_id = ?)").run(projectId);
     this.db.query("DELETE FROM settings WHERE key IN (SELECT 'move-note:' || id FROM threads WHERE project_id = ?)").run(projectId);
+    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'memory-notices:' || id FROM threads WHERE project_id = ?)").run(projectId);
     this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
     return rows.map((row) => row.id);
   }

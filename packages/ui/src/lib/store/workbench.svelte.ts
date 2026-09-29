@@ -1,5 +1,8 @@
 import type {
   AgentTask,
+  MemoryEvent,
+  MemoryState,
+  MemoryStatus,
   FileContent,
   FileEntry,
   GitDiff,
@@ -30,6 +33,45 @@ export function sameProcess(a: ProcessRecord, b: ProcessRecord): boolean {
  * about the surface that asked, so it reads in that surface.
  */
 export class Workbench {
+  memory = $state.raw<MemoryStatus | null>(null);
+  memoryState = $state<MemoryState | null>(null);
+  memoryStopped = $state(false);
+  private memoryRevision = 0;
+  private memoryRead = 0;
+
+  resetMemory(): void {
+    this.memoryRead++;
+    this.memoryRevision++;
+    this.memory = null;
+    this.memoryState = null;
+    this.memoryStopped = false;
+  }
+
+  memoryEvent(event: MemoryEvent): void {
+    this.memoryRevision++;
+    this.memoryState = event.state;
+    if (event.state === 'ok') this.memoryStopped = false;
+    else if (event.kind === 'killed') this.memoryStopped = true;
+  }
+
+  async refreshMemory(): Promise<void> {
+    const client = this.ctx.client;
+    if (!client || !this.ctx.store.owner) return;
+    const read = ++this.memoryRead;
+    const revision = this.memoryRevision;
+    try {
+      const memory = await client.call('resources.memoryStatus', {});
+      if (client !== this.ctx.client || read !== this.memoryRead) return;
+      this.memory = memory;
+      if (revision === this.memoryRevision) {
+        this.memoryState = memory.state;
+        if (memory.state === 'ok') this.memoryStopped = false;
+      }
+    } catch (error) {
+      if (client === this.ctx.client && read === this.memoryRead) this.ctx.fail(error);
+    }
+  }
+
   resources = $state<ThreadResources[]>([]);
   trace = $state<ProcessRecord[]>([]);
   /**
@@ -192,9 +234,10 @@ export class Workbench {
 
   async refreshResources(): Promise<void> {
     const client = this.ctx.client;
-    if (!client) return;
+    if (!client || !this.ctx.store.owner) return;
     try {
-      this.resources = await client.call('resources.list', {});
+      const [resources] = await Promise.all([client.call('resources.list', {}), this.refreshMemory()]);
+      if (client === this.ctx.client) this.resources = resources;
     } catch (error) {
       this.ctx.fail(error);
     }

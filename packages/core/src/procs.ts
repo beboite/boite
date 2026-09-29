@@ -4,11 +4,15 @@ import type { Readable, Writable } from 'node:stream';
 import type { ProcessRecord, Settings, ThreadId, ThreadLoad, ThreadSummary, TraceCapability, Turn } from '@boite/contracts';
 import type { Bus } from './bus.ts';
 import type { Journal } from './journal.ts';
+import { MemoryGuard } from './memory-guard.ts';
+import type { MemoryProcess } from './memory-guard-logic.ts';
 import { processPlatform } from './platform/index.ts';
 import { stopGroup } from './platform/posix-kill.ts';
 import type { GuardStatus, NativeProcessExit, NativeProcessInfo, ProcessPlatform } from './platform/types.ts';
 
 export interface SpawnOptions {
+  /** Direct spawns are agent roots unless the caller identifies a tool process. */
+  agentRoot?: boolean;
   cwd?: string | undefined;
   env?: Record<string, string | undefined> | undefined;
 }
@@ -49,6 +53,7 @@ export interface SpawnedTerminal {
 
 interface Entry {
   record: ProcessRecord;
+  root: boolean;
   /** Off Windows, the group stop that follows: resolved once the group is gone or SIGKILLed. */
   kill(): void | Promise<void>;
   usage(): { cpuMs: number; peakMemoryBytes: number } | null;
@@ -91,6 +96,7 @@ export interface ProcRegistryOptions {
  * grandchild nobody here spawned is registered from a job event.
  */
 export class ProcRegistry {
+  readonly memory: MemoryGuard;
   private readonly unassigned = new Set<number>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
@@ -119,6 +125,7 @@ export class ProcRegistry {
     private readonly platform: ProcessPlatform = processPlatform,
     options: ProcRegistryOptions = {},
   ) {
+    this.memory = new MemoryGuard(bus, platform);
     this.orphanGraceMs = options.orphanGraceMs ?? ORPHAN_GRACE_MS;
     this.forgetDelayMs = options.forgetDelayMs ?? FORGET_DELAY_MS;
     this.summarize = options.summarize ?? ((thread) => thread);
@@ -138,6 +145,13 @@ export class ProcRegistry {
       },
       note: (threadId, message) => {
         this.bus.emit('core.log', { level: 'warn', message: `thread ${threadId}: ${message}`, at: Date.now() });
+      },
+      memoryLimit: (threadId, kind) => {
+        this.memory.memoryLimit(threadId, kind);
+        const message = kind === 'thread-cap'
+          ? `thread ${threadId}: the thread reached its memory cap`
+          : 'the agents reached their memory budget';
+        this.bus.emit('core.log', { level: 'warn', message, at: Date.now() });
       },
     }, {
       pushed: (threadId, pid, title, restored) => {
@@ -171,6 +185,7 @@ export class ProcRegistry {
   }
 
   applySettings(settings: Settings): void {
+    this.memory.applySettings(settings);
     this.platform.applySettings(settings);
     this.reapOrphans = settings.reapOrphans !== false;
     if (!this.reapOrphans) for (const threadId of [...this.sweepTimers.keys()]) this.cancelSweep(threadId);
@@ -213,6 +228,7 @@ export class ProcRegistry {
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
+      root: opts.agentRoot !== false,
       kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
@@ -248,6 +264,7 @@ export class ProcRegistry {
     });
 
     const record = this.register(threadId, proc.pid, cmd, args, {
+      root: opts.agentRoot !== false,
       kill: () => killBunChild(proc),
       usage: () => {
         const usage = proc.resourceUsage();
@@ -290,6 +307,7 @@ export class ProcRegistry {
     }
 
     const record = this.register(threadId, proc.pid, cmd, args, {
+      root: false,
       kill: () => {
         if (process.platform === 'win32') {
           proc.kill();
@@ -340,6 +358,7 @@ export class ProcRegistry {
     });
 
     const record = this.register(threadId, child.pid ?? -1, cmd, args, {
+      root: opts.agentRoot !== false,
       kill: () => {
         if (OWN_GROUP) return stopGroup(child.pid ?? -1, () => child.exitCode === null && child.signalCode === null);
         child.kill();
@@ -437,6 +456,7 @@ export class ProcRegistry {
       },
       {
         // Nothing to kill by hand: the job owns this process, killTree terminates it.
+        root: false,
         kill: () => undefined,
         usage: () => null,
       },
@@ -663,17 +683,23 @@ export class ProcRegistry {
     this.forgetTimers.set(threadId, timer);
   }
 
-  private measure(threadId: ThreadId, processes: number): ThreadLoad {
+  private measure(threadId: ThreadId, processes: number, memory?: MemoryProcess[]): ThreadLoad {
     const sample = this.platform.sample(threadId);
     if (sample === null) return { processes, cpuPercent: 0, memoryBytes: 0 };
+    for (const measured of sample.workingSets ?? []) {
+      const entry = this.live.get(threadId)?.get(measured.pid);
+      if (entry !== undefined) memory?.push({ threadId, pid: measured.pid, exe: entry.record.exe, bytes: measured.committedBytes ?? measured.bytes, root: entry.root });
+      else if (this.capability().os !== 'windows') memory?.push({ threadId, pid: measured.pid, exe: measured.exe ?? 'process', bytes: measured.bytes, root: false });
+    }
     return { processes, cpuPercent: sample.cpuPercent, memoryBytes: sample.memoryBytes };
   }
 
   private sampleLoad(): void {
     if (this.journal.isClosed()) return;
+    const processes: MemoryProcess[] = [];
     for (const [threadId, byPid] of this.live) {
       if (byPid.size === 0) continue;
-      const load = this.measure(threadId, byPid.size);
+      const load = this.measure(threadId, byPid.size, processes);
       this.lastLoad.set(threadId, load);
       if (!worthPushing(this.lastPushed.get(threadId), load)) continue;
       const thread = this.journal.getThread(threadId);
@@ -686,6 +712,19 @@ export class ProcRegistry {
       this.lastLoad.delete(threadId);
       this.lastPushed.delete(threadId);
     }
+    this.memory.sample(processes.reduce((sum, process) => sum + process.bytes, 0), processes, (victim) => {
+      const entry = this.live.get(victim.threadId)?.get(victim.pid);
+      if (entry?.root) return false;
+      if (this.capability().os === 'windows') return entry !== undefined && this.platform.terminateProcess(victim.threadId, victim.pid);
+      try {
+        if (entry === undefined) return this.platform.terminateProcess(victim.threadId, victim.pid);
+        const stop = entry.kill();
+        if (stop !== undefined) this.trackStop(stop);
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 }
 

@@ -51,6 +51,7 @@ export function seed(ctx: FakeContext): void {
   ctx.accounts = accounts;
 
   const { finished, running, waiting, unread } = seedThreads();
+  finished.memoryEvents = [{ threadId: finished.id, kind: 'killed', reason: 'thread-quota', limitBytes: 9728 * 1048576, exe: 'cargo.exe', bytes: 2147483648, state: 'critical', at: finished.updatedAt + 1 }];
 
   for (const thread of [finished, running, waiting, unread]) ctx.threads.set(thread.id, thread);
   // Put away two days before the seed, its worktree still on disk.

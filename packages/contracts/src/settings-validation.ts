@@ -9,7 +9,7 @@ export const BROWSER_ORIGINS_MAX = 32;
 /** A model id is a name, never a paragraph. */
 const TITLE_MODEL_MAX = 200;
 
-const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb'] as const;
+const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
 const POSITIVE_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency'] as const;
 const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
@@ -96,6 +96,14 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
   for (const key of PERCENT_KEYS) {
     const value = patch[key];
     if (value !== undefined && value > 100) return { ok: false, field: key, message: `${key} must be between 0 and 100` };
+  }
+  const budget = patch.agentMemoryBudgetPercent;
+  if (budget !== undefined && (!Number.isInteger(budget) || budget < 10 || budget > 90)) {
+    return { ok: false, field: 'agentMemoryBudgetPercent', message: 'agentMemoryBudgetPercent must be an integer between 10 and 90' };
+  }
+  const reserve = patch.memoryReserveMb;
+  if (reserve !== undefined && (!Number.isInteger(reserve) || (reserve !== 0 && (reserve < 256 || reserve > 1048576)))) {
+    return { ok: false, field: 'memoryReserveMb', message: 'memoryReserveMb must be 0 (auto) or an integer between 256 and 1048576 MB' };
   }
   for (const key of BOOLEAN_KEYS) {
     const value = patch[key];

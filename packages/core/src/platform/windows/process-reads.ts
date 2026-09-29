@@ -34,6 +34,7 @@ const OFF_COMMAND_LINE = 0x70;
 const PROCESS_MEMORY_COUNTERS_SIZE = 72;
 const OFF_PEAK_WORKING_SET = 8;
 const OFF_WORKING_SET = 16;
+const OFF_PAGEFILE_USAGE = 56;
 /** IO_COUNTERS: six u64, the three operation counts then the three transfer counts. */
 const IO_COUNTERS_SIZE = 48;
 const OFF_READ_TRANSFER = 24;
@@ -125,12 +126,13 @@ export function ioBytesOf(api: ProcessReads, handle: number): number | null {
   return Number(total);
 }
 
-export function workingSetOf(api: ProcessReads, handle: number): { workingSet: number; peak: number } | null {
+export function workingSetOf(api: ProcessReads, handle: number): { workingSet: number; peak: number; committedBytes: number } | null {
   const buffer = new Uint8Array(PROCESS_MEMORY_COUNTERS_SIZE);
   const view = new DataView(buffer.buffer);
   view.setUint32(0, PROCESS_MEMORY_COUNTERS_SIZE, true);
   if (!api.memoryInfo(handle, buffer)) return null;
   return {
+    committedBytes: Number(view.getBigUint64(OFF_PAGEFILE_USAGE, true)),
     workingSet: Number(view.getBigUint64(OFF_WORKING_SET, true)),
     peak: Number(view.getBigUint64(OFF_PEAK_WORKING_SET, true)),
   };

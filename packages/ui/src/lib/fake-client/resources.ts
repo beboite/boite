@@ -34,6 +34,20 @@ export function resourceMethods(ctx: FakeContext) {
     'resources.list': async (params) => {
       return structuredClone(resources(ctx));
     },
+    'resources.memoryStatus': async () => {
+      const totalMb = 32768;
+      const budget = Math.floor(totalMb * ctx.settings.agentMemoryBudgetPercent / 100 / 256) * 256;
+      return {
+        state: ctx.memoryState,
+        agentBytes: resources(ctx).reduce((sum, thread) => sum + thread.load.memoryBytes, 0),
+        availableBytes: (ctx.memoryState === 'critical' ? 2048 : 16384) * 1048576,
+        limits: {
+          budgetMb: budget,
+          threadMemoryCapMb: Math.min(ctx.settings.threadMemoryCapMb || Math.floor(budget / 2 / 256) * 256, budget),
+          memoryReserveMb: ctx.settings.memoryReserveMb || Math.max(totalMb * 0.1, 3072),
+        },
+      };
+    },
     'resources.killTree': async (params) => {
       let killed = 0;
       for (const record of ctx.processes) {

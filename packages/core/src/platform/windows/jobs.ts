@@ -4,16 +4,17 @@
  * grandchild that outlives its parent and `killTree` is one call instead of a
  * pid walk. Linux and macOS use the separate POSIX backend.
  *
- * One global job holds the machine-wide CPU cap; every thread job nests under
+ * One global job holds the CPU cap and memory budget; every thread job nests under
  * it, runs below normal priority and dies with the core (KILL_ON_JOB_CLOSE,
  * never BREAKAWAY_OK).
  */
-import { cpus } from 'node:os';
+import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import type { Pointer } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
+import { resolveMemoryLimits } from '../../memory-limits.ts';
 import {
   commandLineOf,
   cpuMsOf,
@@ -48,6 +49,8 @@ const MSG_EXIT_PROCESS = 7;
 const MSG_ABNORMAL_EXIT_PROCESS = 8;
 const MSG_PROCESS_MEMORY_LIMIT = 9;
 const MSG_JOB_MEMORY_LIMIT = 10;
+/** Key 0 wakes the drain; key 1 belongs to the global job, never a thread. */
+const GLOBAL_JOB_KEY = 1;
 
 const PROCESS_TERMINATE = 0x1;
 const PROCESS_VM_READ = 0x10;
@@ -55,7 +58,6 @@ const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
 /** Enough for GetProcessTimes, and granted on processes the full query right is not. */
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-const ERROR_ACCESS_DENIED = 5;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
 const KILL_EXIT_CODE = 9;
@@ -163,7 +165,7 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
     terminateProcess: (proc: number, exitCode: number): boolean =>
       k32.TerminateProcess(asPointer(proc), exitCode) !== 0,
     createPort: (): number => asHandle(k32.CreateIoCompletionPort(INVALID_HANDLE_VALUE, null, 0n, 1)),
-    /** Key 0 on the port: the drain's signal to stop. Thread job keys start at 1. */
+    /** Key 0 on the port: the drain's signal to stop. Thread job keys start at 2. */
     wakeToStop: (port: number): boolean => k32.PostQueuedCompletionStatus(asPointer(port), 0, 0n, null) !== 0,
     openProcess: (access: number, pid: number): number => asHandle(k32.OpenProcess(access, 0, pid)),
     close: (handle: number): void => {
@@ -232,8 +234,11 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let nestingRefused = false;
 let sink: ProcessEventSink | null = null;
-let limits: ProcessLimits = { agentCpuCapPercent: 75, threadMemoryCapMb: 0 };
-let nextKey = 1;
+let limits: ProcessLimits = {
+  agentCpuCapPercent: 75,
+  ...resolveMemoryLimits({ agentMemoryBudgetPercent: 60, threadMemoryCapMb: 0, memoryReserveMb: 0 }, totalmem()),
+};
+let nextKey = GLOBAL_JOB_KEY + 1;
 
 const threadJobs = new Map<string, ThreadJob>();
 const threadsByKey = new Map<number, string>();
@@ -289,7 +294,10 @@ export function setProcessLimits(next: ProcessLimits): void {
   limits = { ...next };
   const api = native;
   if (api === null) return;
-  if (globalJob !== 0) applyCpuCap(api, globalJob);
+  if (globalJob !== 0) {
+    applyMemoryLimit(api, globalJob, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
+    applyCpuCap(api, globalJob);
+  }
   for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
 }
 
@@ -301,6 +309,16 @@ export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
   if (!api.queryJobInfo(globalJob, CLASS_CPU_RATE_CONTROL, buffer)) return null;
   const view = new DataView(buffer.buffer);
   return { flags: view.getUint32(0, true), rate: view.getUint32(4, true) };
+}
+
+/** The kernel's memory limit and flags. Null selects the global job; read by tests only. */
+export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number } | null {
+  const handle = threadId === null ? globalJob : threadJobs.get(threadId)?.handle;
+  if (native === null || !handle) return null;
+  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
+  if (!native.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
+  const view = new DataView(buffer.buffer);
+  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)) };
 }
 
 export function jobsCapability(): TraceCapability {
@@ -316,7 +334,7 @@ export function jobsCapability(): TraceCapability {
     };
   }
   const suffix = nestingRefused
-    ? '; the global job refused nesting (access denied), thread jobs run standalone'
+    ? '; the global job refused nesting, thread jobs run standalone'
     : '';
   if (workerFailure !== null) {
     return {
@@ -327,8 +345,6 @@ export function jobsCapability(): TraceCapability {
   }
   return { os, mode: 'events', note: `${EVENTS_NOTE}${suffix}` };
 }
-
-// -- the two seams `procs` calls --------------------------------------------
 
 export function assignToThreadJob(threadId: string, pid: number): boolean {
   if (pid <= 0) return false;
@@ -347,7 +363,7 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
     if (globalJob !== 0 && !nestingRefused) {
       // The thread job nests under the global job through this first assignment:
       // the process is already in the global job when it joins the thread job.
-      if (!api.assign(globalJob, handle) && api.lastError() === ERROR_ACCESS_DENIED) nestingRefused = true;
+      if (!api.assign(globalJob, handle)) nestingRefused = true;
     }
     return api.assign(job.handle, handle);
   } finally {
@@ -434,17 +450,17 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   job.lastSampleAt = now;
 
   let memoryBytes = 0;
+  const workingSets: { pid: number; bytes: number; committedBytes: number }[] = [];
   for (const [pid, entry] of tracked) {
     if (entry.threadId !== threadId) continue;
     const memory = workingSetOf(api, entry.handle);
     if (memory === null) continue;
     memoryBytes += memory.workingSet;
-    if (memory.peak > entry.peakMemoryBytes) {
-      tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
-    }
+    workingSets.push({ pid, bytes: memory.workingSet, committedBytes: memory.committedBytes });
+    if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
 
-  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes };
+  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets };
 }
 
 // -- job creation -----------------------------------------------------------
@@ -485,27 +501,46 @@ function applyCpuCap(api: Native, job: number): void {
 }
 
 function applyThreadLimits(api: Native, job: number): void {
+  applyMemoryLimit(api, job, limits.threadMemoryCapMb * 1.1, true);
+}
+
+function applyMemoryLimit(api: Native, job: number, mb: number, thread = false): void {
   const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
   const view = new DataView(buffer.buffer);
-  let flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_PRIORITY_CLASS;
-  view.setUint32(OFF_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, true);
-  if (limits.threadMemoryCapMb > 0) {
+  let flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (thread) {
+    flags |= JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+    view.setUint32(OFF_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, true);
+  }
+  // Windows rounds down to pages. A zero limit would refuse every allocation.
+  if (mb > 0) {
     flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
-    view.setBigUint64(OFF_JOB_MEMORY_LIMIT, BigInt(Math.round(limits.threadMemoryCapMb)) * 1024n * 1024n, true);
+    view.setBigUint64(OFF_JOB_MEMORY_LIMIT, BigInt(Math.floor(mb * 1024 * 1024 / 4096) * 4096), true);
   }
   view.setUint32(OFF_LIMIT_FLAGS, flags, true);
   api.setJobInfo(job, CLASS_EXTENDED_LIMIT, buffer);
+}
+
+function associatePort(api: Native, handle: number, key: number): void {
+  if (completionPort === 0) completionPort = api.createPort();
+  if (completionPort === 0) return;
+  // Associate before the first process joins, or its NEW_PROCESS is never queued.
+  const assoc = new Uint8Array(16);
+  const view = new DataView(assoc.buffer);
+  view.setBigUint64(0, BigInt(key), true);
+  view.setBigUint64(8, BigInt(completionPort), true);
+  api.setJobInfo(handle, CLASS_ASSOCIATE_COMPLETION_PORT, assoc);
+  ensureWorker(completionPort);
 }
 
 function ensureGlobalJob(api: Native): void {
   if (globalJob !== 0) return;
   const handle = api.createJob();
   if (handle === 0) return;
-  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
-  new DataView(buffer.buffer).setUint32(OFF_LIMIT_FLAGS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, true);
-  api.setJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer);
+  applyMemoryLimit(api, handle, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
   globalJob = handle;
   applyCpuCap(api, handle);
+  associatePort(api, handle, GLOBAL_JOB_KEY);
 }
 
 function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
@@ -519,16 +554,7 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
 
   const key = nextKey;
   nextKey += 1;
-  if (completionPort === 0) completionPort = api.createPort();
-  if (completionPort !== 0) {
-    // Associate before the first process joins, or its NEW_PROCESS is never queued.
-    const assoc = new Uint8Array(16);
-    const view = new DataView(assoc.buffer);
-    view.setBigUint64(0, BigInt(key), true);
-    view.setBigUint64(8, BigInt(completionPort), true);
-    api.setJobInfo(handle, CLASS_ASSOCIATE_COMPLETION_PORT, assoc);
-    ensureWorker(completionPort);
-  }
+  associatePort(api, handle, key);
 
   const job: ThreadJob = { handle, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
   threadJobs.set(threadId, job);
@@ -654,6 +680,12 @@ function onWorkerMessage(message: JobsWorkerMessage): void {
 }
 
 function onJobPacket(message: number, key: number, pid: number, handle = 0): void {
+  if (key === GLOBAL_JOB_KEY) {
+    // Starts and exits also reach the global job. Only the thread owns their trace.
+    if (handle !== 0) native?.close(handle);
+    if (message === MSG_JOB_MEMORY_LIMIT) sink?.memoryLimit(tracked.get(pid)?.threadId ?? null, 'budget');
+    return;
+  }
   const threadId = threadsByKey.get(key);
   if (threadId === undefined) {
     if (handle !== 0) native?.close(handle);
@@ -676,7 +708,7 @@ function onJobPacket(message: number, key: number, pid: number, handle = 0): voi
       sink?.note(threadId, `process ${pid} reached the memory limit`);
       return;
     case MSG_JOB_MEMORY_LIMIT:
-      sink?.note(threadId, 'the thread reached its memory cap');
+      sink?.memoryLimit(threadId, 'thread-cap');
       return;
     default:
       return;

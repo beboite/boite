@@ -125,6 +125,7 @@ export class Store {
   detach(): void {
     const ctx = this.#ctx;
     ctx.drafts.stop();
+    ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
     this.coordination = null;
     this.coordinationDirectory = null;
@@ -533,6 +534,10 @@ export class Store {
   // -------------------------------------------------------------------------
 
   get resources() { return this.#ctx.workbench.resources; }
+  get memory() { return this.#ctx.workbench.memory; }
+  get memoryState() { return this.#ctx.workbench.memoryState; }
+  get memoryStopped() { return this.#ctx.workbench.memoryStopped; }
+  refreshMemory() { return this.#ctx.workbench.refreshMemory(); }
   set resources(value) { this.#ctx.workbench.resources = value; }
   get trace() { return this.#ctx.workbench.trace; }
   set trace(value) { this.#ctx.workbench.trace = value; }

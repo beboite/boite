@@ -1017,6 +1017,8 @@ export interface ActivityIteration {
 }
 
 export interface Thread extends ThreadSummary {
+  /** The latest 100 memory notices, oldest first, including those missed while disconnected. */
+  memoryEvents?: MemoryEvent[];
   activity?: ThreadActivity;
   /**
    * Set when `threads.get` answered an `after`: `messages` starts at this
@@ -1179,6 +1181,31 @@ export interface SchedulerState {
   queued: { turnId: TurnId; threadId: ThreadId; position: number; queuedAt: Timestamp }[];
 }
 
+export type MemoryState = 'ok' | 'critical';
+
+export interface MemoryStatus {
+  state: MemoryState;
+  agentBytes: number;
+  availableBytes: number | null;
+  limits: { budgetMb: number; threadMemoryCapMb: number; memoryReserveMb: number };
+}
+
+interface MemoryEventBase {
+  threadId: string | null;
+  pid?: number;
+  exe?: string;
+  bytes?: number;
+  state: MemoryState;
+  at: number;
+}
+
+export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
+
+export type MemoryEvent = MemoryEventBase & (
+  | { kind: 'killed'; reason: MemoryKillReason; limitBytes: number }
+  | { kind: 'thread-cap' | 'budget' | 'pressure' }
+);
+
 /** Per-core consent. Installation identifiers never cross RPC. */
 export interface TelemetryState {
   mode: 'off' | 'basic' | 'enhanced';
@@ -1205,12 +1232,16 @@ export interface Settings {
    * CPU rate control, and other systems ignore it.
    */
   agentCpuCapPercent: number;
+  /** Share of physical RAM for all agents, an integer from 10 to 90. Default 60. */
+  agentMemoryBudgetPercent: number;
   /**
    * Memory ceiling for one thread's whole process tree, in megabytes. 0 means
-   * no cap. Windows only: it is the thread job's memory limit, and a tree that
-   * reaches it fails its next allocation.
+   * half the effective budget, rounded down to 256 MB. An explicit cap cannot
+   * exceed the budget. The kernel safety net sits 10% above this quota on Windows.
    */
   threadMemoryCapMb: number;
+  /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
+  memoryReserveMb: number;
   /**
    * Windows of agent processes never keep the foreground: one that takes it is
    * sent to the bottom without activation and the window the user was on gets
@@ -2449,6 +2480,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
+  /** Owner-only machine memory reading and the limits actually applied by the governor. */
+  'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };
 
   'scheduler.get': { params: Record<string, never>; result: SchedulerState };
@@ -2503,6 +2536,8 @@ export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
 export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+  'resources.memory': MemoryEvent;
+  'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
