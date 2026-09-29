@@ -543,7 +543,7 @@ describe('pi driver', () => {
     await settle(() => fakeLog().includes('late-answer'));
     expect(fakeLog()).toContain('late-answer late-1 cancelled=true');
     // The file acknowledgement and the websocket log travel independently.
-    await waitFor(() => logs.some((line) => line.includes('confirm') && line.includes('late-1')));
+    await settle(() => logs.some((line) => line.includes('confirm') && line.includes('late-1')));
     expect(logs.some((line) => line.includes('confirm') && line.includes('late-1'))).toBe(true);
   });
 

@@ -227,3 +227,44 @@ test('machines list each execution host and disconnect only the selected host', 
   await page.click(id('confirm-ok'));
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 1`);
 }, 30_000);
+
+test('composer and buttons keep solid fallback fills without color-mix', async () => {
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('composer-picker')}')`);
+  const opacity = await page.evaluate<number[][]>(`(async () => {
+    const removed = [];
+    const root = document.documentElement;
+    const theme = root.dataset.theme, glass = root.dataset.glass;
+    try {
+      // Simulate unavailable feature branches while the browser still computes the default CSS rules.
+      for (const sheet of document.styleSheets) {
+        for (let index = sheet.cssRules.length - 1; index >= 0; index--) {
+          const rule = sheet.cssRules[index];
+          if (rule instanceof CSSSupportsRule && rule.conditionText.includes('color-mix')) {
+            removed.push({ sheet, index, text: rule.cssText });
+            sheet.deleteRule(index);
+          }
+        }
+      }
+      const context = new OffscreenCanvas(1, 1).getContext('2d');
+      const result = [];
+      for (const mode of ['dark', 'light', 'grain', 'glass']) {
+        root.dataset.theme = mode === 'glass' ? 'dark' : mode;
+        if (mode === 'glass') root.dataset.glass = 'acrylic'; else delete root.dataset.glass;
+        await Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})));
+        result.push(['composer', 'composer-picker'].map(name => {
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = getComputedStyle(document.querySelector('[data-testid="' + name + '"]')).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return context.getImageData(0, 0, 1, 1).data[3];
+        }));
+      }
+      return result;
+    } finally {
+      for (const item of removed.reverse()) item.sheet.insertRule(item.text, item.index);
+      if (theme === undefined) delete root.dataset.theme; else root.dataset.theme = theme;
+      if (glass === undefined) delete root.dataset.glass; else root.dataset.glass = glass;
+    }
+  })()`);
+  expect(opacity).toEqual([[255, 255], [255, 255], [255, 255], [255, 255]]);
+}, 30_000);

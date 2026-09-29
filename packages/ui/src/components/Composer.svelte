@@ -795,8 +795,7 @@
     padding: 0 20px;
   }
 
-  /* The one raised object in the column: it floats over the timeline instead of
-     repeating the sidebar's slab. e1 rides on e2 for the inset top highlight. */
+  /* A translucent surface with a top reflection; focus only changes its hairline. */
   .composer {
     position: relative;
     display: flex;
@@ -804,19 +803,18 @@
     width: 100%;
     max-width: var(--content);
     margin: 0 auto;
-    background: var(--color-surface-2);
+    background: var(--composer-glaze) var(--color-composer-surface);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
     border: 1px solid var(--color-border);
+    border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-e2), var(--shadow-e1);
+    box-shadow: var(--shadow-composer);
     transition: border-color var(--dur-2) var(--ease-out-quint);
   }
 
   .composer:focus-within {
-    border-color: var(--color-edge);
-    box-shadow:
-      var(--shadow-e2),
-      var(--shadow-e1),
-      0 0 0 2px color-mix(in srgb, var(--color-foreground) 22%, transparent);
+    border-color: var(--color-composer-focus);
   }
 
   /* Editing a sent message: one quiet line above the box, the way out on its right. */
@@ -869,8 +867,7 @@
   }
 
   @media (max-width: 720px) {
-    .composer { box-shadow: none; border-radius: var(--radius-xl); }
-    .composer:focus-within { box-shadow: none; border-color: var(--color-edge); }
+    .composer { box-shadow: var(--shadow-e1); border-radius: var(--radius-xl); }
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }
