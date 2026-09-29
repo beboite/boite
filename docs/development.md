@@ -15,6 +15,11 @@ Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
 
+The E2E core fixture clears an inherited `BOITE_UI_DIR` so runs started from
+the installed desktop serve this checkout's UI. A test can still set its own
+UI directory explicitly. `ui.test.ts` checks the served entry script against
+this checkout's production build before exercising it.
+
 ## Desktop updater tests
 
 Desktop updater checks use a local HTTP fixture and a signed inert payload in

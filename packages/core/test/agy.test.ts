@@ -21,6 +21,15 @@ import type { TestCore } from './harness.ts';
 /** The fake agy: a real stream-json process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/agy-agent.ts', import.meta.url));
 
+test('agy preserves named agent tools when the provider reports them', async () => {
+  const client = await startCore();
+  const { threadId } = await agyThread(client);
+  expect((await runTurn(client, threadId, '[agents]')).status).toBe('done');
+  expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
+    expect.objectContaining({ name: 'Reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+  ]);
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 
@@ -158,6 +167,7 @@ describe('agy driver', () => {
     const thread = await client.call('threads.get', { threadId });
     expect(thread.sessionId).toMatch(/^conv-[0-9a-f-]{36}$/);
     expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: 'hello there agy' }]);
+    expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([]);
     expect(thread.context).toMatchObject({ tokens: 20, window: null, breakdown: { input: 10, cache: 6, output: 4 } });
     expect(argvLines()).toEqual(['argv conversation=new model=configured mode=default skip=false stream=true']);
     // The browser the CLI would open for a sign-in is the no-op, never a window.

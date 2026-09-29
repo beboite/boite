@@ -138,17 +138,22 @@ describe('claude driver: questions and background work', () => {
     scripted((fake) => {
       fake.emit(init(sessionId));
       fake.emit(assistant(sessionId, [{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { prompt: 'dig', run_in_background: true } }]));
+      fake.emit(sdk({ type: 'system', subtype: 'task_started', session_id: sessionId, task_id: 'agent-1', tool_use_id: 'toolu_agent', description: 'dig', task_type: 'local_agent', is_backgrounded: true }));
       fake.emit(sdk({ type: 'system', subtype: 'background_tasks_changed', session_id: sessionId, tasks: [{ task_id: 'agent-1', task_type: 'local_agent', description: 'dig' }] }));
       fake.emit(toolResult(sessionId, 'toolu_agent', 'Async agent launched'));
       fake.emit(success(sessionId));
     });
     expect(await runTurn(client, threadId, 'dig in the background')).toBe('done');
+    const team = await client.call('delegation.get', { threadId });
+    expect(team.nativeAgents).toHaveLength(1);
+    expect(team.nativeAgents[0]).toMatchObject({ toolId: 'toolu_agent', task: 'dig', status: 'running' });
 
     queries[0]!.emit(sdk({ type: 'assistant', session_id: sessionId, parent_tool_use_id: 'toolu_agent', message: { id: 'msg_bg', role: 'assistant', content: [{ type: 'text', text: 'still digging' }] } }));
     await Bun.sleep(300);
     expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
     expect((await client.call('threads.get', { threadId })).status).toBe('idle');
     await client.call('turns.stop', { threadId });
+    expect((await client.call('delegation.get', { threadId })).nativeAgents[0]?.status).toBe('unknown');
   });
 
   test('output the CLI writes while the last turn is still closing opens its turn right after', async () => {

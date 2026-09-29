@@ -152,6 +152,14 @@ const SECOND = { input_tokens: 3, output_tokens: 5, thinking_tokens: 1, cache_re
 function turn(text: string): void {
   const input = stepIndex++;
   step({ step_index: input, state: 'DONE', step_type: 'user_input' });
+  if (text.includes('[agents]')) {
+    const index = stepIndex++;
+    const info = { name: 'Task', parameters: { prompt: 'Review parser boundaries', description: 'Reviewer' } };
+    step({ step_index: index, state: 'ACTIVE', step_type: 'tool', tool_info: info });
+    step({ step_index: index, state: 'DONE', step_type: 'tool', tool_info: { ...info, output: 'Parser checked' } });
+    result('SUCCESS', 'Checked');
+    return;
+  }
   if (text.includes('[crash]')) {
     process.stderr.write('boom\n');
     process.exit(3);

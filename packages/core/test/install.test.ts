@@ -624,11 +624,14 @@ describe('managed installs', () => {
     expect(installs.leaseCount('echo')).toBe(0);
 
     await client.call('threads.subscribe', { threadId });
-    // Stay alive long enough to observe the lease on both hosts. `ver` was a
-    // Windows-only command and could exit before the first polling sample.
-    const command = `${process.platform === 'win32' ? '' : 'exec '}bun -e "setTimeout(()=>{},250)"`;
+    // Keep the process alive until the test stops it, so a delayed polling
+    // sample cannot miss the lease's whole lifetime.
+    const command = process.platform === 'win32' ? 'ping -n 30 127.0.0.1' : 'exec sleep 30';
+    const started = client.next('process.started', record => record.threadId === threadId);
     await client.call('turns.start', { threadId, prompt: `go [spawn:${command}]` });
+    await started;
     await waitFor(() => installs.leaseCount('echo') > 0, 10_000);
+    await client.call('turns.stop', { threadId });
     await waitFor(() => installs.leaseCount('echo') === 0, 10_000);
   });
 

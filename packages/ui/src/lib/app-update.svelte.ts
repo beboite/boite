@@ -8,6 +8,7 @@ export type UpdatePhase =
   | 'available'
   | 'downloading'
   | 'ready'
+  | 'waiting'
   | 'installing'
   | 'current'
   | 'error';
@@ -31,6 +32,7 @@ export interface AppUpdateBackend {
   check(channel: UpdateChannel): Promise<UpdateSnapshot>;
   download(): Promise<UpdateSnapshot>;
   install(): Promise<void>;
+  cancelInstall?(): Promise<boolean>;
   listen(handler: (snapshot: UpdateSnapshot) => void): Promise<() => void>;
 }
 
@@ -45,6 +47,7 @@ export interface AppUpdateTestFixture {
   snapshot: UpdateSnapshot;
   checks?: Partial<Record<UpdateChannel, UpdateSnapshot>>;
   download?: UpdateSnapshot;
+  waitForIdle?: boolean;
 }
 
 const FIRST_CHECK_MS = 8_000;
@@ -91,6 +94,7 @@ function tauriBackend(): AppUpdateBackend {
     check: (channel) => invoke<UpdateSnapshot>('app_update_check', { channel }),
     download: () => invoke<UpdateSnapshot>('app_update_download'),
     install: () => invoke<void>('app_update_install'),
+    cancelInstall: () => invoke<boolean>('app_update_cancel_install'),
     listen: async (handler) => {
       const { listen } = await import('@tauri-apps/api/event');
       return listen<UpdateSnapshot>('app-update', (event) => handler(event.payload));
@@ -100,6 +104,7 @@ function tauriBackend(): AppUpdateBackend {
 
 function testBackend(fixture: AppUpdateTestFixture): AppUpdateBackend {
   let current = fixture.snapshot;
+  let finishInstall: (() => void) | undefined;
   const handlers = new Set<(snapshot: UpdateSnapshot) => void>();
   const publish = (snapshot: UpdateSnapshot): UpdateSnapshot => {
     current = snapshot;
@@ -116,7 +121,19 @@ function testBackend(fixture: AppUpdateTestFixture): AppUpdateBackend {
       error: null
     }),
     install: async () => {
-      publish({ ...current, phase: 'installing', error: null });
+      if (fixture.waitForIdle || fixture.snapshot.phase === 'waiting') {
+        publish({ ...current, phase: 'waiting', error: null });
+        await new Promise<void>((resolve) => { finishInstall = resolve; });
+      } else {
+        publish({ ...current, phase: 'installing', error: null });
+      }
+    },
+    cancelInstall: async () => {
+      if (current.phase !== 'waiting') return false;
+      publish({ ...current, phase: 'ready', error: null });
+      finishInstall?.();
+      finishInstall = undefined;
+      return true;
     },
     listen: async (handler) => {
       handlers.add(handler);
@@ -130,13 +147,13 @@ function queryFixture(): AppUpdateTestFixture | undefined {
   if (!import.meta.env.DEV || query.get('fake') !== '1') return undefined;
   if (window.__BOITE_APP_UPDATE_TEST__) return window.__BOITE_APP_UPDATE_TEST__;
   const phase = query.get('appUpdate');
-  if (!['checking', 'ready', 'downloading', 'error'].includes(phase ?? '')) return undefined;
+  if (!['checking', 'ready', 'waiting', 'downloading', 'error'].includes(phase ?? '')) return undefined;
   const channel: UpdateChannel = query.get('appUpdateChannel') === 'nightly' ? 'nightly' : 'stable';
   const currentChannel: UpdateChannel = query.get('appUpdateCurrentChannel') === 'nightly' ? 'nightly' : 'stable';
   // A running check has found nothing yet: the shell clears the offer when it starts one.
   const offered = phase !== 'checking';
   const snapshot: UpdateSnapshot = {
-    phase: phase as 'checking' | 'ready' | 'downloading' | 'error',
+    phase: phase as UpdatePhase,
     currentVersion: currentChannel === 'nightly' ? '2.0.0-nightly.7' : '2.0.0-beta.1',
     currentChannel,
     channel,
@@ -165,6 +182,7 @@ export function showAppUpdateUi(): boolean {
 export class AppUpdater {
   snapshot = $state.raw<UpdateSnapshot>({ ...idleSnapshot });
   lastCheckedAt = $state<number | null>(null);
+  cancelling = $state(false);
   #dismissedUpdate = $state<string | null>(readDismissedUpdate());
 
   #backend: AppUpdateBackend;
@@ -209,7 +227,7 @@ export class AppUpdater {
   }
 
   get busy(): boolean {
-    return ['checking', 'downloading', 'installing'].includes(this.snapshot.phase);
+    return ['checking', 'downloading', 'waiting', 'installing'].includes(this.snapshot.phase);
   }
 
   /** Start once from App after mount. The returned function owns every timer and listener. */
@@ -249,10 +267,11 @@ export class AppUpdater {
     this.#pendingCheck = null;
     this.#downloadRequested = false;
     this.#active = null;
+    this.cancelling = false;
   }
 
   check(channel: UpdateChannel = this.snapshot.channel): void {
-    if (!this.snapshot.supported || this.snapshot.phase === 'installing') return;
+    if (!this.snapshot.supported || ['waiting', 'installing'].includes(this.snapshot.phase)) return;
     this.#pendingCheck = channel;
     this.#pump(this.#generation);
   }
@@ -266,7 +285,9 @@ export class AppUpdater {
   install(): void {
     if (!this.ready || this.#active) return;
     const generation = this.#generation;
-    this.snapshot = { ...this.snapshot, phase: 'installing', error: null };
+    this.#pendingCheck = null;
+    this.#downloadRequested = false;
+    this.snapshot = { ...this.snapshot, phase: 'waiting', error: null };
     this.#active = this.#backend.install()
       .catch((error) => this.#fail(error, generation))
       .finally(() => {
@@ -274,6 +295,21 @@ export class AppUpdater {
         this.#active = null;
         this.#pump(generation);
       });
+  }
+
+  /** Cancellation must reach native code while the install invocation is pending. */
+  async cancelInstall(): Promise<boolean> {
+    if (this.snapshot.phase !== 'waiting' || this.cancelling || !this.#backend.cancelInstall) return false;
+    const generation = this.#generation;
+    this.cancelling = true;
+    try {
+      return await this.#backend.cancelInstall();
+    } catch (error) {
+      if (generation === this.#generation) this.snapshot = { ...this.snapshot, error: message(error) };
+      return false;
+    } finally {
+      if (generation === this.#generation) this.cancelling = false;
+    }
   }
 
   /** Test and integration hook for waiting until the serialized native work drains. */
@@ -288,14 +324,15 @@ export class AppUpdater {
 
   #scheduledCheck(): void {
     if (!this.snapshot.supported) return;
-    if (['checking', 'downloading', 'ready', 'installing'].includes(this.snapshot.phase)) return;
+    if (['checking', 'downloading', 'ready', 'waiting', 'installing'].includes(this.snapshot.phase)) return;
     this.check(this.snapshot.channel);
   }
 
   #apply(snapshot: UpdateSnapshot): void {
     this.snapshot = snapshot;
     if (snapshot.phase === 'available') this.#downloadRequested = true;
-    if (snapshot.phase === 'ready' || snapshot.phase === 'installing') this.#downloadRequested = false;
+    if (['ready', 'waiting', 'installing'].includes(snapshot.phase)) this.#downloadRequested = false;
+    if (['waiting', 'installing'].includes(snapshot.phase)) this.#pendingCheck = null;
     queueMicrotask(() => this.#pump(this.#generation));
   }
 
@@ -309,7 +346,7 @@ export class AppUpdater {
 
     if (this.#pendingCheck !== null) {
       const channel = this.#pendingCheck;
-      if (this.snapshot.phase === 'installing' || this.snapshot.phase === 'checking') return;
+      if (['waiting', 'installing', 'checking'].includes(this.snapshot.phase)) return;
       if (this.snapshot.phase === 'downloading') {
         if (channel === this.snapshot.channel) this.#pendingCheck = null;
         return;

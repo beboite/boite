@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
@@ -8,7 +8,7 @@ import { claudeProjectFolder } from '../../packages/core/src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from '../../packages/core/test/fixtures/claude-session.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
-import { developmentMarkers, ensureProductionUi } from './lib/prod-ui.ts';
+import { developmentMarkers, ensureProductionUi, UI_DIST } from './lib/prod-ui.ts';
 
 const TIMEOUT = 60_000;
 /** The reconnect has its own budget: a backoff that needs a minute is a bug. */
@@ -73,6 +73,9 @@ afterAll(async () => {
 test('the core serves the production bundle: no fake client, no Svelte dev runtime', async () => {
   const index = await (await fetch(`${core.url}/`)).text();
   const scripts = [...index.matchAll(/src="(?:\.\/|\/)(assets\/[^"]+\.js)"/g)].map((match) => match[1] ?? '');
+  const builtIndex = readFileSync(join(UI_DIST, 'index.html'), 'utf8');
+  const builtScripts = [...builtIndex.matchAll(/src="(?:\.\/|\/)(assets\/[^"]+\.js)"/g)].map(match => match[1] ?? '');
+  expect(scripts).toEqual(builtScripts);
   expect(scripts.length).toBeGreaterThan(0);
   const files = await Promise.all(scripts.map(async (name) => ({ name, text: await (await fetch(`${core.url}/${name}`)).text() })));
   expect(developmentMarkers(files)).toEqual([]);

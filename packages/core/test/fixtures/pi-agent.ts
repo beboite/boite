@@ -18,7 +18,7 @@
  */
 import { appendFileSync } from 'node:fs';
 
-const DIRECTIVE = /\[(tool|thought|usage|slow|crash|ask|select|input|editor|retry|giveup|deaf|noclear|notify|timeout|compacted)\]/g;
+const DIRECTIVE = /\[(agents|tool|thought|usage|slow|crash|ask|select|input|editor|retry|giveup|deaf|noclear|notify|timeout|compacted)\]/g;
 const CHUNKS = 3;
 
 /**
@@ -29,6 +29,7 @@ const CHUNKS = 3;
  * 50 ms, `compacted` an automatic compaction inside the run.
  */
 type Directive =
+  | 'agents'
   | 'tool'
   | 'thought'
   | 'usage'
@@ -308,6 +309,11 @@ async function runPrompt(text: string): Promise<void> {
 
   for (const directive of directives) {
     switch (directive) {
+      case 'agents': {
+        send({ type: 'tool_execution_start', toolCallId: 'native-pi', toolName: 'subagent', args: { agent: 'reviewer', task: 'Review parser boundaries' } });
+        send({ type: 'tool_execution_end', toolCallId: 'native-pi', toolName: 'subagent', result: { content: [{ type: 'text', text: 'Parser checked' }], details: {} }, isError: false });
+        break;
+      }
       case 'tool': {
         toolCounter += 1;
         const toolCallId = `call-${toolCounter}`;

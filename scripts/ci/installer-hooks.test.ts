@@ -23,13 +23,14 @@ const scratch = ready ? mkdtempSync(join(tmpdir(), 'boite-hooks-')) : '';
 const started: number[] = [];
 
 function kill(pid: number) {
+  try { process.kill(pid, 0); } catch { return; }
   Bun.spawnSync(['taskkill', '/T', '/F', '/PID', String(pid)], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
 }
 
 afterAll(() => {
   for (const pid of started) kill(pid);
   if (scratch) rmSync(scratch, { recursive: true, force: true });
-});
+}, 30_000);
 
 function makensis(script: string): string {
   const built = Bun.spawnSync([MAKENSIS, '/V4', script], { stdout: 'pipe', stderr: 'pipe', windowsHide: true });
@@ -184,18 +185,28 @@ describe.skipIf(!ready)('installer hooks', () => {
     expect(await exited(removed.core)).toBe(0);
     expect(restartedPids(removed.restarted)).toEqual([]);
     expect(existsSync(join(removed.install, 'boite-core.exe'))).toBe(false);
+
+    const busy = await running('busy');
+    writeFileSync(join(data, 'boite2', 'busy'), '');
+    const before = Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')));
+    expect(await run([join(base, 'setup.exe'), '/S', `/D=${busy.install}`])).not.toBe(0);
+    expect(busy.core.exitCode).toBeNull();
+    expect(Bun.hash(readFileSync(join(busy.install, 'boite-core.exe')))).toBe(before);
+    expect(restartedPids(busy.restarted)).toEqual([]);
   }, 120_000);
 });
 
 /** Writes core.json into its --data-dir and leaves on an authorised POST /shutdown. */
 const FAKE_CORE = `
+import { existsSync } from 'node:fs';
 const dir = process.argv[process.argv.indexOf('--data-dir') + 1];
 const token = 'hook-token';
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   const url = new URL(request.url);
-  if (url.pathname === '/shutdown' && request.method === 'POST' && request.headers.get('authorization') === 'Bearer ' + token) {
+  if (url.pathname === '/shutdown-if-idle' && existsSync(dir + '/busy')) return new Response('busy', { status: 409 });
+  if ((url.pathname === '/shutdown' || url.pathname === '/shutdown-if-idle' && url.searchParams.get('pid') === String(process.pid)) && request.method === 'POST' && request.headers.get('authorization') === 'Bearer ' + token) {
     setTimeout(() => process.exit(0), 20);
-    return Response.json({ ok: true }, { status: 202 });
+    return Response.json({ ok: true, pid: process.pid }, { status: 202 });
   }
   return new Response('no', { status: 401 });
 } });

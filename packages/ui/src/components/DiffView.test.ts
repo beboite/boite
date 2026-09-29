@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import DiffView from './DiffView.svelte';
 import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
@@ -32,6 +32,18 @@ test('a short diff has no show-all button', () => {
   flushSync();
   expect(document.querySelectorAll('[data-testid=diff-row]')).toHaveLength(2);
   expect(document.querySelector('[data-testid=diff-show-all]')).toBeNull();
+});
+
+test('code diffs recognize their language and retain exact text after highlighting', async () => {
+  const oldText = 'const name = "old";\n';
+  const newText = 'const name = "<img onerror=alert(1)>";\n';
+  running = mount(DiffView, { target: document.body, props: { path: 'src/name.ts', oldText, newText } });
+  flushSync();
+  await vi.waitFor(() => expect(document.querySelector('.row.add .hljs-keyword')).not.toBeNull());
+  expect(document.querySelector('[data-testid=diff-view]')?.getAttribute('data-language')).toBe('typescript');
+  expect(document.querySelector('.row.add .text')?.textContent).toBe(newText.trimEnd());
+  expect(document.querySelector('.row.remove .text')?.textContent).toBe(oldText.trimEnd());
+  expect(document.querySelector('img')).toBeNull();
 });
 
 test('the whitespace switch hides reindented lines for every diff and remembers it', () => {

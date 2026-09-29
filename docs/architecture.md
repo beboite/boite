@@ -26,7 +26,10 @@ the channel is what keeps their data directories, and so their cores, apart.
 [docs/releasing.md](releasing.md). Boite and Boite Nightly are update tracks
 within the regular install and share its data. The desktop updater belongs to
 the shell, uses main-webview-only IPC and never acts on the selected remote core.
-It verifies signed installers before offering a restart. [Updates](updates.md).
+It verifies signed installers before offering installation. Updates wait for
+the local core to atomically admit an idle stop; active work remains usable
+and the wait can be cancelled. The installer never kills a busy core.
+[Updates](updates.md).
 
 ## One WebSocket, one contract
 

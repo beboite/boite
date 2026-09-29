@@ -70,13 +70,16 @@
     const id = threadId;
     const path = selected;
     void status;
+    diff = null;
     if (id === null || path === null) {
       diff = null;
       return;
     }
+    let cancelled = false;
     void store.gitDiff(id, path).then((answer) => {
-      if (threadId === id && selected === path) diff = answer;
+      if (!cancelled) diff = answer;
     });
+    return () => { cancelled = true; };
   });
 </script>
 
