@@ -665,9 +665,12 @@ test('a pending send cannot duplicate a turn or erase text typed for the next pr
   press('Enter');
   press('Enter');
   await type('still composing the next prompt');
+  paste(pngFile('next.png'));
+  await waitFor(() => input().value.includes('[Image 1]'));
   release();
   await waitFor(() => store.busy);
-  expect(input().value).toBe('still composing the next prompt');
+  expect(input().value).toBe('still composing the next prompt [Image 1] ');
+  expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
   expect(rpc.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
 });
 
@@ -831,6 +834,44 @@ test('sending waits for a file read so the attachment cannot land in the next pr
   await waitFor(() => store.openThread!.messages.length > before && !store.busy);
   const sent = store.openThread!.messages.filter(m => m.role === 'user').at(-1)!;
   expect(sent.parts).toContainEqual({ type: 'file', mimeType: 'text/plain', name: 'notes.txt', data: btoa('notes') });
+});
+
+test.each([true, false])('an image pasted during a pending send preserves only unsent content when accepted=%s', async accepted => {
+  await mountOnFake();
+  await store.open('t-trace');
+  paste(pngFile('sent.png'));
+  await waitFor(() => chips().length === 1);
+  await type('send this once [Image 1]');
+  input().setSelectionRange(input().value.length, input().value.length);
+  input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'turns.start') {
+      await gate;
+      if (!accepted) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'send refused' });
+    }
+    return call(method, params);
+  });
+  press('Enter');
+  await waitFor(() => store.composerStates['t-trace']!.sending);
+  paste(pngFile('next.png'));
+  await waitFor(() => chips().length === 2 && input().value.includes('[Image 2]'));
+  release();
+  await waitFor(() => !store.composerStates['t-trace']!.sending);
+  if (accepted) {
+    expect(input().value).toBe('[Image 1] ');
+    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['next.png']);
+    const sent = store.openThread!.messages.filter(message => message.role === 'user').at(-1)!;
+    expect(sent.parts[0]).toEqual({ type: 'text', text: 'send this once [Image 1]' });
+    expect(sent.parts.filter(part => part.type === 'image').map(part => part.alt)).toEqual(['sent.png']);
+  } else {
+    expect(store.error).toBe('send refused');
+    expect(input().value).toBe('send this once [Image 1] [Image 2] ');
+    expect(store.composerStates['t-trace']!.attachments.map(item => item.name)).toEqual(['sent.png', 'next.png']);
+  }
 });
 
 test('a file read uses the original provider even if the user switches threads', async () => {

@@ -6,7 +6,7 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
-  import { insertImageReference, removeImageReferences } from '../lib/composer-images';
+  import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -396,9 +396,11 @@
       return;
     }
     state.sending = true;
+    const finishImageSend = trackImageSend(state, prompt, images);
     const accepted = await (nextDraft
       ? store.submitAndDraft(prompt, choice, images, references)
       : store.submit(prompt, choice, images, references));
+    finishImageSend(accepted);
     if (accepted) {
       // Text typed and images attached while the RPC was pending belong to the
       // next prompt: only what went out is cleared.

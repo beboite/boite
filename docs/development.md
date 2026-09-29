@@ -825,6 +825,9 @@ close button dismisses the preview, as does a click outside the image and compos
 Removing an image updates the remaining
 references to match attachment order. `bun test tests/e2e/composer-images.test.ts`
 checks this flow and captures desktop and phone layouts.
+An image accepted during a pending send stays in the next draft without keeping
+already-sent content. A refused send keeps the original prompt and attachments;
+text edited by the user while sending remains intact.
 
 The timeline shows downloadable file cards with names and sizes. Images retain
 thumbnails. `bun test tests/e2e/attachments.test.ts` checks owner desktop and
