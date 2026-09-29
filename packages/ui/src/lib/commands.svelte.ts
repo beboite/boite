@@ -1,8 +1,6 @@
 /*
- * Boite's own commands: one list and one dispatcher, shared by the command
- * palette and the composer's slash menu. The palette draws them by their
- * label, the slash menu by their id as `/name` with the label under it, so a
- * command is written once and both entries stay in step.
+ * Boite's application commands and dispatcher for the palette and shortcuts.
+ * The composer's slash menu keeps its prompt controls in composer-menus.ts.
  */
 
 import type { KeybindingCommand } from '@boite/contracts';

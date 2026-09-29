@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 import { BrowserPage, freePort } from './lib/cdp';
 import { startDevUi } from './lib/ui.ts';
 
@@ -35,6 +36,62 @@ beforeAll(async () => {
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('the browser follows layout changes without measuring its slot on every idle frame', async () => {
+  await onStore(`store.panel.closeAll(); store.panel.open('browser');`);
+  await page.waitFor(`document.querySelector('${id('browser-slot')}') && document.querySelector('iframe[data-browser-id]')?.style.display === 'block'`);
+  await capture('browser-desktop.png');
+  const reads = await page.evaluate(`(async () => {
+    const slot = document.querySelector('${id('browser-slot')}');
+    const original = slot.getBoundingClientRect;
+    let reads = 0;
+    slot.getBoundingClientRect = function() { reads++; return original.call(this); };
+    for (let i = 0; i < 60; i++) await new Promise(requestAnimationFrame);
+    slot.getBoundingClientRect = original;
+    return reads;
+  })()`);
+  writeFileSync(join(import.meta.dir, '.artifacts', 'browser-idle.json'), JSON.stringify({ date: new Date().toISOString(), frames: 60, reads }, null, 2));
+  console.log(`Browser slot: ${reads} layout reads across 60 idle frames`);
+  expect(reads).toBeLessThan(3);
+  await onStore(`store.toggleSidebar();`);
+  await page.waitFor(`(() => {
+    const slot = document.querySelector('${id('browser-slot')}').getBoundingClientRect();
+    const frame = document.querySelector('iframe[data-browser-id]').getBoundingClientRect();
+    return Math.abs(slot.x - frame.x) < 2 && Math.abs(slot.width - frame.width) < 2;
+  })()`);
+  let release!: () => void;
+  let waiting = new Promise<void>(resolve => { release = resolve; });
+  const site = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch() {
+    await waiting;
+    return new Response('<title>Local preview</title><main>Local preview loaded</main>', { headers: { 'content-type': 'text/html' } });
+  } });
+  try {
+    await page.type(id('browser-url'), `127.0.0.1:${site.port}`);
+    await page.evaluate(`document.querySelector('${id('browser-url')}').form.requestSubmit()`);
+    await page.waitFor(`document.querySelector('${id('browser-loading')}')`);
+    await capture('browser-loading-desktop.png');
+    release();
+    await page.waitFor(`!document.querySelector('${id('browser-loading')}')`);
+    expect(await page.evaluate(`document.querySelector('${id('browser-url')}').value`)).toBe(`http://127.0.0.1:${site.port}/`);
+    waiting = new Promise<void>(resolve => { release = resolve; });
+    await page.click(id('browser-reload'));
+    await page.waitFor(`document.querySelector('${id('browser-loading')}')`);
+    release();
+    await page.waitFor(`!document.querySelector('${id('browser-loading')}')`);
+    await page.type(id('browser-url'), 'javascript:alert(1)');
+    await page.evaluate(`document.querySelector('${id('browser-url')}').form.requestSubmit()`);
+    await page.waitFor(`document.querySelector('${id('browser-error')}')`);
+    expect(await page.evaluate(`document.querySelector('iframe[data-browser-id]').src`)).toBe(`http://127.0.0.1:${site.port}/`);
+    await page.type(id('browser-url'), `127.0.0.1:${site.port}`);
+    await page.evaluate(`document.querySelector('${id('browser-url')}').form.requestSubmit()`);
+    await page.waitFor(`!document.querySelector('${id('browser-error')}') && !document.querySelector('${id('browser-loading')}')`);
+  } finally { release(); site.stop(true); }
+  await phone(true);
+  await capture('browser-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await phone(false);
+  await onStore(`store.panel.closeAll();`);
+});
+
 test('the panel opens on its launcher, and the workbench surfaces fit both widths', async () => {
   // The layout is remembered per thread: this run starts on an empty strip.
   await onStore(`store.panel.closeAll();`);
@@ -60,6 +117,16 @@ test('the panel opens on its launcher, and the workbench surfaces fit both width
   await page.waitFor(`document.querySelector('${id('diff-view')}')`);
   expect(await page.evaluate(`document.querySelector('${id('changes-row')}[data-path="src/components/RightPanel.svelte"]').getAttribute('aria-selected')`)).toBe('true');
   await capture('changes-desktop.png');
+  // Both signs must color the complete line, including highlighted tokens.
+  await page.click(`${id('changes-row')}[data-path="src/lib/store.svelte.ts"]`);
+  await page.waitFor(`document.querySelector('${id('diff-view')}')?.dataset.path === 'src/lib/store.svelte.ts' && document.querySelector('.row.add .hljs-keyword')`);
+  expect(await page.evaluate(`(() => {
+    const add = document.querySelector('.row.add .text');
+    const remove = document.querySelector('.row.remove .text');
+    return !!remove && getComputedStyle(add).color !== getComputedStyle(remove).color
+      && getComputedStyle(add.querySelector('span')).color === getComputedStyle(add).color;
+  })()`)).toBe(true);
+  await capture('changes-colors-desktop.png');
   expect(await page.evaluate(`(() => { const panel = document.querySelector('${id('changes-panel')}'); return panel.scrollWidth <= panel.clientWidth; })()`)).toBe(true);
   // The status badges are a colour mixed into the ground, and light is the
   // theme one of them could go light on light in. The screenshot of this
@@ -155,6 +222,11 @@ test('the tree opens on a directory, the editor lands on a line, and a picture z
     return Math.abs(band.top - number.top) < 1.5 && band.top > view.top && band.bottom < view.bottom && document.querySelector('${id('file-text')}').scrollTop > 0;
   })()`)).toBe(true);
   await capture('file-text-desktop.png');
+  await page.waitFor(`document.querySelector('${id('file-syntax')} .hljs-keyword')`);
+  await phone(true);
+  await capture('file-text-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await phone(false);
 
   await onStore(`store.panel.openFile('assets/preview.png');`);
   await page.waitFor(`document.querySelector('${id('file-natural')}')?.textContent.includes('640 x 400')`);

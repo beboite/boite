@@ -53,13 +53,33 @@ export interface BrowserBridge {
   on(handler: (event: BrowserEvent) => void): () => void;
 }
 
+/** Classify the canonical hostname returned by URL, including its IPv4 interpretation. */
+function isLocalHost(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '[::1]') return true;
+  const ipv4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(hostname);
+  const first = Number(ipv4?.[1]), second = Number(ipv4?.[2]);
+  return ipv4 !== null && (first === 127 || first === 10 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168) || (first === 169 && second === 254));
+}
+
 /** A url the field can be handed to: a scheme it already has, or a host to prefix. */
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (text === '') return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text;
-  if (/^[\w.-]+(:\d+)?(\/|$)/.test(text)) return `https://${text}`;
-  return `https://${encodeURIComponent(text)}`;
+  const local = /^(?:localhost|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
+  const host = /^(?:[\w-]+\.)+[\w-]+(?::\d+)?(?:[/?#]|$)/.test(text);
+  const scheme = /^[a-z][a-z0-9+.-]*:\S*$/i.test(text);
+  const unqualified = local || host;
+  const candidate = unqualified ? `https://${text}` : scheme ? text : null;
+  if (candidate === null) return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    // Parse from the original input again so a port that HTTPS considered default is retained.
+    return unqualified && isLocalHost(url.hostname) ? new URL(`http://${text}`).href : url.href;
+  } catch {
+    return null;
+  }
 }
 
 const PLACEHOLDER = `<!doctype html><meta charset="utf-8"><title>New tab</title>
@@ -91,6 +111,7 @@ export class FakeBridge implements BrowserBridge {
     else frame.src = url;
     document.body.append(frame);
     this.#views.set(id, frame);
+    if (url !== '') this.#emit({ type: 'loading', id, loading: true });
     frame.addEventListener('load', () => {
       this.#loaded.add(id);
       this.annotate(id, null);
@@ -120,6 +141,8 @@ export class FakeBridge implements BrowserBridge {
   reload(id: string): void {
     const frame = this.#views.get(id);
     if (!frame) return;
+    this.#loaded.delete(id);
+    this.#emit({ type: 'loading', id, loading: true });
     try {
       frame.contentWindow?.location.reload();
     } catch {

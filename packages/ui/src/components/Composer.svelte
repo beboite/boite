@@ -219,8 +219,8 @@
   /** The agent's own, in the order it reported them. Never on a draft: there is no agent yet. */
   let agentItems = $derived.by((): PaletteItem[] => agentSlashItems(store.openThread?.commands ?? []));
 
-  /** Boite's own under them: the palette's list plus the three the composer runs itself. */
-  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(store, inShell, CHIP_COMMANDS));
+  /** Boite's prompt controls follow the agent's own commands. */
+  let boiteItems = $derived.by((): PaletteItem[] => boiteSlashItems(CHIP_COMMANDS));
 
   /** Agent commands first, so a tie goes to the agent's own. */
   let slashItems = $derived(rankItems(slashQuery ?? '', [...agentItems, ...boiteItems]));
