@@ -88,8 +88,9 @@ describe('orphan sweep', () => {
   });
 
   test('a process younger than the grace is left alone', () => {
-    expect(procs.sweepOrphans(THREAD, Date.now())).toEqual([]);
-    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+    const startedAt = procs.liveOf(THREAD).find((record) => record.pid === 103)!.startedAt;
+    expect(procs.sweepOrphans(THREAD, startedAt)).toEqual([]);
+    expect(procs.sweepOrphans(THREAD, startedAt + GRACE_MS).sort()).toEqual([103, 104]);
   });
 
   test('a parent pid taken by a younger process does not count as the parent', async () => {

@@ -19,6 +19,17 @@ import type { TestCore } from './harness.ts';
 /** The fake ACP agent: a real ACP process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp-agent.ts', import.meta.url));
 
+test('ACP named task calls reach the native team without exposing the side conversation', async () => {
+  const client = await startCore();
+  const threadId = await acpThread(client);
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: '[agents]' });
+  expect((await finished).status).toBe('done');
+  expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
+    expect.objectContaining({ id: 'native-acp', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+  ]);
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 let restoreDriver: (() => void) | null = null;

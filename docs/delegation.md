@@ -1,6 +1,6 @@
 # Agent delegation
 
-Open Agents in a conversation to configure a team. Add named profiles with
+Open Team in a conversation to configure delegation. Add named profiles with
 the same harness, account, model and reasoning picker used by the composer.
 Enable delegation when the profiles and limits are ready. The main agent can
 then delegate through the `boite` CLI, and the owner can launch a brief from
@@ -10,7 +10,35 @@ Every child is a normal Boite conversation with its own provider session,
 permissions, process trace and usage. It inherits the parent's project,
 checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
-these Boite-managed teams.
+these Boite-managed teams, and appear in their own section of Team. The global
+Persistent agents page holds agents with their own roles, memory and missions;
+it is not the list of children of a conversation.
+
+Team shows whether Boite workflows are disabled, enabled or paused before the
+settings are expanded. Its agent, turn and token budget counts only Boite
+delegation. Communication between conversations is a separate setting; its
+Off label does not disable provider-native subagents.
+
+## Native provider subagents
+
+Team shows native agents' reported names, tasks, models, status and bounded
+results. Running agents also appear below the chat. Ask the main agent to steer
+or stop them: their IDs are provider IDs, not Boite conversations. No token
+total is invented for children whose usage the provider does not separate.
+
+Codex collaboration calls and subagent activity become persisted tool parts.
+Child-thread text and tools stay out of the parent's answer. Claude Agent/Task
+calls and background agent lists, Muse subagent items, and named agent tools
+from ACP and pi feed the same view. Other drivers, including agy's ordinary
+tool stream, retain agent tools if the provider reports their name and brief.
+A provider that sends only text or shell output exposes no native agent list.
+
+A successful spawn call is not a completed child. Missing individual states,
+background launch acknowledgements, and unfinished children after a parent
+turn ends show Status unknown. A live background-agent list can still confirm
+that a child is running. Team retains reported results across message paging
+and restart. Native events discarded by an older Boite version cannot be
+reconstructed from its journal.
 
 ## Follow and steer
 

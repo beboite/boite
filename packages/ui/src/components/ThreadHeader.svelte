@@ -78,7 +78,7 @@
   let hasTeam = $derived.by(() => {
     if (agentsOn || thread?.parentThreadId) return true;
     const team = store.delegation;
-    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0);
+    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0 || (team.nativeAgents?.length ?? 0) > 0);
   });
 
   /**

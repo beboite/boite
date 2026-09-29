@@ -13,6 +13,25 @@ const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.m
 /** The fixture's environment switches a test may set; every one is cleared after it. */
 const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS'];
 
+test('native collaboration is journalled and appears in Team with delegation disabled', async () => {
+  const client = await startCore();
+  const threadId = await codexThread(client);
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: '[agents]' });
+  expect((await finished).status).toBe('done');
+  const thread = await client.call('threads.get', { threadId });
+  expect(JSON.stringify(thread.messages)).not.toContain('Private child work');
+  expect(JSON.stringify(thread.messages)).not.toContain('Private command output');
+  expect(thread.messages.flatMap(m => m.parts).filter(p => p.type === 'tool' && p.name === 'Agent')).toHaveLength(4);
+  const team = await client.call('delegation.get', { threadId });
+  expect(team.config.enabled).toBe(false);
+  expect(team.agents).toHaveLength(0);
+  expect(team.nativeAgents).toEqual([
+    expect.objectContaining({ id: 'native-reviewer', task: 'Review parser boundaries', model: 'fake-smart', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ id: 'native-other', name: '/root/research', status: 'done' }),
+  ]);
+});
+
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
   const threadId = await codexThread(client);

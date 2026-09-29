@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, nativeAgentsOfTool, type RpcEvents } from '@boite/contracts';
 import type { AgentLetter, DelegatedAgent, DelegationConfig, DelegationProfile, DelegationView, RpcParams, ThreadSummary, Turn, Usage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused } from './errors.ts';
@@ -7,6 +7,7 @@ import { checkEffort, checkModel } from './threads/selection.ts';
 import { newId } from './ids.ts';
 import { assertDriverRunnable } from './drivers/index.ts';
 import { withLoad } from './threads/records.ts';
+import { nativeAgents } from './native-agents.ts';
 
 interface AgentRow { thread_id: string; root_id: string; request_id: string; fingerprint: string; profile_id: string; task: string }
 interface LetterRow { data: string; fingerprint: string }
@@ -29,6 +30,7 @@ export class Delegation {
   private readonly delivering = new Set<string>();
   private readonly jobs = new Set<Promise<void>>();
   private readonly stopped = new Set<string>();
+  private readonly nativeActive = new Set<string>();
   private readonly off: () => void;
   private readonly timer: ReturnType<typeof setInterval>;
 
@@ -41,7 +43,17 @@ export class Delegation {
     }
     this.off = core.bus.onAny((name, payload) => {
       if (this.closed) return;
+      if (name === 'thread.background') this.core.bus.emit('delegation.changed', { threadId: (payload as RpcEvents['thread.background']).threadId });
+      if (name === 'message.part') {
+        const event = payload as RpcEvents['message.part'];
+        if (nativeAgentsOfTool(event.part).length) {
+          this.nativeActive.add(event.threadId);
+          this.core.bus.emit('delegation.changed', { threadId: event.threadId });
+        }
+      }
       if (name === 'turn.finished') {
+        const threadId = (payload as Turn).threadId;
+        if (this.nativeActive.delete(threadId)) this.core.bus.emit('delegation.changed', { threadId });
         this.finished(payload as Turn);
         // A thread that yields takes the letters that waited for it now, not at the next tick.
         this.kick((payload as Turn).threadId);
@@ -129,7 +141,7 @@ export class Delegation {
     const letters = (threadId === root.id
       ? this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id)
       : this.core.journal.db.query('SELECT data FROM delegation_messages WHERE root_id = ? AND (sender_id = ? OR recipient_id = ?) ORDER BY created_at DESC, rowid DESC LIMIT 100').all(root.id, threadId, threadId)) as LetterRow[];
-    return { rootThreadId: root.id, config: this.config(root.id), agents, messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
+    return { rootThreadId: root.id, config: this.config(root.id), agents, nativeAgents: nativeAgents(this.core.journal, threadId, this.core.threads.agentState.background.get(threadId)), messages: letters.reverse().map(row => JSON.parse(row.data) as AgentLetter), turnsUsed: this.used(root.id), usage };
   }
   private saveConfig(rootId: string, config: DelegationConfig): void { this.core.journal.setSetting(`delegation:${rootId}`, config); }
   configure(threadId: string, value: DelegationConfig): DelegationView {
@@ -423,15 +435,15 @@ export class Delegation {
     this.changed(root.id);
     return stopped;
   }
-  instructions(threadId: string): string {
+  instructions(threadId: string, request?: string): string {
     const thread = this.core.threads.require(threadId), root = this.root(threadId), config = this.config(root.id);
     if (thread.parentThreadId && this.core.workflows.owns(threadId)) return this.core.workflows.instructions(threadId);
-    if (!config.enabled) return '';
+    if (!config.enabled) return request !== undefined && !/workflow/i.test(request) ? '' : '\nBoite delegation and workflows are disabled for this conversation. If the user requests a dynamic workflow, explain that the owner must add model profiles and enable delegation in Team > Team settings. Do not substitute native subagents or a checklist for a requested Boite workflow, and do not claim a workflow ran without a run ID. Continue independent work while this is blocked.\n';
     if (thread.parentThreadId) return `\nYou are a Boite delegated agent. Parent: ${root.id}. Use boite delegate send ${root.id} <text> for useful questions or blockers; final answers return automatically. Shared checkout: agree file ownership. No nested delegation, courtesy replies or polling.\n`;
     return `\nBoite delegation: ${config.paused ? 'paused' : 'enabled'}. Profiles: ${config.profiles.map(p => `${p.id}=${p.name} (${p.providerId}/${p.model})`).join('; ')}.
 boite delegate spawn <profile-id> <brief>: bounded task; boite delegate list: results; boite delegate send <thread-id> <text>: steer/reuse; boite delegate stop [thread-id]: stop. Children share checkout and permissions: assign distinct files, send only needed context. Results return automatically; work independently or end your turn, never poll or hold a scheduler slot waiting.
 Limits: ${config.maxAgents} agents, ${config.maxConcurrent} concurrent, ${config.maxTurns - this.used(root.id)} turns left, ${config.maxMinutes} min per child turn or parent wake. Only the owner changes profiles/limits or resumes.
-Dynamic workflows: boite workflow help for JSON format; boite workflow check <plan.json> then boite workflow run <plan.json>. Use after for dependencies, forEach for output-driven fan-out, when for conditions; boite workflow extend <run-id> <steps> adds steps to an active/paused run. The core schedules these profiles and returns results automatically.\n`;
+Dynamic workflows: boite workflow help for JSON format; boite workflow check <plan.json> then boite workflow run <plan.json>. Use after for dependencies, forEach for output-driven fan-out, when for conditions; boite workflow extend <run-id> <steps> adds steps to an active/paused run. The core schedules these profiles and returns results automatically. If the user requests a workflow, use this runner and report its run ID. Do not substitute native subagents or a checklist. When paused, explain that the owner must resume the team before new work can run.\n`;
   }
   private changed(rootId: string): void {
     this.core.bus.emit('delegation.changed', { threadId: rootId });

@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their budget and letters. */
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -32,6 +32,7 @@ function delegationView(ctx: FakeContext, rootId: ThreadId, callerId = rootId): 
     rootThreadId: rootId,
     config: delegationConfig(ctx, rootId),
     agents: rows.map(row => delegatedAgent(ctx, row)),
+    nativeAgents: collectNativeAgents(ctx.thread(callerId).messages.flatMap(message => message.role === 'assistant' ? message.parts.map(part => ({ part, at: message.createdAt, turnStatus: ctx.thread(callerId).turns.find(turn => turn.id === message.turnId)?.status })) : []), ctx.thread(callerId).background),
     messages: structuredClone((ctx.delegationLetters.get(rootId) ?? []).filter(letter => callerId === rootId || letter.from.threadId === callerId || letter.to.threadId === callerId)),
     turnsUsed: ctx.delegationTurns.get(rootId) ?? 0,
     usage
@@ -63,6 +64,13 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
 export function seedDelegationDemo(ctx: FakeContext): void {
   const demoAt = Date.now() - 85_000;
   const root = ctx.thread('t-trace');
+  const nativeId = 't-native';
+  const nativeTurn: Turn = { id: 'turn-native-demo', threadId: nativeId, status: 'done', queuedAt: demoAt, startedAt: demoAt, finishedAt: demoAt + 10_000, usage: null, error: null };
+  const nativeMessage: Message = { id: 'm-native-demo', threadId: nativeId, turnId: nativeTurn.id, role: 'assistant', state: 'complete', createdAt: demoAt, parts: [
+    { type: 'tool', toolId: 'native-spawn', name: 'Agent', input: { action: 'spawnAgent' }, output: null, status: 'done', nativeAgents: [{ id: 'native-reviewer', name: 'Review parser boundaries', task: 'Check parsing and invalid inputs.', model: 'fake-smart', status: 'done', result: 'Parser checked' }] },
+    { type: 'tool', toolId: 'native-research', name: 'Agent', input: { action: 'spawnAgent' }, output: null, status: 'done', nativeAgents: [{ id: 'native-research', name: 'Research compatibility', status: 'unknown' }] },
+  ] };
+  ctx.threads.set(nativeId, { ...root, id: nativeId, title: 'Review parser boundaries', providerId: 'codex', accountId: 'a-codex', model: 'gpt-6-astra', status: 'idle', turns: [nativeTurn], messages: [nativeMessage], activity: undefined, background: [], memoryEvents: [], pullRequest: null, load: null, context: null, messagesBefore: null, parentThreadId: null });
   const reviewer: DelegationProfile = { id: 'reviewer', name: 'Reviewer', providerId: 'claude', accountId: 'a-claude-main', model: 'claude-sonnet-5', effort: 'high' };
   const implementer: DelegationProfile = { id: 'implementer', name: 'Implementer', providerId: 'codex', accountId: 'a-codex', model: 'gpt-5.6-sol', effort: 'medium' };
   ctx.delegationConfigs.set(root.id, { enabled: true, paused: false, maxAgents: 4, maxConcurrent: 2, maxTurns: 12, maxMinutes: 30, profiles: [reviewer, implementer] });

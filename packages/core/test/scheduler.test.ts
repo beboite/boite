@@ -213,7 +213,8 @@ describe('scheduler', () => {
     await client.call('settings.set', { maxConcurrentTurns: 6, perAccountConcurrency: 1 });
     const threads = await threeThreads(client);
     for (const threadId of threads) {
-      await client.call('turns.start', { threadId, prompt: '[sleep:300]' });
+      // Hold the slot until teardown instead of racing three RPCs against 300 ms.
+      await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
     }
     const state = await client.call('scheduler.get', {});
     expect(state.running).toHaveLength(1);

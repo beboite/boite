@@ -12,6 +12,17 @@ import type { TestCore } from './harness.ts';
 /** The fake pi in RPC mode: a real JSON-lines process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/pi-agent.ts', import.meta.url));
 
+test('pi subagent extension calls reach the native team through the real protocol', async () => {
+  const client = await startCore();
+  const threadId = await piThread(client);
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: '[agents]' });
+  expect((await finished).status).toBe('done');
+  expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
+    expect.objectContaining({ id: 'native-pi', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+  ]);
+});
+
 test('coordination steers a running pi turn over its RPC connection', async () => {
   const client = await startCore();
   const threadId = await piThread(client);
@@ -520,6 +531,8 @@ describe('pi driver', () => {
     // process and the agent waits on an id nobody holds.
     await settle(() => fakeLog().includes('late-answer'));
     expect(fakeLog()).toContain('late-answer late-1 cancelled=true');
+    // The file acknowledgement and the websocket log travel independently.
+    await waitFor(() => logs.some((line) => line.includes('confirm') && line.includes('late-1')));
     expect(logs.some((line) => line.includes('confirm') && line.includes('late-1'))).toBe(true);
   });
 

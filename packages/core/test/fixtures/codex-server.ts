@@ -24,12 +24,12 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
   | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
-  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block';
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
 
 let threadCounter = 0;
 let turnCounter = 0;
@@ -258,6 +258,16 @@ async function runTurn(turnId: string, text: string): Promise<void> {
 
   for (const directive of directives) {
     switch (directive) {
+      case 'agents': {
+        const item = { type: 'collabAgentToolCall', id: 'spawn-reviewer', tool: 'spawnAgent', status: 'completed', senderThreadId: threadId, receiverThreadIds: ['native-reviewer'], prompt: 'Review parser boundaries', model: 'fake-smart', agentsStates: { 'native-reviewer': { status: 'running', message: null } } };
+        notify('item/completed', { threadId, turnId, item });
+        notify('item/agentMessage/delta', { threadId: 'native-reviewer', turnId: 'child-turn', itemId: 'child-text', delta: 'Private child work' });
+        notify('item/completed', { threadId: 'native-reviewer', turnId: 'child-turn', item: commandItem('child-command', 'completed', 'Private command output') });
+        notify('item/completed', { threadId, turnId, item: { ...item, id: 'wait-reviewer', tool: 'wait', prompt: null, model: null, agentsStates: { 'native-reviewer': { status: 'completed', message: 'Parser checked' } } } });
+        notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'started' } });
+        notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other-done', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'completed' } });
+        break;
+      }
       case 'command': {
         itemCounter += 1;
         const itemId = `item-${itemCounter}`;
