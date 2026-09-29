@@ -29,6 +29,8 @@ and pi protocols, warm reuse, simultaneous stops and recovery after agent
 exits. It also opens the production UI in a hidden browser with 1,000 sidebar
 threads and a 256-turn burst, checks a foreground reply and writes desktop and
 phone captures. `BOITE_STRESS_ARTIFACTS` selects the capture directory.
+An HTTP 503 fixture verifies that failed health checks mark both the scenario
+and the overall benchmark report failed even when every agent stops normally.
 The smaller six-process regression runs in the normal core suite and starts a
 fresh core so earlier tests cannot hide a race in first-use imports.
 
@@ -84,7 +86,7 @@ passed on 2026-09-29 after grouping synchronous startup and completion writes:
 | All 1,000 turns running together, cold then already used | Starts accepted in 14.4/19.8 s and cancelled in 14.1/17.2 s with the 30-second RPC deadline unchanged |
 | Independent HTTP health during mass start/stop | Zero timeouts; p95 172/217 ms and maximum 3.10/3.56 s for cold/warm phases |
 | Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 4.1 s restart |
-| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 1.00 s, typing in 5.6 ms and maximum timer lag 44 ms; desktop and phone checked |
+| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.68 s, typing in 4.5 ms and maximum timer lag 44 ms; desktop and phone checked |
 
 Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
 starts. The instrumented failure accepted 505 starts before expiry, with no

@@ -152,7 +152,7 @@ try {
       wallMs = performance.now() - stopStart;
     } catch (error) { failure = error; }
     const health = await probe.stop();
-    record({ scenario: 'mass cancellation', phase, status: failure ? 'failed' : 'passed', accepted, acceptMs, stopped, wallMs,
+    record({ scenario: 'mass cancellation', phase, status: failure || health.errors.length ? 'failed' : 'passed', accepted, acceptMs, stopped, wallMs,
       elapsedMs: performance.now() - start, healthSamples: health.samples.length,
       healthP95Ms: health.samples.toSorted((a,b) => a-b)[Math.floor(health.samples.length * .95)],
       healthMaxMs: Math.max(...health.samples), healthErrors: health.errors,
