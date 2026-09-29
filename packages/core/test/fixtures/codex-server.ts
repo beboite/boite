@@ -21,7 +21,7 @@
  * notifications carry no `jsonrpc` member, which is what the driver has to
  * survive.
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
@@ -436,9 +436,9 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         });
         break;
       case 'crash':
-        process.stderr.write('boom\n');
+        process.stderr.write(`${process.env['CODEX_FAKE_CRASH_ERROR'] ?? 'boom'}\n`);
         setTimeout(() => {
-          process.exit(3);
+          process.exit(process.env['CODEX_FAKE_CRASH_ERROR'] ? 1 : 3);
         }, 20);
         // The exit is what the client sees; this promise never settles.
         await new Promise<void>(() => undefined);
@@ -458,6 +458,14 @@ function handle(method: string, raw: unknown): unknown {
   switch (method) {
     case 'initialize':
       log('initialize');
+      if (process.env['CODEX_FAKE_INIT_FAILURES']) {
+        const attempts = readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').split('\n').filter(line => line === 'initialize').length;
+        if (attempts <= Number(process.env['CODEX_FAKE_INIT_FAILURES'])) {
+          const error = process.env['CODEX_FAKE_INIT_ERROR'] ?? 'failed to initialize sqlite state runtime under test-home: failed to initialize state runtime at test-home';
+          process.stderr.write(`Error: ${error}\nCaused by: database is locked\n`);
+          process.exit(1);
+        }
+      }
       return {
         userAgent: 'codex-fake/0 (test) boite',
         codexHome: process.cwd(),

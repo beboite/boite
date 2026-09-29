@@ -11,7 +11,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -152,6 +152,77 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('SQLite initialization retries before sending a prompt and keeps the recovered session warm', async () => {
+    const client = await startCore({ warmProcessMinutes: 1 });
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'First' });
+    expect((await finished).status).toBe('done');
+    const second = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Second' });
+    expect((await second).status).toBe('done');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(2);
+    expect(fakeLog().match(/^thread\/start /gm)).toHaveLength(1);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(2);
+    expect(harness!.core.journal.listMessages(threadId).filter(message => message.role === 'assistant').some(message => message.parts.some(part => part.type === 'error'))).toBe(false);
+  });
+
+  test('SQLite initialization gives up after three attempts without sending a prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    const turn = await finished;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('database is locked');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(3);
+    expect(fakeLog()).not.toContain('thread/start');
+    expect(fakeLog()).not.toContain('turn/start');
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('other initialization failures are not retried', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    process.env['CODEX_FAKE_INIT_ERROR'] = 'invalid configuration';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    expect((await finished).status).toBe('error');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+    expect(fakeLog()).not.toContain('turn/start');
+  });
+
+  test('stopping during SQLite initialization backoff prevents another process and prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    const retrying = client.next('core.log', entry => entry.message.includes('retrying SQLite initialization'), 20000);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    await retrying;
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+    expect(fakeLog()).not.toContain('turn/start');
+  });
+
+  test('a SQLite error after sending the prompt is not retried', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_CRASH_ERROR'] = 'failed to initialize sqlite state runtime under test-home';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[crash]' });
+    const turn = await finished;
+    expect(turn.status).toBe('error');
+    expect(turn.error).toContain('failed to initialize sqlite state runtime');
+    expect(fakeLog().split('\n').filter(line => line === 'initialize')).toHaveLength(1);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
   test('an asynchronous question draws a card without waiting, and its answer steers the running turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -726,6 +797,14 @@ describe('codex driver', () => {
     await runTurn(client, threadId, 'second');
     await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
     expect(countLines('initialize')).toBe(2);
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+
+    // One startup fails before a third prompt resumes the same native thread.
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '3';
+    await runTurn(client, threadId, 'third');
+    expect(countLines('initialize')).toBe(4);
+    expect(countLines('turn/start model=fake-codex effort=')).toBe(3);
+    expect(fakeLog().split('\n').filter(line => line.startsWith(`thread/resume ${sessionId} `))).toHaveLength(2);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
   });
 

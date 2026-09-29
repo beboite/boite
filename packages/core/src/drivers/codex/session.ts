@@ -49,6 +49,8 @@ const HOOK_OUTCOMES: Record<string, HookOutcome> = {
 
 /** How long a stopped turn waits for the agent to end it before its process is stopped. */
 const STOP_GRACE_MS = 3_000;
+const SQLITE_INIT_ATTEMPTS = 3;
+const SQLITE_INIT_BACKOFF_MS = 500;
 
 // ---------------------------------------------------------------------------
 // The session: one agent process per thread
@@ -89,6 +91,9 @@ export class CodexSession {
   private readonly asyncItems = new Set<string>();
   private closing = false;
   private ended = false;
+  private initializing = false;
+  private sqliteInitFailed = false;
+  private startupStderr = '';
 
   constructor(
     readonly key: string,
@@ -184,6 +189,7 @@ export class CodexSession {
       await this.start(turn.ctx);
     } catch (error) {
       if (error instanceof ThreadLostError) turn.loseSession(error.message);
+      else if (turn.isStopped) turn.endStopped();
       else turn.fail(messageOf(error));
       this.endTurn(turn, true);
       return;
@@ -272,28 +278,7 @@ export class CodexSession {
       throw unavailable(`no ${ctx.provider.id} executable on this machine`, { providerId: ctx.provider.id });
     }
 
-    const child = ctx.spawnChild(executable, profile?.launch?.args ?? [], {
-      cwd: ctx.thread.cwd,
-      env: { ...process.env, ...ctx.accountEnv },
-    });
-    this.child = child;
-    const rpc = new CodexRpc(child, {
-      notification: (method, params) => {
-        this.onNotification(method, params);
-      },
-      request: (method, params) => this.onRequest(ctx, method, params),
-      log: (level, message) => {
-        ctx.log(level, message);
-      },
-    });
-    this.rpc = rpc;
-    this.watch(child, ctx, rpc);
-    this.opener = ctx;
-
-    await rpc.request('initialize', {
-      clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
-      capabilities: null,
-    });
+    const rpc = await this.initialize(ctx, executable, profile?.launch?.args ?? []);
     rpc.notify('initialized', {});
     void this.reportSkippedHooks(rpc, ctx);
 
@@ -328,9 +313,71 @@ export class CodexSession {
     this.served = servedOf(created);
   }
 
+  /** Only restart a failed SQLite initialization, before any thread or prompt is sent. */
+  private async initialize(ctx: TurnContext, executable: string, args: string[]): Promise<CodexRpc> {
+    this.initializing = true;
+    try {
+      for (let attempt = 1; ; attempt += 1) {
+        if (this.closing || this.active?.isStopped) throw new Error('the codex startup was stopped');
+        this.exitCode = null;
+        this.lastStderr = '';
+        this.sqliteInitFailed = false;
+        this.startupStderr = '';
+        const rpc = this.spawn(ctx, executable, args);
+        try {
+          await rpc.request('initialize', {
+            clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version },
+            capabilities: null,
+          });
+          return rpc;
+        } catch (error) {
+          if (this.closing || this.active?.isStopped || this.exitCode !== 1 || !this.sqliteInitFailed || attempt >= SQLITE_INIT_ATTEMPTS) throw error;
+          const delay = SQLITE_INIT_BACKOFF_MS * attempt;
+          ctx.log('warn', `codex: retrying SQLite initialization in ${delay} ms (attempt ${attempt + 1}/${SQLITE_INIT_ATTEMPTS})`);
+          let timer: Timer | undefined;
+          try {
+            await Promise.race([
+              new Promise<void>(resolve => { timer = setTimeout(resolve, delay); }),
+              this.active?.stopped,
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      }
+    } finally {
+      this.initializing = false;
+    }
+  }
+
+  private spawn(ctx: TurnContext, executable: string, args: string[]): CodexRpc {
+    const child = ctx.spawnChild(executable, args, {
+      cwd: ctx.thread.cwd,
+      env: { ...process.env, ...ctx.accountEnv },
+    });
+    this.child = child;
+    const rpc = new CodexRpc(child, {
+      notification: (method, params) => {
+        this.onNotification(method, params);
+      },
+      request: (method, params) => this.onRequest(ctx, method, params),
+      log: (level, message) => {
+        ctx.log(level, message);
+      },
+    });
+    this.rpc = rpc;
+    this.watch(child, ctx, rpc);
+    this.opener = ctx;
+    return rpc;
+  }
+
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
+      if (this.initializing) {
+        this.startupStderr = (this.startupStderr + chunk).slice(-4_096);
+        if (/failed to initialize sqlite state runtime/i.test(this.startupStderr)) this.sqliteInitFailed = true;
+      }
       for (const line of chunk.split(/\r?\n/)) {
         const text = line.trim();
         if (text.length === 0) continue;
@@ -349,14 +396,14 @@ export class CodexSession {
         const sentence = this.exitSentence(this.exitCode);
         rpc.fail(sentence);
         this.current?.fail(sentence);
-        if (!this.closing) this.drop();
+        if (!this.closing && !this.initializing) this.drop();
       });
       child.once('error', (error) => {
         resolve(null);
         const sentence = `the codex agent did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
         this.current?.fail(sentence);
-        if (!this.closing) this.drop();
+        if (!this.closing && !this.initializing) this.drop();
       });
     });
   }
