@@ -153,8 +153,15 @@ The same day's CI merge included newer main commit `ddfb04a`. Fresh
 3,389,414 bytes for the CI merge `f8077af`, an increase of 7,135 bytes
 (0.211%). Main alone left only 421 bytes below the previous UI total limit.
 The total UI budget moved to 3,728,400 bytes, about 10% above the measured
-merge. Both builds emitted a 516,684-byte entry chunk, so its 520,000-byte
-budget stayed unchanged.
+merge. Both builds emitted a 516,684-byte entry chunk.
+
+A later CI merge included main `c26a03a`. Fresh paired builds of that main
+and the CI merge `bbca511` both emitted a 524,773-byte entry chunk, above the
+previous 520,000-byte limit. The entry budget moved to 577,300 bytes, about
+10% above that measurement. Their UI totals were 3,393,503 and 3,400,642
+bytes respectively, an increase of 7,139 bytes (0.210%) for the browser
+plugin and no increase in entry bytes. The total UI and core limits stayed
+unchanged.
 
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
