@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, type RpcMethodName } from '@boite/contracts';
 import { RpcFailure, type Client } from './client';
 import { FakeClient } from './fake-client';
 import { PORTABLE_SETTINGS, SyncFailure, syncSettings, type SyncEnd } from './settings-sync';
@@ -83,11 +83,11 @@ test('a source brain switched off switches the target one off, its folder kept',
   const from = await machine();
   const to = await machine();
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: false });
-  await to.call('brain.configure', { path: 'E:/Target/brain', enabled: true });
+  await to.call('brain.configure', { path: 'E:/Target/brain', enabled: true, autoPull: { onStartup: true, intervalMinutes: 15 } });
 
   expect((await syncSettings(await end(from), await end(to))).brain).toBe('copied');
 
-  expect((await to.call('brain.status', {})).config).toMatchObject({ path: 'E:/Target/brain', enabled: false });
+  expect((await to.call('brain.status', {})).config).toMatchObject({ path: 'E:/Target/brain', enabled: false, autoPull: { onStartup: false, intervalMinutes: 0 } });
 });
 
 test('a core without keybindings leaves them alone and the copy goes on to the brain', async () => {
@@ -123,6 +123,34 @@ test('a keybinding the target refuses puts back what the copy changed and names 
   expect((failed as SyncFailure).stage).toBe('keybindings');
   expect((failed as SyncFailure).message).toContain('does not parse');
   expect((await to.call('keybindings.get', {})).bindings).toEqual(before);
+});
+
+test.each([
+  { remaining: true, point: 'the first of two keybinding writes' },
+  { remaining: false, point: 'the last keybinding write' },
+])('cancellation after $point restores changed entries without copying remaining source bindings', async ({ remaining }) => {
+  const from = await machine(), to = await machine();
+  const abort = new AbortController();
+  try {
+    await to.call('keybindings.set', { command: 'panel', chord: 'mod+alt+p' });
+    if (remaining) await from.call('keybindings.set', { command: 'terminal', chord: 'mod+shift+t' });
+    const before = (await to.call('keybindings.get', {})).bindings;
+    const source = await end(from), target = await end(to);
+    const call = to.call.bind(to);
+    const spy = vi.spyOn(to, 'call').mockImplementation(async (method, params) => {
+      const result = await call<RpcMethodName>(method, params);
+      if (method === 'keybindings.set' && (params as { command?: string; chord?: string | null }).command === 'panel'
+        && (params as { chord?: string | null }).chord === null) abort.abort();
+      return result;
+    });
+    try {
+      const failed = await syncSettings(source, target, abort.signal).catch((error: unknown) => error);
+      expect(failed).toBeInstanceOf(SyncFailure);
+      expect((failed as SyncFailure).stage).toBe('keybindings');
+      expect((await call('keybindings.get', {})).bindings).toEqual(before);
+      expect(spy.mock.calls.some(([method, params]) => method === 'keybindings.set' && (params as { command?: string }).command === 'terminal')).toBe(false);
+    } finally { spy.mockRestore(); }
+  } finally { from.close(); to.close(); }
 });
 
 

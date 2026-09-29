@@ -1,4 +1,5 @@
-import type { TerminalState, ThreadId } from '@boite/contracts';
+import { RpcErrorCode, type TerminalState, type ThreadId } from '@boite/contracts';
+import { RpcFailure } from '../client';
 import type { StoreContext } from './context';
 
 /** The thread drawers and sign-in shells: which are shown, and the calls that drive them. */
@@ -61,7 +62,10 @@ export class Terminals {
 
   /** Keystrokes. A shell that ended in between has nothing to take them, which is not an error to show. */
   writeTerminal(id: string, data: string): void {
-    void this.ctx.client?.call('terminals.write', { id, data }).catch(() => undefined);
+    void this.ctx.client?.call('terminals.write', { id, data }).catch(error => {
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.NotFound) return;
+      this.ctx.fail(error);
+    });
   }
 
   resizeTerminal(id: string, cols: number, rows: number): void {

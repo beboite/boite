@@ -208,11 +208,9 @@ test('machines list each execution host and disconnect only the selected host', 
   await page.waitFor(`document.querySelectorAll('[data-testid="machine-card"]').length === 2`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid="machine-rename"]')).map(input => input.value)`)).toContain('Builder');
   await capture('machines.png');
-  // A copy goes from the machine the settings speak for to another one, after a confirmation.
+  // Checking the option immediately copies settings and keeps following changes.
   expect(await page.evaluate(`document.querySelectorAll('${id('machine-sync')}').length`)).toBe(1);
   await page.click(id('machine-sync'));
-  await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
-  await page.click(id('confirm-ok'));
   await page.waitFor(`document.querySelector('${id('machine-sync-report')}')`);
   expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}').closest('${id('machine-card')}').querySelector('${id('machine-rename')}').value`)).toBe('Builder');
   await capture('machines-sync.png');

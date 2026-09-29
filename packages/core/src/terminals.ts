@@ -113,6 +113,7 @@ interface Session {
   id: string;
   cwd: string;
   terminal: Bun.Terminal;
+  sequence: number;
   /** Exactly what `terminal.output` events carried so far, so a snapshot and the events after it never overlap. */
   history: OutputHistory;
   exited: Promise<number | null>;
@@ -149,7 +150,7 @@ export class TerminalStore {
     if (running !== undefined) {
       if (running.closing) throw refused(`the shell ${id} is still closing, open it again in a moment`, { id });
       running.terminal.resize(options.cols, options.rows);
-      return { id, cwd: running.cwd, output: running.history.text() };
+      return { id, cwd: running.cwd, output: running.history.text(), sequence: running.sequence };
     }
     if (!existsSync(options.cwd)) {
       throw refused(`the working directory ${options.cwd} does not exist any more`, { id, cwd: options.cwd });
@@ -157,6 +158,7 @@ export class TerminalStore {
     const shell = pickShell();
     const decoder = new TextDecoder();
     let session: Session | null = null;
+    let sequence = 0;
     let typed = options.type === undefined;
     let quiet: ReturnType<typeof setTimeout> | null = null;
     const typeNow = () => {
@@ -174,7 +176,9 @@ export class TerminalStore {
     let gate: ReturnType<typeof setTimeout> | null = null;
     const emit = (data: string) => {
       history.push(data);
-      this.core.bus.emit('terminal.output', { id, data });
+      sequence++;
+      if (session) session.sequence = sequence;
+      this.core.bus.emit('terminal.output', { id, data, sequence });
     };
     const release = () => {
       if (held.length === 0) {
@@ -228,9 +232,9 @@ export class TerminalStore {
       options.onExit?.();
       return code;
     });
-    session = { id, cwd: options.cwd, terminal: spawned.terminal, history, exited, closing: false };
+    session = { id, cwd: options.cwd, terminal: spawned.terminal, sequence, history, exited, closing: false };
     this.sessions.set(id, session);
-    return { id, cwd: options.cwd, output: '' };
+    return { id, cwd: options.cwd, output: history.text(), sequence };
   }
 
   has(id: string): boolean {

@@ -1978,6 +1978,8 @@ export interface TerminalState {
   cwd: string;
   /** What it printed lately, so a client that attaches late draws the same screen. */
   output: string;
+  /** Last output event included in this snapshot; absent on older cores. */
+  sequence?: number;
 }
 
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
@@ -2661,7 +2663,9 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
   /** What a shell printed, as it printed it. */
-  'terminal.output': { id: string; data: string };
+  'terminal.output': { id: string; data: string; sequence?: number };
+  /** Portable brain switches changed. The folder stays on its host. */
+  'brain.configured': BrainConfig;
   /** The shell ended: typed `exit`, closed, or killed with its thread. */
   'terminal.exited': { id: string; exitCode: number | null };
 }

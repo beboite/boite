@@ -14,6 +14,20 @@ import { browserBridge } from './browser-bridge';
 import { rightPanel } from './right-panel.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
+test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async () => {
+  const { store, client } = await ready();
+  const call = vi.spyOn(client, 'call').mockRejectedValue(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'Remote terminal transport unavailable' }));
+  try {
+    store.writeTerminal('terminal:t-remote', 'pwd\r');
+    await vi.waitFor(() => expect(store.error).toContain('Remote terminal transport unavailable'));
+    store.error = null;
+    call.mockRejectedValue(new RpcFailure({ code: RpcErrorCode.NotFound, message: 'no terminal is running' }));
+    store.writeTerminal('terminal:t-remote', 'x');
+    await Promise.resolve();
+    expect(store.error).toBeNull();
+  } finally { call.mockRestore(); client.close(); store.detach(); }
+});
+
 test('changing a Store endpoint drops the previous machine composer and element callbacks', async () => {
   const { store, client } = await ready();
   const saved = Object.entries(localStorage);

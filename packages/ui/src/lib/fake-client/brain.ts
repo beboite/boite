@@ -26,6 +26,7 @@ export function brainMethods(ctx: FakeContext) {
           { kind: 'plugin', name: 'team-tools', path: 'plugins/team-tools/.claude-plugin/plugin.json', description: 'Shared tools for the team.', error: null },
         ] : [];
         ctx.brain.git = config.path ? { branch: 'main', upstream: 'origin/main', ahead: 0, behind: 0, dirty: false } : null;
+        ctx.emit('brain.configured', structuredClone(ctx.brain.config));
         return structuredClone(ctx.brain);
     },
     'brain.sync': async () => {

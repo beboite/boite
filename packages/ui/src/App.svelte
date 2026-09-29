@@ -264,6 +264,7 @@
     // once, so a reload during the boot does not jump there again.
     const requestedThread = new URLSearchParams(location.search).get('thread');
     if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    const stopSettingsSync = workspace.settingsSync.start();
     void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
@@ -275,6 +276,7 @@
       return () => {
         stopTheme();
         stopToasts();
+        stopSettingsSync();
         workspace.close();
       };
     }
@@ -308,6 +310,7 @@
       stopTheme();
       stopToasts();
       quitHold?.dispose();
+      stopSettingsSync();
       workspace.close();
     };
   });

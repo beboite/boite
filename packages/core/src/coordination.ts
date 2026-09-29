@@ -512,27 +512,32 @@ export class Coordination {
       if (this.nonces.has(key)) throw new Error('replayed request');
       this.nonces.set(key, now);
     } catch { return new Response('invalid signed message', { status: 403 }); }
-    let result: unknown;
-    let error: string | undefined;
-    let status = 200;
-    try {
-      // A revoke while the body streamed wins before any data is read or changed.
-      if (!this.peers().some(p => p.coreId === peer.coreId)) throw refused('peer permission revoked');
-      if (envelope.operation === 'directory') result = this.localDirectory();
-      else if (envelope.operation === 'deliver') result = this.receive(envelope.payload as AgentLetter, peer);
-      else if (envelope.operation === 'receipt') {
-        const payload = envelope.payload as { id: string; fromThreadId: string };
-        const letter = this.find(text(payload?.id, 'receipt.id', 100), 'in');
-        if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
-        result = letter;
-      } else throw invalidParams('operation: expected directory, deliver or receipt');
-    } catch (reason) {
-      status = reason instanceof RpcFailure ? 400 : 500;
-      error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
-    }
-    const raw = JSON.stringify({ nonce: envelope.nonce, result, error });
-    this.identityKey();
-    return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
+    // Reading an unsigned body cannot hold an update. Admission may have won
+    // during that await, so authenticated processing must enter the same gate.
+    if (this.closed || this.core.stopping) return new Response('the core is stopping', { status: 503 });
+    return this.core.router.trackRequest(() => {
+      let result: unknown;
+      let error: string | undefined;
+      let status = 200;
+      try {
+        // A revoke while the body streamed wins before any data is read or changed.
+        if (!this.peers().some(p => p.coreId === peer.coreId)) throw refused('peer permission revoked');
+        if (envelope.operation === 'directory') result = this.localDirectory();
+        else if (envelope.operation === 'deliver') result = this.receive(envelope.payload as AgentLetter, peer);
+        else if (envelope.operation === 'receipt') {
+          const payload = envelope.payload as { id: string; fromThreadId: string };
+          const letter = this.find(text(payload?.id, 'receipt.id', 100), 'in');
+          if (!letter || letter.from.coreId !== peer.coreId || letter.from.threadId !== payload.fromThreadId) throw refused('unknown receipt');
+          result = letter;
+        } else throw invalidParams('operation: expected directory, deliver or receipt');
+      } catch (reason) {
+        status = reason instanceof RpcFailure ? 400 : 500;
+        error = reason instanceof RpcFailure ? reason.message : 'Machine could not process the request';
+      }
+      const raw = JSON.stringify({ nonce: envelope.nonce, result, error });
+      this.identityKey();
+      return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
+    });
   }
   beginClose(): void { this.closed = true; clearInterval(this.timer); this.off(); }
   async close(): Promise<void> { this.beginClose(); await Promise.allSettled([...this.pending]); }
