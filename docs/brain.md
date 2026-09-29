@@ -74,7 +74,9 @@ formats stay behind `boite help` and `boite workflow help`.
 The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
 "Asynchronous questions" off, the guide leaves its `boite ask` line out. The
-guide exists only in the turn prefix: it is never written into the brain
+test-only echo driver always omits that line because it parses question text
+as a test directive. Real drivers follow the asynchronous-questions setting.
+The guide exists only in the turn prefix: it is never written into the brain
 folder, so the brain's Git status and the global links stay untouched, and a
 harness started outside Boite never reads it.
 

@@ -385,4 +385,9 @@ test('with a brain, a new Claude session reads the Boite guide once and learns `
   expect(first!.split('boite ask').length).toBe(2);
   expect(second).toContain('Shared convention');
   expect(second).not.toContain('boite where');
+  harness.core.settings.set({ asyncQuestions: false });
+  const other = await claudeThread(client);
+  expect(await runTurn(client, other, 'third')).toBe('done');
+  expect(calls.at(-1)!.prompts[0]).toContain('boite where');
+  expect(calls.at(-1)!.prompts[0]).not.toContain('boite ask');
 });

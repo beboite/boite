@@ -244,7 +244,7 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   expect(second).not.toContain('boite where');
 });
 
-test('the Boite guide switch persists, and the ask line follows asynchronous questions', async () => {
+test('the Boite guide switch persists, and echo never receives the ask command', async () => {
   const owner = await h.connect();
   file(join(root, 'AGENTS.md'), 'Shared convention');
   await owner.call('brain.configure', { path: root, enabled: true });
@@ -266,13 +266,36 @@ test('the Boite guide switch persists, and the ask line follows asynchronous que
   expect(brain.instructions()).not.toContain('boite where');
   expect(await run()).not.toContain('boite ask');
   h.core.settings.set({ asyncQuestions: true });
-  expect(await run()).toContain('boite ask');
+  expect(await run()).not.toContain('boite ask');
   const off = await owner.call('brain.configure', { path: root, enabled: true, boiteGuide: false });
   expect(off.config.boiteGuide).toBe(false);
   expect(await run()).not.toContain('boite where');
   // Leaving the field out keeps the switch where it was.
   expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
   await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+});
+
+test('echo with the default guide and asynchronous questions finishes without asking', async () => {
+  h.core.settings.set({ asyncQuestions: true });
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const turn = await owner.call('turns.start', { threadId, prompt: 'container persistence check' });
+  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done', 1000);
+  const parts = h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
+  expect(parts.some(p => p.type === 'question')).toBe(false);
+  expect(JSON.stringify(parts)).toContain('boite where');
+});
+
+test('an absolute path receives the guide while a native command stays untouched', async () => {
+  const owner = await h.connect();
+  const run = async (prompt: string) => {
+    const { threadId } = await echoThread(h, owner);
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
+  };
+  expect(JSON.stringify(await run('/tmp/report: inspect this file'))).toContain('boite where');
+  expect(await run('/shout raw command')).toEqual([{ type: 'text', text: 'RAW COMMAND' }]);
 });
 
 /** Moves every time under `dir` an hour back, as a brain nobody edited today looks. */

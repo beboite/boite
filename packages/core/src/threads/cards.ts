@@ -16,6 +16,7 @@ import type { PermissionTicket, QuestionAsk, QuestionTicket } from '../drivers/t
 import { notFound, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { ThreadStore } from '../threads.ts';
+import { nativeCommandPrompt } from './operations.ts';
 import { setThreadStatus } from './records.ts';
 
 interface PendingPermission {
@@ -301,7 +302,7 @@ export class ThreadCards {
    * asynchronous questions, and echo is the test agent.
    */
   askInstructions(thread: ThreadSummary, provider: ProviderDescriptor, turn: Turn, prompt: string): string {
-    if (thread.sessionId !== null || turn.execution?.operation || prompt.trimStart().startsWith('/')) return '';
+    if (thread.sessionId !== null || turn.execution?.operation || nativeCommandPrompt(prompt)) return '';
     if (provider.protocol === 'codex-appserver' || provider.protocol === 'echo') return '';
     if (this.core.settings.get().asyncQuestions === false) return '';
     // Boite's guide already teaches the command in the same prompt.
