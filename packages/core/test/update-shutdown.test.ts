@@ -43,6 +43,7 @@ test('an update lets running and queued turns finish before admitting shutdown',
     const accepted = await ask(h);
     expect(accepted.status).toBe(202);
     expect(await accepted.json()).toEqual({ ok: true, pid: process.pid });
+    expect((await ask(h)).status).toBe(202);
     await waitFor(() => stops === 1);
     expect(h.core.journal.listTurns(first.threadId)).toHaveLength(1);
     expect(h.core.journal.listTurns(second.threadId)).toHaveLength(1);
@@ -148,6 +149,19 @@ test('idle shutdown requires owner authentication and a process owned by the cor
     expect((await fetch(`${at}?pid=1`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })).status).toBe(412);
     expect((await ask(h)).status).toBe(501);
     expect(h.core.stopping).toBe(false);
+  } finally { await h.stop(); }
+});
+
+test('an ordinary shutdown cannot acknowledge idle admission', async () => {
+  let stops = 0;
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  try {
+    const ordinary = await fetch(`${h.url}/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
+    expect(ordinary.status).toBe(202);
+    expect((await ask(h)).status).toBe(409);
+    await waitFor(() => stops === 1);
+    expect((await ask(h)).status).toBe(409);
+    expect(stops).toBe(1);
   } finally { await h.stop(); }
 });
 
