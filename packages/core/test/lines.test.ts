@@ -82,18 +82,21 @@ describe('LineSplitter', () => {
   test('a 32 MiB line in 64 KiB chunks is scanned once, not once per chunk', () => {
     const huge = `{"data":"${'q'.repeat(32 * 1024 * 1024)}"}`;
     const chunks = chunksOf(`${huge}\n`, CHUNK);
-    // One join and one scan is the yardstick: a runner slow at one is slow at the other.
-    let started = performance.now();
+    // Compare CPU used by synchronous work so other test processes cannot inflate
+    // the split's elapsed time by preempting it after the yardstick finishes.
+    let started = process.cpuUsage();
     chunks.join('').indexOf('\n');
-    const once = performance.now() - started;
-    started = performance.now();
+    const joined = process.cpuUsage(started);
+    const once = (joined.user + joined.system) / 1_000;
+    started = process.cpuUsage();
     const { lines } = split(chunks);
-    const elapsed = performance.now() - started;
+    const used = process.cpuUsage(started);
+    const cpuMs = (used.user + used.system) / 1_000;
     expect(lines).toHaveLength(1);
     expect(lines[0]?.length).toBe(huge.length);
-    // The old rescan took about 690 ms here on a Ryzen 9800X3D, 80 to 220 times
-    // the yardstick; this one about 10, under 3 times it (2026-09-28).
-    expect(elapsed).toBeLessThan(Math.max(300, once * 20));
+    // Rescanning the growing buffer spends quadratic CPU; joining and scanning
+    // once stays within this budget, including coarse CPU accounting's floor.
+    expect(cpuMs).toBeLessThan(Math.max(300, once * 20));
   });
 });
 
