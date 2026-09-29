@@ -26,17 +26,18 @@ export function nativeAgentsOfTool(part: MessagePart): NativeAgentUpdate[] {
   });
 }
 
-export interface NativeAgentEntry { part: MessagePart; at: number; turnStatus?: Turn['status'] }
+export interface NativeAgentEntry { part: MessagePart; at: number; turnId?: string; turnStatus?: Turn['status'] }
 
-/** Merge spawn, wait and follow-up snapshots by provider ID, retaining the original brief and model. */
+/** Merge explicit provider IDs across turns, and scope inferred tool IDs to their invocation's turn. */
 export function collectNativeAgents(entries: Iterable<NativeAgentEntry>, background: BackgroundTask[] = []): NativeAgent[] {
   const agents = new Map<string, NativeAgent>();
-  for (const { part, at, turnStatus } of entries) {
+  for (const { part, at, turnId, turnStatus } of entries) {
     if (part.type !== 'tool') continue;
     for (const update of nativeAgentsOfTool(part)) {
-      const previous = agents.get(update.id);
+      const id = !part.nativeAgents && turnId ? `${turnId}:${update.id}` : update.id;
+      const previous = agents.get(id);
       const defined = Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined));
-      const agent = { ...previous, ...defined, id: update.id, status: update.status, toolId: previous?.toolId ?? part.toolId, startedAt: previous?.startedAt ?? part.startedAt ?? at } as NativeAgent;
+      const agent = { ...previous, ...defined, id, status: update.status, toolId: previous?.toolId ?? part.toolId, startedAt: previous?.startedAt ?? part.startedAt ?? at } as NativeAgent;
       if (agent.status === 'running' && (turnStatus === 'stopped' || turnStatus === 'error' || turnStatus === 'done')) agent.status = 'unknown';
       if (agent.status === 'running' && !update.result) delete agent.result;
       agents.set(agent.id, agent);
@@ -44,7 +45,7 @@ export function collectNativeAgents(entries: Iterable<NativeAgentEntry>, backgro
   }
   for (const task of background) {
     if (task.kind !== 'agent') continue;
-    const previous = [...agents.values()].find(agent => agent.toolId === task.toolId);
+    const previous = [...agents.values()].reverse().find(agent => agent.toolId === task.toolId && agent.startedAt <= task.startedAt);
     const id = previous?.id ?? task.id;
     agents.set(id, { ...previous, id, name: previous?.name ?? task.description, status: 'running', result: undefined, toolId: previous?.toolId ?? task.toolId ?? task.id, startedAt: previous?.startedAt ?? task.startedAt });
   }

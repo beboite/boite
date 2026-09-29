@@ -45,3 +45,18 @@ test('a provider background-agent list confirms live work without duplicating it
   expect(agents[0]).toMatchObject({ id: part.toolId, status: 'running' });
   expect(collectNativeAgents([{ part, at: 1, turnStatus: 'done' }], [])[0]?.status).toBe('unknown');
 });
+
+test('reused tool IDs retain separate child invocations across turns and the background list follows its original launch', () => {
+  const first = tool({ input: { prompt: 'First review', run_in_background: true }, status: 'done', output: 'Launched' });
+  const second = tool({ input: { prompt: 'Second review' }, status: 'done', output: 'Second result' });
+  const entries = [{ part: first, at: 1, turnId: 'first', turnStatus: 'done' as const }, { part: second, at: 3, turnId: 'second', turnStatus: 'done' as const }];
+  const agents = collectNativeAgents(entries, [{ id: 'task-1', toolId: first.toolId, kind: 'agent', description: 'First review', startedAt: 2 }]);
+  expect(agents).toHaveLength(2);
+  expect(agents.map(agent => [agent.task, agent.status, agent.result])).toEqual([['First review', 'running', undefined], ['Second review', 'done', 'Second result']]);
+  expect(new Set(agents.map(agent => agent.id)).size).toBe(2);
+  const nativeEntries = [
+    { part: tool({ nativeAgents: [{ id: 'stable-provider-id', status: 'running' }] }), at: 1, turnId: 'first' },
+    { part: tool({ nativeAgents: [{ id: 'stable-provider-id', status: 'done', result: 'Checked' }] }), at: 3, turnId: 'second' },
+  ];
+  expect(collectNativeAgents(nativeEntries)).toEqual([expect.objectContaining({ id: 'stable-provider-id', status: 'done', result: 'Checked' })]);
+});

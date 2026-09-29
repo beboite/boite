@@ -26,7 +26,7 @@ test('ACP named task calls reach the native team without exposing the side conve
   await client.call('turns.start', { threadId, prompt: '[agents]' });
   expect((await finished).status).toBe('done');
   expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
-    expect.objectContaining({ id: 'native-acp', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ toolId: 'native-acp', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
   ]);
 });
 

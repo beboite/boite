@@ -32,7 +32,7 @@ test('Claude Agent tools reach Team while child text remains on its sidechain', 
   });
   expect(await runTurn(client, threadId, 'Review')).toBe('done');
   expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
-    expect.objectContaining({ id: 'native-claude', name: 'Parser review', model: 'sonnet', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ toolId: 'native-claude', name: 'Parser review', model: 'sonnet', status: 'done', result: 'Parser checked' }),
   ]);
   expect(JSON.stringify((await client.call('threads.get', { threadId })).messages)).not.toContain('Private child work');
 });

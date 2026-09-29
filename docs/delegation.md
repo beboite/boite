@@ -25,7 +25,9 @@ Off label does not disable provider-native subagents.
 
 Team shows native agents' reported names, tasks, models, status and bounded
 results. Running agents also appear below the chat. Ask the main agent to steer
-or stop them: their IDs are provider IDs, not Boite conversations. No token
+or stop them: these records are not Boite conversations. Explicit provider IDs
+join updates across turns; inferred tool IDs are scoped to a turn so repeated
+tool IDs keep separate invocations. No token
 total is invented for children whose usage the provider does not separate.
 
 Codex collaboration calls and subagent activity become persisted tool parts.

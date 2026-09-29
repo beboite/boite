@@ -19,8 +19,15 @@ test('pi subagent extension calls reach the native team through the real protoco
   await client.call('turns.start', { threadId, prompt: '[agents]' });
   expect((await finished).status).toBe('done');
   expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
-    expect.objectContaining({ id: 'native-pi', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ toolId: 'native-pi', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
   ]);
+  const second = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: '[agents]' });
+  expect((await second).status).toBe('done');
+  const agents = (await client.call('delegation.get', { threadId })).nativeAgents;
+  expect(agents).toHaveLength(2);
+  expect(new Set(agents.map(agent => agent.id)).size).toBe(2);
+  expect(agents.every(agent => agent.toolId === 'native-pi' && agent.status === 'done')).toBe(true);
 });
 
 test('coordination steers a running pi turn over its RPC connection', async () => {
@@ -104,7 +111,8 @@ function writeLateDialogAgent(dataDir: string): string {
   writeFileSync(
     path,
     [
-      "import { appendFileSync } from 'node:fs';",
+      "import { appendFileSync, existsSync } from 'node:fs';",
+      `const READY = ${JSON.stringify(join(dataDir, 'pi-late-dialog.ready'))};`,
       "const LOG = process.env.PI_FAKE_LOG ?? '';",
       "function log(line) { if (LOG.length > 0) appendFileSync(LOG, line + '\\n', 'utf8'); }",
       "function send(payload) { process.stdout.write(JSON.stringify(payload) + '\\n'); }",
@@ -114,12 +122,14 @@ function writeLateDialogAgent(dataDir: string): string {
       "  send({ type: 'message_update', usage: ZERO,",
       "    assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'done' } });",
       "  send({ type: 'agent_settled' });",
-      '  // The extension finishes its own work after the run, so the driver has no',
-      '  // turn to draw a card on and the agent still blocks on the answer.',
-      '  setTimeout(() => {',
+      '  // The test releases this dialog after turn.finished, so context reads',
+      '  // cannot leave a closing turn attached when the request arrives.',
+      '  const pending = setInterval(() => {',
+      '    if (!existsSync(READY)) return;',
+      '    clearInterval(pending);',
       "    send({ type: 'extension_ui_request', id: 'late-1', method: 'confirm',",
       "      title: 'Late', message: 'after the run' });",
-      '  }, 30);',
+      '  }, 10);',
       '}',
       'function handle(message) {',
       "  if (message.type === 'extension_ui_response') {",
@@ -525,6 +535,7 @@ describe('pi driver', () => {
     const logs = collectLogs(client);
 
     await runTurn(client, threadId, 'first');
+    writeFileSync(join(harness?.dataDir ?? '', 'pi-late-dialog.ready'), 'ready');
 
     // The process stays warm, so the extension's dialog lands with no turn to
     // draw a card on. Unanswered, it blocks that extension for the life of the

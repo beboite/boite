@@ -20,7 +20,7 @@ test('Muse subagent snapshots reach the native team', async () => {
   const threadId = await museThread(client);
   expect((await runTurn(client, threadId, '[agents]')).status).toBe('done');
   expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
-    expect.objectContaining({ id: 'native-muse', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+    expect.objectContaining({ toolId: 'native-muse', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
   ]);
 });
 
