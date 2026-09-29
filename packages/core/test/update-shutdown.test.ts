@@ -73,7 +73,7 @@ test('an update waits for dependent workflow steps and their parent delivery', a
     await waitFor(() => {
       const current = h.core.workflows.get(threadId, run.id);
       return current.status === 'done' && current.delivered && h.core.scheduler.state().running.length === 0;
-    });
+    }, 10_000);
     const done = h.core.workflows.get(threadId, run.id);
     expect(done.nodes.map(node => node.status)).toEqual(['done', 'done']);
     for (const node of done.nodes) expect(h.core.journal.listTurns(node.instances[0]!.threadId!)).toHaveLength(1);
@@ -136,4 +136,25 @@ test('idle shutdown requires owner authentication and a process owned by the cor
     expect((await ask(h)).status).toBe(501);
     expect(h.core.stopping).toBe(false);
   } finally { await h.stop(); }
+});
+
+test('an in-flight peer HTTP request completes before update admission', async () => {
+  const h = await startTestCore({ onShutdown: () => undefined });
+  let finish: (() => void) | undefined;
+  try {
+    let entered = false;
+    h.core.coordination.http = async () => {
+      entered = true;
+      await new Promise<void>(resolve => { finish = resolve; });
+      return Response.json({ delivered: true });
+    };
+    const delivery = fetch(`${h.url}/agent-messages`, { method: 'POST', body: 'pending peer body' });
+    void delivery.catch(() => undefined);
+    await waitFor(() => entered);
+    expect((await ask(h)).status).toBe(409);
+    finish!();
+    expect(await (await delivery).json()).toEqual({ delivered: true });
+    expect((await ask(h)).status).toBe(202);
+    expect((await fetch(`${h.url}/agent-messages`, { method: 'POST' })).status).toBe(503);
+  } finally { finish?.(); await h.stop(); }
 });

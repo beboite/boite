@@ -63,7 +63,7 @@ wait. There is no deadline that interrupts an agent.
 
 The shell polls the owner-authenticated `POST /shutdown-if-idle` with the
 expected core PID. The core refuses admission while a turn, queued execution,
-RPC or tracked process is active, or while a provider reports background work.
+RPC, signed peer request or tracked process is active, or while a provider reports background work.
 This includes terminals and warm provider sessions: close a terminal or let
 the session expire before expecting installation. A paused task that has not
 started remains stored for a later explicit resume.
