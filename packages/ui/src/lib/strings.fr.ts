@@ -306,6 +306,7 @@ export const fr: Translation = {
     downloading: 'Téléchargement de {received} sur {total}',
     downloaded: '{received} téléchargés',
     ready: 'La version {version} est prête à installer.',
+    waiting: 'En attente de la fin du travail sur cet ordinateur. Vous pouvez continuer à discuter ou annuler la mise à jour.',
     installing: "Démarrage du programme d'installation",
     current: 'Boite est à jour.',
     failed: 'La mise à jour a échoué.',
@@ -321,7 +322,7 @@ export const fr: Translation = {
     readyAction: 'Mise à jour',
     dismissNotice: 'Masquer cette notification de mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
-    installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
+    installBody: 'Boite attendra la fin des tours des agents et du travail en arrière-plan sur cet ordinateur, puis installera la mise à jour et redémarrera. Vous pouvez continuer à discuter et annuler la mise à jour pendant cette attente.',
     detailsNotice: 'Ouvrir les détails de la mise à jour'
   },
 

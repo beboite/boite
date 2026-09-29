@@ -150,3 +150,43 @@ test('prevents duplicate install dialogs and refuses a stale confirmed selection
   ask.mockRestore();
   stop();
 });
+
+test('waiting offers cancellation and locks the channel until native confirms ready', async () => {
+  const ready: UpdateSnapshot = {
+    phase: 'ready', currentVersion: '2.0.0', currentChannel: 'stable', channel: 'nightly',
+    version: '2.1.0-nightly.8', notes: null, publishedAt: null, received: 100, total: 100,
+    error: null, supported: true
+  };
+  let publish!: (snapshot: UpdateSnapshot) => void;
+  let finishCancel!: (accepted: boolean) => void;
+  const native: AppUpdateBackend = {
+    status: vi.fn(async (): Promise<UpdateSnapshot> => ({ ...ready, phase: 'waiting' })),
+    check: vi.fn(async () => ready), download: vi.fn(async () => ready),
+    install: vi.fn(async () => undefined),
+    cancelInstall: vi.fn(() => new Promise<boolean>((resolve) => { finishCancel = resolve; })),
+    listen: vi.fn(async (handler) => { publish = handler; return () => undefined; })
+  };
+  const updater = new AppUpdater(native, undefined, () => true);
+  const stop = updater.start();
+  await updater.settled();
+  mounted = mount(AppUpdateContent, { target: document.body, props: { updater, beforeInstall: () => undefined } });
+  expect(document.querySelector('[data-testid=app-update-status]')?.textContent).toContain('Waiting for work');
+  expect(document.querySelector('[data-testid=app-update-check]')).toBeNull();
+  expect(document.querySelector<HTMLButtonElement>('[data-testid=app-update-stable]')?.disabled).toBe(true);
+  const cancel = document.querySelector<HTMLButtonElement>('[data-testid=app-update-cancel]')!;
+  cancel.click();
+  flushSync();
+  expect(cancel.disabled).toBe(true);
+  cancel.click();
+  expect(native.cancelInstall).toHaveBeenCalledOnce();
+  finishCancel(true);
+  await Promise.resolve();
+  flushSync();
+  expect(document.querySelector('[data-testid=app-update-install]')).toBeNull();
+  publish(ready);
+  flushSync();
+  expect(document.querySelector('[data-testid=app-update-cancel]')).toBeNull();
+  expect(document.querySelector('[data-testid=app-update-install]')).not.toBeNull();
+  expect(document.querySelector<HTMLButtonElement>('[data-testid=app-update-stable]')?.disabled).toBe(false);
+  stop();
+});

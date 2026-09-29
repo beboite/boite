@@ -151,6 +151,27 @@ export class Core {
   private endpoint = { host: '127.0.0.1', port: 0 };
   #onShutdown: (() => void) | undefined;
   #shutdownRequested = false;
+  #idleShutdownAdmitted = false;
+
+  /** An update may stop only between executions. Admission and the gates share one event-loop turn. */
+  requestIdleShutdown(): 'accepted' | 'busy' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#idleShutdownAdmitted) return 'accepted';
+    if (this.#shutdownRequested || this.#stopping) return 'busy';
+    const scheduler = this.scheduler.state();
+    const threads = this.threads;
+    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
+      || this.agentRuntime.busy || this.procs.liveThreads().length > 0
+      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
+      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    this.#idleShutdownAdmitted = true;
+    this.#stopping = true;
+    this.router.stopAccepting();
+    this.procs.stopAccepting();
+    this.requestShutdown();
+    return 'accepted';
+  }
 
   /**
    * Asks the process to stop the way `core.shutdown` does: the answer goes out

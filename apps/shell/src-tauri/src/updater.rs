@@ -1,5 +1,5 @@
 //! Signed desktop updates. These commands never update a connected remote core.
-use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Mutex}, time::{Duration, Instant}};
+use std::{path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, Webview};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -43,6 +43,7 @@ pub struct AppUpdater {
     busy: AtomicBool,
     preference: PathBuf,
     cache: PathBuf,
+    install: Arc<Mutex<crate::update_stop::InstallState>>,
 }
 struct Operation<'a>(&'a AtomicBool);
 impl Drop for Operation<'_> { fn drop(&mut self) { self.0.store(false, Ordering::Release); } }
@@ -68,7 +69,8 @@ impl AppUpdater {
             phase: if error.is_some() { "error" } else { "idle" }.into(), current_version: version,
             current_channel, channel, version: None, notes: None, published_at: None,
             received: 0, total: None, error, supported,
-        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache }
+        }), pending: Mutex::new(None), busy: AtomicBool::new(false), preference, cache,
+            install: Arc::new(Mutex::new(crate::update_stop::InstallState::Idle)) }
     }
     fn begin(&self) -> Result<Operation<'_>, String> {
         if !self.snapshot.lock().unwrap().supported { return Err("Updates require an installed Windows x64 build of Boite".into()); }
@@ -239,6 +241,18 @@ pub async fn app_update_download(webview: Webview, app: AppHandle, state: State<
 }
 
 #[tauri::command]
+pub async fn app_update_cancel_install(webview: Webview, state: State<'_, AppUpdater>) -> Result<bool, String> {
+    crate::browser::only_main(&webview)?;
+    let control = state.install.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut install = control.lock().map_err(|_| "update admission state is poisoned")?;
+        if *install != crate::update_stop::InstallState::Waiting { return Ok(false); }
+        *install = crate::update_stop::InstallState::Cancelled;
+        Ok(true)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'_, AppUpdater>) -> Result<(), String> {
     crate::browser::only_main(&webview)?;
     let _operation = state.begin()?;
@@ -253,21 +267,30 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         let error = "Downloaded update changed after signature verification".to_string();
         state.fail(&app, error.clone()); return Err(error);
     }
-    state.change(&app, |s| s.phase = "installing".into());
-    // The core outlives the shell (it is resident by default), so nothing
-    // stops it when this process exits: it is stopped here, through its own
-    // /shutdown, before the installer has to replace boite-core.exe. A core
-    // still running would keep that file locked and, once the new shell
-    // started, be adopted as the engine of a version it is not.
+    *state.install.lock().unwrap() = crate::update_stop::InstallState::Waiting;
+    state.change(&app, |s| s.phase = "waiting".into());
     let core = app.clone();
+    let control = state.install.clone();
     let stopped = tauri::async_runtime::spawn_blocking(move || match core.try_state::<crate::local_core::CoreState>() {
-        Some(core) => core.stop_for_install(),
-        None => Ok(()),
+        Some(engine) => engine.wait_for_install(&control, || {
+            core.state::<AppUpdater>().change(&core, |s| s.phase = "installing".into());
+        }),
+        None => Err("the shell has no local core state; nothing was installed".into()),
     }).await;
-    if let Some(error) = match stopped { Ok(Ok(())) => None, Ok(Err(e)) => Some(e), Err(e) => Some(e.to_string()) } {
-        let error = format!("The engine could not be stopped for the update, so nothing was installed: {error}");
-        state.fail(&app, error.clone());
-        return Err(error);
+    match stopped {
+        Ok(Ok(true)) => {},
+        Ok(Ok(false)) => {
+            *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
+            *state.pending.lock().unwrap() = Some(pending);
+            state.change(&app, |s| { s.phase = "ready".into(); s.error = None; });
+            return Ok(());
+        },
+        outcome => {
+            *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
+            let error = match outcome { Ok(Err(e)) => e, Err(e) => e.to_string(), _ => unreachable!() };
+            state.fail(&app, error.clone());
+            return Err(error);
+        }
     }
     // The in-memory digest ties these exact bytes to the verified download.
     // On Windows Tauri exits once the installer launches. If it cannot
@@ -278,6 +301,7 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
         Ok(Ok(())) => { app.restart(); }
         outcome => {
             if let Some(core) = app.try_state::<crate::local_core::CoreState>() { core.release_hold(); }
+            *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
             let error = match outcome { Ok(Err(e)) => e.to_string(), Err(e) => e.to_string(), _ => unreachable!() };
             state.fail(&app, error.clone());
             Err(error)

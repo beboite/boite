@@ -4,7 +4,8 @@
 ; the generated installer only closes the shell (`CheckIfAppIsRunning` matches
 ; boite-shell.exe by name). A reinstall or an uninstall over a running core
 ; cannot write or delete boite-core.exe ("Error opening file for writing"), so
-; these hooks stop the core of this install first, with stop-core.ps1.
+; these hooks obtain idle admission before installation. Explicit uninstall
+; still stops the core of this install, with stop-core.ps1.
 ;
 ; Tauri's installer.nsi includes this file near its top, before it defines
 ; BUNDLEID, MAINBINARYNAME and PRODUCTNAME. Nothing outside the macros below
@@ -22,7 +23,7 @@
   !define BOITE_DATA_ROOT "$LOCALAPPDATA"
 !endif
 
-!macro BOITE_STOP_CORE
+!macro BOITE_STOP_CORE IDLE_ONLY
   !ifndef BUNDLEID
     !error "hooks.nsh: BUNDLEID is not defined where BOITE_STOP_CORE is inserted"
   !endif
@@ -50,9 +51,19 @@
   ; its command line.
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_EXE", t "$INSTDIR\boite-core.exe") i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_DIR", t "${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}") i'
+  System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_IDLE", t "${IDLE_ONLY}") i'
   ; nsExec runs it without a window.
   nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\boite-stop-core.ps1"'
   Pop $0
+  !if "${IDLE_ONLY}" == "1"
+    StrCmp $0 "0" boite_core_admitted
+      DetailPrint "Boite is still working or cannot confirm an idle core. Finish its work or stop it explicitly, then retry."
+      Pop $1
+      Pop $0
+      SetErrorLevel 2
+      Abort
+    boite_core_admitted:
+  !endif
   ; Whatever still holds the file (a core that would not stop, a scanner):
   ; move it aside, which Windows allows for a running executable, so the new
   ; one can be written, and delete the old one at the next restart.
@@ -60,6 +71,13 @@
   IfFileExists "$INSTDIR\boite-core.exe" 0 boite_core_free
     FileOpen $1 "$INSTDIR\boite-core.exe" a
     IfErrors 0 boite_core_writable
+      !if "${IDLE_ONLY}" == "1"
+        DetailPrint "boite-core.exe is still in use. Nothing was replaced; retry once the core has exited."
+        Pop $1
+        Pop $0
+        SetErrorLevel 2
+        Abort
+      !endif
       Delete "$INSTDIR\boite-core.exe.old"
       Rename "$INSTDIR\boite-core.exe" "$INSTDIR\boite-core.exe.old"
       Delete /REBOOTOK "$INSTDIR\boite-core.exe.old"
@@ -73,9 +91,9 @@
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  !insertmacro BOITE_STOP_CORE
+  !insertmacro BOITE_STOP_CORE 1
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  !insertmacro BOITE_STOP_CORE
+  !insertmacro BOITE_STOP_CORE 0
 !macroend

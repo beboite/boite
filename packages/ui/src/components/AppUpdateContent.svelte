@@ -27,6 +27,7 @@
           ? fill(strings.appUpdate.downloaded, { received: bytes(update.received) })
           : fill(strings.appUpdate.downloading, { received: bytes(update.received), total: bytes(update.total) });
       case 'ready': return fill(strings.appUpdate.ready, { version: update.version ?? '' });
+      case 'waiting': return strings.appUpdate.waiting;
       case 'installing': return strings.appUpdate.installing;
       case 'current': return strings.appUpdate.current;
       case 'error': return update.error ?? strings.appUpdate.failed;
@@ -71,6 +72,10 @@
         <button type="button" class="primary" disabled={appUpdateInstall.preparing} onclick={() => { beforeInstall(); void appUpdateInstall.request(updater); }} data-testid="app-update-install">
           {strings.appUpdate.install}
         </button>
+      {:else if update.phase === 'waiting'}
+        <button type="button" disabled={updater.cancelling} aria-busy={updater.cancelling} onclick={() => { void updater.cancelInstall(); }} data-testid="app-update-cancel">
+          {strings.common.cancel}
+        </button>
       {:else if update.phase === 'available'}
         <button type="button" onclick={() => updater.download()} data-testid="app-update-download">
           {strings.appUpdate.download}
@@ -93,12 +98,13 @@
         </button>
       {/if}
     </div>
+    {#if update.phase === 'waiting' && update.error}<p class="cancel-error" role="alert">{update.error}</p>{/if}
     <details class="options">
       <summary>{strings.appUpdate.channel}<span>{update.channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable}</span></summary>
       <div class="segmented" role="group" aria-label={strings.appUpdate.channel}>
         {#each ['stable', 'nightly'] as const as channel (channel)}
           <button type="button" class:on={update.channel === channel} aria-pressed={update.channel === channel}
-            disabled={update.phase === 'installing'} onclick={() => choose(channel)} data-testid={`app-update-${channel}`}>
+            disabled={update.phase === 'waiting' || update.phase === 'installing'} onclick={() => choose(channel)} data-testid={`app-update-${channel}`}>
             {channel === 'nightly' ? strings.appUpdate.nightly : strings.appUpdate.stable}
           </button>
         {/each}
@@ -118,6 +124,7 @@
   .changelog:hover { color: var(--color-foreground); text-decoration: underline; }
   .status { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; color: var(--color-muted-foreground); overflow-wrap: anywhere; }
   .status.ready { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .cancel-error { color: var(--color-danger); }
   .status.error { color: var(--color-danger); }
   .subtle { color: var(--color-subtle); font-size: var(--text-xs); }
   .actions { display: flex; margin-top: 14px; }
