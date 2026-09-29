@@ -68,6 +68,9 @@ This includes terminals and warm provider sessions: close a terminal or let
 the session expire before expecting installation. A paused task that has not
 started remains stored for a later explicit resume.
 
+Peer bodies awaiting authentication do not block admission. They are limited
+to 262144 bytes and five seconds; a peer authenticated after admission is refused.
+
 Admission and the refusal of new executions happen in the same event-loop
 turn. Once admitted, cancellation ends and the core drains and exits. The
 shell allows up to 12 seconds for that exit and never force-kills it for an

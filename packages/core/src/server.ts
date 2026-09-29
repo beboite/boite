@@ -352,7 +352,7 @@ export function startServer(options: ServerOptions): RunningServer {
 
       if (url.pathname === '/agent-messages') {
         if (core.stopping) return new Response('core stopping', { status: 503 });
-        const response = core.router.trackRequest(() => core.coordination.http(request));
+        const response = core.coordination.http(request);
         peerRequests.add(response);
         void response.finally(() => peerRequests.delete(response)).catch(() => undefined);
         return response;

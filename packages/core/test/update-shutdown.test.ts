@@ -1,9 +1,18 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 function ask(h: TestCore): Promise<Response> {
   return fetch(`${h.url}/shutdown-if-idle?pid=${process.pid}`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
+}
+
+function trustedPeer(h: TestCore) {
+  const keys = generateKeyPairSync('ed25519');
+  const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const coreId = createHash('sha256').update(publicKey).digest('hex');
+  h.core.coordination.trust({ coreId, name: 'Peer', publicKey, url: 'http://127.0.0.1:1' });
+  return { coreId, privateKey: keys.privateKey };
 }
 
 test('an update lets running and queued turns finish before admitting shutdown', async () => {
@@ -141,20 +150,66 @@ test('idle shutdown requires owner authentication and a process owned by the cor
 test('an in-flight peer HTTP request completes before update admission', async () => {
   const h = await startTestCore({ onShutdown: () => undefined });
   let finish: (() => void) | undefined;
+  const tracked = h.core.router.trackRequest.bind(h.core.router);
+  let entered = false;
+  const gate = spyOn(h.core.router, 'trackRequest').mockImplementation(<T>(work: () => T | Promise<T>): Promise<T> => tracked(async () => {
+    entered = true;
+    await new Promise<void>(resolve => { finish = resolve; });
+    return work();
+  }));
   try {
-    let entered = false;
-    h.core.coordination.http = async () => {
-      entered = true;
-      await new Promise<void>(resolve => { finish = resolve; });
-      return Response.json({ delivered: true });
-    };
-    const delivery = fetch(`${h.url}/agent-messages`, { method: 'POST', body: 'pending peer body' });
+    const peer = trustedPeer(h);
+    const body = JSON.stringify({ from: peer.coreId, to: h.core.coordination.identity().coreId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+    const delivery = fetch(`${h.url}/agent-messages`, { method: 'POST', body, headers: {
+      'x-boite-peer': peer.coreId, 'x-boite-signature': sign(null, Buffer.from(body), peer.privateKey).toString('base64'),
+    } });
     void delivery.catch(() => undefined);
     await waitFor(() => entered);
     expect((await ask(h)).status).toBe(409);
     finish!();
-    expect(await (await delivery).json()).toEqual({ delivered: true });
+    expect(await (await delivery).json()).toMatchObject({ result: [] });
     expect((await ask(h)).status).toBe(202);
     expect((await fetch(`${h.url}/agent-messages`, { method: 'POST' })).status).toBe(503);
-  } finally { finish?.(); await h.stop(); }
+  } finally { finish?.(); gate.mockRestore(); await h.stop(); }
+});
+
+test('a slow unauthenticated peer body cannot hold update admission', async () => {
+  const h = await startTestCore({ onShutdown: () => undefined });
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let pending: Promise<Response> | undefined;
+  try {
+    const peer = trustedPeer(h);
+    let entered = false;
+    const http = h.core.coordination.http.bind(h.core.coordination);
+    h.core.coordination.http = request => { entered = true; return http(request); };
+    const body = new ReadableStream<Uint8Array>({ start(stream) { controller = stream; stream.enqueue(new TextEncoder().encode('{')); } });
+    pending = fetch(`${h.url}/agent-messages`, { method: 'POST', body, headers: { 'x-boite-peer': peer.coreId, 'x-boite-signature': 'invalid' } });
+    void pending.catch(() => undefined);
+    await waitFor(() => entered);
+    expect((await ask(h)).status).toBe(202);
+    controller!.close(); controller = undefined;
+    expect((await pending).status).toBe(403);
+  } finally { controller?.close(); await pending?.catch(() => undefined); await h.stop(); }
+});
+
+test('a peer authenticated after update admission cannot process its request', async () => {
+  const h = await startTestCore({ onShutdown: () => undefined });
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let pending: Promise<Response> | undefined;
+  try {
+    const peer = trustedPeer(h);
+    const raw = JSON.stringify({ from: peer.coreId, to: h.core.coordination.identity().coreId, at: Date.now(), nonce: crypto.randomUUID(), operation: 'directory', payload: {} });
+    let entered = false;
+    const http = h.core.coordination.http.bind(h.core.coordination);
+    h.core.coordination.http = request => { entered = true; return http(request); };
+    const body = new ReadableStream<Uint8Array>({ start(stream) { controller = stream; stream.enqueue(new TextEncoder().encode(raw.slice(0, 1))); } });
+    pending = fetch(`${h.url}/agent-messages`, { method: 'POST', body, headers: {
+      'x-boite-peer': peer.coreId, 'x-boite-signature': sign(null, Buffer.from(raw), peer.privateKey).toString('base64'),
+    } });
+    void pending.catch(() => undefined);
+    await waitFor(() => entered);
+    expect((await ask(h)).status).toBe(202);
+    controller!.enqueue(new TextEncoder().encode(raw.slice(1))); controller!.close(); controller = undefined;
+    expect((await pending).status).toBe(503);
+  } finally { controller?.close(); await pending?.catch(() => undefined); await h.stop(); }
 });
