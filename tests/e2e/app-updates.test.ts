@@ -56,7 +56,7 @@ afterEach(async () => { await page?.close(); }, 15_000);
 afterAll(async () => { await server?.close(); }, 15_000);
 
 test('footer icons open a compact update popup with release details and an external changelog', async () => {
-  await page.navigate(`${base}/?fake=1&open=recent&appUpdate=ready&appUpdateChannel=nightly`);
+  await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   expect(await page.evaluate(`document.querySelector('.foot ${id('nav-app-update')}') !== null`)).toBe(true);
   expect((await page.text(id('add-project'))).trim()).toBe('');
@@ -71,6 +71,19 @@ test('footer icons open a compact update popup with release details and an exter
   await page.click(id('app-update-changelog'));
   expect(await page.evaluate('window.__openedRelease')).toBe('https://github.com/beboite/boite/releases/tag/v2.0.0-nightly.8');
   await capture('release-desktop');
+  await escapeUpdate();
+  await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(208)');
+  await page.click(id('machine-status'));
+  await page.waitFor(`document.querySelector('${id('machine-status-menu')} [data-value]')`);
+  await page.evaluate(`document.querySelectorAll('${id('machine-status-menu')} [data-value]')[2].click()`);
+  await page.waitFor(`document.querySelector('${id('machine-status-menu')}') === null`);
+  expect(await page.evaluate(`(() => {
+    const controls = ['machine-status', 'add-project', 'nav-app-update', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
+    const foot = document.querySelector('.foot').getBoundingClientRect();
+    return controls.every((box, index) => box.width >= 26 && box.right <= foot.right && (!index || box.left >= controls[index - 1].right));
+  })()`)).toBe(true);
+  await capture('narrow-sidebar');
+
 }, 30_000);
 
 test('the update popup closes outside and by keyboard, and confirms installation in both languages', async () => {

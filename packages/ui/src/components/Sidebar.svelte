@@ -508,7 +508,15 @@
   }
   /* The machine button, when there is one, sits alone on the left. */
   .foot :global(.machines) {
+    min-width: var(--control-sm);
     margin-right: auto;
+  }
+  .foot :global(.machines .menu),
+  .foot :global(.machines .trigger) { max-width: 100%; }
+  .foot :global(button.icon) {
+    flex: none;
+    width: var(--control-sm);
+    height: var(--control-sm);
   }
 
   @keyframes leave {
