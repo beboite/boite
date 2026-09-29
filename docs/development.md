@@ -219,8 +219,15 @@ thread. Under its rows, a project with archived threads shows a folded
 "N archived" line; opened, it reads that project's archived threads and
 restores one in a click. The fold is not remembered between sessions.
 
-Settings > General > Worktrees (owner only, also in each git project's `...`
-menu) lists every project's worktrees with what each would lose. "Remove the
+The project menu keeps New thread, Copy path, View archived threads and Manage
+project, with distinct icons. The phone opens the same menu from the project's
+header action button. Manage project opens a second menu with Back,
+worktrees, icon refresh, session import when enabled, archive and removal.
+Actions keep their owner restrictions; project archiving stays available to
+paired devices. Copy path shows the path on hover.
+
+Settings > General > Worktrees (owner only, also under each git project's
+Manage project menu) lists every project's worktrees with what each would lose. "Remove the
 clean ones" takes those that are neither dirty nor unmerged and hold no live
 thread, without `force`. Files git ignores do not make a worktree dirty, as
 for `git worktree remove` itself: dependencies and build output an agent left

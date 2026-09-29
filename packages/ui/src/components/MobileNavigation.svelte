@@ -8,6 +8,7 @@
   import { hasUnsentDraft } from '../lib/composer-queue';
   import { mobileOverlay } from '../lib/mobile-history';
   import { archiveThread } from '../lib/archive';
+  import { projectMenu } from '../lib/project-menu';
   import { separator, type MenuItem } from '../lib/menu';
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
@@ -92,6 +93,10 @@
       {store.draftInDrafts && !store.openThread ? strings.drafts.name : project ? projectName(project) : strings.mobile.project}<ChevronDown size={14} />
     </Menu>
   </div>
+  {#if project}
+    <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
+      onclick={(event) => project && projectMenu(event, store, project)}><Ellipsis size={20} /></button>
+  {/if}
   <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!project || store.connection !== 'ready'} onclick={() => { store.startDraft(project?.id); show('chat'); }}><Plus size={21} /></button>
 </header>
 

@@ -208,6 +208,8 @@ test(
     const openProjectMenu = `(() => { document.querySelector('${testid('project-row')}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 60 })); return null; })()`;
     await page.evaluate<null>(openProjectMenu);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=copy]')`);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
+    await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=back]')`);
     expect(await page.evaluate<boolean>(`document.querySelector('${testid('context-menu')} [data-value=import]') === null`)).toBe(true);
     await page.evaluate<null>(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return null; })()`);
     await page.waitFor(`!document.querySelector('${testid('context-menu')}')`);
@@ -221,6 +223,7 @@ test(
     await page.waitFor(`document.querySelector('${testid('chat')}')`);
 
     await page.evaluate<null>(openProjectMenu);
+    await page.click(`${testid('context-menu')} [data-value=manage]`);
     await page.waitFor(`document.querySelector('${testid('context-menu')} [data-value=import]')`);
     await page.click(`${testid('context-menu')} [data-value=import]`);
     await page.waitFor(`document.querySelectorAll('${testid('import-row')}').length === 1`);

@@ -136,6 +136,9 @@
           data-value={item.id}
           onclick={() => pick(item)}
         >
+          {#if item.glyph}
+            <span class="glyph" aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>
+          {/if}
           <span class="label">{item.label}</span>
           {#if item.hint}
             <span class="hint">{item.hint}</span>
@@ -151,7 +154,7 @@
     position: fixed;
     z-index: 70;
     min-width: 200px;
-    max-width: 320px;
+    max-width: min(320px, calc(100vw - 12px));
     padding: 4px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
@@ -176,7 +179,7 @@
     justify-content: space-between;
     gap: 12px;
     width: 100%;
-    height: var(--control);
+    min-height: var(--control);
     padding: 0 8px;
     border: none;
     border-radius: var(--radius-sm);
@@ -199,6 +202,22 @@
 
   .row.danger {
     color: var(--color-danger);
+  }
+
+  .glyph {
+    display: flex;
+    flex: 0 0 16px;
+    color: var(--color-muted-foreground);
+  }
+
+  .danger .glyph {
+    color: inherit;
+  }
+
+  .label {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .row.active .label::after {
