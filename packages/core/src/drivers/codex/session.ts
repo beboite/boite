@@ -75,6 +75,7 @@ export class CodexSession {
   private lastStderr = '';
   private exitCode: number | null = null;
   private exited: Promise<number | null> | null = null;
+  private processClosed: Promise<void> = Promise.resolve();
   private idle: Timer | null = null;
   /** The turn whose `turn/start` is in flight. Context updates also arrive while idle. */
   private current: CodexTurn | null = null;
@@ -331,7 +332,9 @@ export class CodexSession {
           });
           return rpc;
         } catch (error) {
-          if (this.closing || this.active?.isStopped || this.exitCode !== 1 || !this.sqliteInitFailed || attempt >= SQLITE_INIT_ATTEMPTS) throw error;
+          await this.waitForStartupClose();
+          if (this.closing || this.active?.isStopped || this.exitCode !== 1 || !this.sqliteInitFailed) throw error;
+          if (attempt >= SQLITE_INIT_ATTEMPTS) throw new Error(this.exitSentence(this.exitCode));
           const delay = SQLITE_INIT_BACKOFF_MS * attempt;
           ctx.log('warn', `codex: retrying SQLite initialization in ${delay} ms (attempt ${attempt + 1}/${SQLITE_INIT_ATTEMPTS})`);
           let timer: Timer | undefined;
@@ -372,6 +375,8 @@ export class CodexSession {
   }
 
   private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {
+    let closed: () => void = () => undefined;
+    this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       if (this.child !== child) return;
@@ -394,6 +399,7 @@ export class CodexSession {
       // `close` and not `exit`: stderr is flushed by then, so the sentence the
       // turn fails with carries the line the agent printed on its way out.
       child.once('close', () => {
+        closed();
         if (this.child !== child) return;
         const sentence = this.exitSentence(this.exitCode);
         rpc.fail(sentence);
@@ -402,6 +408,7 @@ export class CodexSession {
       });
       child.once('error', (error) => {
         resolve(null);
+        closed();
         if (this.child !== child) return;
         const sentence = `the codex agent did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
@@ -409,6 +416,20 @@ export class CodexSession {
         if (!this.closing && !this.initializing) this.drop();
       });
     });
+  }
+
+  /** An RPC error can arrive before the failed child exits and drains stderr. */
+  private async waitForStartupClose(): Promise<void> {
+    let timer: Timer | undefined;
+    try {
+      await Promise.race([
+        this.processClosed,
+        this.active?.stopped,
+        new Promise<void>(resolve => { timer = setTimeout(resolve, EXIT_GRACE_MS); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private exitWithin(ms: number): Promise<number | null | undefined> {

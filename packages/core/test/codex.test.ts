@@ -11,7 +11,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -152,6 +152,34 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('an initialize RPC error waits for late SQLite stderr and exit before retrying', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Sent once' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(2);
+    expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+  });
+
+  test('an initialize RPC error from a live process fails within a bounded wait', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'live';
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'Never sent' });
+    await waitFor(() => fakeLog().includes('initialize RPC error'), 20000);
+    const waiting = performance.now();
+    expect((await finished).status).toBe('error');
+    expect(performance.now() - waiting).toBeLessThan(2000);
+    expect(countLines('initialize')).toBe(1);
+    expect(fakeLog()).not.toContain('turn/start');
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+  });
+
   test('a delayed close from a failed initialization cannot close the recovered turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
@@ -207,10 +235,11 @@ describe('codex driver', () => {
     expect(harness!.core.journal.listMessages(threadId).filter(message => message.role === 'assistant').some(message => message.parts.some(part => part.type === 'error'))).toBe(false);
   });
 
-  test('SQLite initialization gives up after three attempts without sending a prompt', async () => {
+  test.each(['close', 'RPC error'])('SQLite initialization gives up after three attempts without sending a prompt: %s', async failure => {
     const client = await startCore();
     const threadId = await codexThread(client);
     process.env['CODEX_FAKE_INIT_FAILURES'] = '99';
+    if (failure === 'RPC error') process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
     const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: 'Never sent' });
     const turn = await finished;

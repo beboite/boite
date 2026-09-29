@@ -462,6 +462,16 @@ function handle(method: string, raw: unknown): unknown {
         const attempts = readFileSync(process.env['CODEX_FAKE_LOG']!, 'utf8').split('\n').filter(line => line === 'initialize').length;
         if (attempts <= Number(process.env['CODEX_FAKE_INIT_FAILURES'])) {
           const error = process.env['CODEX_FAKE_INIT_ERROR'] ?? 'failed to initialize sqlite state runtime under test-home: failed to initialize state runtime at test-home';
+          if (process.env['CODEX_FAKE_INIT_RPC_ERROR']) {
+            log('initialize RPC error');
+            if (process.env['CODEX_FAKE_INIT_RPC_ERROR'] === 'exit') {
+              setTimeout(() => {
+                process.stderr.write(`Error: ${error}\nCaused by: database is locked\n`);
+                process.exit(1);
+              }, 100);
+            }
+            throw new Error('SQLite initialization failed');
+          }
           process.stderr.write(`Error: ${error}\nCaused by: database is locked\n`);
           process.exit(1);
         }

@@ -620,6 +620,8 @@ The native thread is created or resumed only after initialization succeeds;
 the prompt is sent once. Stop cancels the retry wait. Other startup failures
 and failures after initialization end the turn without an automatic retry.
 Each retry is logged, and a third failure keeps the agent's exit error visible.
+An initialization RPC error waits up to 500 ms for process closure and remaining
+stderr before the retry decision, so a process that stays alive cannot stall it.
 
 ### Codex task tracking
 
