@@ -83,7 +83,7 @@ jobs:
           docker push "$tag"
           mkdir -p digests
           docker inspect --format '{{index .RepoDigests 0}}' "$tag" > "digests/$ARCH"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: ./.github/actions/upload-artifact
         if: inputs.publish
         with:
           name: server-digest-${{ matrix.arch }}
