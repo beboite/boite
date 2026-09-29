@@ -41,6 +41,8 @@ test('machine memory reports plausible physical total and available bytes', () =
   const memory = processPlatform.machineMemory();
   expect(memory).not.toBeNull();
   expect(memory!.totalBytes).toBeGreaterThan(512 * MB);
+  // macOS gives no honest available reading, so the reserve check sits out there.
+  if (process.platform === 'darwin') return expect(memory!.availableBytes).toBeNull();
   expect(memory!.availableBytes).toBeGreaterThan(0);
   expect(memory!.availableBytes).toBeLessThanOrEqual(memory!.totalBytes);
 });

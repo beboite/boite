@@ -43,6 +43,7 @@ test('header and project layout', async () => {
     workspace.active.localCore = true;
     workspace.machines = [...workspace.machines].reverse();
   })()`);
+  await page.waitFor(`document.querySelector('${id('machine-status')}')`);
   await pointerClick(id('machine-status'));
   await page.waitFor(`document.querySelector('${id('machine-status-menu')}')`);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('machine-status-menu')} [data-row]')).slice(0,2).map(el => el.textContent.trim())`)).toEqual(['All machines', 'This PC']);

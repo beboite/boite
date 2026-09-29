@@ -10,7 +10,8 @@ test('memory RPC reads applied limits and threads.get recovers bounded memory no
     const status = await client.call('resources.memoryStatus', {});
     expect(status.limits).toEqual(resolveMemoryLimits(harness.core.settings.get(), processPlatform.machineMemory()!.totalBytes));
     expect(status.agentBytes).toBe(0);
-    expect(status.availableBytes).toBeGreaterThan(0);
+    if (process.platform === 'darwin') expect(status.availableBytes).toBeNull();
+    else expect(status.availableBytes).toBeGreaterThan(0);
     const { threadId } = await echoThread(harness, client);
     for (let at = 0; at < 103; at++) {
       harness.core.bus.emit('resources.memory', { threadId, kind: 'thread-cap', state: 'ok', at });
