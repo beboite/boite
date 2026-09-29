@@ -409,14 +409,15 @@ export class ProcRegistry {
       ioBytes: null,
     };
 
-    if (control.startup && pid > 0 && this.platform.startup) {
+    const attached = this.platform.attach(threadId, pid);
+    if (!attached) this.unassigned.add(pid);
+    if (control.startup && attached && this.platform.startup) {
       this.finishStartup(threadId);
       this.platform.startup(threadId, true);
       const timer = setTimeout(() => this.finishStartup(threadId), STARTUP_PRIORITY.ms);
       timer.unref();
       this.startups.set(threadId, { pid, timer });
     }
-    if (!this.platform.attach(threadId, pid)) this.unassigned.add(pid);
     this.track(threadId, record, control);
     return record;
   }
