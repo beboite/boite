@@ -335,7 +335,7 @@ export interface ProviderSummary {
   executable: string | null;
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
-  /** Whether Boite can start login, and how: a piped command, the ACP call, or a command typed into a terminal. */
+  /** How Boite starts login: a piped command, ACP, a terminal or a device-code protocol. */
   login: false | { kind: 'command' | 'acp' | 'terminal' | 'device' };
   /** True when the provider cannot use its default login location. */
   alwaysIsolated: boolean;
