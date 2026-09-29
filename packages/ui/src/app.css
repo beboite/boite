@@ -178,6 +178,9 @@
   --color-accent-ink: #101013;
   --color-reasoning: var(--color-accent);
   --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
+  --picker-white: #ffffff;
+  --picker-black: #000000;
+  --picker-hues: linear-gradient(to right, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
   --color-reasoning-on: #ffffff;
   --color-live: #eab308;
   --color-success: #4ade80;
@@ -280,6 +283,59 @@
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: dark;
+}
+
+/* The five editable roles, with a separate palette for each appearance. */
+:root {
+  --palette-dark-default-background: #101013;
+  --palette-grain-theme-color: #1a1a1e;
+  --palette-dark-default-frame: #1a1a1d;
+  --palette-dark-default-surface: #1b1b1f;
+  --palette-dark-default-foreground: #ececf1;
+  --palette-light-default-background: #f3f3f6;
+  --palette-light-default-frame: #e7e7ec;
+  --palette-light-default-surface: #ffffff;
+  --palette-light-default-foreground: #1c1c21;
+  --palette-dark-ocean-background: #101b29;
+  --palette-dark-ocean-frame: #172638;
+  --palette-dark-ocean-surface: #1b2d42;
+  --palette-dark-ocean-foreground: #e4eef8;
+  --palette-dark-ocean-accent: #70b9f9;
+  --palette-light-ocean-background: #edf4fa;
+  --palette-light-ocean-frame: #dce9f4;
+  --palette-light-ocean-surface: #f8fcff;
+  --palette-light-ocean-foreground: #1d344c;
+  --palette-light-ocean-accent: #176aaa;
+  --palette-dark-forest-background: #121e1a;
+  --palette-dark-forest-frame: #1b2b25;
+  --palette-dark-forest-surface: #22342c;
+  --palette-dark-forest-foreground: #e4f0e9;
+  --palette-dark-forest-accent: #79d7a1;
+  --palette-light-forest-background: #eef5f0;
+  --palette-light-forest-frame: #dceade;
+  --palette-light-forest-surface: #fafffb;
+  --palette-light-forest-foreground: #223d2c;
+  --palette-light-forest-accent: #277b4c;
+  --palette-dark-sand-background: #201c17;
+  --palette-dark-sand-frame: #2b261f;
+  --palette-dark-sand-surface: #342e25;
+  --palette-dark-sand-foreground: #f2eadc;
+  --palette-dark-sand-accent: #e7b66e;
+  --palette-light-sand-background: #f5f1e8;
+  --palette-light-sand-frame: #e9e1d3;
+  --palette-light-sand-surface: #fffdf8;
+  --palette-light-sand-foreground: #423729;
+  --palette-light-sand-accent: #926016;
+  --palette-dark-plum-background: #1e1724;
+  --palette-dark-plum-frame: #2a2131;
+  --palette-dark-plum-surface: #32273b;
+  --palette-dark-plum-foreground: #f0e6f5;
+  --palette-dark-plum-accent: #c49aee;
+  --palette-light-plum-background: #f6f0f9;
+  --palette-light-plum-frame: #eaddf0;
+  --palette-light-plum-surface: #fffbff;
+  --palette-light-plum-foreground: #44304e;
+  --palette-light-plum-accent: #8547ab;
 }
 
 /* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big

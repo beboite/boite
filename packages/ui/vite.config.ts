@@ -7,6 +7,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { stampWorkerCache } from './src/lib/worker-stamp';
 import { tooNewForFloor } from './src/lib/browser-floor';
 import { localePreloadScript } from './src/lib/locale-preload';
+import { colorsBootScript } from './src/lib/theme-colors';
 
 const COMPRESSIBLE = /\.(?:html|js|css|svg|json|webmanifest)$/;
 
@@ -130,7 +131,7 @@ function localePreload(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte(), browserFloor(), dropFakeClient(), localePreload(), precompress()],
+  plugins: [svelte(), { name: 'boite-colors-prepaint', transformIndexHtml: () => [{ tag: 'script', children: colorsBootScript(), injectTo: 'head' }] }, browserFloor(), dropFakeClient(), localePreload(), precompress()],
   base: './',
   // AudioWorklet modules must be same-origin files, never data URLs under the shell CSP.
   build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', assetsInlineLimit: (file) => file.endsWith('speech-worklet.js') ? false : undefined },

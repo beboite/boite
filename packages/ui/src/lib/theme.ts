@@ -10,6 +10,7 @@
 import { isExperimentEnabled, subscribeExperiments } from './experiments';
 import { startAccent } from './accent';
 import { startFonts } from './fonts';
+import { applyColors, COLORS_EVENT, startColors } from './theme-colors';
 
 export type Theme = 'system' | 'dark' | 'light' | 'grain';
 
@@ -68,6 +69,8 @@ export function applyTheme(theme: Theme): void {
   if (resolved === 'dark') delete root.dataset.theme;
   else root.dataset.theme = resolved;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[resolved]);
+  applyColors(resolved === 'light' ? 'light' : 'dark');
+  window.dispatchEvent(new Event(COLORS_EVENT));
 }
 
 /** Stores the choice and paints it in one call: what the settings control uses. */
@@ -85,18 +88,20 @@ export function setTheme(theme: Theme): void {
 export function startTheme(): () => void {
   const stopAccent = startAccent();
   const stopFonts = startFonts();
+  const stopColors = startColors();
   applyTheme(readTheme());
   const stopExperiments = subscribeExperiments(() => applyTheme(readTheme()));
-  if (typeof window.matchMedia !== 'function') return () => { stopExperiments(); stopAccent(); stopFonts(); };
+  const onstorage = (event: StorageEvent) => { if (event.key === THEME_STORAGE_KEY || event.key === null) applyTheme(readTheme()); };
+  window.addEventListener('storage', onstorage);
+  const cleanup = () => { stopExperiments(); stopAccent(); stopFonts(); stopColors(); window.removeEventListener('storage', onstorage); };
+  if (typeof window.matchMedia !== 'function') return cleanup;
   const query = window.matchMedia(LIGHT_QUERY);
   const onchange = () => {
     if (readTheme() === 'system') applyTheme('system');
   };
   query.addEventListener('change', onchange);
   return () => {
-    stopExperiments();
-    stopAccent();
-    stopFonts();
+    cleanup();
     query.removeEventListener('change', onchange);
   };
 }
