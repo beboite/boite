@@ -68,6 +68,9 @@ The guide covers the CLI, panel, attachments, tasks and project todos. It lives
 in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
 session keeps the guide; a replacement session receives it again. The brain's
 own instructions still go every normal turn while sharing is enabled.
+The base guide is 569 bytes, or 724 with asynchronous questions. Coordination
+and delegation add only the instructions for enabled features; the full command
+formats stay behind `boite help` and `boite workflow help`.
 The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
 "Asynchronous questions" off, the guide leaves its `boite ask` line out. The
