@@ -767,9 +767,11 @@ test('Ctrl+J opens the shell of the thread under the chat, hides it again, and i
   expect(document.body.dispatchEvent(chord())).toBe(false);
   await waitFor(() => document.querySelector(`[data-testid=terminal][data-terminal-id="terminal:${threadId}"]`) !== null);
   // xterm draws what the fake shell printed: its prompt, in the thread's folder.
-  await waitFor(() => query('[data-testid=terminal-drawer]').textContent?.includes('PS ') === true);
+  await waitFor(() => document.querySelector('[data-testid=terminal-drawer]')?.textContent?.includes('PS ') === true);
   expect(query('[data-testid=terminal-toggle]').classList.contains('on')).toBe(true);
   expect(query<HTMLButtonElement>('[data-testid=terminal-toggle]').title).toContain('Ctrl+J');
+  await store.open(threadId);
+  await waitFor(() => document.activeElement?.classList.contains('xterm-helper-textarea') === true);
 
   // Back from a dropped socket, the view asks the core for the shell again.
   const reopen = vi.spyOn(store, 'openTerminal');
@@ -2292,6 +2294,72 @@ test('the desktop still has every one of them', async () => {
   await waitFor(() => document.querySelector('[data-testid=setting-focus-guard]') !== null);
   expect((query('[data-testid=setting-focus-guard]') as HTMLInputElement).checked).toBe(false);
 
+});
+
+test('automatic settings sync follows the chosen source outside settings and stops when unchecked', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2);
+  const remote = workspace.machines.find(machine => machine.store !== store)!;
+  await store.client!.call('brain.configure', { path: '/home/user/source-brain', enabled: false });
+  await remote.store.client!.call('brain.configure', { path: '/home/user/target-brain', enabled: false });
+  await store.client!.call('settings.set', { warmProcessMinutes: 9 });
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
+  const checkbox = query<HTMLInputElement>('[data-testid=machine-sync]');
+  expect(checkbox.type).toBe('checkbox');
+  checkbox.click();
+  await waitFor(() => remote.store.settings?.warmProcessMinutes === 9);
+  expect(document.querySelector('[data-testid=confirm-ok]')).toBeNull();
+  store.showChat();
+  await store.client!.call('settings.set', { warmProcessMinutes: 12 });
+  await store.client!.call('keybindings.set', { command: 'terminal', chord: 'Ctrl+Shift+J' });
+  await waitFor(() => remote.store.settings?.warmProcessMinutes === 12 && remote.store.keybindings?.bindings.terminal === 'ctrl+shift+j');
+  const brain = await store.client!.call('brain.status', {});
+  await store.client!.call('brain.configure', { ...brain.config, boiteGuide: false });
+  await waitFor(() => workspace.settingsSync.reports[remote.id]?.report.brain === 'copied');
+  await vi.waitFor(async () => expect((await remote.store.client!.call('brain.status', {})).config).toMatchObject({ path: '/home/user/target-brain', boiteGuide: false }));
+  // Missed changes catch up when the destination reconnects.
+  remote.store.connection = 'closed';
+  flushSync();
+  await store.client!.call('settings.set', { warmProcessMinutes: 14 });
+  remote.store.connection = 'ready';
+  flushSync();
+  await waitFor(() => remote.store.settings?.warmProcessMinutes === 14);
+  // Switching the visible host does not reverse the saved source.
+  await workspace.select(remote.store);
+  await store.client!.call('settings.set', { warmProcessMinutes: 15 });
+  await waitFor(() => remote.store.settings?.warmProcessMinutes === 15);
+  await workspace.select(store);
+  store.showSettings('machines');
+  await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
+  query<HTMLInputElement>('[data-testid=machine-sync]').click();
+  await store.client!.call('settings.set', { warmProcessMinutes: 18 });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  expect(remote.store.settings?.warmProcessMinutes).toBe(15);
+});
+
+test('a remote terminal keeps output arriving while its opening response is in flight', async () => {
+  await mountOnFake('/?fake=1&machines=1');
+  await waitFor(() => workspace.machines.length === 2 && store.openThread !== null);
+  const remote = workspace.machines.find(machine => machine.store !== store)!;
+  await workspace.select(remote.store, store.openThread!.id);
+  const client = remote.store.client!;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  let snapshotReady = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call<RpcMethodName>(method, params);
+    if (method === 'terminals.open') { snapshotReady = true; await gate; }
+    return result;
+  });
+  try {
+    remote.store.toggleTerminal();
+    await waitFor(() => snapshotReady);
+    await call('terminals.write', { id: `terminal:${remote.store.openThread!.id}`, data: 'remote-prompt-marker' });
+    release();
+    await waitFor(() => document.querySelector('[data-testid=terminal-drawer]')?.textContent?.includes('remote-prompt-marker') === true);
+  } finally { release(); spy.mockRestore(); }
 });
 
 test('machines coexist and disconnecting a remote leaves the primary connected', async () => {

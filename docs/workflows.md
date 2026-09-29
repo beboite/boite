@@ -12,6 +12,12 @@ can save a run as a template and start it again from the panel. The owner must
 enable delegation first, because every step uses a profile approved for that
 team.
 
+When a request mentions a workflow while delegation is disabled, every driver
+receives the same instruction to explain the block and point the owner to
+Team settings. Enabled teams receive the runner commands and must report the
+run ID. Native subagents and a checklist do not stand in for a requested Boite
+workflow. This guidance does not enable delegation or increase its limits.
+
 ## A plan
 
 ```json

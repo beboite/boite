@@ -6,6 +6,7 @@
 
   let { store, threadId }: { store: Store; threadId: string } = $props();
   let active = $derived((store.delegation?.agents ?? []).filter(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)));
+  let native = $derived((store.delegation?.nativeAgents ?? []).filter(agent => agent.status === 'running'));
 
   $effect(() => { void store.loadDelegation(threadId); });
   $effect(() => { void store.loadWorkflows(threadId); });
@@ -16,7 +17,7 @@
   }
 </script>
 
-{#if active.length > 0}
+{#if active.length > 0 || native.length > 0}
   <nav class="dock" aria-label={strings.delegation.activeAgents} data-testid="agent-dock">
     <span class="label"><UsersRound size={14} strokeWidth={1.75} />{strings.delegation.activeAgents}</span>
     <div class="agents">
@@ -24,6 +25,12 @@
         <button type="button" class="chip agent" data-testid="agent-dock-member" data-agent-id={agent.thread.id} onclick={() => open(agent.thread.id)}>
           <StatusMark status={agent.thread.status} />
           <span>{agent.thread.title}</span>
+        </button>
+      {/each}
+      {#each native as agent (agent.id)}
+        <button type="button" class="chip agent" data-testid="native-agent-dock-member" onclick={() => { store.panel.open('agents'); void store.selectDelegatedAgent(null); }} title={strings.delegation.nativeHeading}>
+          <StatusMark status="running" />
+          <span>{agent.name ?? agent.task ?? strings.delegation.nativeHeading}</span>
         </button>
       {/each}
     </div>

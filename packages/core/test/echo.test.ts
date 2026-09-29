@@ -556,9 +556,10 @@ describe('echo driver', () => {
 
     const started: RpcEvents['process.started'][] = [];
     client.on('process.started', (record) => {
-      if (record.threadId === threadId) started.push(record);
+      // Windows can also report the shell's console host. This assertion follows the direct child.
+      if (record.threadId === threadId && record.parentPid === process.pid) started.push(record);
     });
-    const exited = client.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const exited = client.next('process.exited', (record) => record.threadId === threadId && record.parentPid === process.pid, 10000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
 
     await client.call('turns.start', { threadId, prompt: '[spawn:echo hello]' });
@@ -575,7 +576,7 @@ describe('echo driver', () => {
     const text = assistant?.parts.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
     expect(text).toContain('hello');
 
-    const trace = await client.call('trace.get', { threadId });
+    const trace = (await client.call('trace.get', { threadId })).filter(record => record.pid === started[0]?.pid);
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitCode).toBe(0);
     // The child wrote `hello` into a pipe, so WriteTransferCount is above zero

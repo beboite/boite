@@ -78,6 +78,7 @@ export class Scheduler {
   }
 
   private pump(): void {
+    if (this.core.stopping) return;
     let started = false;
     for (;;) {
       const index = this.queue.findIndex(

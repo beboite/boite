@@ -15,6 +15,7 @@ mod material;
 mod platform;
 mod quota_window;
 mod resident;
+mod update_stop;
 mod tray;
 mod updater;
 mod window;
@@ -120,6 +121,7 @@ pub fn run() {
             updater::app_update_check,
             updater::app_update_download,
             updater::app_update_install,
+            updater::app_update_cancel_install,
             quota_window::quota_window,
             material::window_material,
             material::window_material_supported,

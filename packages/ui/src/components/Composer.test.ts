@@ -993,7 +993,9 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   // The agent's two, in its own order, before every one of Boite's.
   expect(rows.slice(0, 2)).toEqual(['shout', 'whisper']);
   expect(rows).toContain('model');
-  expect(rows).toContain('theme-dark');
+  expect(rows).not.toContain('theme-dark');
+  expect(rows).not.toContain('sidebar');
+  expect(rows).not.toContain('settings');
   expect(slashMenu()?.textContent).toContain('The prompt back in capitals');
   expect(slashMenu()?.textContent).toContain('<text>');
   expect(document.body.textContent).toContain('Agent');
@@ -1022,19 +1024,19 @@ test('a slash lists the agent commands first, filters, and completes the box', a
   expect(answer).toBe('HELLO');
 });
 
-test('one of Boite own commands runs from the slash menu and empties the box', async () => {
+test('a composer command opens its control without sending a prompt', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread !== null && !store.busy);
 
-  await type('/dark');
+  await type('/model');
   await waitFor(() => slashMenu() !== null);
-  expect(slashRows()).toEqual(['theme-dark']);
+  expect(slashRows()).toEqual(['model']);
 
   input().focus();
   expect(press('Enter')).toBe(false);
   await waitFor(() => slashMenu() === null);
   expect(input().value).toBe('');
-  expect(window.localStorage.getItem('boite.theme')).toBe('dark');
+  await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   // Nothing was sent: a Boite command is not a prompt.
   expect(store.busy).toBe(false);
 });

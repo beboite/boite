@@ -15,6 +15,15 @@ import type { TestCore } from './harness.ts';
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/muse-server.ts', import.meta.url));
 const PROVIDER = 'muse-fake';
 
+test('Muse subagent snapshots reach the native team', async () => {
+  const client = await startCore();
+  const threadId = await museThread(client);
+  expect((await runTurn(client, threadId, '[agents]')).status).toBe('done');
+  expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
+    expect.objectContaining({ toolId: 'native-muse', name: 'reviewer', task: 'Review parser boundaries', status: 'done', result: 'Parser checked' }),
+  ]);
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 
