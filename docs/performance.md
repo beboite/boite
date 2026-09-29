@@ -4,6 +4,49 @@ What boite does to stay cheap on a slow link and quick to start, how each part
 is measured, and the numbers of the last run. A claim about speed or size needs
 a fresh run of the bench that covers it, with the command and the date.
 
+## Concurrent agent stress
+
+```sh
+bun run test:stress
+bun run bench:stress --threads 1000 --concurrency 64 --clients 12 --output stress.json
+bun run bench:stress --threads 1000 --concurrency 64 --clients 0 --output stress-solo.json
+```
+
+These are offline tests on fresh temporary data directories. The benchmark
+checks every streamed answer and persisted turn, global concurrency, mass
+cancellation, a reader reconnect and recovery after killing the core. It runs
+both six turns at a time and the requested concurrency. Additional readers
+alternate local connections with compressed, paced remote connections.
+An independent process probes HTTP health, so parsing the load generator's
+WebSocket frames cannot delay the observer.
+
+`test:stress` checks 24 real child processes across the scripted ACP, Codex
+and pi protocols, warm reuse, simultaneous stops and recovery after agent
+exits. It also opens the production UI in a hidden browser with 1,000 sidebar
+threads and a 256-turn burst, checks a foreground reply and writes desktop and
+phone captures. `BOITE_STRESS_ARTIFACTS` selects the capture directory.
+The smaller six-process regression runs in the normal core suite and starts a
+fresh core so earlier tests cannot hide a race in first-use imports.
+
+On Windows with Bun 1.4.2, 2026-09-29:
+
+| Scenario | Observed result |
+| --- | --- |
+| 24 scripted agents, cold then warm turns | Initially 38 processes instead of 24; sharing the pending driver load kept all 24 warm processes |
+| 1,000 echo threads, one observer, initial baseline | Both streaming bursts completed with exact answers; all 1,000 turns cancelled and recovered after a crash |
+| Same baseline, core memory at 64 concurrent turns | 115.8 MiB; this excludes real agent processes |
+| Same baseline, scheduler payloads | 163.3 MiB of decoded scheduler JSON on one connection during the 64-turn burst |
+| 1,000 threads and 12 additional readers, independent health observer | Three HTTP requests timed out after ten seconds each; turn-start requests exceeded thirty seconds |
+| Production UI, 1,000 threads and a 256-turn burst | Scheduler RPC timed out after ten seconds; desktop and phone failure captures were produced; browser teardown also exceeded its exit deadline |
+
+The load failure remains open. Scheduler updates send the whole queue on each
+change, so a burst grows both the number and size of snapshots; this is a
+candidate for profiling, not a confirmed explanation for every stall.
+Background machine load was not controlled. These single runs establish
+failures and reproducible checks. They do not
+establish a supported agent count or measure real provider quotas, agent RAM,
+the native shell, Linux or macOS under this load.
+
 ## Naming a long conversation
 
 `bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text

@@ -20,9 +20,12 @@ import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, Turn
  */
 function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean } = {}): Driver {
   let loaded: Driver | null = null;
+  let loading: Promise<Driver> | null = null;
   const ready = async (): Promise<Driver> => {
-    if (loaded === null) loaded = await load();
-    return loaded;
+    if (loaded !== null) return loaded;
+    // Concurrent first turns must share the driver and its warm-session registry.
+    loading ??= load().then(driver => { loaded = driver; return driver; }).finally(() => { loading = null; });
+    return loading;
   };
   return {
     protocol,

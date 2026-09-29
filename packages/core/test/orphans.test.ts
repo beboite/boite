@@ -88,8 +88,10 @@ describe('orphan sweep', () => {
   });
 
   test('a process younger than the grace is left alone', () => {
-    expect(procs.sweepOrphans(THREAD, Date.now())).toEqual([]);
-    expect(procs.sweepOrphans(THREAD, Date.now() + GRACE_MS).sort()).toEqual([103, 104]);
+    // Journal writes can exceed the grace on a loaded host. Check age using the recorded births.
+    const births = procs.liveOf(THREAD).filter(record => record.pid === 103 || record.pid === 104).map(record => record.startedAt);
+    expect(procs.sweepOrphans(THREAD, Math.min(...births) + GRACE_MS - 1)).toEqual([]);
+    expect(procs.sweepOrphans(THREAD, Math.max(...births) + GRACE_MS).sort()).toEqual([103, 104]);
   });
 
   test('a parent pid taken by a younger process does not count as the parent', async () => {
