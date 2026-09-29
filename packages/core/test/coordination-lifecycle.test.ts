@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { holdAccountTurns, echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -16,7 +16,7 @@ afterEach(async () => {
 const brief: CoordinationConfig = { mode: 'brief', resources: '', remote: false, paused: false };
 
 async function setupQueued() {
-  const h = await startTestCore({ settings: { maxConcurrentTurns: 1, perAccountConcurrency: 1 } });
+  const h = await startTestCore();
   cores.push(h);
   const owner = await h.connect();
   const from = (await echoThread(h, owner, 'Sender')).threadId;
@@ -34,12 +34,13 @@ async function setupQueued() {
     stopBlocker = () => finish('stopped');
     return { done, stop: stopBlocker };
   } }));
-  h.core.threads.startTurn(blocker, 'Hold the account slot');
+  h.core.threads.startTurn(blocker, 'Keep existing work running');
+  const releaseAdmission = holdAccountTurns(h);
   await waitFor(() => h.core.threads.require(blocker).status === 'running');
   const destination = h.core.coordination.get(to).self;
   const letter = await h.core.coordination.send({ threadId: from, to: destination, text: 'Coordinate later', requestId: crypto.randomUUID() });
   await waitFor(() => h.core.coordination.get(to).messages.find(message => message.id === letter.id)?.error === 'Queued for provider delivery', 8000);
-  return { h, owner, from, to, blocker, letter, stopBlocker };
+  return { h, owner, from, to, blocker, letter, stopBlocker, releaseAdmission };
 }
 
 test('stopping or archiving a queued coordination turn restores messages that never reached a provider', async () => {
@@ -91,7 +92,7 @@ test('cross-project consent is rechecked and disabling it rejects a pending deli
 });
 
 test('revoking a peer cancels its queued wake before rejecting the incoming message', async () => {
-  const one = await startTestCore(); const two = await startTestCore({ settings: { maxConcurrentTurns: 1, perAccountConcurrency: 1 } });
+  const one = await startTestCore(); const two = await startTestCore();
   cores.push(one, two);
   const ownerOne = await one.connect(); const ownerTwo = await two.connect();
   const from = (await echoThread(one, ownerOne, 'Remote sender')).threadId;
@@ -107,7 +108,8 @@ test('revoking a peer cancels its queued wake before rejecting the incoming mess
     const done = new Promise<{ status: 'stopped'; sessionId: null; usage: null }>(resolve => { release = () => resolve({ status: 'stopped', sessionId: null, usage: null }); });
     return { done, stop: release };
   } }));
-  two.core.threads.startTurn(blocker, 'Hold the account slot');
+  two.core.threads.startTurn(blocker, 'Keep existing work running');
+  holdAccountTurns(two);
   await waitFor(() => two.core.threads.require(blocker).status === 'running');
   const destination: AgentAddress = two.core.coordination.get(to).self;
   const sent = await one.core.coordination.send({ threadId: from, to: destination, text: 'Remote work', requestId: crypto.randomUUID() });
@@ -171,9 +173,10 @@ test('pausing in settings cancels an already queued wake', async () => {
 }, 12000);
 
 test('a queued wake rechecks expiry before sending anything to the provider', async () => {
-  const { h, to, letter, stopBlocker } = await setupQueued();
+  const { h, to, letter, stopBlocker, releaseAdmission } = await setupQueued();
   h.core.journal.db.query("UPDATE coordination_letters SET data = json_set(data, '$.expiresAt', ?) WHERE id = ?").run(Date.now() - 1, letter.id);
   stopBlocker();
+  releaseAdmission();
   await waitFor(() => h.core.journal.listTurns(to)[0]?.status === 'stopped');
   expect(h.core.coordination.get(to).messages[0]?.status).toBe('received');
 }, 12000);

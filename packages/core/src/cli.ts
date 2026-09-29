@@ -246,7 +246,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
         print([
           `parent: ${view.rootThreadId}`,
           `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
-          `turns: ${view.turnsUsed}/${view.config.maxTurns}`,
+          `turns: ${view.turnsUsed}`,
           ...(action === 'profiles'
             ? view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)
             : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),

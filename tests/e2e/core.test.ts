@@ -267,46 +267,29 @@ test(
 );
 
 test(
-  'a cap of one leaves two turns queued, and a queued turn can be stopped',
+  'independent turns on one account start together and can each be stopped',
   async () => {
-    const settings = await client.call('settings.set', { maxConcurrentTurns: 1 });
-    expect(settings.maxConcurrentTurns).toBe(1);
-
     const accounts = await client.call('accounts.list', {});
-    const echoAccount = accounts.find((account) => account.providerId === 'echo');
+    const echoAccount = accounts.find(account => account.providerId === 'echo')!;
     const three: ThreadSummary[] = [];
-    for (let index = 0; index < 3; index += 1) {
-      three.push(
-        await client.call('threads.create', {
-          projectId: project.id,
-          providerId: 'echo',
-          accountId: echoAccount?.id ?? '',
-          title: `queued ${index}`,
-        }),
-      );
+    for (let index = 0; index < 3; index++) three.push(await client.call('threads.create', {
+      projectId: project.id, providerId: 'echo', accountId: echoAccount.id, title: `parallel ${index}`,
+    }));
+    try {
+      for (const entry of three) await client.call('turns.start', { threadId: entry.id, prompt: '[sleep:60000]' });
+      const state = await client.call('scheduler.get', {});
+      const ours = new Set(three.map(entry => entry.id));
+      expect(state.running.filter(entry => ours.has(entry.threadId))).toHaveLength(3);
+      expect(state.queued.filter(entry => ours.has(entry.threadId))).toEqual([]);
+      const target = three[1]!;
+      const finished = client.next('turn.finished', turn => turn.threadId === target.id, TIMEOUT);
+      expect((await client.call('turns.stop', { threadId: target.id })).stopped).toBe(true);
+      expect((await finished).status).toBe('stopped');
+      const after = await client.call('scheduler.get', {});
+      expect(after.running.filter(entry => ours.has(entry.threadId))).toHaveLength(2);
+    } finally {
+      for (const entry of three) await client.call('turns.stop', { threadId: entry.id });
     }
-
-    const turns: Turn[] = [];
-    for (const queued of three) {
-      turns.push(await client.call('turns.start', { threadId: queued.id, prompt: 'wait [sleep:400]' }));
-    }
-
-    const state = await client.call('scheduler.get', {});
-    const ours = new Set(three.map((entry) => entry.id));
-    expect(state.running.filter((entry) => ours.has(entry.threadId)).length).toBe(1);
-    expect(state.queued.filter((entry) => ours.has(entry.threadId)).length).toBe(2);
-
-    const queuedEntry = state.queued.find((entry) => ours.has(entry.threadId));
-    expect(queuedEntry).toBeDefined();
-    const stopped = await client.call('turns.stop', { threadId: queuedEntry?.threadId ?? '' });
-    expect(stopped.stopped).toBe(true);
-
-    const after = await client.call('scheduler.get', {});
-    expect(after.queued.some((entry) => entry.turnId === queuedEntry?.turnId)).toBe(false);
-
-    for (const queued of three) await client.call('turns.stop', { threadId: queued.id }).catch(() => undefined);
-    await client.call('settings.set', { maxConcurrentTurns: 6 });
-    expect(turns.length).toBe(3);
   },
   TIMEOUT,
 );

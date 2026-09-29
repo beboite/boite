@@ -26,6 +26,63 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('sidebar shortcuts preserve the prompt and file edits, and toggle both panels', async () => {
+  await page.evaluate(`(async () => {
+    const { workspace } = await import('/src/lib/workspace.svelte.ts');
+    await workspace.active.setKeybinding('panel', 'default');
+    workspace.active.panel.openFile('docs/guide/editor.md');
+  })()`);
+  await page.waitFor(`document.querySelector('${id('file-text')}')`);
+  await page.type(id('file-text'), '# Unsaved file');
+  await page.waitFor(`document.querySelector('${id('file-dirty')}')`);
+  await page.type(id('composer-input'), 'Keep this prompt');
+  const chord = async (shift = false, panel = false) => {
+    const base = { key: panel ? 'b' : 's', code: panel ? 'KeyB' : 'KeyS', windowsVirtualKeyCode: panel ? 66 : 83, modifiers: panel ? 3 : shift ? 10 : 2 };
+    await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  };
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
+  expect(await page.evaluate(`document.querySelector('${id('composer-input')}').value`)).toBe('Keep this prompt');
+  expect(await page.evaluate(`!!document.querySelector('${id('file-dirty')}')`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('sidebar-toggle')}').title`)).toEndWith('(Ctrl+S)');
+  expect(await page.evaluate(`document.querySelector('${id('panel-toggle')}').title`)).toEndWith('(Ctrl+Alt+B)');
+  await capture('shortcut-left-collapsed.png');
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'true'`);
+  // Saving in the file editor consumes Ctrl+S before it reaches the sidebar.
+  await page.evaluate(`document.querySelector('${id('file-text')}').focus()`);
+  await chord();
+  await page.waitFor(`!document.querySelector('${id('file-dirty')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+  // A read-only editor cannot save, so Ctrl+S still reaches the thread sidebar.
+  await page.evaluate(`__boiteTest.workspace.active.principal = 'session'`);
+  await page.waitFor(`document.querySelector('${id('file-text')}').readOnly`);
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'true'`);
+  await page.evaluate(`__boiteTest.workspace.active.principal = 'owner'`);
+  await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
+  await chord(true);
+  await page.waitFor(`document.querySelector('${id('composer-input')}').value === ''`);
+  await chord(true);
+  await page.waitFor(`document.querySelector('${id('composer-input')}').value === 'Keep this prompt'`);
+  await chord(false, true);
+  await page.waitFor(`!document.querySelector('${id('right-panel')}')`);
+  await capture('shortcut-right-collapsed.png');
+  await chord(false, true);
+  await page.waitFor(`document.querySelector('${id('file-text')}')?.value === '# Unsaved file'`);
+  await capture('shortcut-panels-expanded.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await capture('shortcut-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
+  await chord(false, true);
+  await page.type(id('composer-input'), '');
+  expect(page.errors()).toEqual([]);
+}, 30_000);
+
 test('header and project layout', async () => {
   await capture(process.env.BOITE_CAPTURE_BEFORE ? 'header-before.png' : 'header-expanded.png');
   if (process.env.BOITE_CAPTURE_BEFORE) return;

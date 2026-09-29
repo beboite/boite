@@ -253,7 +253,7 @@ export class Composer {
           }
           throw error;
         });
-        if (s.openThread?.id === threadId) s.openThread.activity = accepted;
+        if (this.ctx.client === client && s.openThread?.id === threadId) s.openThread.activity = accepted;
         return true;
       }
       const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(thread => thread.id === threadId);

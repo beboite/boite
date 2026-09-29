@@ -149,7 +149,6 @@ async function main(): Promise<void> {
   let client: CoreClient | undefined;
 
   try {
-    await direct.call('settings.set', { maxConcurrentTurns: 8, perAccountConcurrency: 8 });
     const project = await direct.call('projects.add', { path: directory, name: 'bench' });
     const account = (await direct.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
     if (account === undefined) throw new Error('the core has no echo account');

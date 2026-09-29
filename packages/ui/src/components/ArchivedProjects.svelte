@@ -4,6 +4,7 @@
   import { projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Machine } from '../lib/workspace.svelte';
+  import MachineIcon from './MachineIcon.svelte';
 
   /**
    * The projects put out of the list, under it. One click brings one back;
@@ -26,7 +27,13 @@
       <ul>
         {#each entries as { machine, project } (`${machine.id}:${project.id}`)}
           <li data-project-id={project.id}>
-            <span class="name" title={multi ? `${project.path} · ${machine.label}` : project.path}>{projectName(project)}</span>
+            <div class="project">
+              <span class="name" title={multi ? `${project.path} · ${machine.label}` : project.path}>{projectName(project)}</span>
+              <span class="machine" title={machine.label}>
+                <MachineIcon icon={machine.icon} os={machine.store.core?.os} size={11} />
+                <span class="machine-name">{machine.label}</span>
+              </span>
+            </div>
             <button
               class="ghost small"
               data-testid="archived-project-restore"
@@ -68,16 +75,34 @@
     align-items: center;
     gap: 6px;
     min-height: var(--row);
-    padding: 0 2px 0 22px;
+    padding: 4px 2px 4px 22px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
   }
-  .name {
+  .project {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .name, .machine-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .machine {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-subtle);
+    font-size: var(--text-xs);
+  }
+  .machine :global(svg) {
+    flex: none;
+  }
+  .machine-name {
+    min-width: 0;
   }
   li button {
     flex: none;

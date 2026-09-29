@@ -16,15 +16,15 @@ describe('the keyboard table', () => {
     });
     expect(table.palette).toEqual({ text: null, chord: null, custom: true });
     expect(table.sidebar).toEqual({
-      text: 'mod+b',
-      chord: { mod: true, ctrl: false, alt: false, shift: false, meta: false, key: 'b' },
+      text: 'mod+s',
+      chord: { mod: true, ctrl: false, alt: false, shift: false, meta: false, key: 's' },
       custom: false
     });
     expect(table.archive).toEqual({ text: null, chord: null, custom: false });
   });
 
   test('a chord matches its exact modifiers, and mod is Ctrl here and Cmd on a Mac', () => {
-    const modB = resolveBindings({}).sidebar.chord!;
+    const modB = resolveBindings({ sidebar: 'mod+b' }).sidebar.chord!;
     expect(matchesChord(key({ key: 'b', ctrlKey: true }), modB, false)).toBe(true);
     expect(matchesChord(key({ key: 'B', ctrlKey: true }), modB, false)).toBe(true);
     expect(matchesChord(key({ key: 'b', ctrlKey: true, altKey: true }), modB, false)).toBe(false);

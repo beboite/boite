@@ -113,3 +113,29 @@ test('a late accepted batch stays sent after replacing the client', async () => 
     expect(state.paused).toBe(false);
   } finally { store.detach(); client.close(); replacement.close(); }
 });
+
+test('a late accepted activity command cannot update the replacement thread', async () => {
+  const { store, client } = await ready();
+  const replacement = new FakeClient({ delayMs: 0 });
+  let acceptCommand!: (result: RpcResult<'threads.activity.set'>) => void;
+  const pending = new Promise<RpcResult<'threads.activity.set'>>(resolve => { acceptCommand = resolve; });
+  const call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
+    method === 'threads.activity.set' ? pending as ReturnType<typeof call> : call(method, params));
+  try {
+    await store.open('t-trace');
+    store.composerStates['t-trace'] = queued('/goal Former session goal');
+    const state = store.composerStates['t-trace']!;
+    await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'threads.activity.set')).toHaveLength(1));
+    store.composerStates = {};
+    store.attach(replacement);
+    await store.connect();
+    await store.open('t-trace');
+    const initialActivity = JSON.stringify(store.openThread!.activity);
+    acceptCommand({ goal: { objective: 'Former session goal', status: 'paused', iterations: 0, error: null }, loop: null, tasks: [] });
+    await vi.waitFor(() => expect(state.sending).toBe(false));
+    expect(JSON.stringify(store.openThread!.activity)).toBe(initialActivity);
+    expect(state.queued).toHaveLength(0);
+    expect(state.paused).toBe(false);
+  } finally { store.detach(); client.close(); replacement.close(); }
+});
