@@ -1,0 +1,468 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29",
+  "interpretation": "Engineering preflights retained without main-comparison scores. A superseded pilot result is not evidence of a current-arm success rate.",
+  "collected": 12,
+  "cohorts": [
+    {
+      "id": "initial-pilot",
+      "comparisonEligible": false,
+      "reason": "Invalid reference aliases and navigation validation. No main-comparison score.",
+      "expected": 4,
+      "protocolSha256": "90d12faeb1c3af3a4f095d8135e2b3d2c4483786ae3e02aa3c8f716ceb7a0568",
+      "sourceHashes": {
+        "browser-lab-julia.ts": "b00a1943b5d68ce6d0be2ed991804008b9ecef5e9f7d670ad7a51a95c5b62851",
+        "browser-lab-julia-choice.ts": "bf3689b8a897fd47c220092281d08a03c032e8489f280c1ec24cb5d65460f182",
+        "browser-lab-julia-choice.test.ts": "eb45badc6315ace763be37175a8430390349b6e8db04f947b751fcc6f595dfcf",
+        "browser-lab-page.ts": "be90e04c21dd05aaa8fd28664c3ce95627c2108d3fb367636513d06deab60b63",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "2b7c40f5f4d7b93d26a993a206f73c184a05023371bf676540e7674258f987db",
+        "browser-lab-native.ts": "83a2afab5ae65521eabc40f2b98cc3a058ca2f62b6540cab7a460b4c446ae5c6",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-model.ts": "8af88765f8d67d941530821e6c87ea64fd0c2a8b3ef0750572f1609513af8525",
+        "browser-lab-capture.ts": "b13ba4e29def0e58ad273fee46c597fd586d3390705bd61082fc189ba664ecc7",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496"
+      },
+      "cleanup": {
+        "completedTrials": 4,
+        "stopReason": null,
+        "allGroupsZero": true
+      },
+      "attempts": [
+        {
+          "id": "candidate-model-github-issue-investigation-1",
+          "mode": "candidate-model",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T18:33:32.967Z",
+          "finished": false,
+          "actions": 0,
+          "decisions": 0,
+          "elapsedBeforeCleanupMs": 34158.8969,
+          "cancelled": null,
+          "error": "Error: Native browser command failed: Operation timed out. The page may still be loading or the element may not exist.",
+          "processesAfter": 0,
+          "resultSha256": "1043441f1dbf86b012b98554aac8881affa4f657546c042d318dac73d4f72e40",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-julia-github-issue-investigation-1",
+          "mode": "candidate-julia",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T18:34:08.886Z",
+          "finished": false,
+          "actions": 0,
+          "decisions": 2,
+          "elapsedBeforeCleanupMs": 49484.801400000004,
+          "cancelled": null,
+          "error": "Error: candidates[0].command.selector: expected a ref in the current observation.",
+          "processesAfter": 0,
+          "resultSha256": "936069e7e4a11215262746cb50d878d001883022287c357d50932cdff106aac4",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-model-wikipedia-language-history-source-1",
+          "mode": "candidate-model",
+          "task": "wikipedia-language-history-source",
+          "startedAt": "2026-09-29T18:34:59.062Z",
+          "finished": false,
+          "actions": 1,
+          "decisions": 2,
+          "elapsedBeforeCleanupMs": 36439.8404,
+          "cancelled": null,
+          "error": "Error: candidates[0].command.selector: expected a ref in the current observation.",
+          "processesAfter": 0,
+          "resultSha256": "85cd967ffc6419aa83a396b7161dc7f19d4c8bb5fe0801c3f303be811079ce7f",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-julia-wikipedia-language-history-source-1",
+          "mode": "candidate-julia",
+          "task": "wikipedia-language-history-source",
+          "startedAt": "2026-09-29T18:35:37.181Z",
+          "finished": false,
+          "actions": 0,
+          "decisions": 1,
+          "elapsedBeforeCleanupMs": 13513.222700000013,
+          "cancelled": null,
+          "error": "Error: candidates[0].command.selector: expected a ref in the current observation.",
+          "processesAfter": 0,
+          "resultSha256": "8dfe67797e0a47ba667a9f4e5ff63a9f07fc618ff230b54e26f8743cff062d0d",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        }
+      ]
+    },
+    {
+      "id": "strict-pilot-v2",
+      "comparisonEligible": false,
+      "reason": "Superseded preflight protocol: four-candidate minimum, fatal invalid proposals, generic selector question and an observed loading race. Preserve its outcomes separately.",
+      "expected": 4,
+      "protocolSha256": "da58a2155fecba7149980b61dbeb3298f938f081d13fc76edcfa1370f4130e60",
+      "sourceHashes": {
+        "browser-lab-julia.ts": "4a97b0dbe4fcfa922ecf74196c2977d5ce9c73f37dfbc50fd4e21db790a54c89",
+        "browser-lab-julia-choice.ts": "213ece145dd0b3e5eb3b648d81a2ced0b124f2023b5464fc81dbb62f72ceaccb",
+        "browser-lab-julia-choice.test.ts": "a58705083afa64fa5bc6201174ef290c568f90fcd4f060943e532fc779fc62d6",
+        "browser-lab-page.ts": "be90e04c21dd05aaa8fd28664c3ce95627c2108d3fb367636513d06deab60b63",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "2b7c40f5f4d7b93d26a993a206f73c184a05023371bf676540e7674258f987db",
+        "browser-lab-native.ts": "83a2afab5ae65521eabc40f2b98cc3a058ca2f62b6540cab7a460b4c446ae5c6",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-model.ts": "8af88765f8d67d941530821e6c87ea64fd0c2a8b3ef0750572f1609513af8525",
+        "browser-lab-capture.ts": "b13ba4e29def0e58ad273fee46c597fd586d3390705bd61082fc189ba664ecc7",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496",
+        "browser-lab-recording.ts": "4043bf35914c3a73cfbe9e1c093cdad12ea810a3473c89b8ff09d67f2d548420"
+      },
+      "cleanup": {
+        "completedTrials": 4,
+        "stopReason": null,
+        "allGroupsZero": true
+      },
+      "attempts": [
+        {
+          "id": "candidate-model-github-issue-investigation-1",
+          "mode": "candidate-model",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T18:40:56.541Z",
+          "finished": false,
+          "actions": 5,
+          "decisions": 6,
+          "elapsedBeforeCleanupMs": 92177.207,
+          "cancelled": null,
+          "error": "Error: candidates: duplicate command.",
+          "processesAfter": 0,
+          "resultSha256": "92678d598498ea40e0c4af6554cfcd0b2fa4498db0ff9457ad72afed1d27f7f3",
+          "criteria": [
+            {
+              "index": 1,
+              "passed": true,
+              "evidence": [
+                "004.json",
+                "004.png"
+              ],
+              "reason": "Observed query contains state:closed, label:browser-chromium and sort:comments-desc. Closed tab and Comments descending are visibly selected."
+            },
+            {
+              "index": 2,
+              "passed": true,
+              "evidence": [
+                "004.json",
+                "004.png",
+                "006.json",
+                "006.png",
+                "decision-04.json",
+                "decision-05.json"
+              ],
+              "reason": "First sorted issue is #27997, author sheekha-jain, exact Playwright-Java browser.newContext title and list count 40. These facts are explicitly extracted into planner memory; final observation opens that issue."
+            },
+            {
+              "index": 3,
+              "passed": false,
+              "evidence": [
+                "006.json",
+                "result.json"
+              ],
+              "reason": "Only issue tab t1 exists at stop. Author profile never opened, public display name not obtained and two required tabs not retained."
+            }
+          ],
+          "separatelyReviewedTaskSuccess": false,
+          "failureClassification": "planner-output-invalid"
+        },
+        {
+          "id": "candidate-julia-github-issue-investigation-1",
+          "mode": "candidate-julia",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T18:42:30.802Z",
+          "finished": false,
+          "actions": 7,
+          "decisions": 8,
+          "elapsedBeforeCleanupMs": 163828.6186,
+          "cancelled": null,
+          "error": "Error: command.url: expected a nonempty string.",
+          "processesAfter": 0,
+          "resultSha256": "cf1cd6a3651f75eb92c266c82d195e7fe4a80cdc903f7825f2f3b94099d44483",
+          "criteria": [
+            {
+              "index": 1,
+              "passed": true,
+              "evidence": [
+                "006.json",
+                "006.png"
+              ],
+              "reason": "Submitted closed/browser-chromium query visibly resolves to Closed 194 and Comments descending."
+            },
+            {
+              "index": 2,
+              "passed": true,
+              "evidence": [
+                "006.json",
+                "006.png",
+                "008.json",
+                "008.png",
+                "decision-06.json",
+                "decision-07.json"
+              ],
+              "reason": "First issue #27997, author sheekha-jain, exact issue title and sorted-list comment total 40 are extracted in memory and corroborated by raw evidence. Final observed page is that issue."
+            },
+            {
+              "index": 3,
+              "passed": false,
+              "evidence": [
+                "008.json",
+                "result.json"
+              ],
+              "reason": "Only issue tab t1 retained. Profile tab was not opened and display name not extracted."
+            }
+          ],
+          "separatelyReviewedTaskSuccess": false,
+          "failureClassification": "planner-output-invalid"
+        },
+        {
+          "id": "candidate-model-wikipedia-language-history-source-1",
+          "mode": "candidate-model",
+          "task": "wikipedia-language-history-source",
+          "startedAt": "2026-09-29T18:45:19.789Z",
+          "finished": true,
+          "actions": 8,
+          "decisions": 9,
+          "elapsedBeforeCleanupMs": 178407.93170000002,
+          "cancelled": null,
+          "error": null,
+          "processesAfter": 0,
+          "resultSha256": "7e49ae457b2fde155c9bd23dca406877bfd5570c5bf5693318addad9b190a7e1",
+          "criteria": [
+            {
+              "index": 1,
+              "passed": true,
+              "evidence": [
+                "decision-01.json",
+                "decision-02.json",
+                "decision-03.json",
+                "004.png",
+                "decision-04.json",
+                "005.json",
+                "010.png"
+              ],
+              "reason": "Search field filled with Apollo 11 and submitted; English article reached. Language interface opened, screenshot shows Francais target, coordinate click selects it and French article is observed."
+            },
+            {
+              "index": 2,
+              "passed": true,
+              "evidence": [
+                "006.json",
+                "006.png",
+                "decision-06.json",
+                "010.json",
+                "result.json"
+              ],
+              "reason": "French article history opens in t2. Latest visible revision is 12 September 2026 at 17:02 by JeanPaulGRingault, matching the delivered answer. t2 remains available at final observation."
+            },
+            {
+              "index": 3,
+              "passed": true,
+              "evidence": [
+                "007.json",
+                "decision-07.json",
+                "008.json",
+                "008.png",
+                "010.json",
+                "010.png",
+                "result.json"
+              ],
+              "reason": "Observed article reference hq.nasa.gov/alsj/a11/a11.html opens in t3 and redirects to nasa.gov/history/alsj-and-afj/. NASA heading is The Apollo Lunar Surface Journal and Apollo Flight Journal and its observed URL/title match the delivered answer. Final tabs retain article t1, history t2 and NASA t3, with article active."
+            }
+          ],
+          "separatelyReviewedTaskSuccess": true,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-julia-wikipedia-language-history-source-1",
+          "mode": "candidate-julia",
+          "task": "wikipedia-language-history-source",
+          "startedAt": "2026-09-29T18:48:21.428Z",
+          "finished": false,
+          "actions": 5,
+          "decisions": 6,
+          "elapsedBeforeCleanupMs": 106701.67439999996,
+          "cancelled": null,
+          "error": "Error: candidates[3].command.url: expected an exact observed URL.",
+          "processesAfter": 0,
+          "resultSha256": "c8ecf87e236f750287617ab0608c474c3ba0e38176597125c7b1f4aeb9194f85",
+          "criteria": [
+            {
+              "index": 1,
+              "passed": false,
+              "evidence": [
+                "decision-01.json",
+                "decision-02.json",
+                "003.json",
+                "003.png",
+                "decision-03.json",
+                "decision-05.json",
+                "006.png"
+              ],
+              "reason": "Apollo 11 is found through search, but no language selector is opened and no French article is reached. Final visible page is English revision history."
+            },
+            {
+              "index": 2,
+              "passed": false,
+              "evidence": [
+                "006.json",
+                "006.png",
+                "result.json"
+              ],
+              "reason": "English history replaces article in the only tab t1. No French history in a second tab or requested French revision date obtained."
+            },
+            {
+              "index": 3,
+              "passed": false,
+              "evidence": [
+                "004.png",
+                "006.json",
+                "006.png",
+                "result.json"
+              ],
+              "reason": "English references were inspected, but no NASA reference page was opened and no third tab created. No NASA title/URL reported."
+            }
+          ],
+          "separatelyReviewedTaskSuccess": false,
+          "failureClassification": "planner-output-invalid-after-selector-subgoal-divergence"
+        }
+      ]
+    },
+    {
+      "id": "recording-preflight-1",
+      "comparisonEligible": false,
+      "reason": "First recorder failed before planner actions. Companion trial deliberately cancelled; neither is a selector-comparison result.",
+      "expected": 2,
+      "protocolSha256": "9f75dab9279056bfb7cf98b53dde59d836d6c3ddc0cf49856ad55cf850730c5d",
+      "sourceHashes": {
+        "browser-lab-julia.ts": "06150c3306910d2654665723d7bfb3ae2ae3634b88f11a7f74b3e4d372322d46",
+        "browser-lab-julia-choice.ts": "9ce7dbe5dafbffac87bdd56db336e04485c01cdf66aad209638653a9afc52954",
+        "browser-lab-julia-choice.test.ts": "624aa7c8d1ba67d7528ad608c4a3936721c1e2268f7b9001f200930933f69885",
+        "browser-lab-page.ts": "9592e561086c1347471ec6155948b06c72c22a08445fdc76575591d1a1b2fb38",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "2b7c40f5f4d7b93d26a993a206f73c184a05023371bf676540e7674258f987db",
+        "browser-lab-native.ts": "83a2afab5ae65521eabc40f2b98cc3a058ca2f62b6540cab7a460b4c446ae5c6",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-model.ts": "8af88765f8d67d941530821e6c87ea64fd0c2a8b3ef0750572f1609513af8525",
+        "browser-lab-capture.ts": "b13ba4e29def0e58ad273fee46c597fd586d3390705bd61082fc189ba664ecc7",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496",
+        "browser-lab-recording.ts": "4043bf35914c3a73cfbe9e1c093cdad12ea810a3473c89b8ff09d67f2d548420"
+      },
+      "cleanup": {
+        "completedTrials": 2,
+        "stopReason": "stop.requested",
+        "allGroupsZero": true
+      },
+      "attempts": [
+        {
+          "id": "candidate-model-github-issue-investigation-1",
+          "mode": "candidate-model",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T19:03:58.094Z",
+          "finished": false,
+          "actions": 0,
+          "decisions": 0,
+          "elapsedBeforeCleanupMs": 15541.5039,
+          "cancelled": null,
+          "error": "Error: No screencast frame arrived for selected target.",
+          "processesAfter": 0,
+          "resultSha256": "0ee41bb197e84b86e8c322ba04e0b306960685bc109830c889bea8de47acfcef",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-julia-github-issue-investigation-1",
+          "mode": "candidate-julia",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T19:04:19.017Z",
+          "finished": false,
+          "actions": 3,
+          "decisions": 4,
+          "elapsedBeforeCleanupMs": 69970.78629999999,
+          "cancelled": "stop.requested",
+          "error": "abort@[native code]",
+          "processesAfter": 0,
+          "resultSha256": "c10edab10e5497b2e3e6898acd2dc017dc01e8fac9d119d4d478666f3afc4eb4",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        }
+      ]
+    },
+    {
+      "id": "recording-preflight-2",
+      "comparisonEligible": false,
+      "reason": "First recorder capture timed out before planner actions. Companion trial deliberately cancelled; neither is a selector-comparison result.",
+      "expected": 2,
+      "protocolSha256": "1832a2c4ebf597b6e5b9d7a8a3616c83eb0e1db555aafbddedb2fab44248a154",
+      "sourceHashes": {
+        "browser-lab-julia.ts": "06150c3306910d2654665723d7bfb3ae2ae3634b88f11a7f74b3e4d372322d46",
+        "browser-lab-julia-choice.ts": "9ce7dbe5dafbffac87bdd56db336e04485c01cdf66aad209638653a9afc52954",
+        "browser-lab-julia-choice.test.ts": "624aa7c8d1ba67d7528ad608c4a3936721c1e2268f7b9001f200930933f69885",
+        "browser-lab-page.ts": "9592e561086c1347471ec6155948b06c72c22a08445fdc76575591d1a1b2fb38",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "2b7c40f5f4d7b93d26a993a206f73c184a05023371bf676540e7674258f987db",
+        "browser-lab-native.ts": "83a2afab5ae65521eabc40f2b98cc3a058ca2f62b6540cab7a460b4c446ae5c6",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-model.ts": "8af88765f8d67d941530821e6c87ea64fd0c2a8b3ef0750572f1609513af8525",
+        "browser-lab-capture.ts": "b13ba4e29def0e58ad273fee46c597fd586d3390705bd61082fc189ba664ecc7",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496",
+        "browser-lab-recording.ts": "b9e5a2679434217c7ed31a1e174d49611196be67493a86f9d77164d4ebade7f9"
+      },
+      "cleanup": {
+        "completedTrials": 2,
+        "stopReason": "stop.requested",
+        "allGroupsZero": true
+      },
+      "attempts": [
+        {
+          "id": "candidate-model-github-issue-investigation-1",
+          "mode": "candidate-model",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T19:23:33.202Z",
+          "finished": false,
+          "actions": 0,
+          "decisions": 0,
+          "elapsedBeforeCleanupMs": 12086.2594,
+          "cancelled": null,
+          "error": "Error: Recording Page.captureScreenshot timed out.",
+          "processesAfter": 0,
+          "resultSha256": "16d8f0fde1ed546951c1dd3339b993a4a165bf47f799124b39eaaeb29a8d4be6",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        },
+        {
+          "id": "candidate-julia-github-issue-investigation-1",
+          "mode": "candidate-julia",
+          "task": "github-issue-investigation",
+          "startedAt": "2026-09-29T19:23:48.142Z",
+          "finished": false,
+          "actions": 1,
+          "decisions": 2,
+          "elapsedBeforeCleanupMs": 44366.423200000005,
+          "cancelled": "stop.requested",
+          "error": "abort@[native code]",
+          "processesAfter": 0,
+          "resultSha256": "855f6b7014aa30c56d37052c5a47c80702181df4e10ffff2c72d7340e33ac576",
+          "criteria": null,
+          "separatelyReviewedTaskSuccess": null,
+          "failureClassification": null
+        }
+      ]
+    }
+  ]
+}

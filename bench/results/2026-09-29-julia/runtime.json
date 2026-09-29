@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-29",
+  "hardware": "AMD Ryzen 7 5825U",
+  "execution": "CPU-only Linux x86_64, two intra-op threads, one inter-op thread, sequential requests",
+  "model": "SupersonicLabs/Julia-1",
+  "revision": "a85b127321d580d65176c89ced8273f305745d85",
+  "weightHash": "df853bf7fe424420011f3d0c47a05d7341aa9eefa7fb9f203ea4aada4ad95b72",
+  "weightBytes": 577189056,
+  "runtimeHash": "91bb30987ff8626ed1610955c6fd796939a5d271e2405b73f8674ccb947eb931",
+  "serverHash": "0c3dced60374fc951cddd64efa0ed6d545d07084d5a833cb59251892b9992300",
+  "torch": "2.14.0+cpu",
+  "transformers": "5.0.0",
+  "python": "3.12.3",
+  "cpuThreads": 2,
+  "interopThreads": 1,
+  "loadMs": 10343.18256599363,
+  "loadLimit": "Cached filesystem load, not a model download or guaranteed cold start",
+  "markerOnlyHead": true,
+  "maxLength": 8192,
+  "strictEncoding": true,
+  "onnx": {
+    "repository": "SupersonicLabs/Julia-1-ONNX",
+    "revision": "82a2fadf8fccfccdc5fd4e1009ba8f1a265eb7a8",
+    "graphHash": "97141d0cfb1da6204e9f8f24d581af72eaeb82cda21149d83eaa6df7160fbcd9",
+    "externalDataHash": "fd915be810d7ebfb80fb05a48dd33c9484d17ae1b6bcb9e1f544cbaaa913ded1",
+    "runtime": "1.30.0",
+    "provider": "CPUExecutionProvider",
+    "precision": "FP32"
+  },
+  "peakRssKbAtLiveHealth": 5015780,
+  "memoryLimit": "Peak process RSS includes both loaded torch and ONNX runtimes; it is not the memory requirement of either runtime alone"
+}

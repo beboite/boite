@@ -28,10 +28,10 @@ class ScreencastCdp {
     });
     return new ScreencastCdp(socket);
   }
-  send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+  send(method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 5000): Promise<any> {
     const id = ++this.next;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Recording ${method} timed out.`)); }, 5000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Recording ${method} timed out after ${timeoutMs} ms.`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
@@ -123,6 +123,7 @@ export class BrowserLabRecording {
     } catch (error) {
       recorder.cdp.close();
       if (recorder.encoder) { options.core.procs.killTree(recorder.processGroup); await recorder.encoder.exited; await options.core.procs.stopAndWait(recorder.processGroup); }
+      writeFileSync(`${recorder.path}.json`, JSON.stringify({ instrumented: true, phase: 'startup', failure: String(error), frames: recorder.frameCount, capturedFrames: recorder.capturedFrames, events: recorder.events, errors: recorder.errors, stderr: recorder.stderr ? await recorder.stderr : undefined, stdout: recorder.stdout ? await recorder.stdout : undefined }, null, 2));
       throw error;
     }
   }
@@ -136,19 +137,39 @@ export class BrowserLabRecording {
       await this.cdp.send('Page.stopScreencast', {}, this.sessionId).catch(error => this.errors.push(String(error)));
       await this.cdp.send('Target.detachFromTarget', { sessionId: this.sessionId }).catch(error => this.errors.push(String(error)));
     }
+    this.sessionId = undefined; this.targetId = undefined;
     const attached = await this.cdp.send('Target.attachToTarget', { targetId, flatten: true });
-    this.sessionId = attached.sessionId; this.targetId = targetId;
-    this.events.push({ atMs: performance.now() - this.started, targetId, event: 'selected-target' });
-    await this.cdp.send('Page.enable', {}, this.sessionId);
-    // Every owned browser is headless. This selects its visible rendering target
-    // without creating a desktop window or changing the selected model page.
-    await this.cdp.send('Page.bringToFront', {}, this.sessionId);
+    this.sessionId = attached.sessionId;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const first = new Promise<void>((resolve, reject) => { this.firstFrame = resolve; timer = setTimeout(() => reject(new Error('No screencast frame arrived for selected target.')), 5000); });
-    void first.catch(() => {});
     try {
+      await this.cdp.send('Page.enable', {}, this.sessionId);
+      // Every owned browser is headless. This selects its visible rendering target
+      // without creating a desktop window or changing the selected model page.
+      await this.cdp.send('Page.bringToFront', {}, this.sessionId);
+      await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.options.width ?? 1280, height: this.options.height ?? 800, deviceScaleFactor: 1, mobile: false }, this.sessionId);
+      await this.cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }, this.sessionId);
+      // Some headless surfaces acknowledge start without rendering an initial
+      // frame. Request real pixels before starting, avoiding concurrent capture
+      // and screencast initialization; only screencast events enter the video.
+      const renderStarted = performance.now();
+      this.events.push({ atMs: renderStarted - this.started, targetId, event: 'screencast-render-request', timeoutMs: 15000 });
+      await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80, fromSurface: true, captureBeyondViewport: false }, this.sessionId, 15000);
+      this.events.push({ atMs: performance.now() - this.started, targetId, event: 'screencast-render-ready', ms: performance.now() - renderStarted });
+      const first = new Promise<void>((resolve, reject) => { this.firstFrame = resolve; timer = setTimeout(() => reject(new Error('No screencast frame arrived for selected target.')), 5000); });
+      void first.catch(() => {});
       await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 80, maxWidth: this.options.width ?? 1280, maxHeight: this.options.height ?? 800, everyNthFrame: 1 }, this.sessionId);
       await first;
+      this.targetId = targetId;
+      this.events.push({ atMs: performance.now() - this.started, targetId, event: 'selected-target' });
+    } catch (error) {
+      const sessionId = this.sessionId;
+      this.firstFrame = undefined;
+      this.sessionId = undefined; this.targetId = undefined;
+      if (sessionId) {
+        await this.cdp.send('Page.stopScreencast', {}, sessionId).catch(cleanupError => this.errors.push(String(cleanupError)));
+        await this.cdp.send('Target.detachFromTarget', { sessionId }).catch(cleanupError => this.errors.push(String(cleanupError)));
+      }
+      throw error;
     } finally { clearTimeout(timer); this.firstFrame = undefined; }
   }
   private async pump() {

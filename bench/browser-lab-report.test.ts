@@ -3,6 +3,15 @@ import { validateReview, verifyLabSources, combineLabReports, labTokenUsage, typ
 
 const raw = { observations: [{ id: 1 }, { id: 2 }], model: { turn: { status: 'completed' } }, finished: true, processesAfter: 0 };
 const review = (): LabReview => ({ criteria: Array.from({ length: 3 }, () => ({ met: true, observations: [1], note: 'Page and controls satisfy the requirement.' })), capturesViewed: [1], category: 'complete' });
+test('chooser review requires an explicit tool allowlist and still rejects other tools', () => {
+  const event = (type: string, tool?: string) => ({ method: 'item/started', params: { item: { type, tool } } });
+  const chooser = { ...raw, model: { ...raw.model, events: [event('dynamicToolCall', 'choose_action')] } };
+  expect(validateReview(review(), chooser)).toBe(false);
+  expect(validateReview(review(), chooser, undefined, ['choose_action'])).toBe(true);
+  for (const forbidden of [event('commandExecution'), event('dynamicToolCall', 'shell'), event('dynamicToolCall', 'browser')]) {
+    expect(validateReview(review(), { ...chooser, model: { ...chooser.model, events: [...chooser.model.events, forbidden] } }, undefined, ['choose_action'])).toBe(false);
+  }
+});
 test('self-reported finish cannot replace independent evidence or clean completion', () => {
   expect(validateReview(review(), raw)).toBe(true);
   expect(validateReview(review(), { ...raw, model: { ...raw.model, timedOut: true } })).toBe(false);

@@ -18,7 +18,65 @@ test('recording follow failures preserve both successful and failed action outco
   expect(recorder.errors).toEqual(['Error: Recorder lost its target', 'Error: Recorder lost its target']);
 });
 
+test('recording requests a real render when the screencast emits no initial frame', async () => {
+  const calls: string[] = [];
+  let rendered = false;
+  const recorder = new (BrowserLabRecording as any)({ processGroup: 'recording-startup',
+    command: async () => ({}), activeTargetId: async () => 'target',
+  }, { output: 'recording-startup.mp4' });
+  recorder.cdp = { send: async (method: string, _params: unknown, _sessionId: string, timeoutMs?: number) => {
+    calls.push(method);
+    if (method === 'Target.attachToTarget') return { sessionId: 'session' };
+    // A dormant headless surface acknowledges start but emits its first actual
+    // screencast frame only once captureScreenshot requests a render.
+    if (method === 'Page.captureScreenshot') { expect(timeoutMs).toBe(15000); expect(recorder.firstFrame).toBeUndefined(); rendered = true; }
+    if (method === 'Page.startScreencast' && rendered) recorder.firstFrame?.();
+    return {};
+  } };
+  await recorder.follow();
+  expect(calls.indexOf('Emulation.setDeviceMetricsOverride')).toBeGreaterThan(-1);
+  expect(calls.indexOf('Emulation.setEmulatedMedia')).toBeGreaterThan(-1);
+  expect(calls.indexOf('Page.captureScreenshot')).toBeLessThan(calls.indexOf('Page.startScreencast'));
+  expect(recorder.events.some((event: any) => event.event === 'screencast-render-request')).toBe(true);
+}, 7000);
+
 const live = process.env.BOITE_BENCH_RECORDING_SMOKE === '1' ? test : test.skip;
+
+test('failed target initialization detaches the partial session and permits a later explicit follow', async () => {
+  for (const failureMethod of ['Page.enable', 'Page.captureScreenshot']) {
+    const calls: Array<{ method: string; params: any; sessionId?: string }> = [];
+    const failure = new Error('Injected target initialization failure');
+    let fail = true, actions = 0, attached = 0;
+    const recorder = new (BrowserLabRecording as any)({ processGroup: 'recording-follow',
+      command: async () => { actions++; return { clicked: true }; }, activeTargetId: async () => 'new-target',
+    }, { output: 'recording-follow.mp4' });
+    recorder.targetId = 'old-target'; recorder.sessionId = 'old-session';
+    recorder.cdp = { send: async (method: string, params: any, sessionId?: string) => {
+      calls.push({ method, params, sessionId });
+      if (method === 'Target.attachToTarget') return { sessionId: `session-${++attached}` };
+      if (method === failureMethod && fail) throw failure;
+      if (method === 'Page.startScreencast') {
+        expect(recorder.targetId).toBeUndefined();
+        expect(recorder.sessionId).toBe('session-2');
+        recorder.firstFrame?.();
+      }
+      return {};
+    } };
+    expect(await recorder.wrappedCommand('tab_switch')).toEqual({ clicked: true });
+    expect(recorder.errors).toEqual([String(failure)]);
+    expect(recorder.targetId).toBeUndefined();
+    expect(recorder.sessionId).toBeUndefined();
+    expect(calls.some(c => c.method === 'Page.stopScreencast' && c.sessionId === 'session-1')).toBe(true);
+    expect(calls.some(c => c.method === 'Target.detachFromTarget' && c.params.sessionId === 'session-1')).toBe(true);
+    fail = false;
+    await recorder.follow();
+    expect(attached).toBe(2);
+    expect(recorder.targetId).toBe('new-target');
+    expect(actions).toBe(1);
+    expect(recorder.errors).toEqual([String(failure)]);
+  }
+});
+
 live('continuous recording follows two actual public tabs in both engines and decodes to a filmstrip', async () => {
   const { startTestCore } = await import('../packages/core/test/harness.ts');
   const { findBrowser } = await import('../tests/e2e/lib/cdp.ts');

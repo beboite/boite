@@ -24,7 +24,7 @@ function safeNote(note: unknown): string {
   if (/(?<![A-Za-z])[A-Za-z]:[\\/]|(?:\/Users|\/home)\/|bearer\s|api[_-]?key|(?:secret|token|password)[=:]/i.test(note)) throw new Error('Private path or credential-like text in review note.');
   return note.replace(/\u2014/g, '-').replace(/\u2026/g, '...');
 }
-export function validateReview(review: LabReview, raw: Data, directory?: string) {
+export function validateReview(review: LabReview, raw: Data, directory?: string, allowedDynamicTools: readonly string[] = ['browser']) {
   if (review.excluded) { safeNote(review.excluded.cohort); safeNote(review.excluded.reason); }
   const observationIds = new Set((raw.observations ?? []).map((entry: Data) => entry.id));
   if (!Array.isArray(review.criteria) || review.criteria.length !== 3) throw new Error('Exactly three independent rubric decisions required.');
@@ -43,7 +43,7 @@ export function validateReview(review: LabReview, raw: Data, directory?: string)
   if (allMet !== (review.category === 'complete')) throw new Error('Review category contradicts rubric decisions.');
   return allMet && !raw.error && !raw.cancelled && !raw.model?.timedOut && raw.model?.turn?.status === 'completed'
     && raw.finished === true && raw.processesAfter === 0 && !raw.cleanupError
-    && toolAudit(raw.model?.events).unexpectedTypes.length === 0 && !review.excluded;
+    && toolAudit(raw.model?.events, allowedDynamicTools).unexpectedTypes.length === 0 && !review.excluded;
 }
 export function verifyLabSources(input: string, hashes: Data) {
   for (const file of requiredSources) if (typeof hashes?.[file] !== 'string' || !/^[a-f0-9]{64}$/.test(hashes[file])) throw new Error('Missing source hash: ' + file);

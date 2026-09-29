@@ -109,15 +109,16 @@ export function tokenUsage(events: Data[] = []) {
 }
 
 /** Count any item type outside ordinary messages as a tool until reviewed. */
-export function toolAudit(events: Data[] = []) {
+export function toolAudit(events: Data[] = [], allowedDynamicTools: readonly string[] = ['browser']) {
   const ordinary = new Set(['userMessage', 'agentMessage', 'reasoning', 'plan', 'contextCompaction', 'error']);
   const items = events.filter(event => event.method === 'item/started').map(event => event.params?.item).filter(Boolean);
   const calls = items.filter(item => !ordinary.has(String(item.type)));
-  const browser = calls.filter(item => item.type === 'dynamicToolCall' && item.tool === 'browser');
+  const allowed = new Set(allowedDynamicTools);
+  const browser = calls.filter(item => item.type === 'dynamicToolCall' && allowed.has(item.tool));
   return {
     calls: calls.length,
     batchCommandsRequested: browser.reduce((sum: number, item: Data) => sum + (Array.isArray(item.arguments?.commands) ? item.arguments.commands.length : 0), 0),
-    unexpectedTypes: calls.filter(item => item.type !== 'dynamicToolCall' || item.tool !== 'browser').map(item => String(item.type ?? 'unknown')),
+    unexpectedTypes: calls.filter(item => item.type !== 'dynamicToolCall' || !allowed.has(item.tool)).map(item => String(item.type ?? 'unknown')),
   };
 }
 

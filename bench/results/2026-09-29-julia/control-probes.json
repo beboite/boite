@@ -1,0 +1,149 @@
+{
+  "date": "2026-09-29",
+  "backend": "onnx",
+  "cpuThreads": 2,
+  "maxLength": 8192,
+  "interpretation": "Two tiny synthetic sanity decisions and two HTTP contract controls. They do not measure browser completion or website reliability.",
+  "inputs": [
+    {
+      "id": "official-billing-example",
+      "row": {
+        "state": "I was charged twice.",
+        "question": "Which team should handle this request?",
+        "options": [
+          "Billing",
+          "Shipping",
+          "Account access"
+        ],
+        "type": "choice"
+      },
+      "expectedIndex": 0
+    },
+    {
+      "id": "explicit-cookie-refusal",
+      "row": {
+        "state": "The user explicitly declines optional tracking cookies. The cookie dialog offers accept, reject and customize controls.",
+        "question": "Which action follows the user instruction?",
+        "options": [
+          "Accept all cookies",
+          "Reject optional cookies",
+          "Customize cookie settings"
+        ],
+        "type": "choice"
+      },
+      "expectedIndex": 1
+    },
+    {
+      "id": "option-overflow-rejection",
+      "row": {
+        "state": "Test strict input validation.",
+        "question": "Pick a choice.",
+        "options": [
+          "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+          "short"
+        ],
+        "type": "choice"
+      },
+      "expectedStatus": 422
+    }
+  ],
+  "results": [
+    {
+      "id": "official-billing-example",
+      "status": 200,
+      "body": {
+        "results": [
+          {
+            "index": 0,
+            "probabilities": [
+              0.9238061907671913,
+              0.04841856964707758,
+              0.02777523958573113
+            ],
+            "logits": [
+              -6.711594581604004,
+              -9.660213470458984,
+              -10.215951919555664
+            ],
+            "elapsedMs": 47.2704729763791,
+            "inputTokens": 26,
+            "encoding": {
+              "tokens": 26,
+              "optionTokens": [
+                1,
+                1,
+                2
+              ],
+              "headLength": 1536,
+              "stateTruncated": false,
+              "optionsTruncated": false
+            }
+          }
+        ],
+        "elapsedMs": 47.275481978431344,
+        "encodingMs": 0.7962739909999073,
+        "inferenceMs": 46.439544996246696,
+        "backend": "onnx",
+        "peakRssKb": 5014400
+      },
+      "wallMs": 56.4228,
+      "passed": true
+    },
+    {
+      "id": "explicit-cookie-refusal",
+      "status": 200,
+      "body": {
+        "results": [
+          {
+            "index": 1,
+            "probabilities": [
+              0.005408145756828712,
+              0.9945904255494425,
+              1.428693728664486E-06
+            ],
+            "logits": [
+              1.831520438194275,
+              7.045945167541504,
+              -6.4073805809021
+            ],
+            "elapsedMs": 58.49862500326708,
+            "inputTokens": 45,
+            "encoding": {
+              "tokens": 45,
+              "optionTokens": [
+                3,
+                3,
+                3
+              ],
+              "headLength": 1536,
+              "stateTruncated": false,
+              "optionsTruncated": false
+            }
+          }
+        ],
+        "elapsedMs": 58.50276298588142,
+        "encodingMs": 0.8227829821407795,
+        "inferenceMs": 57.629927003290504,
+        "backend": "onnx",
+        "peakRssKb": 5014400
+      },
+      "wallMs": 63.8673,
+      "passed": true
+    },
+    {
+      "id": "option-overflow-rejection",
+      "status": 422,
+      "body": {
+        "error": "Option exceeds 48-token model contract",
+        "strictEncoding": true
+      },
+      "wallMs": 4.1839999999999975,
+      "passed": true
+    },
+    {
+      "id": "authorization-required",
+      "status": 401,
+      "passed": true
+    }
+  ]
+}

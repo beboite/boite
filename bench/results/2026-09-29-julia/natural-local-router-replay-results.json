@@ -1,0 +1,2549 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "date": "2026-09-29",
+    "indexBase": 0,
+    "backend": "onnx",
+    "maxLength": 8192,
+    "cpuThreads": 2,
+    "datasetArtifact": "natural-decision-cases.json",
+    "datasetArtifactSha256": "2dbe3b9f32bd5d91e2743c5e6c64c5534745b0a47d61c813ada574cfd31dc839",
+    "labelAuditArtifact": "label-audit.json",
+    "labelAuditArtifactSha256": "f6816615db7616f962d3232da4ce16fd2534eb45301f0559145850e64c0d121d",
+    "originalNaturalDatasetSha256": "9d8250eeee094ae00d84092ed3fdc17cb7fcf2eddd9380ffc018a89fadfc5c6f",
+    "replayCliSourceSha256": "c3822d5b73d563be1ac235ef12698c38a76fcebcd0e9fb8b353d048a41c7fda7",
+    "hashDefinitions": {
+      "savedSourceRowFileSha256": "Exact bytes of the original saved JSON input row, including its indentation and line endings.",
+      "serializedRowSha256": "UTF-8 bytes of JSON.stringify(row), with state,question,options,type in that order.",
+      "preparedStateSha256": "UTF-8 bytes of the exact row.state sent to the model, including the original task-goal prefix.",
+      "requestBodySha256": "UTF-8 bytes of JSON.stringify({rows:[row],backend:\"onnx\",maxLength:8192}), matching the original driver and replay CLI."
+    },
+    "requestHashLimit": "The original drivers saved the complete input row. Request-body hashes are reconstructed from those rows and the verified driver serialization; HTTP wire bytes were not captured independently.",
+    "scoring": "Historical matches use unchanged expected indices. Semantic matches use the public acceptableIndices sets. Only accepted responses receive correctness labels.",
+    "interpretation": "Retrospective expert-curated replay with supplied local subgoals and candidates. Results cover input preparation and selection and do not measure autonomous browser completion or an independent holdout.",
+    "preparation": {
+      "statePrefix": "Task goal: {task.goal}\n",
+      "type": "choice",
+      "rowFieldOrder": [
+        "state",
+        "question",
+        "options",
+        "type"
+      ],
+      "requestFieldOrder": [
+        "rows",
+        "backend",
+        "maxLength"
+      ],
+      "full": "Retain complete supplied state unchanged after the original goal prefix.",
+      "targetState": "Local actions retain the first three prefix lines, the first 500 subsequent body characters and the entire suffix beginning with the candidate-control marker. Facts and completions retain their full state.",
+      "localRouter": "Select local_action cases only; retain the first two title/URL lines and append the explicit body/DOM omission note used by the CLI."
+    },
+    "attemptCount": 40,
+    "configurations": [
+      "natural-local-router"
+    ],
+    "startedAt": "2026-09-29T19:02:39.505Z",
+    "originalResultSha256": "216f08ede42ea3471712afd47e464036043339ae2c05666271402c4d5a61b877",
+    "originalProtocolSha256": "b5d5cad207696dcdf0614fba0dc95303dfa54656c827243bd01c98423548cbae",
+    "originalDriverSourceSha256": "91b863a4294f70c59c4db609ba328a59c66d84ba2f802bc4c194a26375542092",
+    "excludedKinds": [
+      "fact_verification",
+      "completion_verification"
+    ]
+  },
+  "results": [
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "amazon-product-comparison-01",
+      "task": "amazon-product-comparison",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 221,
+      "encoding": {
+        "tokens": 221,
+        "optionTokens": [
+          4,
+          5,
+          5,
+          4,
+          4,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0000028860846030596772,
+        0.9955640444946358,
+        0.004362517911093144,
+        0.0000013075144029074604,
+        0.00006775899232694892,
+        0.0000014850029382372447
+      ],
+      "logits": [
+        -8.945793151855469,
+        3.805370807647705,
+        -1.6248892545700073,
+        -9.737565994262695,
+        -5.789736747741699,
+        -9.61027717590332
+      ],
+      "serverMs": 284.7013390273787,
+      "rowElapsedMs": 284.6976930159144,
+      "encodingMs": 1.1585140018723905,
+      "inferenceMs": 283.51169801317155,
+      "wallMs": 296.08410000000003,
+      "peakRssKb": 4987208,
+      "originalStateCharacters": 1434,
+      "preparedStateCharacters": 750,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "0af128eb87013b03e38b08aa78af731a06ab109c8c9a0262a37ac82de9f92c39",
+        "serializedRowSha256": "8f104bdbb0ca29a61bc10d25805bb9888afd2633c322179180bd0fadbdb92e69",
+        "preparedStateSha256": "c83dcf862b2a87be97de9a5b6cdf03223a6df2bf2ad3255d8385cf9bcdc6c7f9",
+        "requestBodySha256": "a75a939d5aecfbab537bf530d0112edf8d9cfd0e8d81ef3af85d204f4bcd3d1c"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "amazon-product-comparison-02",
+      "task": "amazon-product-comparison",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        0,
+        2,
+        3,
+        5
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 310,
+      "encoding": {
+        "tokens": 310,
+        "optionTokens": [
+          13,
+          12,
+          14,
+          14,
+          12,
+          19
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.02198406778687309,
+        0.005569004363973044,
+        0.0036615957246645884,
+        0.7054510946293081,
+        0.00031754508802820053,
+        0.263016692407153
+      ],
+      "logits": [
+        -5.688998222351074,
+        -7.062099933624268,
+        -7.481417179107666,
+        -2.2204787731170654,
+        -9.926451683044434,
+        -3.2070987224578857
+      ],
+      "serverMs": 405.35111795179546,
+      "rowElapsedMs": 405.34770098747686,
+      "encodingMs": 1.3471529819071293,
+      "inferenceMs": 403.973568987567,
+      "wallMs": 418.47409999999996,
+      "peakRssKb": 4987208,
+      "originalStateCharacters": 5610,
+      "preparedStateCharacters": 691,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "2e601356487b8dbeb49f2921976f6e7db6a2c9ca625a57693f629852a84fce54",
+        "serializedRowSha256": "06a911353cdf10d2c7c3ed91d6f5215decb7ab3a0eb2cf2e87cab36fc81cb268",
+        "preparedStateSha256": "87f8a2d8566bb01bf34d96dba425ff5fa45a2796871b0d66c53e864f38494911",
+        "requestBodySha256": "c3556d9cbbfeefdc6638b141dadd73c3ae740fbc07d98d67f9e816e5b7f0de5a"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "amazon-product-comparison-03",
+      "task": "amazon-product-comparison",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 234,
+      "encoding": {
+        "tokens": 234,
+        "optionTokens": [
+          3,
+          3,
+          3,
+          8,
+          7,
+          6
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0011739796741129986,
+        0.0038049459055311072,
+        0.0003995914410915324,
+        0.020339651555110944,
+        0.7171311241756457,
+        0.25715070724850764
+      ],
+      "logits": [
+        -8.801907539367676,
+        -7.626005172729492,
+        -9.879619598388672,
+        -5.949734687805176,
+        -2.3870482444763184,
+        -3.412644624710083
+      ],
+      "serverMs": 321.5670030331239,
+      "rowElapsedMs": 321.564368030522,
+      "encodingMs": 0.7930879946798086,
+      "inferenceMs": 320.7463549915701,
+      "wallMs": 328.0276,
+      "peakRssKb": 4987336,
+      "originalStateCharacters": 12327,
+      "preparedStateCharacters": 762,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "464efa8ad6cc658776c625f1f146168a49577db047a6f4a714401642ea5dccac",
+        "serializedRowSha256": "a7708a1ba108927a51c10ed7bf221fab7ce0e96ad01cd45b22b58f66b399323b",
+        "preparedStateSha256": "3daead678aca5ab84a0c9ba1c88fbca00a4f42f31a75b5a08706bca010f77213",
+        "requestBodySha256": "f596b8c5e219b59df795e39ec9322ed4b39c0aa0004d531b93ccd85a046bce6e"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "amazon-product-comparison-04",
+      "task": "amazon-product-comparison",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 262,
+      "encoding": {
+        "tokens": 262,
+        "optionTokens": [
+          10,
+          8,
+          10,
+          9,
+          6,
+          6
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.006291527904121132,
+        0.15754101291189376,
+        0.06009068728849843,
+        0.418788304869049,
+        0.3486142032668489,
+        0.008674263759588775
+      ],
+      "logits": [
+        -9.842941284179688,
+        -6.622459411621094,
+        -7.58629035949707,
+        -5.644779682159424,
+        -5.828179359436035,
+        -9.521784782409668
+      ],
+      "serverMs": 337.06247399095446,
+      "rowElapsedMs": 337.0390710188076,
+      "encodingMs": 0.6936439895071089,
+      "inferenceMs": 336.29304997157305,
+      "wallMs": 342.88159999999993,
+      "peakRssKb": 4987336,
+      "originalStateCharacters": 2761,
+      "preparedStateCharacters": 675,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "48ebdbce571b35ff0acdd7cbf2e3f64489b0875cf47d7433418ff5a2ced77e86",
+        "serializedRowSha256": "22be050ad2dcb49158a6855a39da5fed35b1bc45aa34e40a22cc569aabe8b19a",
+        "preparedStateSha256": "7a910ae254160cbda689189cd3aa7a3b6fd070ff137c8208a5ab504294fa3105",
+        "requestBodySha256": "80cab4d2e4a5eddcd9bf3596ec0583720495948722456dca8cd853c8a90e6680"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-01",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        3
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 218,
+      "encoding": {
+        "tokens": 218,
+        "optionTokens": [
+          5,
+          3,
+          5,
+          5,
+          7,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.896622622357756,
+        0.004071038097073807,
+        0.00032185908466790764,
+        0.09656187738774726,
+        0.000022810724852711406,
+        0.0023997923479022456
+      ],
+      "logits": [
+        0.2711036503314972,
+        -5.12363338470459,
+        -7.661172866821289,
+        -1.9573473930358887,
+        -10.308055877685547,
+        -5.652149200439453
+      ],
+      "serverMs": 300.15788704622537,
+      "rowElapsedMs": 300.1516259973869,
+      "encodingMs": 1.3137210044078529,
+      "inferenceMs": 298.7960769678466,
+      "wallMs": 306.02279999999996,
+      "peakRssKb": 4987464,
+      "originalStateCharacters": 1466,
+      "preparedStateCharacters": 685,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "b2fc8dac1fb8982abcffc72ac0a7050b10767a62f28669ef675c458800b6247a",
+        "serializedRowSha256": "b3ad3e365bfd9f38eb3cac36bf92d5ed0c15eeed49cd7e3372d335ec14151a5d",
+        "preparedStateSha256": "158242995eb366e9f1bf3e2ca09b40e2106f679df0730808bac686e32f493dfb",
+        "requestBodySha256": "0e5e8631d88411e2c719a16f7423a0969d514c0b980fe4239d7886e32bf5a492"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-02",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 225,
+      "encoding": {
+        "tokens": 225,
+        "optionTokens": [
+          12,
+          6,
+          5,
+          3,
+          6,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00022560291221590789,
+        0.9358703288680091,
+        0.033942528808172244,
+        0.02941787837146897,
+        0.000539017023723173,
+        0.000004644016410596284
+      ],
+      "logits": [
+        -5.505278587341309,
+        2.8251771926879883,
+        -0.4916309714317322,
+        -0.6346971392631531,
+        -4.634307861328125,
+        -9.38847541809082
+      ],
+      "serverMs": 287.0222440105863,
+      "rowElapsedMs": 287.01618302147835,
+      "encodingMs": 0.3110850229859352,
+      "inferenceMs": 286.6575089865364,
+      "wallMs": 293.4091000000001,
+      "peakRssKb": 4987464,
+      "originalStateCharacters": 5250,
+      "preparedStateCharacters": 685,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "3e3b4a6c5010b7ba7fdb27b0739dc1bd8233cd1e6a1f4a4d4f7e4d9060889279",
+        "serializedRowSha256": "176fae4e4cf1adc08118f2c2449cc11a62fcee738c720a36c021af902eea8a01",
+        "preparedStateSha256": "158242995eb366e9f1bf3e2ca09b40e2106f679df0730808bac686e32f493dfb",
+        "requestBodySha256": "6c7cd1023eee4591f338df9ad2ea52b788ee8a933c9541dbf06cd89facf6936a"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-03",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 211,
+      "encoding": {
+        "tokens": 211,
+        "optionTokens": [
+          4,
+          4,
+          4,
+          5,
+          2,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00021316280958642698,
+        0.9997406299136543,
+        0.00003960633086515253,
+        0.000006347275099578705,
+        1.9410558903043783e-7,
+        5.956520551476912e-8
+      ],
+      "logits": [
+        -0.5549929738044739,
+        7.898201942443848,
+        -2.238060235977173,
+        -4.069023609161377,
+        -7.556402206420898,
+        -8.737732887268066
+      ],
+      "serverMs": 288.26206002850085,
+      "rowElapsedMs": 288.2580120349303,
+      "encodingMs": 1.3128200080245733,
+      "inferenceMs": 286.91495599923655,
+      "wallMs": 306.6359000000002,
+      "peakRssKb": 4987464,
+      "originalStateCharacters": 2443,
+      "preparedStateCharacters": 693,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "e865d718fff1228fd41f1cbe4bd3beb20946fa9da58dda2e6f77ce9c095136ea",
+        "serializedRowSha256": "c39af8f75d135e4808994c991aa3da74ca3a99b6a832d4b14e16fa2ce075c532",
+        "preparedStateSha256": "a2b9c1527917d7af590c04293832e5403aca12809ff3d7d93a19b3a59038e67e",
+        "requestBodySha256": "f6cc732b71a4deda58a6b4ef600546d7549c4a3695761d233f4b26bcc17ee7cc"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-04",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 256,
+      "encoding": {
+        "tokens": 256,
+        "optionTokens": [
+          4,
+          6,
+          15,
+          6,
+          14,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.005093374843891724,
+        0.000011978936076835771,
+        0.000028896009408919118,
+        0.0000023355107735489425,
+        0.9938394503103881,
+        0.0010239643894608143
+      ],
+      "logits": [
+        -1.615958571434021,
+        -7.66850471496582,
+        -6.7879509925842285,
+        -9.303423881530762,
+        3.6576764583587646,
+        -3.22021746635437
+      ],
+      "serverMs": 322.5015029893257,
+      "rowElapsedMs": 322.494350024499,
+      "encodingMs": 0.19509100820869207,
+      "inferenceMs": 322.2470420296304,
+      "wallMs": 328.1559000000002,
+      "peakRssKb": 4987552,
+      "originalStateCharacters": 1584,
+      "preparedStateCharacters": 693,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "eefe8e4aa8923eb957a6326f3b4eeb19a382742d7a76aed8413d98592788b133",
+        "serializedRowSha256": "a2e31185ee5be85e3ad133be3eedc1a52b14958de0d63257dd4c0ae4d1bcf1cb",
+        "preparedStateSha256": "a2b9c1527917d7af590c04293832e5403aca12809ff3d7d93a19b3a59038e67e",
+        "requestBodySha256": "b9a154ad63f430751219e18d9dd215195a2a68a692929f3e176626cd3f52f545"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-05",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 238,
+      "encoding": {
+        "tokens": 238,
+        "optionTokens": [
+          15,
+          4,
+          5,
+          7,
+          4,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00010080543067760075,
+        0.9196713138362481,
+        0.00003164517539266949,
+        0.000004670629081498755,
+        0.0003408341560181605,
+        0.07985073077258188
+      ],
+      "logits": [
+        -4.988202095031738,
+        4.130377292633057,
+        -6.146808624267578,
+        -8.060100555419922,
+        -3.76999831199646,
+        1.686519980430603
+      ],
+      "serverMs": 298.08852705173194,
+      "rowElapsedMs": 298.08377800509334,
+      "encodingMs": 1.3681320124305785,
+      "inferenceMs": 296.67269700439647,
+      "wallMs": 304.46669999999995,
+      "peakRssKb": 4987552,
+      "originalStateCharacters": 5182,
+      "preparedStateCharacters": 657,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "d6afc9d05148460a389e6e90a920e3ab82a710f1b18d2ec0ec4e1608a40be50a",
+        "serializedRowSha256": "c07aa0da192a59cee9b9065213ada395c2922e3b2bb443f9be086b531abaca2c",
+        "preparedStateSha256": "e7e6827b8b2c18bdcc17f6b2f23126432101cafaa0cb6d9f312054749dbc30a0",
+        "requestBodySha256": "1e084f79a32138b4aca1896d225f88cafdfecb28707b654a016f047703451a46"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "booking-hotel-filters-06",
+      "task": "booking-hotel-filters",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 232,
+      "encoding": {
+        "tokens": 232,
+        "optionTokens": [
+          4,
+          5,
+          5,
+          4,
+          4,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.10771888294616959,
+        0.0000011217904256385482,
+        0.000005110704735443952,
+        0.0002512443522081644,
+        0.8920163381920148,
+        0.000007302014446471809
+      ],
+      "logits": [
+        3.022566080093384,
+        -8.449788093566895,
+        -6.933376789093018,
+        -3.038288116455078,
+        5.136525630950928,
+        -6.576563835144043
+      ],
+      "serverMs": 308.64032701356336,
+      "rowElapsedMs": 308.633814973291,
+      "encodingMs": 0.2561639994382858,
+      "inferenceMs": 308.33719699876383,
+      "wallMs": 315.3925000000004,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 12596,
+      "preparedStateCharacters": 657,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "d99b5374ed3798d6684e484ba980fd89ee69e933393901daba9430bb6beb8599",
+        "serializedRowSha256": "f18f7dff22019fe1effd93da04830e35013b6a8916374a660eee6b659d4db822",
+        "preparedStateSha256": "e7e6827b8b2c18bdcc17f6b2f23126432101cafaa0cb6d9f312054749dbc30a0",
+        "requestBodySha256": "d2af0c7aab70d24660d9dcec05432e662c065a2bb8117a1b26f4a97fbf7b9fee"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-issue-investigation-01",
+      "task": "github-issue-investigation",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 2,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 230,
+      "encoding": {
+        "tokens": 230,
+        "optionTokens": [
+          9,
+          4,
+          9,
+          5,
+          7,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00006175831923908882,
+        0.0000355148937980405,
+        0.9979634537402597,
+        0.0006256719705996861,
+        0.000799580661770663,
+        0.0005140204143326309
+      ],
+      "logits": [
+        -7.366885185241699,
+        -7.920161724090576,
+        2.3233580589294434,
+        -5.051287651062012,
+        -4.806026458740234,
+        -5.2478508949279785
+      ],
+      "serverMs": 274.9274089583196,
+      "rowElapsedMs": 274.9202559934929,
+      "encodingMs": 1.5017789555713534,
+      "inferenceMs": 273.35893601411954,
+      "wallMs": 281.1166000000003,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1447,
+      "preparedStateCharacters": 750,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "69df09bf454f6df971f8b12c254f60565a140502078169871fa4b7af2677b864",
+        "serializedRowSha256": "4f0c8a43168d6e5a2a2a06954464ed35bf0976035aa11bf483caea72d5866500",
+        "preparedStateSha256": "73d19533b2794c758eb5f9dddfada6b47a464dfd59dbe8b65db69df60ef83187",
+        "requestBodySha256": "9500ef3c7bda485a184b1d86da304ef202356491d86234c8d44a4419cbf05e28"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-issue-investigation-02",
+      "task": "github-issue-investigation",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 318,
+      "encoding": {
+        "tokens": 318,
+        "optionTokens": [
+          16,
+          13,
+          14,
+          11,
+          20,
+          16
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        2.452380979854071e-7,
+        9.648208116878357e-7,
+        0.0000018112850244633404,
+        0.9999391310605014,
+        0.00005776998862962727,
+        7.760693489055973e-8
+      ],
+      "logits": [
+        -9.534278869628906,
+        -8.164566040039062,
+        -7.534716606140137,
+        5.686696529388428,
+        -4.072283744812012,
+        -10.68485164642334
+      ],
+      "serverMs": 413.6667500133626,
+      "rowElapsedMs": 413.66298304637894,
+      "encodingMs": 1.322999014519155,
+      "inferenceMs": 412.3136950074695,
+      "wallMs": 419.3924999999999,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 6067,
+      "preparedStateCharacters": 830,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "d21f885fb01c927623177bcd6eb01e2295bd8992ad949711d49911572e176cac",
+        "serializedRowSha256": "33f4547cb05625a73abf701cd119e165801f4d6e0d24e1e7d0ab8a18287acf3e",
+        "preparedStateSha256": "59bfe0c975593c553588582483759e748036e8d8f8e1a6941e218173d6aefd94",
+        "requestBodySha256": "b450b83845eeacee11e05e68b87483733f3487d923f0013ccbe95416b6fc8f51"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-issue-investigation-03",
+      "task": "github-issue-investigation",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        3
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 260,
+      "encoding": {
+        "tokens": 260,
+        "optionTokens": [
+          3,
+          4,
+          5,
+          9,
+          5,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.006917096461756343,
+        0.811933886412098,
+        0.04670311803178299,
+        0.12577126768775224,
+        0.004561430104194527,
+        0.004113201302415907
+      ],
+      "logits": [
+        -10.113126754760742,
+        -5.34770393371582,
+        -8.203311920166016,
+        -7.212657928466797,
+        -10.529486656188965,
+        -10.63292121887207
+      ],
+      "serverMs": 353.7718100124039,
+      "rowElapsedMs": 353.7686240160838,
+      "encodingMs": 1.0512549779377878,
+      "inferenceMs": 352.6854300289415,
+      "wallMs": 359.1406000000002,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 3042,
+      "preparedStateCharacters": 871,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "0639c9be8e124df805e779365db6e480253c56684bf69bea2f5917aaefec3d0f",
+        "serializedRowSha256": "5052d873c14a32df056a91fdaf7f85e2d5d7590cb8d5ecaabf3dcec24144fc8b",
+        "preparedStateSha256": "de306aa3dd565c4b03201eb82c3bf824d47c7a26c812ce180fc476e89a6b194a",
+        "requestBodySha256": "a9cbda518068fc6987d2a1acb1535fd688008b361dd108520973b195b35012f6"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-release-download-01",
+      "task": "github-release-download",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        5
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 238,
+      "encoding": {
+        "tokens": 238,
+        "optionTokens": [
+          11,
+          15,
+          14,
+          8,
+          13,
+          12
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00006069993993620745,
+        0.0009538860187631072,
+        0.0008363221637939625,
+        0.029031676850527103,
+        0.00016208044505050602,
+        0.9689553345819291
+      ],
+      "logits": [
+        -8.300471305847168,
+        -5.545869827270508,
+        -5.6774001121521,
+        -2.1302711963653564,
+        -7.318321228027344,
+        1.377559781074524
+      ],
+      "serverMs": 315.25706400861964,
+      "rowElapsedMs": 315.25427900487557,
+      "encodingMs": 1.190534036140889,
+      "inferenceMs": 314.0399809926748,
+      "wallMs": 337.8135999999995,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 2174,
+      "preparedStateCharacters": 634,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "3c5c1fb8a833cbdbafc23ede8b738fd244762afe67f9fca4c49ab120f0ee028e",
+        "serializedRowSha256": "b407fab62a0d9b8adf1770da5277475d39c818390057995dfdf2269280d5f518",
+        "preparedStateSha256": "e8a0b711b611a58c58b83086d91fb4adc324758a2438213aa012eda2677476a8",
+        "requestBodySha256": "40eb394ccc742e16e23b431bf81e505ae9771a2fc67ae2e7e432172b7a1cf91c"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-release-download-02",
+      "task": "github-release-download",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        3
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 168,
+      "encoding": {
+        "tokens": 168,
+        "optionTokens": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.005020363416326379,
+        0.2577110958546441,
+        0.06589794865478509,
+        0.6547073742920005,
+        0.012288290134827764,
+        0.004374927647416173
+      ],
+      "logits": [
+        -10.57719898223877,
+        -6.638862133026123,
+        -8.002593994140625,
+        -5.706512928009033,
+        -9.68205451965332,
+        -10.714811325073242
+      ],
+      "serverMs": 225.3507289569825,
+      "rowElapsedMs": 225.34486796939746,
+      "encodingMs": 0.6372399511747062,
+      "inferenceMs": 224.65760499471799,
+      "wallMs": 229.5541000000003,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5104,
+      "preparedStateCharacters": 539,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "aa9e00ebde84c8bc0363fbbaf2549b18385a23144cd5407fbe0be58bb546d9f4",
+        "serializedRowSha256": "4a4913deba5f36fc08e34f067e8045809fa43142195763478875d2e6fa1ae4f8",
+        "preparedStateSha256": "b323ca0898ddce9bc7e41866dbedb9064057711aeb1d70ee8c5c5c4f4180b73e",
+        "requestBodySha256": "a3275fe1d685e870d54135daf0e3c3ce0d1ca55257894b4a83f73d1086b47973"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-release-download-03",
+      "task": "github-release-download",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0,
+        2
+      ],
+      "predicted": 2,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 225,
+      "encoding": {
+        "tokens": 225,
+        "optionTokens": [
+          12,
+          13,
+          13,
+          13,
+          12,
+          13
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.000014838859618578392,
+        0.000012740069407304775,
+        0.9999229243440763,
+        0.00002522038325479554,
+        0.00001932381011676455,
+        0.000004952533526271335
+      ],
+      "logits": [
+        -8.788443565368652,
+        -8.940940856933594,
+        2.329740524291992,
+        -8.258040428161621,
+        -8.524354934692383,
+        -9.885793685913086
+      ],
+      "serverMs": 295.2473380137235,
+      "rowElapsedMs": 295.24411202874035,
+      "encodingMs": 1.039403025060892,
+      "inferenceMs": 294.17496401583776,
+      "wallMs": 329.3932999999997,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 13031,
+      "preparedStateCharacters": 511,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "88b54e5a1946ed7fd85fd1329ae272602fd69516a881c5f09d15507449c3fdd8",
+        "serializedRowSha256": "a7f13f6c74b68247265d63d5d993025b1058cd194d368d7fc85d834720201279",
+        "preparedStateSha256": "cdea8285f17b52942752aaf94b6f3c12ccc5acc866e2aae74c2d714ab40d3c33",
+        "requestBodySha256": "579d9467566d7c771c264ab002fb6f4c394c0230da7ea891158b7fef7319cdf3"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "github-release-download-04",
+      "task": "github-release-download",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 202,
+      "encoding": {
+        "tokens": 202,
+        "optionTokens": [
+          9,
+          6,
+          8,
+          2,
+          10,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9262953842038271,
+        0.007024582391914584,
+        0.000022827850254227905,
+        0.00330676621726525,
+        0.0633475433359198,
+        0.000002896000819002762
+      ],
+      "logits": [
+        2.9767918586730957,
+        -1.9049855470657349,
+        -7.6341753005981445,
+        -2.658430576324463,
+        0.2942348122596741,
+        -9.69882583618164
+      ],
+      "serverMs": 281.72401897609234,
+      "rowElapsedMs": 281.7210539942607,
+      "encodingMs": 0.30371302273124456,
+      "inferenceMs": 281.39332600403577,
+      "wallMs": 300.10739999999987,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1446,
+      "preparedStateCharacters": 539,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "2e5fbe24b7976e0a0f018d528c10a761062a8e5d60a7058fd98aa27c832ff1f4",
+        "serializedRowSha256": "4f55bd22460f201ad872808c5662d51258564cf75b51ef797f63fe1c5e7278ce",
+        "preparedStateSha256": "b323ca0898ddce9bc7e41866dbedb9064057711aeb1d70ee8c5c5c4f4180b73e",
+        "requestBodySha256": "07168f4139276234ead0bfbf25b1afae77310aa6b801795cb786c50b276e1c63"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-maps-walking-01",
+      "task": "google-maps-walking",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        3
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 214,
+      "encoding": {
+        "tokens": 214,
+        "optionTokens": [
+          4,
+          6,
+          6,
+          6,
+          4,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0003543380185974838,
+        0.00076637368009983,
+        0.004662554195238578,
+        0.9915782092275353,
+        0.001757016116946158,
+        0.0008815087615826512
+      ],
+      "logits": [
+        -9.895791053771973,
+        -9.124372482299805,
+        -7.318723678588867,
+        -1.9589892625808716,
+        -8.294670104980469,
+        -8.984407424926758
+      ],
+      "serverMs": 280.2971670171246,
+      "rowElapsedMs": 280.2922779810615,
+      "encodingMs": 1.273447007406503,
+      "inferenceMs": 278.9821540354751,
+      "wallMs": 293.91669999999976,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1597,
+      "preparedStateCharacters": 623,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "2cb739744c2247a5472a85e95d7dbfa38c25dc7244d882e44aad859d02dfaa55",
+        "serializedRowSha256": "73c2d2df3044e8ebe705554b8aed1280c4f3862e28e2e048f6951894efbbc260",
+        "preparedStateSha256": "b9944f251fa46323baff8c96e3e492f08396999c2f774c12a75abbe4f483367e",
+        "requestBodySha256": "70fbba0436b4af604e37d59452d2aeefb0f035eeb7b56dec6f349dc9b070f391"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-maps-walking-02",
+      "task": "google-maps-walking",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 224,
+      "encoding": {
+        "tokens": 224,
+        "optionTokens": [
+          9,
+          4,
+          4,
+          2,
+          2,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.004781011346868884,
+        0.0020459991516672106,
+        0.0014940219096686068,
+        0.7526886786885912,
+        0.23879874400707163,
+        0.00019154489613244473
+      ],
+      "logits": [
+        -4.761201858520508,
+        -5.6099677085876465,
+        -5.924382209777832,
+        0.2977977395057678,
+        -0.8502328395843506,
+        -7.978487014770508
+      ],
+      "serverMs": 309.88890799926594,
+      "rowElapsedMs": 309.8854220006615,
+      "encodingMs": 1.2560749892145395,
+      "inferenceMs": 308.59007401159033,
+      "wallMs": 315.4287000000004,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1070,
+      "preparedStateCharacters": 603,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "413c00bf9564dc1bb1ef3b92b4cb946d7b465417c83149220e9b1c2149542348",
+        "serializedRowSha256": "e17f96f8e1f69ccd88976606b6b24a60b2cd34acbccbb58ac612d0ff13d1c323",
+        "preparedStateSha256": "05c8d21f193c964953902e643096b534b97216d4dd6ced135756d763238a0cc2",
+        "requestBodySha256": "c3bc0c2616f4fdebc2a16dc62db8621cab35c858da24bc62a933a9abb94b9a12"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-maps-walking-03",
+      "task": "google-maps-walking",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        5
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 226,
+      "encoding": {
+        "tokens": 226,
+        "optionTokens": [
+          3,
+          4,
+          3,
+          4,
+          3,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0000027294316147368862,
+        0.00007894905453025583,
+        0.0000017575205303829979,
+        0.000022022530188014755,
+        0.00007483701407658716,
+        0.99981970444906
+      ],
+      "logits": [
+        -8.740425109863281,
+        -5.375715732574463,
+        -9.180614471435547,
+        -6.65245246887207,
+        -5.429205894470215,
+        4.070811748504639
+      ],
+      "serverMs": 307.2331940056756,
+      "rowElapsedMs": 307.22596996929497,
+      "encodingMs": 1.1185709736309946,
+      "inferenceMs": 306.0591000248678,
+      "wallMs": 325.41559999999936,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1065,
+      "preparedStateCharacters": 609,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "577e2e904a653c3ca364ffa092225973005027eefa5b25f6ac02fc5c52ce98d9",
+        "serializedRowSha256": "e6a5774d2524e6455210423612b87c9517a895479c4c4aa41a537c334c8b9b68",
+        "preparedStateSha256": "874f109735bbc5467952ec4b2a5a8ef78b9cede3a85146aec0d80176a1c54f1e",
+        "requestBodySha256": "71c54d3adbd6890e3b6259fbdb684811dbcc430d6fbe65ad728eaee61a11825e"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-maps-walking-04",
+      "task": "google-maps-walking",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        5
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 497,
+      "encoding": {
+        "tokens": 497,
+        "optionTokens": [
+          4,
+          3,
+          3,
+          9,
+          2,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.030106922994033825,
+        0.42779733605529513,
+        0.36560819096468555,
+        0.007742449807946328,
+        0.03137765367168723,
+        0.13736744650635202
+      ],
+      "logits": [
+        -8.400331497192383,
+        -5.746437072753906,
+        -5.903524398803711,
+        -9.758368492126465,
+        -8.358990669250488,
+        -6.882427215576172
+      ],
+      "serverMs": 731.3401660067029,
+      "rowElapsedMs": 731.3319509848952,
+      "encodingMs": 1.7162769800052047,
+      "inferenceMs": 729.5658220537007,
+      "wallMs": 738.2275,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 2144,
+      "preparedStateCharacters": 975,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "fc188fa8e7c08f881457b3d6b698128b7926b206176c7ceb844ee9ec92f214b7",
+        "serializedRowSha256": "a5d4106dba255c84e96c60e1e4691781ae7a771cbfc1d2ed2b7737f946fba98c",
+        "preparedStateSha256": "9318e0c4ad8e54bc5937e8559009de47eab7438c32a17d82cf97b4a272e7fac9",
+        "requestBodySha256": "e2d1956b7252625fdd760962b79fc5b23995b666a8cd9bde6888b6e3ffd2c33c"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "wikipedia-language-history-source-01",
+      "task": "wikipedia-language-history-source",
+      "kind": "local_action",
+      "expected": 2,
+      "acceptableIndices": [
+        2
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 192,
+      "encoding": {
+        "tokens": 192,
+        "optionTokens": [
+          7,
+          3,
+          5,
+          4,
+          3,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.16706049172253906,
+        0.039918439967095314,
+        0.012412803471075444,
+        0.37733642430296876,
+        0.3777432808323134,
+        0.025528559704008007
+      ],
+      "logits": [
+        -7.263522148132324,
+        -8.695039749145508,
+        -9.863149642944336,
+        -6.4487409591674805,
+        -6.447663307189941,
+        -9.142080307006836
+      ],
+      "serverMs": 263.6291470262222,
+      "rowElapsedMs": 263.62291601253673,
+      "encodingMs": 1.811773981899023,
+      "inferenceMs": 261.76642003702,
+      "wallMs": 271.2415000000001,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1388,
+      "preparedStateCharacters": 658,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "86a9ac8be905584367bf3382f446d5fad0be8203133b16f3a69d1820d436c5a8",
+        "serializedRowSha256": "90fcb89a8b7a49f0d78c13c6db5c0d33198bf63dcd9b64510965ad9b95209ab8",
+        "preparedStateSha256": "16e800bac1e2586072f5dca395d14a33186acdee62ca46318995cec4cf14a39d",
+        "requestBodySha256": "dc9b51c607e0b150a39e235200a7e17fda44b14c23d8f9cdf4e306142432ccb2"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "wikipedia-language-history-source-02",
+      "task": "wikipedia-language-history-source",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 198,
+      "encoding": {
+        "tokens": 198,
+        "optionTokens": [
+          4,
+          3,
+          4,
+          2,
+          8,
+          2
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.48655575905682497,
+        0.31450297410447087,
+        0.0896846427603741,
+        0.003176762550395479,
+        0.005784180882034825,
+        0.1002956806458997
+      ],
+      "logits": [
+        -5.350497722625732,
+        -5.786855697631836,
+        -7.0415496826171875,
+        -10.381986618041992,
+        -9.782722473144531,
+        -6.929726600646973
+      ],
+      "serverMs": 276.346314989496,
+      "rowElapsedMs": 276.3400130206719,
+      "encodingMs": 1.4160510036163032,
+      "inferenceMs": 274.8885169858113,
+      "wallMs": 283.08320000000003,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5052,
+      "preparedStateCharacters": 647,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "afa11ec95d942cb51bd1e80349613f5b20d5706c5774e2a695de483dd0bc391e",
+        "serializedRowSha256": "958200c16dcd448a11380e82db7ac169335e4de44f191188630799f03be4a98e",
+        "preparedStateSha256": "305705fe7e6f8756c678ee8af086939427e53d753dd42649950dc59cc50f9f1b",
+        "requestBodySha256": "5378ba9160a15249775f6a0c2e6ab7adeb0eb4e32c8db3cd9e0a6a2f3ef783a6"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "wikipedia-language-history-source-03",
+      "task": "wikipedia-language-history-source",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 203,
+      "encoding": {
+        "tokens": 203,
+        "optionTokens": [
+          5,
+          5,
+          5,
+          5,
+          3,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0001791424906954874,
+        0.00001546652645003535,
+        0.00005408832482109839,
+        0.000009151928192955155,
+        0.9086937477608207,
+        0.09104840296901985
+      ],
+      "logits": [
+        -4.801364898681641,
+        -7.250868320465088,
+        -5.998928070068359,
+        -7.7755818367004395,
+        3.7302169799804688,
+        1.4296001195907593
+      ],
+      "serverMs": 268.1510260445066,
+      "rowElapsedMs": 268.1451150565408,
+      "encodingMs": 0.3456090344116092,
+      "inferenceMs": 267.75190798798576,
+      "wallMs": 276.1060000000007,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 12510,
+      "preparedStateCharacters": 647,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "d86894026f81bfc63186707d788856bfaf54ab8213b8eed4b8ede5898e8f5138",
+        "serializedRowSha256": "cc39e51b689ccda2e0c6b6ca40a3d5b1756218c0b4ff5cbd361b5b57142eebeb",
+        "preparedStateSha256": "305705fe7e6f8756c678ee8af086939427e53d753dd42649950dc59cc50f9f1b",
+        "requestBodySha256": "3495b41b2b4a471b40db5459a73b5b0c27e136a88b509c69f1a480b26798d4a7"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "wikipedia-language-history-source-04",
+      "task": "wikipedia-language-history-source",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 209,
+      "encoding": {
+        "tokens": 209,
+        "optionTokens": [
+          7,
+          6,
+          4,
+          6,
+          4,
+          7
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9982904043903349,
+        0.00007415748195219869,
+        0.0006408584513906474,
+        0.000019602815376181256,
+        0.00006992049409117271,
+        0.0009050563668549882
+      ],
+      "logits": [
+        1.5105191469192505,
+        -7.997089385986328,
+        -5.8404717445373535,
+        -9.327607154846191,
+        -8.05592155456543,
+        -5.495283126831055
+      ],
+      "serverMs": 278.62211695173755,
+      "rowElapsedMs": 278.6170379840769,
+      "encodingMs": 1.1587049812078476,
+      "inferenceMs": 277.4244110332802,
+      "wallMs": 286.0083000000004,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1913,
+      "preparedStateCharacters": 647,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "ef8af6fbb61c16f597b731583b7d8e4b84d0fe73030492c65ad31bab683ed79b",
+        "serializedRowSha256": "dd8348dc9e68b40c4bb5ffd74b5e59c07c8380050f63a4c9fddc368dfc28bb44",
+        "preparedStateSha256": "ea1e3e262f27286bd0b028a2505ab65dd03b49fab710e621795403527ce4d69d",
+        "requestBodySha256": "33f55d80719934a763a2d1647e5de141d41d185599ca7deed7cd71eff75f7e3b"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "wikipedia-language-history-source-05",
+      "task": "wikipedia-language-history-source",
+      "kind": "local_action",
+      "expected": 2,
+      "acceptableIndices": [
+        1,
+        2,
+        3,
+        5
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 250,
+      "encoding": {
+        "tokens": 250,
+        "optionTokens": [
+          10,
+          13,
+          9,
+          13,
+          11,
+          16
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.00002618241816082662,
+        0.00006705204930206287,
+        0.002064872965679019,
+        0.034274619724934285,
+        0.003835065228868988,
+        0.9597322076130547
+      ],
+      "logits": [
+        -9.816012382507324,
+        -8.875631332397461,
+        -5.448276519775391,
+        -2.6389400959014893,
+        -4.829158782958984,
+        0.6933090686798096
+      ],
+      "serverMs": 335.25681198807433,
+      "rowElapsedMs": 335.2517019957304,
+      "encodingMs": 0.19914895528927445,
+      "inferenceMs": 335.0187710020691,
+      "wallMs": 354.65999999999985,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5976,
+      "preparedStateCharacters": 647,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "44651ea07e20d5bd6c233a6a3d6f326f3ff448a821a75e792c2f24379862d5c3",
+        "serializedRowSha256": "b4fc92af1a1c8481c251e785cb6c6b7f0b56452820a8ea2bb88beb8937fd9ad6",
+        "preparedStateSha256": "ea1e3e262f27286bd0b028a2505ab65dd03b49fab710e621795403527ce4d69d",
+        "requestBodySha256": "6dc1902731bcd927f34fd30eb33839bf4080df57c9b7d96d9e8cb1df1ccc7b7c"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-01",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 168,
+      "encoding": {
+        "tokens": 168,
+        "optionTokens": [
+          5,
+          4,
+          2,
+          2,
+          2,
+          2
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9989873643255427,
+        0.0010092153917744275,
+        6.517299654530797e-7,
+        2.5419459228432573e-7,
+        4.481342464428528e-7,
+        0.0000020662238785985506
+      ],
+      "logits": [
+        4.460580825805664,
+        -2.436988115310669,
+        -9.782041549682617,
+        -10.72357177734375,
+        -10.15657901763916,
+        -8.628193855285645
+      ],
+      "serverMs": 232.2119369637221,
+      "rowElapsedMs": 232.20469400985166,
+      "encodingMs": 1.3049549888819456,
+      "inferenceMs": 230.84710200782865,
+      "wallMs": 251.3117000000002,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 917,
+      "preparedStateCharacters": 568,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "18951079697f393da991299477e13d0fe4b4bfe05744dd9e0fe4546e0fc78840",
+        "serializedRowSha256": "9604c33d007df46cf4d5a51476ce23d1a847127136223016ce1aa5027b63f1fa",
+        "preparedStateSha256": "636edaf5d76dcc46e3abf86ab2966639d4d3a53a3573b6aa8bff24b33e3a5937",
+        "requestBodySha256": "2067b1339d5685610b8b6e2e274f4261bd401f04936e575897bd005f40b7c836"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-02",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 208,
+      "encoding": {
+        "tokens": 208,
+        "optionTokens": [
+          17,
+          3,
+          4,
+          3,
+          4,
+          2
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.004732907123098782,
+        0.8768702450702903,
+        0.005719198770464706,
+        0.005745296739053264,
+        0.09708947694042584,
+        0.009842875356667134
+      ],
+      "logits": [
+        -9.633269309997559,
+        -4.411449909210205,
+        -9.44398021697998,
+        -9.439427375793457,
+        -6.612175941467285,
+        -8.901061058044434
+      ],
+      "serverMs": 298.1401329743676,
+      "rowElapsedMs": 298.1346430024132,
+      "encodingMs": 1.7073999624699354,
+      "inferenceMs": 296.3912860141136,
+      "wallMs": 318.5066000000006,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5504,
+      "preparedStateCharacters": 654,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "f19f039574be8bdf8234a165e8f88be29a46a2b63e97fcfdd6d0ea7869442811",
+        "serializedRowSha256": "0566d2c972c4ee0ab3e3e86264b2c6ecb1fe788288a6534ea865051ec2c774d1",
+        "preparedStateSha256": "f4f056abb83edcbfb8354a2679986931b84850ffa5198a23701cced059803370",
+        "requestBodySha256": "3ab66ebdf9973c465fde517837dd94e7c4a5ab6535478969278acc898a09a6c6"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-03",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        5
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 205,
+      "encoding": {
+        "tokens": 205,
+        "optionTokens": [
+          5,
+          18,
+          3,
+          5,
+          3,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        3.6958695426761046e-7,
+        0.0000026823610475824323,
+        1.0207859073344994e-7,
+        1.8971493450054359e-7,
+        0.00006254497594782779,
+        0.9999341112825252
+      ],
+      "logits": [
+        -8.010515213012695,
+        -6.028448581695557,
+        -9.297158241271973,
+        -8.67737865447998,
+        -2.8792600631713867,
+        6.800298690795898
+      ],
+      "serverMs": 278.55257800547406,
+      "rowElapsedMs": 278.54616596596316,
+      "encodingMs": 0.34357496770098805,
+      "inferenceMs": 278.1518169795163,
+      "wallMs": 298.3298999999988,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 12653,
+      "preparedStateCharacters": 654,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "42b3f157a035ac2286b01bb8d240dd62a85090ae8d03a38d86fac0815f0287ca",
+        "serializedRowSha256": "c50840e41f19f861dcfe8e34fa01cd03a41f5c757db6162e86a99a5b546c0a52",
+        "preparedStateSha256": "f4f056abb83edcbfb8354a2679986931b84850ffa5198a23701cced059803370",
+        "requestBodySha256": "e65884929448e221f6d3ea19ade4718b29b1c25ab3787ddb2f855c48f7933b16"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-04",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 220,
+      "encoding": {
+        "tokens": 220,
+        "optionTokens": [
+          3,
+          4,
+          3,
+          17,
+          4,
+          2
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.89706462127989,
+        0.001768302917014593,
+        0.003438821974344711,
+        0.04716115399454351,
+        0.006732655424510357,
+        0.04383444440969693
+      ],
+      "logits": [
+        -3.462054491043091,
+        -9.691162109375,
+        -9.026053428649902,
+        -6.407611846923828,
+        -8.354212760925293,
+        -6.480762481689453
+      ],
+      "serverMs": 288.91061997273937,
+      "rowElapsedMs": 288.90657296869904,
+      "encodingMs": 1.351651968434453,
+      "inferenceMs": 287.5283019966446,
+      "wallMs": 295.0709999999999,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1878,
+      "preparedStateCharacters": 674,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "55dded8c45208d720a47017032a47b4114b870cdeeb65f6a6edc3a0a3459f09a",
+        "serializedRowSha256": "837c44c25510dab7b8e7e06cd687ff53f3218cfd5811b88c7f79f438c8a18d79",
+        "preparedStateSha256": "e0e0c4f49c4cb2d22581ce475de925efc76ac6db0882259728614025f0af7832",
+        "requestBodySha256": "4143fde6eaddf549067d046d38fe9cec7b2ff310f2c1695daf53aa5fc571c6a3"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-05",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 257,
+      "encoding": {
+        "tokens": 257,
+        "optionTokens": [
+          16,
+          7,
+          18,
+          14,
+          9,
+          6
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9223391848575438,
+        0.01979218388499441,
+        1.0826802368186509e-7,
+        0.0000059646967365954555,
+        0.05513942417322876,
+        0.002723134119472769
+      ],
+      "logits": [
+        6.117567539215088,
+        2.2759416103363037,
+        -9.840246200561523,
+        -5.831242561340332,
+        3.3005194664001465,
+        0.29243797063827515
+      ],
+      "serverMs": 339.094715018291,
+      "rowElapsedMs": 339.08897498622537,
+      "encodingMs": 0.3298110095784068,
+      "inferenceMs": 338.7251010281034,
+      "wallMs": 357.72360000000117,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5433,
+      "preparedStateCharacters": 674,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "34d763757727de1a79954d1afaaabeb0d80027e77c680edc07341d683df6aa7a",
+        "serializedRowSha256": "4b737aef243b7d22678c529420e0fb444b246d4bb9aa1aeb11858294bedc3a7c",
+        "preparedStateSha256": "e0e0c4f49c4cb2d22581ce475de925efc76ac6db0882259728614025f0af7832",
+        "requestBodySha256": "14ada4991197136325031dc29e447ac5c13f66ef7b627e7675397c6d2d55f605"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "youtube-search-filters-06",
+      "task": "youtube-search-filters",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 205,
+      "encoding": {
+        "tokens": 205,
+        "optionTokens": [
+          7,
+          5,
+          4,
+          2,
+          4,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9864860712811214,
+        0.000006442580449954671,
+        0.00006294388837621784,
+        0.01324899963514572,
+        0.000017944404933832518,
+        0.0001775982099728022
+      ],
+      "logits": [
+        2.976374626159668,
+        -8.962600708007812,
+        -6.683286190032959,
+        -1.3338525295257568,
+        -7.938251495361328,
+        -5.646006107330322
+      ],
+      "serverMs": 270.9983669919893,
+      "rowElapsedMs": 270.99156397162005,
+      "encodingMs": 1.2639789492823184,
+      "inferenceMs": 269.6757080266252,
+      "wallMs": 277.26770000000033,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 4322,
+      "preparedStateCharacters": 638,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "44dc32a484b4fb6c691dde9ae7d93c7eb7560f021ddae78572c6637701627c1d",
+        "serializedRowSha256": "3f87c06363c617f4a398ec0194c9d909016fb92ced45a34ef705f8f7d03c9ba1",
+        "preparedStateSha256": "ffe8c194b63a5b218231cb54682f9ae121227e872bf280b42215cf86a5afd52c",
+        "requestBodySha256": "3c08d7d68b7fe3e2e16a9164c45be140a0df6cede9615dec9e5b7a4ad53d5faa"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-01",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 0,
+      "acceptableIndices": [
+        0
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 242,
+      "encoding": {
+        "tokens": 242,
+        "optionTokens": [
+          8,
+          6,
+          8,
+          31,
+          5,
+          4
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.023745581096671877,
+        0.022957856868699555,
+        0.03398615383480357,
+        0.774477191234463,
+        0.12443396830111862,
+        0.020399248664243336
+      ],
+      "logits": [
+        -8.94421672821045,
+        -8.97795295715332,
+        -8.585659980773926,
+        -5.45942497253418,
+        -7.287837982177734,
+        -9.096115112304688
+      ],
+      "serverMs": 311.0322149586864,
+      "rowElapsedMs": 311.0291689517908,
+      "encodingMs": 0.6204479723237455,
+      "inferenceMs": 310.38456596434116,
+      "wallMs": 330.0002000000004,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1728,
+      "preparedStateCharacters": 688,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "e87a510c789203ce3e707e8b93796dac94ca2fbbb51a7607c203d8a83f2c8fdb",
+        "serializedRowSha256": "d2ba8bf7611c9dd6574c89025c4ef3a604d0e34eb9d6fb2306f69c5ab11a976c",
+        "preparedStateSha256": "bcc4577edc4a00d111c74e7a65fbb27247cde6180f6f7f399aaebaf24c742c5a",
+        "requestBodySha256": "b8104835fa1b64dcca47795468a0993a1afa676a11f5d3a311a95770c55c79d7"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-02",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 1,
+      "acceptableIndices": [
+        1
+      ],
+      "predicted": 1,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 220,
+      "encoding": {
+        "tokens": 220,
+        "optionTokens": [
+          4,
+          3,
+          10,
+          7,
+          7,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.010973747301929971,
+        0.8453234178184738,
+        0.026083498010638032,
+        0.07601767674787942,
+        0.006943586539500654,
+        0.03465807358157808
+      ],
+      "logits": [
+        -9.044452667236328,
+        -4.700239181518555,
+        -8.178655624389648,
+        -7.108992576599121,
+        -9.502140045166016,
+        -7.89442777633667
+      ],
+      "serverMs": 330.2687990362756,
+      "rowElapsedMs": 330.2322910167277,
+      "encodingMs": 0.32845704117789865,
+      "inferenceMs": 329.87157499883324,
+      "wallMs": 336.78809999999976,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5039,
+      "preparedStateCharacters": 688,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "6b8a0e0b0ef034c7b7fdb681c7e1c182441498ae619f5a0ec5222cc3633e3bee",
+        "serializedRowSha256": "c508a1eead58369957b81bf176364ad8c94af669b53c7db442e3adee855a1e10",
+        "preparedStateSha256": "bcc4577edc4a00d111c74e7a65fbb27247cde6180f6f7f399aaebaf24c742c5a",
+        "requestBodySha256": "b36ac44987f46ee87396c39d34f1594ecce126585fe48232ebd43fe549a99b94"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-03",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 5,
+      "acceptableIndices": [
+        5
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 219,
+      "encoding": {
+        "tokens": 219,
+        "optionTokens": [
+          6,
+          7,
+          4,
+          4,
+          8,
+          6
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0008116853166772898,
+        0.00024523761926288076,
+        0.0001273570083217227,
+        0.29198722653550563,
+        0.0010158517750098529,
+        0.7058126417452227
+      ],
+      "logits": [
+        -8.231979370117188,
+        -9.428864479064941,
+        -10.084097862243652,
+        -2.3466267585754395,
+        -8.007609367370605,
+        -1.4639869928359985
+      ],
+      "serverMs": 292.7178360405378,
+      "rowElapsedMs": 292.71392902592197,
+      "encodingMs": 0.31785800820216537,
+      "inferenceMs": 292.365544999484,
+      "wallMs": 299.40600000000086,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 4733,
+      "preparedStateCharacters": 688,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "efe8eb23ac0c30621f580b68ce69d0a2436a4b37bea3ce0bb32cdd24bfe7db35",
+        "serializedRowSha256": "a94fd7af915741440b57b4b770b05a94055ceb0a7f878cc3829ac7f0dd12bf4e",
+        "preparedStateSha256": "bcc4577edc4a00d111c74e7a65fbb27247cde6180f6f7f399aaebaf24c742c5a",
+        "requestBodySha256": "45179bfee6242caab8b206cf1922a39339bffd6c5853c59a8291609da04d0e93"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-04",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 3,
+      "acceptableIndices": [
+        3,
+        4
+      ],
+      "predicted": 3,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": true,
+      "semanticCorrect": true,
+      "backend": "onnx",
+      "inputTokens": 278,
+      "encoding": {
+        "tokens": 278,
+        "optionTokens": [
+          8,
+          8,
+          7,
+          4,
+          7,
+          7
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.0001156371771737313,
+        0.0014912357115212619,
+        0.026485681140150107,
+        0.9254239432987008,
+        0.009569897405419801,
+        0.036913605267034244
+      ],
+      "logits": [
+        -8.423604011535645,
+        -5.866701126098633,
+        -2.989701986312866,
+        0.5639457106590271,
+        -4.007683753967285,
+        -2.6577260494232178
+      ],
+      "serverMs": 375.2322709769942,
+      "rowElapsedMs": 375.2257689484395,
+      "encodingMs": 1.3574619661085308,
+      "inferenceMs": 373.81967704277486,
+      "wallMs": 382.1991999999991,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 1719,
+      "preparedStateCharacters": 786,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "c3dd2337bb9020b68ec8f460076207a4cd10bc561aa9b1408b720bf9eedcf970",
+        "serializedRowSha256": "43ce94fbe836d78f5a87bf14cf0da877f6899a71e8f036b7a7033ce032af1517",
+        "preparedStateSha256": "8792dfd429ddf05c0ecee60153ac4a4c436a6da50f8119afe579f0896ed5d6b4",
+        "requestBodySha256": "b9b1511e61ba624031e738b4173e2d91390f1c4a0be8a237d5aea7efa5b8247d"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-05",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 2,
+      "acceptableIndices": [
+        2
+      ],
+      "predicted": 4,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 278,
+      "encoding": {
+        "tokens": 278,
+        "optionTokens": [
+          4,
+          5,
+          4,
+          7,
+          4,
+          3
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.22435233757070813,
+        0.006789302828567221,
+        0.3131332968477044,
+        0.013255793688780548,
+        0.37906497609772943,
+        0.0634042929665102
+      ],
+      "logits": [
+        -6.508308410644531,
+        -10.00617790222168,
+        -6.174897193908691,
+        -9.337091445922852,
+        -5.983818531036377,
+        -7.771994590759277
+      ],
+      "serverMs": 370.6448409939185,
+      "rowElapsedMs": 370.63972098985687,
+      "encodingMs": 0.3395379753783345,
+      "inferenceMs": 370.2671609935351,
+      "wallMs": 377.72259999999915,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 4871,
+      "preparedStateCharacters": 786,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "1b2d2b490eb9e45c9c39e90c86c5a8b1468483aec78d0071817eaa456fa41487",
+        "serializedRowSha256": "358ebddc65ae32f1e4a5423ceaa7884b826cd981d5ac6bb8e26e9308abed20c0",
+        "preparedStateSha256": "8792dfd429ddf05c0ecee60153ac4a4c436a6da50f8119afe579f0896ed5d6b4",
+        "requestBodySha256": "929a928739dfe1e1432cba3f43a25865b03558ab76f2d789ba8fad2fdf628fc8"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-06",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 2,
+      "acceptableIndices": [
+        2
+      ],
+      "predicted": 5,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 295,
+      "encoding": {
+        "tokens": 295,
+        "optionTokens": [
+          2,
+          6,
+          3,
+          3,
+          6,
+          5
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.000001865391093880313,
+        0.002162327795488649,
+        0.0641173443716967,
+        0.0000012345483935844785,
+        0.000002038586872181682,
+        0.9337151893064551
+      ],
+      "logits": [
+        -8.641033172607422,
+        -1.5855633020401,
+        1.8039662837982178,
+        -9.05379867553711,
+        -8.552247047424316,
+        4.482422828674316
+      ],
+      "serverMs": 403.8399810087867,
+      "rowElapsedMs": 403.83531199768186,
+      "encodingMs": 1.5454700333066285,
+      "inferenceMs": 402.25413598818704,
+      "wallMs": 410.95820000000094,
+      "peakRssKb": 4987664,
+      "originalStateCharacters": 5280,
+      "preparedStateCharacters": 832,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "d2d95c215eafa35718ed4f5b55a51c6e882cb3e882b1ab345d3060921069466d",
+        "serializedRowSha256": "6d5c6b4992966b3d99b9edbec455eff017d9e0e307b1b85aa3145e948745145a",
+        "preparedStateSha256": "9991ab7b2c36515bfd5e2585449e40ce4c7880bb7424f289b7f24fa55ca4f407",
+        "requestBodySha256": "e1fc11dc42a1250a905a2257419e54779309f4c63c2170efebb4cca91ef91e39"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-07",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 2,
+      "acceptableIndices": [
+        2
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 438,
+      "encoding": {
+        "tokens": 438,
+        "optionTokens": [
+          27,
+          27,
+          5,
+          27,
+          27,
+          27
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.47485477167781037,
+        0.009553512228763435,
+        0.0010956608897892614,
+        0.2996437074371892,
+        0.15853449043577694,
+        0.05631785733067087
+      ],
+      "logits": [
+        5.138119220733643,
+        1.232019066810608,
+        -0.9335320591926575,
+        4.677704334259033,
+        4.041082382202148,
+        3.006121873855591
+      ],
+      "serverMs": 634.6907789702527,
+      "rowElapsedMs": 634.684588003438,
+      "encodingMs": 1.6585499979555607,
+      "inferenceMs": 632.9787200083956,
+      "wallMs": 641.2591000000011,
+      "peakRssKb": 5013168,
+      "originalStateCharacters": 2504,
+      "preparedStateCharacters": 853,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "de33c47e5a07768f9de53cc4066119d73c48291d3d9634032a7283046836b8a2",
+        "serializedRowSha256": "b313c1a6e7459a8c30a8f95a05acb9c3a1509f5887e5848c726c5dcbb6b25dfe",
+        "preparedStateSha256": "9609014263ac234bc2f8dc316b740e380ae2aed5c1e4927bc50d52ae6ddbb957",
+        "requestBodySha256": "3cb1b738aea78852b2587ce7ef9e438932cd14c42939b72853a1d0f0301af2ab"
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "cliMode": "local-router",
+      "id": "google-flights-roundtrip-08",
+      "task": "google-flights-roundtrip",
+      "kind": "local_action",
+      "expected": 4,
+      "acceptableIndices": [
+        4
+      ],
+      "predicted": 0,
+      "httpStatus": 200,
+      "accepted": true,
+      "historicalCorrect": false,
+      "semanticCorrect": false,
+      "backend": "onnx",
+      "inputTokens": 532,
+      "encoding": {
+        "tokens": 532,
+        "optionTokens": [
+          27,
+          27,
+          27,
+          3,
+          5,
+          27
+        ],
+        "headLength": 1536,
+        "stateTruncated": false,
+        "optionsTruncated": false
+      },
+      "probabilities": [
+        0.9444714441922673,
+        0.00000268976062819174,
+        0.0030862439187823248,
+        0.000007950735504195145,
+        0.0027805306069924552,
+        0.04965114078582554
+      ],
+      "logits": [
+        6.216739654541016,
+        -6.552188873291016,
+        0.49306899309158325,
+        -5.468376636505127,
+        0.3887559771537781,
+        3.2711355686187744
+      ],
+      "serverMs": 795.8823459921405,
+      "rowElapsedMs": 795.8763049682602,
+      "encodingMs": 2.348045993130654,
+      "inferenceMs": 793.4923520078883,
+      "wallMs": 801.7713000000003,
+      "peakRssKb": 5013168,
+      "originalStateCharacters": 4716,
+      "preparedStateCharacters": 1043,
+      "inputHashes": {
+        "savedSourceRowFileSha256": "e0979059b0ff7dad1d535793436d5b8051a4c7618a7b366f85f4e5be6c14c876",
+        "serializedRowSha256": "50c0b45810dfd484ab6556fed6ab06d705c82f2ec333719b26fca8d1ccaf12a2",
+        "preparedStateSha256": "34df08ed489e665c7de24b61c65b446e467c082f742c6fc58e33ccc529c96e3c",
+        "requestBodySha256": "634dd65b4f6ac9f02a6be5dcef1cf590f51187c91c550992ae390d37b3584793"
+      }
+    }
+  ]
+}

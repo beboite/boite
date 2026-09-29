@@ -34,8 +34,25 @@ export const labStateScript = String.raw`(()=>{
  const links=roots.flatMap(r=>Array.from(r.querySelectorAll('a[href]'))).filter(visible).map(e=>({text:(e.innerText||e.getAttribute('aria-label')||e.title||'').trim().slice(0,160),url:e.href}));
  const text=roots.map(r=>r===document?document.body?.innerText??'':Array.from(r.children).filter(e=>!['STYLE','SCRIPT','TEMPLATE'].includes(e.tagName)&&visible(e)).map(e=>e.innerText??'').join('\n')).join('\n');
  const dialogs=roots.flatMap(r=>Array.from(r.querySelectorAll('[role="dialog"],dialog,[aria-modal="true"]'))).filter(visible).map(e=>(e.innerText||'').slice(0,4000));
- return {url:location.href,title:document.title,text,links,dialogs,viewport:{width:innerWidth,height:innerHeight},darkMode:matchMedia('(prefers-color-scheme: dark)').matches};
+ return {url:location.href,title:document.title,readyState:document.readyState,text,links,dialogs,viewport:{width:innerWidth,height:innerHeight},darkMode:matchMedia('(prefers-color-scheme: dark)').matches};
 })()`;
+
+// Wait only on an incomplete document. DOM signals trigger checks; the timer is
+// a deadline, never a fixed delay before taking evidence. Read fresh state in the
+// same evaluation before snapshot/capture can see a later document than the state.
+export function labReadinessScript(timeoutMs: number) {
+  return `(()=>new Promise((resolve,reject)=>{
+    let done=false,timer;const started=performance.now();
+    const observer=new MutationObserver(check);
+    const ready=()=>document.readyState!=='loading'&&document.title.trim().length>0&&(document.body?.innerText??'').trim().length>50;
+    const cleanup=()=>{clearTimeout(timer);observer.disconnect();document.removeEventListener('readystatechange',check);document.removeEventListener('DOMContentLoaded',check)};
+    function settle(){if(done)return;done=true;cleanup();try{const isReady=ready();resolve({ready:isReady,timedOut:!isReady,elapsedMs:performance.now()-started,state:${labStateScript}})}catch(error){reject(error)}}
+    function check(){if(ready())settle()}
+    observer.observe(document,{subtree:true,childList:true,characterData:true,attributes:true});
+    document.addEventListener('readystatechange',check);document.addEventListener('DOMContentLoaded',check);
+    timer=setTimeout(settle,${timeoutMs});check();
+  }))()`;
+}
 
 export class LabPage {
   readonly history: any[] = [];
@@ -64,7 +81,23 @@ export class LabPage {
     let state: any = {}, snapshot: any = {}, tabs: any = {};
     try { state = (await this.engine.command('evaluate', { script: labStateScript })).result ?? {}; }
     catch (error) { errors.push('state: ' + String(error)); }
-    if (state.url) { this.allowed(state.url); if (this.visited.at(-1) !== state.url) this.visited.push(state.url); }
+    let readiness: any;
+    if (!String(state.title ?? '').trim() || String(state.text ?? '').trim().length <= 50 || state.readyState === 'loading') {
+      const waitingAt = performance.now();
+      const timeoutMs = Math.max(0, Math.min(3000, Math.floor(this.deadline - waitingAt)));
+      readiness = { initialState: state, initialErrors: [...errors], timeoutMs, ready: false };
+      try {
+        const result = (await this.engine.command('evaluate', { script: labReadinessScript(timeoutMs) })).result;
+        if (!result?.state || typeof result.ready !== 'boolean' || typeof result.timedOut !== 'boolean') throw new Error('invalid readiness result');
+        state = result.state;
+        Object.assign(readiness, { ready: result.ready, timedOut: result.timedOut, documentWaitMs: result.elapsedMs });
+        if (!result.ready) errors.push(`readiness: document timed out after ${timeoutMs} ms; title, content or document readiness is incomplete.`);
+      } catch (error) {
+        readiness.error = String(error);
+        errors.push('readiness: ' + String(error));
+      } finally { readiness.waitMs = performance.now() - waitingAt; }
+    }
+    if (state.url) { this.urls.add(this.allowed(state.url)); if (this.visited.at(-1) !== state.url) this.visited.push(state.url); }
     try { snapshot = await this.engine.command('snapshot', { interactive: false, compact: true }); }
     catch (error) { errors.push('snapshot: ' + String(error)); }
     try { tabs = await this.engine.command('tabs'); }
@@ -78,6 +111,9 @@ export class LabPage {
     const matches = (line: string) => !query || query.toLowerCase().split(/\s+/).every(word => line.toLowerCase().includes(word));
     const selected = query ? lines.filter(matches) : lines;
     const shown = selected.join('\n').slice(0, 18000);
+    for (const match of shown.matchAll(/^\s*- \/url: (https:\/\/\S+)\s*$/gm)) {
+      try { this.urls.add(this.allowed(match[1]!)); } catch {}
+    }
     for (const attributes of shown.matchAll(/\[([^\]]+)\]/g)) {
       const ref = attributes[1]!.match(/(?:^|[\s,])ref=((?:f\d+)?e\d+)(?=$|[\s,])/);
       if (ref) this.refs.add('@' + ref[1]);
@@ -98,14 +134,14 @@ export class LabPage {
       if (this.vision) imageUrl = 'data:image/png;base64,' + png.toString('base64');
     }
     catch (error) { errors.push('screenshot: ' + String(error)); }
-    const evidence = { id, atMs: performance.now(), state, snapshot, tabs, screenshot: path, dimensions, errors, observationMs: performance.now() - at };
+    const evidence = { id, atMs: performance.now(), state, readiness, snapshot, tabs, screenshot: path, dimensions, errors, observationMs: performance.now() - at };
     this.history.push(evidence);
     writeFileSync(join(this.directory, String(id).padStart(3, '0') + '.json'), JSON.stringify(evidence, null, 2));
     if ((state.viewport && (state.viewport.width !== 1280 || state.viewport.height !== 800)) || (dimensions && (dimensions.width !== 1280 || dimensions.height !== 800)) || state.darkMode === true) {
       this.refs.clear();
       throw new LabInfrastructureError('Rendering differs from 1280x800 light theme; evidence saved. A fresh valid observation is required before acting.', id === 1);
     }
-    return { text: { url: state.url, title: state.title, snapshot: shown, truncated: shown.length < raw.length, pageText: shownText, links: linkRows, dialogs: state.dialogs, tabs, errors, actionCount: this.actionCount, remainingSeconds: Math.max(0, Math.round((this.deadline - performance.now()) / 1000)) }, imageUrl };
+    return { text: { url: state.url, title: state.title, snapshot: shown, truncated: shown.length < raw.length, pageText: shownText, links: linkRows, dialogs: state.dialogs, tabs, errors, readiness: readiness && { ready: readiness.ready, timedOut: readiness.timedOut, waitMs: readiness.waitMs }, actionCount: this.actionCount, remainingSeconds: Math.max(0, Math.round((this.deadline - performance.now()) / 1000)) }, imageUrl };
   }
   async execute(raw: unknown) {
     if (!raw || typeof raw !== 'object' || !Array.isArray((raw as any).commands)) throw new Error('commands array required.');

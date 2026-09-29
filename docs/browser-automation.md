@@ -127,6 +127,10 @@ downloads, product comparisons, maps and a round-trip flight selection.
 The [integration diagnostics](../bench/results/2026-09-24-browser-diagnostics.md)
 separate transport, download and capture failures from server redirects.
 These experiments do not expand the installed Jev plugin's capabilities.
+The [Julia-1 experiments](../bench/results/2026-09-29-julia.md) add 352
+saved-observation requests and a matched eight-workflow selector comparison.
+Julia remains a benchmark-only selector assisted by Luna's planner.
+Its Linux CPU inference does not verify Linux browser execution.
 Linux and macOS use the driver's Unix socket transport, but their
 browser execution and forced cleanup need platform verification. Windows
 owns the headless browser tree through the native driver's job object.
