@@ -682,6 +682,39 @@ shellTest('voice capture loads its packaged worklet under the native content sec
   }
 }, 30_000);
 
+shellTest('the Whip button moves the native window and restores its position', async () => {
+  if (!page) throw new Error('the shell page is missing');
+  await page.click(testid('nav-settings'));
+  await page.click(testid('settings-tab-experiments'));
+  await page.click(testid('experiment-whip'));
+  await page.click(testid('settings-back'));
+  await page.waitFor(`document.querySelector('[data-testid=whip-button]')`);
+  const result = await page.evaluate<{ origin: { x: number; y: number }; final: { x: number; y: number }; moved: boolean }>(`(async () => {
+    const position = () => window.__TAURI_INTERNALS__.invoke('plugin:window|outer_position', { label: 'main' });
+    const origin = await position();
+    const button = document.querySelector('[data-testid=whip-button]');
+    button.click();
+    await Promise.resolve();
+    let moved = false;
+    const deadline = Date.now() + 5000;
+    do {
+      const sample = await position();
+      moved ||= sample.x !== origin.x || sample.y !== origin.y;
+      await new Promise(resolve => setTimeout(resolve, 15));
+    } while (button.disabled && Date.now() < deadline);
+    if (button.disabled) throw new Error('Whip did not finish within five seconds');
+    return { origin, final: await position(), moved };
+  })()`);
+  expect(result.moved).toBe(true);
+  expect(result.final).toEqual(result.origin);
+  expect(await page.evaluate(`document.querySelector('[data-testid=error-toast]') === null`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'shell-whip.png'));
+  await page.click(testid('nav-settings'));
+  await page.click(testid('settings-tab-experiments'));
+  await page.click(testid('experiment-whip'));
+  await page.click(testid('settings-back'));
+}, TIMEOUT);
+
 shellTest('window controls draw maximize and restore without a second status indicator', async () => {
   // Exercise the component's resize subscription without maximizing a hidden
   // native window: ShowWindow could otherwise expose it on the desktop.
@@ -950,12 +983,14 @@ shellTest('native preview references attach to the composer and highlight from s
     await page.click(testid('preview-annotate'));
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
     // Even while the data-only picker is armed, a page gets no host commands.
-    const refused = await child.evaluate<string>(`(async () => {
-      if (!window.__TAURI_INTERNALS__?.invoke) return 'unavailable';
-      try { await window.__TAURI_INTERNALS__.invoke('core_endpoint'); return 'allowed'; }
-      catch { return 'refused'; }
+    const refused = await child.evaluate<string[]>(`(async () => {
+      if (!window.__TAURI_INTERNALS__?.invoke) return ['unavailable'];
+      return Promise.all(['core_endpoint', 'whip_window'].map(async command => {
+        try { await window.__TAURI_INTERNALS__.invoke(command); return 'allowed'; }
+        catch { return 'refused'; }
+      }));
     })()`);
-    expect(refused).not.toBe('allowed');
+    expect(refused).not.toContain('allowed');
     await child.click('#native-preview-target');
     await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
     expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');
