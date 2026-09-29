@@ -3,10 +3,7 @@
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
-  import { confirm } from '../lib/confirm.svelte';
-  import { contextMenu } from '../lib/context-menu.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
-  import { separator } from '../lib/menu';
   import { clampSidebar, SIDEBAR_DEFAULT } from '../lib/prefs';
   import { fill, strings } from '../lib/strings';
   import { projectName } from '../lib/format';
@@ -15,7 +12,7 @@
   import { moveThread, takesDrop, THREAD_DRAG_TYPE, threadDrag } from '../lib/thread-move.svelte';
   import { controlMenu } from '../lib/controls';
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
-  import { undo } from '../lib/undo.svelte';
+  import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
   import { PROJECT_DRAG_TYPE, projectKey, projectView } from '../lib/project-view.svelte';
   import ProjectViews from './ProjectViews.svelte';
@@ -77,65 +74,13 @@
   function addProject() {
     store.projectPickerOpen = true;
   }
-  function projectMenu(event: MouseEvent, machine: Machine, project: Project) {
-    const owner = machine.store;
-    contextMenu.open(
-      event,
-      [
-        { id: 'new', label: fill(strings.sidebar.newThreadIn, { project: projectName(project) }) },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: project.path },
-        // An archived thread leaves this list: its way back starts where it was.
-        { id: 'archived', label: strings.settings.archived.heading },
-        ...(projectView.order === 'manual' ? [
-          { id: 'move-up', label: strings.sidebar.moveProjectUp, disabled: projectKey(groups[0]!) === projectKey({ machine, project }) },
-          { id: 'move-down', label: strings.sidebar.moveProjectDown, disabled: projectKey(groups[groups.length - 1]!) === projectKey({ machine, project }) }
-        ] : []),
-        ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject }]),
-        ...(owner.owner
-          ? [
-              ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession }] : []),
-              ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
-              // Reads the folder again: a logo added or changed since the project was added.
-              ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon }]),
-              separator(),
-              { id: 'remove', label: strings.sidebar.removeProject, danger: true }
-            ]
-          : [])
-      ],
-      async (action) => {
-        if (action === 'new') await workspace.select(owner, undefined, project.id);
-        if (action === 'move-up' || action === 'move-down') projectView.step(groups, projectKey({ machine, project }), action === 'move-up' ? -1 : 1);
-        if (action === 'copy') await owner.copy(project.path);
-        if (action === 'archived') {
-          if (workspace.active !== owner) await workspace.select(owner);
-          owner.showSettings('general', 'archived');
-        }
-        if (action === 'archive-project' && (await owner.archiveProject(project.id, true)))
-          undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
-            await owner.archiveProject(project.id, false);
-          });
-        if (action === 'worktrees') {
-          if (workspace.active !== owner) await workspace.select(owner);
-          owner.showSettings('general', 'worktrees');
-        }
-        if (action === 'refresh-icon') await owner.refreshProjectIcon(project.id);
-        if (action === 'import') {
-          await workspace.select(owner);
-          await owner.openImports(project.id);
-        }
-        if (
-          action === 'remove' &&
-          (await confirm.ask({
-            title: fill(strings.sidebar.removeProjectTitle, { project: projectName(project) }),
-            body: strings.sidebar.removeProjectBody,
-            confirmLabel: strings.sidebar.remove,
-            cancelLabel: strings.common.cancel,
-            danger: true
-          }))
-        )
-          await owner.removeProject(project.id);
-      }
-    );
+  function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
+    const key = projectKey({ machine, project });
+    projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
+      up: groups[0] !== undefined && projectKey(groups[0]) !== key,
+      down: groups.at(-1) !== undefined && projectKey(groups.at(-1)!) !== key,
+      move: direction => projectView.step(groups, key, direction)
+    } : undefined);
   }
   /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
   let dropOver = $state<string | null>(null);
@@ -251,7 +196,7 @@
           ondrop={(event) => drop(event, machine, project)}
         >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="head" oncontextmenu={(e) => projectMenu(e, machine, project)}>
+          <div class="head" oncontextmenu={(e) => openProjectMenu(e, machine, project)}>
             <button
               class="ghost toggle"
               data-testid="project-row"
@@ -275,7 +220,7 @@
               data-testid="project-menu"
               title={strings.sidebar.projectMenu}
               aria-label={strings.sidebar.projectMenu}
-              onclick={(e) => projectMenu(e, machine, project)}><Ellipsis size={15} /></button
+              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
             >
           </div>
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>

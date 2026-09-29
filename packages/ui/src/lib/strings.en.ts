@@ -415,6 +415,9 @@ export const strings = {
     settings: 'Settings',
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
+    manageProject: 'Manage project',
+    backToProjectMenu: 'Back',
+    viewArchivedThreads: 'View archived threads',
     copied: 'Copied',
     importSession: 'Import a Claude Code session',
     /** Out of the list, not out of Boite: its threads keep running and a new one brings it back. */
