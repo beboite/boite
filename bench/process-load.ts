@@ -1,4 +1,7 @@
-/** Bounded sampling probe. --live --roots N adds sleeping fixtures, never providers. */
+/**
+ * Bounded sampling probe. --live --roots N adds sleeping fixtures, never providers.
+ * --wall-clock supplements forced refresh ticks with high-frequency, no-sleep sampling.
+ */
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { LinuxLoad } from '../packages/core/src/platform/linux-load.ts';
@@ -38,6 +41,7 @@ async function ready(child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>): Promise<v
 
 async function main(): Promise<void> {
   const live = Bun.argv.includes('--live');
+  const wallClock = Bun.argv.includes('--wall-clock');
   if (live && process.platform !== 'linux') throw new Error('--live requires Linux procfs');
   const rootOption = Bun.argv.indexOf('--roots');
   const rootCount = rootOption < 0 ? 0 : Number(Bun.argv[rootOption + 1]);
@@ -70,9 +74,11 @@ async function main(): Promise<void> {
     if (path.endsWith('/children')) return '';
     return null;
   };
-  const load = new LinuxLoad(8, read, () => at);
+  const load = new LinuxLoad(8, read, wallClock ? Date.now : () => at);
   const children: Bun.Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
-  const stderr: Promise<string>[] = [];
+  const stderr: Promise<PromiseSettledResult<string>>[] = [];
+  let primary: { error: unknown } | undefined;
+  const failures: unknown[] = [];
   try {
     // Embedded Bun paths are virtual; a compiled executable relaunches itself.
     const source = import.meta.path.endsWith('.ts') && !import.meta.path.includes('$bunfs') ? [import.meta.path] : [];
@@ -82,7 +88,10 @@ async function main(): Promise<void> {
         stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', windowsHide: true,
       });
       children.push(child);
-      stderr.push(new Response(child.stderr).text());
+      stderr.push(new Response(child.stderr).text().then(
+        value => ({ status: 'fulfilled' as const, value }),
+        reason => ({ status: 'rejected' as const, reason }),
+      ));
     }
     await Promise.all(children.map(ready));
     for (let i = 1; i <= threadCount; i++) load.add(`thread-${i}`, live ? children[i - 1]?.pid ?? process.pid : i);
@@ -110,21 +119,36 @@ async function main(): Promise<void> {
     const cpu = process.cpuUsage(cpuStart);
     console.log(JSON.stringify({
       probe: 'process-load', mode: live ? rootCount > 0 ? 'linux-procfs-fixtures' : 'linux-procfs-self' : 'synthetic-procfs',
+      clock: wallClock ? 'wall-clock' : 'forced-refresh',
       threadCount, repeats, reads, statReads, taskReads,
       elapsedMs: performance.now() - start, cpuMs: (cpu.user + cpu.system) / 1000,
       rssBeforeBytes, sampledPeakRssBytes, sampledPeakRootRssBytes, processesVerified,
       fixtureRoots: children.length, platform: process.platform, bun: Bun.version,
     }));
+  } catch (error) {
+    primary = { error };
   } finally {
     // These handles are captured at spawn. No process outside this fixture is killed.
-    const failures: unknown[] = [];
     for (const child of children) {
       try { if (child.exitCode === null) child.kill('SIGKILL'); }
       catch (error) { failures.push(error); }
     }
     const exits = await Promise.allSettled(children.map(child => child.exited));
     for (const exit of exits) if (exit.status === 'rejected') failures.push(exit.reason);
-    for (const errors of await Promise.all(stderr)) if (errors) process.stderr.write(errors);
-    if (failures.length > 0) throw new AggregateError(failures, 'process-load fixture cleanup failed');
+    for (const result of await Promise.all(stderr)) {
+      if (result.status === 'rejected') failures.push(result.reason);
+      else if (result.value) {
+        try { process.stderr.write(result.value); }
+        catch (error) { failures.push(error); }
+      }
+    }
   }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      primary === undefined ? failures : [primary.error, ...failures],
+      primary === undefined ? 'process-load fixture cleanup failed' : 'process-load probe and fixture cleanup failed',
+      primary === undefined ? undefined : { cause: primary.error },
+    );
+  }
+  if (primary !== undefined) throw primary.error;
 }

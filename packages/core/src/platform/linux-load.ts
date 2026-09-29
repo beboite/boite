@@ -190,12 +190,16 @@ export class LinuxLoad {
     const workingSets: NonNullable<ProcessSample['workingSets']> = [];
     let processes = 0;
     const scan = this.#snapshot();
+    const at = this.now();
     const pending = new Set(pids);
     for (const pid of pending) {
       const status = this.read(`/proc/${pid}/status`);
-      // A cached stat may belong to a process that has since exited. If its
-      // status vanished, confirm it still exists rather than counting stale CPU.
-      const stat = status === null ? this.read(`/proc/${pid}/stat`) : scan.stats.get(pid) ?? this.read(`/proc/${pid}/stat`);
+      // Topology can be shared for 500 ms, but CPU ticks must describe this
+      // sample's time. Reuse scan reads only at that same time, and confirm a
+      // process whose status vanished instead of counting its cached stat.
+      const stat = scan.at === at && status !== null
+        ? scan.stats.get(pid) ?? this.read(`/proc/${pid}/stat`)
+        : this.read(`/proc/${pid}/stat`);
       const used = stat === null ? null : cpuTicks(stat);
       if (used === null) continue;
       processes += 1;
@@ -208,7 +212,6 @@ export class LinuxLoad {
     }
     if (processes === 0) return null;
 
-    const at = this.now();
     const previous = this.#last.get(threadId);
     this.#last.set(threadId, { ticks, at });
     let cpuPercent = 0;

@@ -79,6 +79,49 @@ describe('the procfs parsers', () => {
 });
 
 describe('a thread load on Linux', () => {
+  test('a parent scan that takes time does not seed CPU with ticks observed before the sample', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100 200');
+    proc.set(100, 100, 0, 1000);
+    proc.set(200, 0, 0, 1000);
+    let scanned = false;
+    const load = new LinuxLoad(2, path => {
+      if (path === '/proc/200/stat' && !scanned) {
+        scanned = true;
+        proc.at += 50;
+        proc.set(100, 105, 0, 1000);
+      }
+      return proc.read(path);
+    }, proc.now);
+    load.add('thr', 100);
+    expect(load.sample('thr')?.cpuPercent).toBe(0);
+    proc.at += 100;
+    proc.set(100, 115, 0, 1000);
+    expect(load.sample('thr')?.cpuPercent).toBe(50);
+  });
+
+  test('CPU stays accurate between parent-scan refreshes instead of pausing then spiking', () => {
+    const proc = new FakeProc();
+    proc.files.set('/proc', '100');
+    proc.set(100, 100, 0, 1000);
+    const reads: string[] = [];
+    const load = new LinuxLoad(2, path => { reads.push(path); return proc.read(path); }, proc.now);
+    load.add('thr', 100);
+    expect(load.sample('thr')?.cpuPercent).toBe(0);
+    let ticks = 100;
+    for (const elapsedMs of [100, 150, 200, 100, 250, 100, 200]) {
+      proc.at += elapsedMs;
+      ticks += elapsedMs / 10;
+      proc.set(100, ticks, 0, 1000);
+      // One continuously busy CPU on a two-CPU machine, including both the
+      // cached-topology samples and the samples that refresh that topology.
+      expect(load.sample('thr')?.cpuPercent).toBe(50);
+    }
+    expect(reads.filter(path => path === '/proc')).toHaveLength(3);
+    expect(reads.filter(path => path === '/proc/100/stat')).toHaveLength(8);
+    expect(reads.some(path => path.includes('/task'))).toBe(false);
+  });
+
   test('one parent snapshot supplies stat reads across threads and refreshes after 500 ms', () => {
     const proc = new FakeProc();
     proc.files.set('/proc', '100 101 200');

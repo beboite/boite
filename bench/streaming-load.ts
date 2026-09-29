@@ -20,8 +20,12 @@ const mib = 1024 * 1024;
 
 async function scenario(reads: boolean): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'boite-streaming-load-'));
-  const journal = new Journal(join(dir, 'journal.db'));
+  const previousDataDir = process.env.BOITE_DATA_DIR;
+  let cleanupJournal: Journal | undefined;
   try {
+    process.env.BOITE_DATA_DIR = dir;
+    const journal = new Journal(join(dir, 'journal.db'));
+    cleanupJournal = journal;
     journal.db.exec(`CREATE TABLE bench_writes (n INTEGER);
       INSERT INTO bench_writes VALUES (0);
       CREATE TRIGGER bench_parts AFTER UPDATE OF parts ON messages
@@ -81,8 +85,12 @@ async function scenario(reads: boolean): Promise<void> {
       platform: process.platform, bun: Bun.version,
     }));
   } finally {
-    journal.close();
-    rmSync(dir, { recursive: true, force: true });
+    try { cleanupJournal?.close(); }
+    finally {
+      if (previousDataDir === undefined) delete process.env.BOITE_DATA_DIR;
+      else process.env.BOITE_DATA_DIR = previousDataDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 }
 
