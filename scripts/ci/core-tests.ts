@@ -35,8 +35,11 @@ export async function runCoreFiles(files: string[], options: { cwd: string; quie
       let code: number;
       try { code = await child.exited; }
       finally { clearTimeout(timer); }
-      if (expired) failures.push(`${label}: exceeded ${timeoutMs} ms`);
-      else if (code !== 0) failures.push(`${label}: exited with code ${code}`);
+      const failure = expired ? `${label}: exceeded ${timeoutMs} ms` : code !== 0 ? `${label}: exited with code ${code}` : null;
+      if (failure !== null) {
+        failures.push(failure);
+        if (!options.quiet) console.error(failure);
+      }
     } finally {
       rmSync(dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 25 });
     }
