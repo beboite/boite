@@ -44,5 +44,23 @@ test('queued prompts sit below the latest reply without reserving an empty activ
       expect(gap).toBeLessThanOrEqual(40);
       await page.screenshot(join(import.meta.dir, '.artifacts', `queued-spacing-dock-${width}.png`));
     }
+    // A short pinned history starts at zero, but a new dock can make it overflow.
+    await page.evaluate(`(() => {
+      const store = globalThis.__boiteTest.workspace.active;
+      store.openThread.activity = null;
+      store.composerStates['t-trace'].queued = [];
+    })()`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`parseFloat(getComputedStyle(document.querySelector('[data-testid="timeline"]')).paddingBottom) === 20`);
+    const fittedHeight = await page.evaluate<number>(`(() => { const t = document.querySelector('[data-testid="timeline"]'); return innerHeight + t.scrollHeight - t.clientHeight + 20; })()`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: fittedHeight, deviceScaleFactor: 1, mobile: false });
+    await page.waitFor(`document.querySelector('[data-testid="timeline"]').scrollTop === 0`);
+    await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread.activity = { goal: null, loop: null, tasks: [{ id: 'short', text: 'Keep this short reply visible', status: 'in_progress' }] }`);
+    await page.waitFor(`(() => {
+      const last = [...document.querySelectorAll('[data-testid="message"]')].at(-1);
+      const dock = document.querySelector('[data-testid="thread-activity"]');
+      return dock && last.getBoundingClientRect().bottom <= dock.getBoundingClientRect().top;
+    })()`);
+    expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]').scrollTop`)).toBeGreaterThan(0);
   } finally { await page?.close(); await server.close(); }
 }, 90_000);

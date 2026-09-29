@@ -450,11 +450,11 @@
     }
   });
 
-  /** Lift a pinned tail for the dock without moving a history being read from its top. */
+  /** Lift a pinned tail for the dock, including a short history that previously fit. */
   $effect(() => {
     void dockRoom.height;
     const box = viewport;
-    if (!box || !pinned || box.scrollTop === 0) return;
+    if (!box || !pinned) return;
     box.scrollTop = box.scrollHeight;
     scrollTop = box.scrollTop;
   });
