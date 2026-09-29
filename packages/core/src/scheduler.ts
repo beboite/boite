@@ -81,6 +81,7 @@ export class Scheduler {
   }
 
   private pump(): void {
+    if (this.core.stopping) return;
     const settings = this.core.settings.get();
     let started = false;
     for (;;) {

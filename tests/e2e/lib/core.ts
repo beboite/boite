@@ -32,6 +32,7 @@ export interface RunningCore {
   port: number;
   dataDir: string;
   pid: number;
+  exited: Promise<number>;
   output(): string;
   stop(options?: { keepDataDir?: boolean }): Promise<void>;
 }
@@ -111,6 +112,7 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
     port: Number(new URL(url).port),
     dataDir,
     pid: proc.pid,
+    exited: proc.exited,
     output: () => text,
     async stop(stopOptions: { keepDataDir?: boolean } = {}): Promise<void> {
       killProcessTree(proc.pid);

@@ -298,6 +298,7 @@ export const strings = {
     downloading: 'Downloading {received} of {total}',
     downloaded: 'Downloaded {received}',
     ready: 'Version {version} is ready to install.',
+    waiting: 'Waiting for work on this computer to finish. You can keep chatting or cancel the update.',
     installing: 'Starting the installer',
     current: 'Boite is up to date.',
     failed: 'The update failed.',
@@ -313,7 +314,7 @@ export const strings = {
     readyAction: 'Update',
     dismissNotice: 'Dismiss this update notification',
     installTitle: 'Install the Boite update?',
-    installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
+    installBody: 'Boite will wait for agent turns and background work on this computer to finish, then install the update and restart. You can keep chatting and cancel the update while it waits.',
     detailsNotice: 'Open app update details'
   },
 

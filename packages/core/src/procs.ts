@@ -118,6 +118,12 @@ export class ProcRegistry {
   private readonly summarize: (thread: ThreadSummary) => ThreadSummary;
   private readonly stopListening: () => void;
   private closing: Promise<void> | null = null;
+  private accepting = true;
+
+  stopAccepting(): void { this.accepting = false; }
+  private assertAccepting(): void {
+    if (!this.accepting || this.closing !== null) throw new Error('the core is stopping; no new process may start');
+  }
 
   constructor(
     private readonly journal: Journal,
@@ -215,6 +221,7 @@ export class ProcRegistry {
   }
 
   spawn(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedProcess {
+    this.assertAccepting();
     const env: Record<string, string | undefined> = { ...process.env, ...(opts.env ?? {}) };
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
@@ -251,6 +258,7 @@ export class ProcRegistry {
    * that cannot reach a browser asks for a code to be pasted back.
    */
   spawnPiped(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedPipedProcess {
+    this.assertAccepting();
     const env = opts.env ?? process.env;
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
@@ -287,6 +295,7 @@ export class ProcRegistry {
    * drop its prompt and line editing. The environment is passed as given.
    */
   spawnTerminal(threadId: ThreadId, cmd: string, args: string[], opts: TerminalSpawnOptions): SpawnedTerminal {
+    this.assertAccepting();
     const proc = Bun.spawn({
       cmd: [cmd, ...args],
       cwd: opts.cwd,
@@ -349,6 +358,7 @@ export class ProcRegistry {
    * The environment is passed as given: the caller has already merged it.
    */
   spawnChild(threadId: ThreadId, cmd: string, args: string[], opts: SpawnOptions = {}): SpawnedChild {
+    this.assertAccepting();
     const child = spawnNodeChild(cmd, args, {
       cwd: opts.cwd,
       env: opts.env,

@@ -55,29 +55,50 @@ payload to disk and releases the download buffer. Progress events are limited
 to ten per second. Installation checks the payload against its retained digest
 before handing those bytes to Tauri's installer.
 
-Restarting always requires a click and an in-app confirmation. It interrupts
-agents owned by that desktop. Saved conversations remain; interrupted turns
-are not automatically retried. The local core is resident and outlives the
-shell, so before launching the installer the shell asks it to stop through its
-authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. Until
-the installer takes over, the shell refuses to start a core again, so the
-window's reconnect cannot relaunch the old executable. If the core cannot be
-stopped, nothing is installed and the popup shows why; if the installer cannot
-launch, the next reconnect starts the core again. A remote
-core is not touched by the desktop updater.
+Installing requires a click and an in-app confirmation. Boite then waits for
+the local core to become idle. Running and queued turns finish normally;
+permission cards remain answerable, and the app stays usable. Cancel restores
+the downloaded update without downloading it again. New work extends the
+wait. There is no deadline that interrupts an agent.
 
-The Windows installer stops the core of its own install too, for an update, a
-manual reinstall and an uninstall. Its hooks (`windows/hooks.nsh` and
+The shell polls the owner-authenticated `POST /shutdown-if-idle` with the
+expected core PID. The core refuses admission while a turn, queued execution,
+RPC or tracked process is active, or while a provider reports background work.
+This includes terminals and warm provider sessions: close a terminal or let
+the session expire before expecting installation. A paused task that has not
+started remains stored for a later explicit resume.
+
+Admission and the refusal of new executions happen in the same event-loop
+turn. Once admitted, cancellation ends and the core drains and exits. The
+shell allows up to 12 seconds for that exit and never force-kills it for an
+update. No installer runs if admission or exit cannot be confirmed. The shell
+holds reconnects until installation takes over, so the window cannot relaunch
+the old executable. An installation failure releases that hold. Remote cores
+are not touched by the desktop updater.
+
+The Windows installer requires the same idle admission for an update or a
+manual reinstall. Its hooks (`windows/hooks.nsh` and
 `windows/stop-core.ps1`) first close a running shell, with the installer's own
 "Boite is running" question: an open window would start the core again within
 seconds, from the file about to be replaced. They then find the
-`boite-core.exe` processes running that install's exact file, ask the one named
-in that channel's `core.json` (`boite2` or `boite2-dev`) to shut down, and end
-any still running after 15 seconds. Boite Dev's core runs another file and is
-left alone. No window opens. `scripts/ci/installer-hooks.test.ts` builds the
+`boite-core.exe` processes running that install's exact file. A busy,
+unreachable or older core without idle admission aborts installation before
+files are replaced. An admitted core that has not exited after 15 seconds also
+aborts installation. Explicit uninstall still requests ordinary shutdown and
+ends any core of that install left after 15 seconds. Boite Dev's core runs
+another file and is left alone. The stop script opens no window.
+`scripts/ci/installer-hooks.test.ts` builds the
 hooks into the generated installer script and runs them over a shell that
 restarts its core; it needs a Windows `build:shell` first and is skipped
 without one.
+`scripts/ci/stop-core.test.ts` also runs the stop script directly, without a
+packaged shell, and checks that busy and legacy cores remain running.
+
+The first upgrade from a core without idle admission needs an explicit stop
+after its work finishes, followed by a manual installer. An older in-app
+updater retains its previous interrupting behavior until it is replaced.
+This change postpones replacement of the whole application; it does not load
+a new core or UI alongside agents executing on the old version.
 
 Both in-app updates and downloaded Windows installers replace an existing
 installation in place. They keep its Start menu and desktop shortcuts intact

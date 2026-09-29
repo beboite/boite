@@ -46,6 +46,7 @@ export class AgentRuntime {
   private get store() { return this.core.workforce; }
   private get r() { return this.store.records; }
   private active(): AgentRun[] { return this.r.withStatus('run', ['accepted', 'running']); }
+  get busy(): boolean { return this.pumping || this.active().length > 0; }
 
   private recover(): void {
     for (const run of this.active()) {
@@ -131,11 +132,11 @@ export class AgentRuntime {
     return null;
   }
   private async pump(): Promise<void> {
-    if (this.closed || this.pumping || this.store.limits().paused || this.core.journal.isClosed()) return;
+    if (this.closed || this.core.stopping || this.pumping || this.store.limits().paused || this.core.journal.isClosed()) return;
     this.pumping = true;
     try {
       for (const work of this.r.withStatus('work', ['pending'])) {
-        if (this.closed || this.store.limits().paused) break;
+        if (this.closed || this.core.stopping || this.store.limits().paused) break;
         const active = this.active();
         const scheduler = this.core.scheduler.state();
         const cap = Math.min(this.store.limits().backgroundConcurrency, Math.max(1, scheduler.maxConcurrentTurns - 1));

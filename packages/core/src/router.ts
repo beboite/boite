@@ -27,6 +27,11 @@ type ErasedHandler = (params: never, ctx: RpcContext) => unknown;
 
 export class Router {
   private readonly handlers = new Map<RpcMethodName, ErasedHandler>();
+  private accepting = true;
+  private active = 0;
+
+  get activeRequests(): number { return this.active; }
+  stopAccepting(): void { this.accepting = false; }
 
   register<M extends RpcMethodName>(method: M, handler: Handler<M>): void {
     this.handlers.set(method, handler);
@@ -42,6 +47,7 @@ export class Router {
   }
 
   async dispatch(method: string, params: unknown, ctx: RpcContext): Promise<unknown> {
+    if (!this.accepting) throw new RpcFailure(RpcErrorCode.InvalidRequest, 'the core is stopping; reconnect before sending another request');
     const handler = this.handlers.get(method as RpcMethodName);
     if (handler === undefined) {
       throw new RpcFailure(RpcErrorCode.MethodNotFound, `unknown method ${method}`, { method });
@@ -50,6 +56,8 @@ export class Router {
     // until `DEVICE_METHODS` or `AGENT_METHODS` says otherwise. The params go
     // with it: an agent is held to the thread its token was minted for.
     assertAllowed(method as RpcMethodName, ctx.connection, params);
-    return await handler(params as never, ctx);
+    this.active += 1;
+    try { return await handler(params as never, ctx); }
+    finally { this.active -= 1; }
   }
 }

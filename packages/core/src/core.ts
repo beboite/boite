@@ -152,6 +152,24 @@ export class Core {
   #onShutdown: (() => void) | undefined;
   #shutdownRequested = false;
 
+  /** An update may stop only between executions. Admission and the gates share one event-loop turn. */
+  requestIdleShutdown(): 'accepted' | 'busy' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#shutdownRequested) return 'accepted';
+    const scheduler = this.scheduler.state();
+    const threads = this.threads;
+    if (this.router.activeRequests > 0 || scheduler.running.length > 0 || scheduler.queued.length > 0
+      || this.agentRuntime.busy || this.procs.liveThreads().length > 0
+      || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
+      || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
+      || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    this.#stopping = true;
+    this.router.stopAccepting();
+    this.procs.stopAccepting();
+    this.requestShutdown();
+    return 'accepted';
+  }
+
   /**
    * Asks the process to stop the way `core.shutdown` does: the answer goes out
    * first, then the process drains and exits. False for an embedded core,
