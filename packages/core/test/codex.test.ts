@@ -174,24 +174,29 @@ describe('codex driver', () => {
     await waitFor(() => fakeLog().includes('initialize RPC error'), 20000);
     const waiting = performance.now();
     expect((await finished).status).toBe('error');
-    expect(performance.now() - waiting).toBeLessThan(2000);
+    expect(performance.now() - waiting).toBeLessThan(4000);
     expect(countLines('initialize')).toBe(1);
     expect(fakeLog()).not.toContain('turn/start');
     await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
   });
 
-  test('a delayed close from a failed initialization cannot close the recovered turn', async () => {
+  test('late messages and close from a failed initialization cannot affect the recovered turn', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
     process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
     const procs = harness!.core.procs;
     const spawn = procs.spawnChild.bind(procs);
     let releaseClose: (() => void) | undefined;
+    let sendLateMessages: (() => void) | undefined;
     let first = true;
     const intercepted = spyOn(procs, 'spawnChild').mockImplementation((...args) => {
       const child = spawn(...args);
       if (!first) return child;
       first = false;
+      sendLateMessages = () => {
+        child.stdout.emit('data', `${JSON.stringify({ id: 'stale-approval', method: 'item/commandExecution/requestApproval', params: { command: 'echo stale', reason: 'old startup' } })}\n`);
+        child.stdout.emit('data', `${JSON.stringify({ method: 'item/agentMessage/delta', params: { itemId: 'stale-output', delta: 'stale startup output' } })}\n`);
+      };
       const emit = child.emit.bind(child);
       child.emit = (event: string | symbol, ...values: unknown[]) => {
         if (event !== 'close') return emit(event, ...values);
@@ -208,11 +213,14 @@ describe('codex driver', () => {
       await client.call('turns.start', { threadId, prompt: '[slow]' });
       await waitFor(() => fakeLog().includes('waiting for interrupt'), 20000);
       expect(releaseClose).toBeDefined();
+      sendLateMessages!();
+      expect(await client.call('permissions.list', { threadId })).toEqual([]);
       releaseClose!();
       await client.call('turns.stop', { threadId });
       expect((await finished).status).toBe('stopped');
       expect(countLines('initialize')).toBe(2);
       expect(fakeLog().match(/^turn\/start /gm)).toHaveLength(1);
+      expect(harness!.core.journal.listMessages(threadId).flatMap(message => message.parts).some(part => part.type === 'text' && part.text.includes('stale startup output'))).toBe(false);
     } finally {
       releaseClose?.();
       intercepted.mockRestore();

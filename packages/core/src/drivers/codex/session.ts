@@ -51,6 +51,7 @@ const HOOK_OUTCOMES: Record<string, HookOutcome> = {
 const STOP_GRACE_MS = 3_000;
 const SQLITE_INIT_ATTEMPTS = 3;
 const SQLITE_INIT_BACKOFF_MS = 500;
+const SQLITE_INIT_CLOSE_MS = 2_000;
 
 // ---------------------------------------------------------------------------
 // The session: one agent process per thread
@@ -361,10 +362,15 @@ export class CodexSession {
     this.child = child;
     const rpc = new CodexRpc(child, {
       notification: (method, params) => {
+        if (this.child !== child) return;
         this.onNotification(method, params);
       },
-      request: (method, params) => this.onRequest(ctx, method, params),
+      request: async (method, params) => {
+        if (this.child !== child) throw new Error('the codex process was replaced');
+        return this.onRequest(ctx, method, params);
+      },
       log: (level, message) => {
+        if (this.child !== child) return;
         ctx.log(level, message);
       },
     });
@@ -425,7 +431,7 @@ export class CodexSession {
       await Promise.race([
         this.processClosed,
         this.active?.stopped,
-        new Promise<void>(resolve => { timer = setTimeout(resolve, EXIT_GRACE_MS); }),
+        new Promise<void>(resolve => { timer = setTimeout(resolve, SQLITE_INIT_CLOSE_MS); }),
       ]);
     } finally {
       clearTimeout(timer);
