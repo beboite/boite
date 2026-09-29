@@ -111,14 +111,16 @@ async function stage<T>(name: SyncStage, run: () => Promise<T>): Promise<T> {
  * nothing the target names is dropped before its replacement is in: a call that
  * fails puts every entry already changed back as it was.
  */
-async function copyKeybindings(source: Client, target: Client): Promise<Keybindings | null> {
+async function copyKeybindings(source: Client, target: Client, signal?: AbortSignal): Promise<Keybindings | null> {
   const [from, to] = await Promise.all([
     optional(source.call('keybindings.get', {})),
     optional(target.call('keybindings.get', {}))
   ]);
   if (from === null || to === null) return null;
-  const write = (command: KeybindingCommand, chord: string | null | undefined) =>
-    chord === undefined ? target.call('keybindings.reset', { command }) : target.call('keybindings.set', { command, chord });
+  const write = (command: KeybindingCommand, chord: string | null | undefined) => {
+    signal?.throwIfAborted();
+    return chord === undefined ? target.call('keybindings.reset', { command }) : target.call('keybindings.set', { command, chord });
+  };
   const changed: KeybindingCommand[] = [];
   let result = to;
   try {
@@ -137,7 +139,7 @@ async function copyKeybindings(source: Client, target: Client): Promise<Keybindi
 }
 
 /** Settings, then keybindings, then the brain: a failure names its stage in a SyncFailure. */
-export async function syncSettings(source: SyncEnd, target: SyncEnd): Promise<SyncReport> {
+export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: AbortSignal): Promise<SyncReport> {
   const { settings, changed } = await stage('settings', async () => {
     const [fromSettings, toSettings] = await Promise.all([
       source.client.call('settings.get', {}),
@@ -145,10 +147,12 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd): Promise<Sy
     ]);
     const patch = portable(fromSettings);
     const changed = Object.entries(patch).filter(([key, value]) => toSettings[key as keyof Settings] !== value).length;
-    return { settings: await target.client.call('settings.set', patch), changed };
+    signal?.throwIfAborted();
+    return { settings: changed ? await target.client.call('settings.set', patch) : toSettings, changed };
   });
 
-  const keybindings = await stage('keybindings', () => copyKeybindings(source.client, target.client));
+  signal?.throwIfAborted();
+  const keybindings = await stage('keybindings', () => copyKeybindings(source.client, target.client, signal));
 
   const brain = await stage('brain', async (): Promise<SyncReport['brain']> => {
     const [fromBrain, toBrain] = await Promise.all([
@@ -158,13 +162,15 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd): Promise<Sy
     if (!fromBrain?.config.path) return 'none';
     if (!toBrain?.config.path) return toBrain ? 'absent' : 'none';
     // The folder is the target's own; only the switches come across.
-    await target.client.call('brain.configure', {
+    const config = {
       ...toBrain.config,
       enabled: fromBrain.config.enabled,
       ...(fromBrain.config.autoPull ? { autoPull: fromBrain.config.autoPull } : {}),
       ...(fromBrain.config.globalInstructions !== undefined ? { globalInstructions: fromBrain.config.globalInstructions } : {}),
       ...(fromBrain.config.boiteGuide !== undefined ? { boiteGuide: fromBrain.config.boiteGuide } : {})
-    });
+    };
+    signal?.throwIfAborted();
+    if (JSON.stringify(config) !== JSON.stringify(toBrain.config)) await target.client.call('brain.configure', config);
     return 'copied';
   });
 

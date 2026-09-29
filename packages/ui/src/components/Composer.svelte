@@ -105,9 +105,9 @@
     }
   });
 
-  /** A new draft or thread gets the keyboard, and the recall starts over. */
+  /** A new draft or thread gets the keyboard; reloading the same thread preserves focus. */
   $effect(() => {
-    store.openThread?.id;
+    key;
     store.draft;
     recall = null;
     box?.focus();

@@ -127,10 +127,45 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(
       `document.querySelectorAll('${id('machine-card')}').length === 2 && !document.querySelector('${id('machine-add')}').textContent.includes('Connecting')`
     );
+    await a.call('settings.set', { warmProcessMinutes: 7 });
+    await page.click(id('machine-sync'));
+    await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.warmProcessMinutes === 7`);
+    expect((await b.call('settings.get', {})).warmProcessMinutes).toBe(7);
     await page.click(id('settings-back'));
     await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
     await page.click(`[data-thread-id="${tb.id}"]`);
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Remote project'`);
+    await page.click(id('terminal-toggle'));
+    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.includes(${JSON.stringify(second.dataDir)})`);
+    await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
+    const terminalPoint = await page.evaluate<{ x: number; y: number }>(`(() => {
+      const rect = document.querySelector('[data-testid=terminal-drawer] .xterm-screen').getBoundingClientRect();
+      return { x: rect.left + 40, y: rect.top + 10 };
+    })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...terminalPoint });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...terminalPoint });
+    await page.waitFor(`document.activeElement?.classList.contains('xterm-helper-textarea')`);
+    // Reloading summaries for the same conversation must preserve terminal focus.
+    await page.evaluate('globalThis.__boiteTest.workspace.active.reload()');
+    expect(await page.evaluate(`document.activeElement?.classList.contains('xterm-helper-textarea')`)).toBe(true);
+    // Ordinary keyboard events exercise xterm's key handler, unlike insertText.
+    for (const char of 'echo remote-terminal-e2e') {
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: char, text: char });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: char });
+    }
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows')?.textContent.split('remote-terminal-e2e').length >= 3`);
+    await capture('terminal-remote-real-desktop.png');
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await capture('terminal-remote-real-phone.png');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await page.send('Emulation.clearDeviceMetricsOverride', {});
+    await page.click(id('terminal-close'));
+    await page.waitFor(`!document.querySelector('${id('terminal-drawer')}')`);
+    await a.call('settings.set', { warmProcessMinutes: 13 });
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.warmProcessMinutes === 13`);
+    expect((await b.call('settings.get', {})).warmProcessMinutes).toBe(13);
     await page.type(id('composer-input'), 'Only on the remote host');
     await page.click(id('composer-send'));
     await page.waitFor(
@@ -142,12 +177,14 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await second.stop({ keepDataDir: true });
     await page.click(`[data-thread-id="${ta.id}"]`);
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
+    await a.call('settings.set', { warmProcessMinutes: 15 });
     const restarted = await startCore({ dataDir: second.dataDir, port: second.port });
     cores[1] = restarted;
     await page.evaluate(`location.reload()`);
     await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 2`);
     await page.click(`[data-thread-id="${tb.id}"]`);
     await page.waitFor(`document.querySelector('${id('chat')}')?.textContent.includes('Only on the remote host')`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.warmProcessMinutes === 15`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
     const admin = await connect(restarted.url, restarted.token);

@@ -66,27 +66,48 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
-## Copying settings
+## Automatic settings synchronization
 
-Each card of another machine carries Copy settings from, naming the machine
-the settings pages speak for. Both machines must be connected with full
-control. After a confirmation the client copies, with calls both cores already
-answer:
+Each card of another machine has a checkbox to keep its settings synchronized
+with the machine currently selected in Settings. Checking it copies settings
+immediately, then copies changes while this client is open, including when
+Settings is closed. The source stays the one chosen when checking the box;
+switching the visible machine does not reverse the direction. Cyclic links are
+refused.
 
-- the limits, process guards, agent updates and question mode of Settings;
-- the keybindings file, one entry at a time where the two differ, an unbound
-  command included. A refused entry makes the client try to put back every
-  entry already changed; a restore the target refuses too leaves that entry
-  as copied;
-- the brain's Use with agents, instructions and guide switches, when both
-  machines have a brain folder. The folder itself stays the target's own.
+The preference is saved on this client using each core's host, data directory
+and channel. Both machines need full control and a live connection. A reconnect
+or a client reload copies the latest values again. Unchecking stops future
+copies, including a pending copy that has not started writing. The remote core
+persists what it receives and keeps executing independently when the source or
+this client is offline.
 
-Network access, the public URL, browser origins and every provider sign-in stay
-on the machine they belong to. A login never crosses machines: the report under
-the card names the providers signed in on the source and not on the target,
-with a button to that machine's Providers page. An older core that lacks a
-method is skipped for that part, not failed. A copy that fails elsewhere stops
-there and names the part it stopped at; the parts before it stay copied.
+The client copies:
+
+- limits, process guards, agent updates and question mode;
+- keybindings where the two differ, including unbound commands and restored
+  defaults. A refused entry attempts to restore entries already changed;
+- the brain's Use with agents, instructions, guide and automatic pull switches
+  when both machines have a brain folder. The target keeps its own folder.
+
+Network access, public URLs, browser origins and provider sign-ins stay on their
+own machine. The report names providers that still need signing in on the target
+and opens that machine's Providers page. Methods absent on an older core are
+skipped for that part. Automatic brain changes require the source core's
+`brain.configured` event. A failure names its stage; earlier changes stay copied,
+and the next source change or reconnect tries again.
+
+## Remote terminals
+
+The terminal in a conversation runs on the machine that owns that conversation,
+in its working directory. Reloading the same conversation preserves the keyboard
+focus in the terminal; only opening a different conversation or draft moves it
+to the composer. Refused keystrokes report their error rather than being
+silently discarded. Its output events can arrive while the opening or
+reattachment response is still in flight. The client buffers those events and
+uses the snapshot's output sequence to append only events the snapshot has not
+already included. Older cores without sequence numbers keep the buffered output
+but cannot remove overlap with the snapshot.
 
 ## Browser and phone connections
 
@@ -162,7 +183,7 @@ the machine identity. Only the visible host subscribes to an open conversation;
 all hosts continue receiving summaries. Driver protocols remain unchanged.
 
 `tests/e2e/machines.test.ts` covers two real temporary cores, pairing, routing,
-restart, reload and disconnect. Its fake fixture deliberately reuses thread and
+restart, reload, automatic settings copies and a real remote terminal. Its fake fixture deliberately reuses thread and
 project IDs on two hosts and produces desktop and phone captures. Core tests
 cover user-message timestamps, origin validation and PR metadata parsing.
 `tests/e2e/project-views.test.ts` checks project filtering, draft routing,
