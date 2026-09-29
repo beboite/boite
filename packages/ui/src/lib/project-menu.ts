@@ -31,7 +31,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         ]
       : []),
     ...(owner.owner && project.kind !== 'drafts' ? [separator('archive-sep')] : []),
-    ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject, glyph: Archive }]),
+    ...(project.kind === 'drafts' ? [] : [{ id: 'archive-project', label: strings.sidebar.archiveProject, glyph: Archive, disabled: project.archived === true }]),
     ...(owner.owner ? [{ id: 'remove', label: strings.sidebar.removeProject, glyph: Trash2, danger: true }] : [])
   ];
   const main: MenuItem[] = [
@@ -55,7 +55,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         if (workspace.active !== owner) await workspace.select(owner);
         owner.showSettings('general', 'archived');
       }
-      if (action === 'archive-project' && (await owner.archiveProject(project.id, true)))
+      if (action === 'archive-project' && owner.projects.some(p => p.id === project.id && !p.archived) && (await owner.archiveProject(project.id, true)))
         undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
           await owner.archiveProject(project.id, false);
         });

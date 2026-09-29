@@ -2047,6 +2047,33 @@ test('the phone cannot manage an unrelated project from a draft without a folder
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 });
 
+test('the phone cannot archive an already archived project or offer a misleading undo', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  const project = store.openProject!;
+  const archive = vi.spyOn(store, 'archiveProject');
+  const openManagement = async () => {
+    query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
+    await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+    query<HTMLButtonElement>('[data-value=manage]').click();
+    await waitFor(() => document.querySelector('[data-value=archive-project]') !== null);
+  };
+  try {
+    await openManagement();
+    // Another client can archive the project while this menu stays open.
+    store.projects = store.projects.map(p => p.id === project.id ? { ...p, archived: true } : p);
+    flushSync();
+    query<HTMLButtonElement>('[data-value=archive-project]').click();
+    await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+    expect(archive).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid=undo-toast]')).toBeNull();
+    await openManagement();
+    expect(query<HTMLButtonElement>('[data-value=archive-project]').disabled).toBe(true);
+  } finally {
+    archive.mockRestore();
+  }
+});
+
 test('first run opens a draft in the drafts, and the first send makes them', async () => {
   await mountOnFake();
   await emptyCore();
