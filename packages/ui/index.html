@@ -18,15 +18,15 @@
       body {
         margin: 0;
         height: 100%;
-        background: #101013;
-        color: #ececf1;
+        background: var(--color-background, #101013);
+        color: var(--color-foreground, #ececf1);
         overflow: hidden;
       }
 
       html[data-theme='light'],
       html[data-theme='light'] body {
-        background: #f3f3f6;
-        color: #1c1c21;
+        background: var(--color-background, #f3f3f6);
+        color: var(--color-foreground, #1c1c21);
       }
 
       /* Grain paints its fade from the stylesheet; the mid tone stands in until then. */

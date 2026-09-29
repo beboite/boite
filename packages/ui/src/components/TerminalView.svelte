@@ -50,10 +50,10 @@
     const css = getComputedStyle(document.documentElement);
     const token = (name: string) => css.getPropertyValue(name).trim();
     return {
-      background: token('--color-surface-2'),
-      foreground: token('--color-foreground'),
+      background: token('--color-code-background'),
+      foreground: token('--color-code-foreground'),
       cursor: token('--color-foreground'),
-      cursorAccent: token('--color-surface-2'),
+      cursorAccent: token('--color-code-background'),
       selectionBackground: token('--color-selection')
     };
   }
@@ -159,7 +159,7 @@
     min-height: 0;
     height: 100%;
     padding: 6px 0 0 10px;
-    background: var(--color-surface-2);
+    background: var(--color-code-background);
   }
 
   .terminal :global(.xterm) { height: 100%; }

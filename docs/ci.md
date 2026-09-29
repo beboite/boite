@@ -143,8 +143,15 @@ to 520 KB, 10% above the 462 KB that `bun run build:ui` then
 moves a thread from its messages and menus, folds changed files and archives
 projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
-one in the change that explains the growth. The account-connection baseline
-and the current limits are recorded in [performance](performance.md).
+one in the change that explains the growth. On 2026-09-29 the compact theme
+picker, colour math, persistence and prepaint handling added 9,000 bytes to
+the entry chunk and 57,141 bytes to the complete UI, including palette CSS,
+French strings and community license notices. The Windows desktop jobs measured
+524,773 / 3,393,503 bytes on `main` at `c26a03a` and 533,773 / 3,450,644 bytes
+with the themes at `bedd795`. The UI limits moved to 588,000 and 3,796,000 bytes,
+about 10% above the combined build; the core limit stayed at 817,600 bytes.
+The later account connection changes raised the core limit to 904,000 bytes
+([measurements](performance.md)).
 The resource audit retains those limits, shortens scope-class prefixes and
 loads settings synchronization on first use to reduce emitted bytes while
 keeping readable core function names in errors. Timings are not gated:

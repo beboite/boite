@@ -300,6 +300,15 @@ The accounts/settings end-to-end set passes ten tests and 52 assertions in
 captures were opened; labels and account actions fit, and phone provider
 administration remains hidden.
 
+Resolving the documentation conflict with `ae3ecc5b` retains its themes and
+588,000-byte entry, 3,796,000-byte UI and 904,000-byte core limits. The fresh
+combined UI measures 528,499 bytes for its entry and 3,419,984 bytes in total;
+the core remains 823,664 bytes. Types and architecture pass, four theme and
+settings-sync suites pass 22 tests in 2.13 seconds, and the prebuilt theme and
+delegation end-to-end set passes six tests and 42 assertions in 20.79 seconds.
+Fresh theme, conversation and delegation desktop/phone captures were opened;
+colour controls and composers remain usable without overlap.
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero
