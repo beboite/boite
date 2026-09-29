@@ -590,7 +590,12 @@ describe('echo driver', () => {
     expect(trace.filter(record => record.pid === root.pid)).toHaveLength(1);
     for (const record of trace) {
       expect(record.exitedAt).not.toBeNull();
-      expect(record.exitCode).toBe(0);
+      if (record.pid === root.pid) {
+        expect(record.exitCode).toBe(0);
+      } else {
+        // Native descendants can finish without an available exit status.
+        expect(record.exitCode === null || record.exitCode === 0).toBe(true);
+      }
       expect(record.parentPid === process.pid || startedPids.includes(record.parentPid ?? -1)).toBe(true);
     }
     // The child wrote `hello` into a pipe, so WriteTransferCount is above zero
