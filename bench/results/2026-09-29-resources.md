@@ -231,23 +231,49 @@ root-only workload can exceed its budget without an eligible child to kill.
 Reducing an active provider's heap needs provider-specific measurements rather
 than a tighter limit that merely changes which work can run.
 
+## Post-merge delegation check
+
+On 2026-09-29, one fresh Windows run at code commit `6dfdc477` checked the
+integration of native-agent reads and quiet-stream write recovery. Bun 1.4.2,
+eight teams, 64 children and 16 load ticks; no provider process starts.
+
+```sh
+bun bench/delegation-load.ts 8 16
+```
+
+CPU time was 31 ms, elapsed time 34.07 ms and sampled peak RSS 90.19 MiB
+(80.69 MiB before the measured loop). The selected team received one
+notification and one snapshot, totaling 5,998 JSON characters. This after-only
+Windows check does not replace the paired Linux measurements above.
+
+```json
+{"teams":8,"children":64,"ticks":16,"cpuMs":31,"wallMs":34.072900000000004,"notifications":1,"snapshots":1,"wireBytes":5998,"rssBeforeMiB":80.69140625,"sampledPeakRssMiB":90.1875,"bun":"1.4.2","platform":"win32"}
+```
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero
   errors and warnings.
-- `bun run --cwd packages/core test`: 1,246 passed, 22 skipped, zero failed;
-  all 126 files ran in fresh Bun processes, four at once, in 260.37 seconds.
-- `bun run --cwd packages/ui test --maxWorkers=4`: 992 tests passed in 139 files,
-  in 172.71 seconds with four workers.
+- `bun run --cwd packages/core test`: 1,273 passed, 22 skipped, zero failed;
+  all 128 files ran in fresh Bun processes, four at once, in 192.84 seconds.
+- `bun run --cwd packages/ui test --maxWorkers=4`: 1,006 tests passed in 143 files,
+  in 133.97 seconds with four workers.
 - `NODE_ENV=production bun run build:ui`: production UI build passed.
 - `BOITE_E2E_PREBUILT_UI=1 bun test tests/e2e/delegation.test.ts
   tests/e2e/collaboration-ui.test.ts tests/e2e/coordination-live-ui.test.ts
-  tests/e2e/workflows.test.ts tests/e2e/model-switch.test.ts --parallel=1
-  --timeout 60000`: eight tests passed in five files in 70.09 seconds, covering real RPC,
+  tests/e2e/workflows.test.ts tests/e2e/model-switch.test.ts tests/e2e/native-agents.test.ts --parallel=1
+  --timeout 60000`: ten tests passed in six files in 94.21 seconds, covering real RPC,
   provider protocol fixtures, reload, delegation and phone interaction.
 - Opened `tests/e2e/.artifacts/delegation-desktop.png` and
-  `tests/e2e/.artifacts/delegation-phone.png`: selected child transcript,
-  forwarded parent message and usable composer at both widths.
+  `tests/e2e/.artifacts/delegation-phone.png`, plus both native-agent captures:
+  selected child transcript, separate native rows and usable composer at both widths.
+- `bun run test:shell --release`: 72 passed, zero failed, in 4.41 seconds.
+- Transient streaming-write failure recovered automatically with no new
+  mutation or explicit persistence; the extended scenario failed before the fix.
+- Live native-agent reads leave both current and unrelated SQL rows unchanged;
+  stale persisted tools cannot override live updates. Pagination and restart pass.
+- The 32 MiB line guard uses CPU time with its original 300 ms floor and 20x
+  yardstick. Its old quadratic scanner control failed at 516 ms; the real file passes all 13 tests.
 - `bun test packages/core/test/linux-load.test.ts
   bench/process-load.test.ts bench/streaming-load.test.ts --timeout 60000`:
   23 tests passed. New cases verify fresh CPU ticks between topology refreshes,
