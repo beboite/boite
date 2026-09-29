@@ -39,7 +39,7 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
  * the files around it. Delegation can start a child only on owner-approved
- * routes within that thread's team budget. Every call is held to the token's
+ * routes configured for that thread. Every call is held to the token's
  * thread; team methods check the relationship before reaching a child. None
  * of these methods changes the owner's trust, routes or permissions.
  */
@@ -53,14 +53,14 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['agents.task.submit', 'submission by the current assignment generation, never final approval'],
   ['agents.artifact.add', 'versioned results from the current mission and working directory'],
   ['agents.decision.request', 'durable requests for a human decision without an idle provider process'],
-  ['delegation.get', 'its own team summaries, approved profiles and remaining budget'],
-  ['delegation.spawn', 'one direct child on an owner-approved route, within durable team limits'],
+  ['delegation.get', 'its own team summaries, approved profiles and usage'],
+  ['delegation.spawn', 'one direct child on an owner-approved route'],
   ['delegation.send', 'messages only between this parent and its direct children'],
   ['delegation.stop', 'stop its own children or itself, never unrelated work'],
   ['workflows.list', 'the runs of its own thread, or of its parent for a step'],
   ['workflows.get', 'one run of its own thread, or of its parent for a step'],
   ['workflows.check', 'validating a plan against its own approved profiles, without starting anything'],
-  ['workflows.start', 'a graph of child threads on owner-approved profiles, held to the same team budget and concurrency as delegation'],
+  ['workflows.start', 'a graph of child threads on owner-approved profiles, with concurrency set in its plan'],
   ['workflows.extend', 'more steps on a run it started, under the same checks'],
   ['workflows.control', 'pause, stop or retry runs it started; resuming a paused team stays with the owner'],
   ['workflows.output', 'the structured result of the step this thread is, checked against its declared shape'],

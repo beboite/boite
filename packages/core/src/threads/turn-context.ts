@@ -191,6 +191,7 @@ export class TurnContexts {
         return spawned;
       },
       spawnChild: this.leasedSpawnChild(threadId, provider),
+      finishStartup: () => this.core.procs.finishStartup(threadId),
       killTree: () => {
         this.core.procs.killTree(threadId);
       },

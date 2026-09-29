@@ -46,7 +46,7 @@ test('native agents remain visible with disabled Boite workflows on desktop and 
   expect(page.errors()).toEqual([]);
 }, 40_000);
 
-test('a running native agent has a dock entry without spending the Boite team budget', async () => {
+test('a running native agent has a dock entry without changing Boite team usage', async () => {
   await onStore('store.delegation.nativeAgents[1].status = "running";');
   await page.waitFor('!!document.querySelector("[data-testid=native-agent-dock-member]")');
   await page.click('[data-testid="panel-close"]');

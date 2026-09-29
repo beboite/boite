@@ -200,10 +200,10 @@ test('the scheduler never says Saved after a refused save, and refuses an out-of
   await mountOnFake();
   store.showSettings('advanced');
   await waitFor(() => document.querySelector('[data-testid=scheduler-save]') !== null);
-  const field = query<HTMLInputElement>('[data-testid=setting-maxConcurrentTurns]');
-  field.value = '0';
+  const field = query<HTMLInputElement>('[data-testid=setting-warmProcessMinutes]');
+  field.value = '-1';
   field.dispatchEvent(new Event('input', { bubbles: true }));
-  await waitFor(() => document.querySelector('[data-testid=setting-error-maxConcurrentTurns]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=setting-error-warmProcessMinutes]') !== null);
   expect(query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled).toBe(true);
 
   field.value = '7';
@@ -369,7 +369,7 @@ test('ArrowUp in an empty box of a thread at rest recalls the last prompt to edi
   expect(userTexts()).toEqual(before);
 });
 
-test('Ctrl+S on a recalled prompt sets the text aside and leaves edit mode, so the next prompt is new', async () => {
+test('Ctrl+Shift+S on a recalled prompt sets the text aside and leaves edit mode, so the next prompt is new', async () => {
   await openIdleThread();
   const before = userTexts();
   const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -377,7 +377,7 @@ test('Ctrl+S on a recalled prompt sets the text aside and leaves edit mode, so t
   press(box, 'ArrowUp');
   flushSync();
   await waitFor(() => document.querySelector('[data-testid=composer-editing]') !== null);
-  box.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+  box.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
   flushSync();
   await waitFor(() => document.querySelector('[data-testid=composer-editing]') === null);
   expect(box.value).toBe('');

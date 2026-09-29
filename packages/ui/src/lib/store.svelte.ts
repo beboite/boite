@@ -120,6 +120,7 @@ export class Store {
     this.sidebarWidth = layout.sidebarWidth;
     this.sidebarCollapsed = layout.sidebarCollapsed;
     listen(ctx, client);
+    ctx.off.push(ctx.composer.watchQueues());
   }
 
   detach(): void {

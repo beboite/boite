@@ -143,8 +143,6 @@
     ['machines', 'devices', strings.settings.listenOnLan],
     ['machines', 'devices', strings.settings.pairing.mint],
     ['machines', 'phone', strings.phone.publicUrl],
-    ['advanced', 'execution', strings.settings.maxConcurrentTurns],
-    ['advanced', 'execution', strings.settings.perAccountConcurrency],
     ['advanced', 'execution', strings.settings.warmProcessMinutes]
   ]);
 

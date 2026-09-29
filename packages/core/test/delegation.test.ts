@@ -8,7 +8,7 @@ import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { runCli } from '../src/cli.ts';
-import { echoThread, scriptedClaude, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { holdAccountTurns, echoThread, scriptedClaude, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
@@ -33,7 +33,7 @@ function scripted(steer?: (prompt: string) => Promise<boolean>) {
   return running;
 }
 async function setup(patch: Partial<DelegationConfig> = {}) {
-  const h = await startTestCore({ settings: { maxConcurrentTurns: 6, perAccountConcurrency: 6 } }); cores.push(h);
+  const h = await startTestCore(); cores.push(h);
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner, 'Parent');
   const thread = h.core.threads.require(threadId);
@@ -92,6 +92,18 @@ test('native results survive message pagination and restart without using delega
   const restarted = new Core({ dataDir: h.dataDir, token: h.token });
   try { expect(restarted.delegation.get(threadId).nativeAgents).toEqual(view.nativeAgents); }
   finally { await restarted.close(); }
+});
+
+test('thirty delegated agents launch despite stored legacy team budgets', async () => {
+  const runs = scripted(); const { h, threadId, config, spawn } = await setup();
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...config, maxAgents: 1, maxConcurrent: 1, maxTurns: 1, maxMinutes: 1 });
+  const children = [];
+  for (let index = 0; index < 30; index++) children.push(await spawn(`worker-${index}`));
+  expect(h.core.delegation.get(threadId).agents).toHaveLength(30);
+  expect(h.core.delegation.get(threadId).turnsUsed).toBe(30);
+  expect(children.every(child => runs.has(child.thread.id))).toBe(true);
+  expect(h.core.scheduler.state().running).toHaveLength(30);
+  expect(h.core.scheduler.state().queued).toEqual([]);
 });
 
 test('approved profiles launch ordinary isolated sessions in the parent checkout; spawn retries are idempotent', async () => {
@@ -157,20 +169,17 @@ test('agent tokens can only delegate inside their own owner-enabled family, neve
   } finally { agent.close(); worker.close(); }
 });
 
-test('team concurrency queues children, reuses the global scheduler and enforces total turn and agent budgets', async () => {
-  const runs = scripted(); const { h, owner, threadId, spawn } = await setup({ maxAgents: 2, maxConcurrent: 1, maxTurns: 2 });
+test('a completed child can receive further turns without a team turn budget', async () => {
+  const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
   const one = await spawn('one'), two = await spawn('two');
   expect(h.core.threads.require(one.thread.id).status).toBe('running');
-  expect(h.core.threads.require(two.thread.id).status).toBe('queued');
-  expect(runs.has(two.thread.id)).toBe(false);
-  await expect(spawn('three')).rejects.toThrow('agent limit');
-  runs.get(one.thread.id)!.finish();
-  await waitFor(() => runs.has(two.thread.id));
   expect(h.core.threads.require(two.thread.id).status).toBe('running');
-  await expect(owner.call('turns.start', { threadId: one.thread.id, prompt: 'More work' })).rejects.toThrow('turn budget');
-  expect(h.core.delegation.get(threadId).turnsUsed).toBe(2);
+  runs.get(one.thread.id)!.finish();
+  await waitFor(() => h.core.threads.require(one.thread.id).status === 'idle');
+  await owner.call('turns.start', { threadId: one.thread.id, prompt: 'More work' });
+  expect(h.core.threads.require(one.thread.id).status).toBe('running');
+  expect(h.core.delegation.get(threadId).turnsUsed).toBe(4);
   expect(h.core.delegation.get(threadId).messages.some(m => m.text.includes('Tests passed'))).toBe(true);
-  expect(runs.has(threadId)).toBe(false);
 });
 
 test('completion forwards bounded text without tools, paid summaries or duplicate delivery, and can wake the parent once', async () => {
@@ -224,8 +233,11 @@ test('hook delivery does not spend another turn; unsupported steering waits unti
 });
 
 test('stop all cancels queued and running children and blocks automatic wakeups until owner resumes', async () => {
-  scripted(); const { h, owner, threadId, spawn, config } = await setup({ maxConcurrent: 1 });
-  const one = await spawn('one'), two = await spawn('two');
+  scripted(); const { h, owner, threadId, spawn, config } = await setup();
+  const one = await spawn('one');
+  holdAccountTurns(h);
+  const two = await spawn('two');
+  expect(two.thread.status).toBe('queued');
   await owner.call('delegation.send', { threadId, toThreadId: one.thread.id, text: 'Pending', requestId: 'pending' });
   const result = await owner.call('delegation.stop', { threadId });
   expect(result.stopped).toBe(2);
@@ -302,15 +314,16 @@ test('ordinary threads leave delegation unset on stop/archive; stopping an enabl
   expect(h.core.delegation.get(threadId).config.paused).toBe(true);
 });
 
-test('one scheduler slot permits nonblocking spawn and a completion wake after the parent yields', async () => {
+test('account login admission queues a nonblocking spawn, then its result wakes the parent', async () => {
   const runs = scripted(); const { h, threadId, spawn } = await setup();
-  h.core.settings.set({ maxConcurrentTurns: 1, perAccountConcurrency: 1 });
   h.core.threads.startTurn(threadId, 'Coordinate');
   const parentRun = runs.get(threadId)!;
+  const release = holdAccountTurns(h);
   const child = await spawn();
   expect(child.thread.status).toBe('queued');
   expect(runs.has(child.thread.id)).toBe(false);
   parentRun.finish('Delegated, awaiting result.');
+  release();
   await waitFor(() => runs.has(child.thread.id));
   runs.get(child.thread.id)!.finish('Result ready');
   await waitFor(() => runs.get(threadId) !== parentRun, 5000);
@@ -319,10 +332,10 @@ test('one scheduler slot permits nonblocking spawn and a completion wake after t
 
 test('the regular Stop command reports cancellation of a queued parent wake', async () => {
   const runs = scripted(); const { h, owner, threadId, spawn } = await setup();
-  h.core.settings.set({ maxConcurrentTurns: 1, perAccountConcurrency: 1 });
   const child = await spawn();
   const blocker = (await echoThread(h, owner, 'Other work')).threadId;
-  h.core.threads.startTurn(blocker, 'Keep the scheduler occupied');
+  h.core.threads.startTurn(blocker, 'Keep existing work running');
+  holdAccountTurns(h);
   runs.get(child.thread.id)!.finish('Result ready');
   await waitFor(() => h.core.threads.require(threadId).status === 'queued', 5000);
   expect(await owner.call('turns.stop', { threadId })).toEqual({ stopped: true });
@@ -362,21 +375,25 @@ test('late steering acknowledgement after stop stays uncertain and cannot resume
   expect(h.core.threads.require(child.thread.id).status).toBe('idle');
 });
 
-test('running deadline stops a child and project removal deletes delegation records', async () => {
-  scripted(); const { h, owner, threadId, spawn } = await setup({ maxMinutes: 1 }); const child = await spawn();
+test('a legacy deadline does not stop a child and project removal deletes delegation records', async () => {
+  scripted(); const { h, owner, threadId, spawn } = await setup(); const child = await spawn();
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...h.core.delegation.config(threadId), maxMinutes: 1 });
   const now = Date.now(); const clock = spyOn(Date, 'now').mockReturnValue(now + 61_000);
-  try { await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle', 5000); }
+  try { await Bun.sleep(1100); expect(h.core.threads.require(child.thread.id).status).toBe('running'); }
   finally { clock.mockRestore(); }
   await owner.call('projects.remove', { projectId: h.core.threads.require(threadId).projectId! });
   expect(h.core.journal.db.query('SELECT count(*) AS n FROM delegated_agents').get()).toEqual({ n: 0 });
   expect(h.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages').get()).toEqual({ n: 0 });
 });
 
-test('budget-exhausted results join a manual parent prompt even when the driver has no steering or hooks', async () => {
-  const runs = scripted(); const { h, threadId, spawn } = await setup({ maxTurns: 1 });
-  const child = await spawn(); runs.get(child.thread.id)!.finish('Completed boundary review');
+test('results held while the parent waits join its next manual prompt without steering or hooks', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
+  const child = await spawn();
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), status: 'waiting' });
+  runs.get(child.thread.id)!.finish('Completed boundary review');
   await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
   expect(h.core.delegation.get(threadId).messages[0]?.origin).toBe('result');
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), status: 'idle' });
   h.core.threads.startTurn(threadId, 'Continue with the result');
   expect(runs.get(threadId)!.ctx.prompt).toContain('Completed boundary review');
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(1);
@@ -396,17 +413,19 @@ test('a turn retried on a fresh session after a lost resume still carries the he
     ctx.emit.complete(id, 'complete');
     return { done: Promise.resolve<TurnResult>({ status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null }), stop() {} };
   } }));
-  const { h, threadId, spawn } = await setup({ maxTurns: 1 });
+  const { h, threadId, spawn } = await setup();
   h.core.threads.startTurn(threadId, 'Plan the work');
   await waitFor(() => h.core.threads.require(threadId).sessionId === `session:${threadId}` && h.core.threads.require(threadId).status === 'idle');
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), status: 'waiting' });
   const child = await spawn();
   await waitFor(() => h.core.threads.require(child.thread.id).status === 'idle');
-  // The budget is spent, so the result waits in the parent's inbox for its next prompt.
+  // The parent is awaiting input, so the result stays in its inbox for the next prompt.
   await waitFor(() => h.core.delegation.get(threadId).messages.some(m => m.origin === 'result' && m.status === 'received'));
   h.core.threads.deferred.deferredAnswers.set(threadId, ['Held async answer']);
 
   lose = true;
   calls.length = 0;
+  h.core.journal.putThread({ ...h.core.threads.require(threadId), status: 'idle' });
   const turn = h.core.threads.startTurn(threadId, 'Continue with the result');
   await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done', 5000);
   expect(calls.map(ctx => ctx.sessionId)).toEqual([`session:${threadId}`, null]);
@@ -418,16 +437,17 @@ test('a turn retried on a fresh session after a lost resume still carries the he
   expect(h.core.threads.require(threadId).sessionGeneration).toBe(1);
 });
 
-test('the deadline also stops an automatic parent wake and pauses the team', async () => {
-  const runs = scripted(); const { h, threadId, spawn } = await setup({ maxMinutes: 1 });
+test('an automatic parent wake survives a stored legacy deadline', async () => {
+  const runs = scripted(); const { h, threadId, spawn } = await setup();
   const child = await spawn();
   runs.get(child.thread.id)!.finish('Result to integrate');
   await waitFor(() => runs.has(threadId), 4000);
+  h.core.journal.setSetting(`delegation:${threadId}`, { ...h.core.delegation.config(threadId), maxMinutes: 1 });
   const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 61_000);
-  try { await waitFor(() => h.core.threads.require(threadId).status === 'idle', 4000); }
+  try { await Bun.sleep(1100); expect(h.core.threads.require(threadId).status).toBe('running'); }
   finally { clock.mockRestore(); }
-  expect(h.core.delegation.get(threadId).config.paused).toBe(true);
-  expect(h.core.journal.listTurns(threadId)[0]?.status).toBe('stopped');
+  expect(h.core.delegation.get(threadId).config.paused).toBe(false);
+  expect(h.core.journal.listTurns(threadId)[0]?.status).toBe('running');
 });
 
 test('a paired phone sends authenticated user steering but cannot configure or launch agents', async () => {

@@ -277,6 +277,7 @@
   --dur-1: 90ms;
   --dur-2: 150ms;
   --dur-3: 220ms;
+  --dur-whip: 360ms;
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: dark;

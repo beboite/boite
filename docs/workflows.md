@@ -9,8 +9,8 @@ provider wrote it or runs its steps.
 
 The main agent writes a plan and runs it with `boite workflow run`. The owner
 can save a run as a template and start it again from the panel. The owner must
-enable delegation first, because profiles, the team's concurrency and the
-team's turn budget apply to every step.
+enable delegation first, because every step uses a profile approved for that
+team.
 
 When a request mentions a workflow while delegation is disabled, every driver
 receives the same instruction to explain the block and point the owner to
@@ -84,8 +84,7 @@ parent's working directory: give parallel steps distinct files.
 | Final answer kept per execution | | 4,000 characters |
 | Structured output | | 16,000 characters of JSON |
 
-`maxConcurrent` is also held to the team's own concurrency, and every step turn
-counts against the team's turn budget.
+`maxConcurrent` controls this run. The team adds no concurrency or turn quota.
 
 ## Failure, stop and restart
 
@@ -97,11 +96,10 @@ error in the prompt; an execution whose conversation was archived since gets a
 new one. The executions held back as "Not started" wait again with it, in any
 step.
 
-Handing the summary back is a turn of the parent, so it counts against the
-team's turn budget like a step turn. When the budget is spent or delegation is
-paused, the run keeps the reason as `deliveryError` and the panel shows it; the
-summary goes again when the parent ends another turn or its delegation settings
-change, a raised budget or a resume included.
+Handing the summary back is a turn of the parent. If delegation is disabled or
+paused before delivery, the run keeps the reason as `deliveryError` and the
+panel shows it. The summary goes again when the parent ends another turn or
+the owner enables or resumes the team.
 
 Stop cancels every running step and marks the steps that did not start as
 stopped; retry runs them again. Stopping or archiving the parent conversation

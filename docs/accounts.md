@@ -277,7 +277,11 @@ opaque window: Windows 11 rounds its corners and draws its border, Windows 10
 keeps it square.
 
 Grok reads the selected account's `GROK_HOME/auth.json` and requests its credit
-percentage from the Grok CLI billing endpoint. Expired logins require `grok login`.
+percentage from the Grok CLI billing endpoint. Expired xAI logins renew silently
+when they contain a refresh token, issuer and client ID. Boite saves renewed
+tokens in the same file, preserves other logins and shares concurrent renewals.
+A billing response of 401 triggers one renewal and retry; 403 keeps the access
+error. A rejected refresh token requires `grok login --device-auth`.
 The [billing format](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs)
 also carries legacy credit amounts. Boite accepts those amounts when no percentage
 is reported. An omitted proto3 percentage with a dated credits period means zero

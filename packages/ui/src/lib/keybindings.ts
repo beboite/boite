@@ -12,7 +12,7 @@ import { KEYBINDING_COMMANDS, parseChord, type Chord, type KeybindingCommand, ty
 export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   'new-thread': 'mod+n',
   palette: 'mod+k',
-  sidebar: 'mod+b',
+  sidebar: 'mod+s',
   panel: 'mod+alt+b',
   browser: 'mod+shift+j',
   // The three workbench surfaces take the letter their launcher card shows.
@@ -21,7 +21,7 @@ export const DEFAULT_BINDINGS: Record<KeybindingCommand, string | null> = {
   tasks: 'mod+shift+k',
   'close-surface': 'mod+w',
   settings: 'mod+,',
-  stash: 'mod+s',
+  stash: 'mod+shift+s',
   'send-and-draft': 'mod+enter',
   'add-project': null,
   pin: null,

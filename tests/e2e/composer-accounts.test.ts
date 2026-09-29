@@ -32,8 +32,12 @@ test('queued prompts keep their thread, and browser project and account actions 
     await page.waitFor('document.querySelector("[data-testid=thread-title]")?.textContent.trim() === "Thread B"');
     const permission = (await client.call('permissions.list', { threadId: a.id }))[0]!;
     const firstDone = client.next('turn.finished', (turn) => turn.threadId === a.id);
+    const queuedDone = client.next('turn.finished', (turn) => turn.threadId === a.id && turn.id !== permission.turnId);
     await client.call('permissions.answer', { requestId: permission.id, decision: 'allow' });
     await firstDone;
+    await queuedDone;
+    expect(await page.evaluate('document.querySelector("[data-testid=thread-title]")?.textContent.trim()')).toBe('Thread B');
+    await page.screenshot(join(artifacts, 'composer-queue-background.png'));
     expect((await client.call('threads.get', { threadId: b.id })).messages).toHaveLength(0);
     await page.click(`[data-thread-id="${a.id}"]`);
     await page.waitFor('Array.from(document.querySelectorAll("[data-testid=message][data-role=assistant]")).some(el => el.textContent.includes("queued only for A"))');

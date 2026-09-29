@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -614,11 +615,16 @@ describe('codex driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
     await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
     await waitFor(() => fakeLog().includes('thread/start'));
+    if (process.platform === 'win32') {
+      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     const done = await finished;
     expect(done.status).toBe('stopped');
     expect(done.error).toBeNull();
     expect(fakeLog()).not.toContain('turn/start');
+    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
     // The thread the agent opened is kept for the next turn.
     expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
@@ -686,9 +692,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();

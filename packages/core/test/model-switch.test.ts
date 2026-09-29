@@ -4,7 +4,7 @@ import { setDriver } from '../src/drivers/index.ts';
 import { continuationInput } from '../src/continuation.ts';
 import { Journal } from '../src/journal.ts';
 import { join } from 'node:path';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { holdAccountTurns, echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -55,7 +55,6 @@ test('account switching keeps the thread, carries prior exchanges and never reus
 
 test('a queued turn keeps its original account and late completion cannot attach its session to the new selection', async () => {
   const { client, threadId, accountId } = await setup();
-  h.core.settings.set({ maxConcurrentTurns: 1 });
   const blocker = await client.call('threads.create', {
     projectId: h.core.projects.require(h.core.threads.require(threadId).projectId).id, providerId: 'echo', accountId,
   });
@@ -72,9 +71,11 @@ test('a queued turn keeps its original account and late completion cannot attach
     },
   });
   await client.call('turns.start', { threadId: blocker.id, prompt: 'block' });
+  const release = holdAccountTurns(h, accountId);
   const queued = await client.call('turns.start', { threadId, prompt: 'queued on first account' });
   await client.call('threads.update', { threadId, accountId: 'second-account', model: 'echo' });
   finish({ status: 'done', sessionId: null, usage: null });
+  release();
   await waitFor(() => h.core.journal.getTurn(queued.id)?.status === 'done');
   expect(seen[1]?.account.id).toBe(accountId);
   expect(h.core.threads.require(threadId).accountId).toBe('second-account');

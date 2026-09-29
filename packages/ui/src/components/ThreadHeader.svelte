@@ -221,7 +221,7 @@
           type="button"
           class="ghost icon"
           class:on={store.panelOpen}
-          title={strings.thread.panelHint}
+          title={`${strings.thread.panelHint}${store.keyHint('panel')}`}
           aria-label={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"

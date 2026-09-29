@@ -175,8 +175,8 @@ flag each call gets a fresh id. An artifact object contains `missionId`, `taskId
 and `options`; it yields execution until the user answers. A memory contains
 `title` and `text`, with `id` and `expectedRevision` for an edit. The core adds
 the source context. Use `--json` to preserve the structured result.
-[Delegation](delegation.md) uses owner-approved model profiles and a separate
-team budget. Children share the parent's checkout, retain their own sessions,
+[Delegation](delegation.md) uses owner-approved model profiles and records
+team usage. Children share the parent's checkout, retain their own sessions,
 and return bounded results automatically. `delegate stop` pauses the whole team;
 only the owner can change profiles or resume a paused team.
 [Workflows](workflows.md) run a JSON plan of such children: `workflow help`
