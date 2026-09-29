@@ -352,6 +352,7 @@ export class Store {
   cancelLogin(...args: Parameters<Accounts['cancelLogin']>) { return this.#ctx.accounts.cancelLogin(...args); }
   loginAccount(...args: Parameters<Accounts['loginAccount']>) { return this.#ctx.accounts.loginAccount(...args); }
   sendLoginInput(...args: Parameters<Accounts['sendLoginInput']>) { return this.#ctx.accounts.sendLoginInput(...args); }
+  renameAccount(...args: Parameters<Accounts['renameAccount']>) { return this.#ctx.accounts.renameAccount(...args); }
   checkAccount(...args: Parameters<Accounts['checkAccount']>) { return this.#ctx.accounts.checkAccount(...args); }
   reloadProviders(...args: Parameters<Accounts['reloadProviders']>) { return this.#ctx.accounts.reloadProviders(...args); }
   loadHarnessUpdates(...args: Parameters<Accounts['loadHarnessUpdates']>) { return this.#ctx.accounts.loadHarnessUpdates(...args); }

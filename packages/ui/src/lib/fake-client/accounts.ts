@@ -65,10 +65,12 @@ async function fakeLoginPrompt(ctx: FakeContext, accountId: string): Promise<voi
   const active = ctx.logins.get(accountId);
   await ctx.pause();
   if (!active || ctx.logins.get(accountId) !== active) return;
+  const account = ctx.accounts.find(a => a.id === accountId);
+  const provider = ctx.providers.find(p => p.id === account?.providerId);
   loginEvent(ctx, {
     accountId,
     state: 'running',
-    output: 'Open https://example.invalid/login?code=fake to continue',
+    output: provider?.login && provider.login.kind === 'device' ? 'https://example.invalid/login?code=fake\nTEST-CODE' : 'Open https://example.invalid/login?code=fake to continue',
     url: 'https://example.invalid/login?code=fake',
     exitCode: null
   });
@@ -129,6 +131,16 @@ export function accountMethods(ctx: FakeContext) {
       ctx.emit('accounts.updated', structuredClone(account));
       return structuredClone(account);
     },
+    'accounts.rename': async (params) => {
+      const account = ctx.accounts.find(a => a.id === params.accountId);
+      if (!account) throw ctx.notFound('account', params.accountId);
+      if (typeof params.label !== 'string' || !params.label.trim() || params.label.trim().length > 100) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'label must contain 1 to 100 characters', data: { field: 'label', expected: '1 to 100 characters' } });
+      }
+      account.label = params.label.trim();
+      ctx.emit('accounts.updated', structuredClone(account));
+      return structuredClone(account);
+    },
     'accounts.remove': async (params) => {
       if (!ctx.accounts.some((a) => a.id === params.accountId)) throw ctx.notFound('account', params.accountId);
       const referenced = [...ctx.threads.values()].find((t) => t.accountId === params.accountId);
@@ -178,7 +190,9 @@ export function accountMethods(ctx: FakeContext) {
         url: null,
         exitCode: null
       });
-      void fakeLoginPrompt(ctx, account.id);
+      void fakeLoginPrompt(ctx, account.id).then(async () => {
+        if (provider.login && provider.login.kind === 'device') await finishFakeLogin(ctx, account);
+      });
       return { ok: true };
     },
     'accounts.logins': async (params) => {

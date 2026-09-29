@@ -90,24 +90,24 @@ the same change.
 
 ## What the core checks
 
-`accounts.check` reads the files `auth.session` names, inside the account's
-directory or inside the provider's own location, and answers with one of four
-statuses:
+`accounts.check` reads the files `auth.session` names. A passive check answers
+`ok` when the files exist, `unauthenticated` when they are absent, `unknown`
+when the provider can store its login elsewhere, or `error` when the check fails.
 
-| Status | Meaning |
-|---|---|
-| `unknown` | never checked, the provider is not available on this machine, or its session file is missing on an OS where the login can live outside any file (Claude on macOS, whose login is in the Keychain) |
-| `ok` | the session file is there |
-| `unauthenticated` | the directory exists and the session file does not |
-| `error` | the check itself failed, with the reason |
+The Check connection button requests a fresh login check, without listing
+models or sending a prompt. Codex reads its account through the app-server with
+`refreshToken: true`; Claude asks its CLI for `auth status --json`, including
+Keychain accounts. Both return the signed-in email. Other providers retain their
+session-file check. A failed check displays its reason instead of reporting a
+model count. Passive checks do not launch an agent process.
 
-The check runs when an account is added, when it is asked for, and after a login
-process exits. A changed status reaches every client as `accounts.updated`, so a
-second shell or a phone follows it without a reload. A check asked for that
-finds the same status answers with the account and writes and sends nothing, so
-the Accounts page checking on every focus costs no journal row and keeps the
-cached model lists; a new account and a finished login are always sent. `auth.identity`, where a descriptor
-provides it, is what turns a status into a name the picker can show.
+Changed account statuses and identities reach every client as `accounts.updated`.
+An unchanged passive check writes no journal row and sends no event.
+`accounts.rename` changes the label of any account, including a default CLI
+account, while keeping its ID, login directory and thread references.
+
+Settings shows the chosen account label and its email separately. Emails stay
+blurred until hovered, focused from the keyboard or tapped on a phone.
 
 ## The login flow
 
@@ -127,8 +127,13 @@ open a terminal:
 4. On exit the event carries `done` or `failed` with the exit code, the core
    rechecks the account, and `accounts.updated` follows.
 
-A device-code flow fits that shape exactly, which is why the Codex login block
-asks for one: it prints a link and a code and never opens a browser.
+Codex uses the app-server's `account/login/start` with `chatgptDeviceCode`.
+The core carries its verification URL and code directly to the client, keeps
+both visible until `account/login/completed`, then checks the resulting account.
+The user enters the code on the sign-in page, with no code field to send it back
+to Boite. Cancellation closes the process; expired codes show a retryable error.
+Piped login output from other agents has terminal control sequences removed
+before the core extracts links or displays text.
 
 The other shape is `login.acp`, for an ACP agent whose sign-in is the protocol's
 own `authenticate` call rather than a command. The core starts the agent itself
@@ -241,8 +246,7 @@ never walks into the user's own `skills` or `plugins`.
 ## Quotas and account pools
 
 Providers shows one row per provider and its next step. A row's chevron opens
-its accounts: sign in again for an isolated one, Check (the session file, then a
-model probe), Remove, quotas, `Add another account`, which names the account
+its accounts: sign in again for an isolated one, Check connection, Rename, Remove, quotas, `Add another account`, which names the account
 after the provider and starts its sign-in, `Use my command-line login` when
 no account uses the default location, and the provider's default model and
 effort once it is connected. Default-location accounts keep their
