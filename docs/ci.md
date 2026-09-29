@@ -150,11 +150,11 @@ projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners. On 2026-09-29, `bun run build:ui`,
-`bun run build:core` and `bun scripts/ci/budgets.ts` measured 3319.4 KB for the
+`bun run build:core` and `bun scripts/ci/budgets.ts` measured 3319.5 KB for the
 UI and 799.1 KB for the core after the permanent-deletion controls and atomic
-history cleanup were integrated with current main. Their budgets moved to
-3739000 and 900100 bytes, preserving the 10% margin; the entry limit stays
-520000 bytes.
+history cleanup were integrated with current main, including answer submission
+with Enter. The whole UI limit is 3739000 bytes, preserving the 10% margin;
+integration retains main's larger 578000-byte entry and 904000-byte core limits.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
