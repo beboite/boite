@@ -31,6 +31,12 @@ test('header and project layout', async () => {
   if (process.env.BOITE_CAPTURE_BEFORE) return;
   expect(await page.evaluate(`document.querySelectorAll('${id('titlebar')}').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelector('${id('titlebar')}').contains(document.querySelector('${id('thread-title')}'))`)).toBe(true);
+  expect(await page.evaluate(`(() => {
+    const project = document.querySelector('${id('header-project')}').getBoundingClientRect();
+    const title = document.querySelector('${id('thread-title')}').getBoundingClientRect();
+    const sidebar = document.querySelector('${id('sidebar')}').getBoundingClientRect();
+    return project.right <= title.left && title.left >= sidebar.right;
+  })()`)).toBe(true);
   await pointerClick(id('sidebar-toggle'));
   await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
   await capture('header-collapsed.png');

@@ -2,12 +2,13 @@
 
 General settings contains the desktop update card. It names the installed
 version and channel, the available version, its publication date and release
-notes. When an update is ready, the title bar shows one Update pill. Its label
+notes. When an update is ready, the sidebar footer shows one Update pill. Its label
 opens the update card, where installation requires confirmation before restarting.
 The close button inside the pill hides it for that version and channel,
 including after restarting the app.
 Installation remains available in General settings. A different version or
 channel shows the controls again.
+The settings navigation keeps the same pill at its foot.
 
 ## Boite and Boite Nightly
 

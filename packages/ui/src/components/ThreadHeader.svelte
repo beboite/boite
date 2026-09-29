@@ -7,7 +7,6 @@
   import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
-  import { projectName } from '../lib/format';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import { contextLevel, contextPercent } from '../lib/tokens';
@@ -16,7 +15,6 @@
   import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
-  let project = $derived(store.openProject);
   let renaming = $state(false);
   let renameText = $state('');
 
@@ -175,12 +173,6 @@
 
       <span class="spacer"></span>
 
-      <!-- A draft names its project in the heading below, so the chip would say it twice.
-           Each optional button's right click offers to put it away (Settings, Appearance). -->
-      {#if project && thread && work.shows('header.project')}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <span class="chip path" title={project.path} data-testid="header-project" oncontextmenu={(event) => controlMenu(event, store, 'header.project')}>{projectName(project)}</span>
-      {/if}
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />

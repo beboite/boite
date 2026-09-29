@@ -20,6 +20,7 @@
   import ArchivedDrawer from './ArchivedDrawer.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
+  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import DraftRow from './DraftRow.svelte';
@@ -303,6 +304,7 @@
       ><Plus size={13} />{strings.sidebar.addProject}</button
     >
   {/if}
+  {#if store.page === 'chat'}<AppUpdateNotice {store} />{/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
     {#if work.shows('sidebar.limits')}

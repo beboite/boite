@@ -493,6 +493,10 @@ for the Bun version running it and keeps it under `node_modules/.cache`
 
 ## Captures
 
+On desktop, the selected project sits above the sidebar and the conversation
+title starts above the chat. Folding or resizing the sidebar adjusts the header;
+the phone keeps its existing project navigation and conversation title.
+
 `tests/e2e/header.test.ts` checks the shared header, sidebar folding and saved
 state, project groups, machine menu ordering, and prompt navigation through a
 paged, virtualized conversation. It captures desktop, phone and light-theme

@@ -2,6 +2,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
+  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import BrainPage from './BrainPage.svelte';
   import { ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
@@ -266,6 +267,7 @@
       {/if}
       </div>
     {/each}
+    <div class="update-footer"><AppUpdateNotice {store} /></div>
   </nav>
 
   {#if toc[tab]}
@@ -348,6 +350,8 @@
     padding: 20px 14px;
     overflow-y: auto;
   }
+
+  .update-footer { margin-top: auto; padding-top: 16px; flex: none; }
 
   .back {
     justify-content: flex-start;

@@ -308,10 +308,10 @@ export const strings = {
     download: 'Download',
     install: 'Install and restart',
     readyAction: 'Update',
-    dismissTitlebar: 'Dismiss this update notification',
+    dismissNotice: 'Dismiss this update notification',
     installTitle: 'Install the Boite update?',
     installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
-    detailsTitlebar: 'Open app update details'
+    detailsNotice: 'Open app update details'
   },
 
   connection: {

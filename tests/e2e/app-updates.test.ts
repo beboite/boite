@@ -29,7 +29,7 @@ async function pickDesktopLocale(locale: 'en' | 'fr') {
   await page.click(id(`locale-${locale}`));
   await page.waitFor(`document.documentElement.lang === '${locale}'`);
   await page.click(id('settings-back'));
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
 }
 
 beforeAll(async () => {
@@ -45,10 +45,10 @@ beforeEach(async () => {
 afterEach(async () => { await page?.close(); }, 15_000);
 afterAll(async () => { await server?.close(); }, 15_000);
 
-test('titlebar details open and scroll to the card on the first and later clicks', async () => {
+test('sidebar update details open and scroll to the card on the first and later clicks', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
   await page.evaluate(`(() => {
     window.__appUpdateScrollTarget = null;
     const original = Element.prototype.scrollIntoView;
@@ -57,16 +57,16 @@ test('titlebar details open and scroll to the card on the first and later clicks
       return original.call(this, options);
     };
   })()`);
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('update-notice-ready'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
-  await capture('titlebar-first-click');
+  await capture('sidebar-first-click');
   // General lists no sections in the nav: the user scrolls away by hand, and the next click brings the card back.
   await page.evaluate(`document.getElementById('settings-conversations').scrollIntoView({ block: 'start' })`);
   expect(await page.evaluate(`document.querySelector('${id('settings-tab-general')}').hasAttribute('aria-expanded')`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('.subcategories.open') === null`)).toBe(true);
   await page.evaluate('window.__appUpdateScrollTarget = null');
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('update-notice-ready'));
   await page.waitFor(`window.__appUpdateScrollTarget === 'settings-app-update'`);
 }, 30_000);
 
@@ -74,14 +74,21 @@ test('the update pill opens details and installation still requires confirmation
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
   await width(880);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
-  expect((await page.text(id('titlebar-update-ready'))).trim()).toBe('Update');
-  expect(await page.evaluate(`document.querySelectorAll('${id('titlebar-update-actions')} button').length`)).toBe(2);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
+  expect((await page.text(id('update-notice-ready'))).trim()).toBe('Update');
+  expect(await page.evaluate(`document.querySelectorAll('${id('update-notice-actions')} button').length`)).toBe(2);
+  expect(await page.evaluate(`(() => {
+    const notice = document.querySelector('${id('update-notice-actions')}');
+    const box = notice.getBoundingClientRect();
+    return document.querySelector('${id('sidebar')}').contains(notice)
+      && box.left < 40 && box.bottom > innerHeight - 100
+      && !document.querySelector('${id('titlebar')}').contains(notice);
+  })()`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
   await capture('main-ready');
 
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('update-notice-ready'));
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}')`);
@@ -89,14 +96,14 @@ test('the update pill opens details and installation still requires confirmation
   await capture('main-confirmation');
   await page.click(id('confirm-cancel'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-ready')}') !== null`)).toBe(true);
 
   await page.click(id('settings-back'));
   await pickDesktopLocale('fr');
-  expect((await page.text(id('titlebar-update-ready'))).trim()).toBe('Mise à jour');
+  expect((await page.text(id('update-notice-ready'))).trim()).toBe('Mise à jour');
   expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
   await capture('main-ready-fr');
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('update-notice-ready'));
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
@@ -106,12 +113,12 @@ test('the update pill opens details and installation still requires confirmation
 
   await page.click(id('settings-back'));
   await pickDesktopLocale('en');
-  await page.click(id('titlebar-update-ready'));
+  await page.click(id('update-notice-ready'));
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await page.click(id('confirm-ok'));
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}') === null`);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}') === null`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-install')}') === null`)).toBe(true);
 }, 30_000);
 
@@ -119,33 +126,36 @@ test('dismissing a ready update persists while settings still offer installation
   await page.navigate(`${base}/?fake=1&open=recent&appUpdate=ready`);
   await width(880);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
   if (await page.evaluate(`document.querySelector('${id('error-toast')} .dismiss') !== null`)) {
     await page.click(`${id('error-toast')} .dismiss`);
     await page.waitFor(`document.querySelector('${id('error-toast')}') === null`);
   }
   await capture('compact-ready');
   await pickDesktopLocale('fr');
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
+  await width(1400);
+  await capture('layout-desktop');
+  await width(880);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
   await capture('compact-ready-fr');
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-dismiss')}') !== null`)).toBe(true);
-  await page.click(id('titlebar-update-dismiss'));
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}') === null`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-details')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-dismiss')}') !== null`)).toBe(true);
+  await page.click(id('update-notice-dismiss'));
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}') === null`);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-actions')}') === null`)).toBe(true);
   await page.reload();
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
   await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-ready')}') === null`)).toBe(true);
   await capture('dismissed-settings');
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}')`);
   await page.click(id('confirm-cancel'));
   await page.navigate(`${base}/?fake=1&open=recent&appUpdate=ready&appUpdateChannel=nightly`);
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
 }, 30_000);
 
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
@@ -156,7 +166,7 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
   await capture('ready-desktop');
   await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('[role="alertdialog"], [role="dialog"]')`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}').disabled`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-ready')}').disabled`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('[role="alertdialog"], [role="dialog"]').textContent`)).toContain('Interrupted turns do not restart automatically');
   await capture('restart-confirmation');
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -170,7 +180,7 @@ test('ready desktop updates show versions, notes and a restart confirmation', as
 
 test('an installed nightly calls itself boite (de nuit) in the window title alone', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly&appUpdateCurrentChannel=nightly`);
-  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  await page.waitFor(`document.querySelector('${id('update-notice-ready')}')`);
   await page.waitFor(`document.title.endsWith('boite (de nuit)')`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   // The bar leaves the name to the window title: its room goes to the project, the thread or settings.
@@ -224,8 +234,8 @@ test('phone and ordinary browser settings never offer native app installation', 
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-details')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-ready')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-actions')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
   await capture('phone');
   await page.click(id('settings-tab-appearance'));
@@ -236,7 +246,7 @@ test('phone and ordinary browser settings never offer native app installation', 
   await page.waitFor(`document.documentElement.lang === 'fr' && document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('update-notice-ready')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 390')).toBe(true);
   await capture('phone-fr');
 }, 30_000);
