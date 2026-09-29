@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode, type Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import type { RpcFailure } from '../src/errors.ts';
 import { Core } from '../src/core.ts';
@@ -61,6 +61,11 @@ describe('server', () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     await client.call('threads.subscribe', { threadId });
+    harness.core.activity.set({ threadId, goal: { objective: 'Keep the finished overlay' } });
+    harness.core.activity.control({ threadId, kind: 'goal', action: 'complete' });
+    harness.core.activity.tasks(threadId, [{ id: 'done', text: 'Completed task', status: 'completed' }]);
+    const activity = harness.core.activity.get(threadId);
+    harness.core.threads.deferred.pendingWakes.set(threadId, 'Retain background output');
     const seen: string[] = [];
     client.on('message.started', event => { if (event.threadId === threadId) seen.push('message.started'); });
     client.on('message.completed', event => { if (event.threadId === threadId) seen.push('message.completed'); });
@@ -74,6 +79,27 @@ describe('server', () => {
     expect(harness.core.journal.listTurns(threadId)).toEqual([]);
     expect(harness.core.journal.listMessages(threadId)).toEqual([]);
     expect(seen).toEqual([]);
+    expect({ activity: harness.core.activity.get(threadId), stored: harness.core.journal.getSetting(`activity:${threadId}`),
+      wake: harness.core.threads.deferred.pendingWakes.get(threadId) })
+      .toEqual({ activity, stored: activity, wake: 'Retain background output' });
+  });
+
+  test('a rolled-back child prompt preserves its stopped admission and team usage', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const parent = harness.core.threads.require(threadId);
+    const profile = { id: 'worker', name: 'Worker', providerId: 'echo', accountId: parent.accountId, model: parent.model!, effort: null };
+    harness.core.delegation.configure(threadId, { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [profile] });
+    const childId = harness.core.delegation.createChild(parent, profile, 'Stopped child', () => undefined);
+    harness.core.delegation.stop(childId);
+    const admission = { id: 'turn_probe', threadId: childId } as Turn;
+    expect(harness.core.delegation.prepareTurn(admission)).toBe(false);
+    harness.core.journal.db.exec(`CREATE TRIGGER refuse_child_queue BEFORE INSERT ON threads
+      WHEN NEW.status = 'queued' BEGIN SELECT RAISE(ABORT, 'forced child rollback'); END;`);
+    await expect(client.call('turns.start', { threadId: childId, prompt: 'must keep stop' })).rejects.toBeInstanceOf(Error);
+    expect(harness.core.journal.listTurns(childId)).toEqual([]);
+    expect(harness.core.delegation.get(threadId).turnsUsed).toBe(0);
+    expect(harness.core.delegation.prepareTurn(admission)).toBe(false);
   });
 
   test('an RPC burst lets another client read before the burst ends', async () => {

@@ -128,19 +128,37 @@ try {
   }
 
   const cancelLoad = async (phase: 'cold' | 'warm'): Promise<void> => {
-    const interrupted = await Promise.all(created.map(t => owner.call('turns.start', {
-      threadId: t.id, prompt: '[sleep:3600000] must be stopped',
-    })));
-    const busy = await owner.call('scheduler.get', {});
-    assert.equal(busy.running.length, count);
-    assert.equal(busy.queued.length, 0);
-    const stopStart = performance.now();
-    const stops = await Promise.all(created.map(t => owner.call('turns.stop', { threadId: t.id })));
-    assert(stops.every(s => s.stopped));
-    await until(() => interrupted.every(t => watchers[0]!.finished.get(t.id)?.status === 'stopped'), 'mass cancellation');
-    const settled = await owner.call('scheduler.get', {});
-    assert.equal(settled.running.length + settled.queued.length, 0);
-    record({ scenario: 'mass cancellation', phase, stopped: interrupted.length, wallMs: performance.now() - stopStart });
+    const probe = await startHealthProbe(core!.url);
+    const start = performance.now();
+    let accepted = 0, acceptMs = 0, stopped = 0, wallMs = 0;
+    let failure: unknown;
+    try {
+      const interrupted = await Promise.all(created.map(async t => {
+        const turn = await owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] must be stopped' });
+        accepted++;
+        return turn;
+      }));
+      acceptMs = performance.now() - start;
+      const busy = await owner.call('scheduler.get', {});
+      assert.equal(busy.running.length, count);
+      assert.equal(busy.queued.length, 0);
+      const stopStart = performance.now();
+      const stops = await Promise.all(created.map(t => owner.call('turns.stop', { threadId: t.id })));
+      assert(stops.every(s => s.stopped));
+      await until(() => interrupted.every(t => watchers[0]!.finished.get(t.id)?.status === 'stopped'), 'mass cancellation');
+      const settled = await owner.call('scheduler.get', {});
+      assert.equal(settled.running.length + settled.queued.length, 0);
+      stopped = interrupted.length;
+      wallMs = performance.now() - stopStart;
+    } catch (error) { failure = error; }
+    const health = await probe.stop();
+    record({ scenario: 'mass cancellation', phase, status: failure ? 'failed' : 'passed', accepted, acceptMs, stopped, wallMs,
+      elapsedMs: performance.now() - start, healthSamples: health.samples.length,
+      healthP95Ms: health.samples.toSorted((a,b) => a-b)[Math.floor(health.samples.length * .95)],
+      healthMaxMs: Math.max(...health.samples), healthErrors: health.errors,
+      ...(failure ? { error: failure instanceof Error ? failure.message : String(failure) } : {}) });
+    if (failure) throw failure;
+    assert.deepEqual(health.errors, [], 'independent health probe timed out during mass start/stop');
   };
   // First-use startup is a separate failure path from stopping already-used threads.
   await cancelLoad('cold');
