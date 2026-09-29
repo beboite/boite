@@ -7,6 +7,7 @@ import type { Account, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { hostAgentsEnabled } from './providers/resolve.ts';
+import { grokQuotaToken } from './grok-quota-auth.ts';
 
 export const ANTIGRAVITY_QUOTA_ID = 'quota:antigravity-cli';
 const obj = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -63,11 +64,14 @@ async function credentials(path: string, name: string): Promise<Record<string, u
   catch { throw new Error(`${name} login could not be read. Connect the account in Providers.`); }
 }
 
+class RejectedQuotaToken extends Error {}
+
 async function request(url: string, token: string, name: string, headers: Record<string, string> = {}): Promise<unknown> {
   let response: Response;
   try { response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...headers }, redirect: 'error', signal: AbortSignal.timeout(15_000) }); }
   catch { throw new Error(`${name} usage request failed. Check the connection and retry.`); }
-  if (response.status === 401 || response.status === 403) throw new Error(`${name} login expired or has no subscription access. Reconnect in Providers.`);
+  if (response.status === 401) throw new RejectedQuotaToken(`${name} login expired or has no subscription access. Reconnect in Providers.`);
+  if (response.status === 403) throw new Error(`${name} login expired or has no subscription access. Reconnect in Providers.`);
   if (!response.ok) throw new Error(`${name} usage returned HTTP ${response.status}. Retry in five minutes.`);
   try { return await response.json(); } catch { throw new Error(`${name} returned an invalid usage response.`); }
 }
@@ -77,11 +81,16 @@ export async function readExtraQuota(core: Core, account: Account): Promise<Quot
   const env = core.accounts.accountEnv(account, core.providers.require(account.providerId));
   if (account.providerId === 'grok') {
     const root = env['GROK_HOME'] ?? process.env['GROK_HOME'] ?? join(homePath(), '.grok');
-    const auth = await credentials(join(root, 'auth.json'), 'Grok');
-    const entries = Object.entries(auth).filter(([key]) => key.startsWith('https://auth.x.ai::') || key === 'https://accounts.x.ai/sign-in').sort(([a], [b]) => Number(b.startsWith('https://auth.x.ai::')) - Number(a.startsWith('https://auth.x.ai::')));
-    const login = entries.map(([, value]) => obj(value)).find((value) => typeof value['key'] === 'string' && typeof value['expires_at'] === 'string' && Date.parse(value['expires_at']) > Date.now());
-    if (!login) throw new Error('Grok login is missing or expired. Run grok login, then refresh.');
-    return grokQuotaWindows(await request('https://cli-chat-proxy.grok.com/v1/billing?format=credits', login['key'] as string, 'Grok', { 'x-xai-token-auth': 'xai-grok-cli' }));
+    const path = join(root, 'auth.json');
+    const token = await grokQuotaToken(path);
+    const read = (key: string) => request('https://cli-chat-proxy.grok.com/v1/billing?format=credits', key, 'Grok', { 'x-xai-token-auth': 'xai-grok-cli' });
+    let report: unknown;
+    try { report = await read(token.key); }
+    catch (error) {
+      if (!(error instanceof RejectedQuotaToken)) throw error;
+      report = await read((await grokQuotaToken(path, token)).key);
+    }
+    return grokQuotaWindows(report);
   }
   const root = env['XDG_DATA_HOME'] ?? process.env['XDG_DATA_HOME'] ?? join(homePath(), '.local', 'share');
   // Isolated accounts never borrow an API key from the host environment.

@@ -4,9 +4,8 @@
  * grandchild that outlives its parent and `killTree` is one call instead of a
  * pid walk. Linux and macOS use the separate POSIX backend.
  *
- * One global job holds the CPU cap and memory budget; every thread job nests under
- * it, runs below normal priority and dies with the core (KILL_ON_JOB_CLOSE,
- * never BREAKAWAY_OK).
+ * The global job holds the CPU and memory caps. Thread jobs normally run below
+ * normal priority, with normal priority during bounded agent initialization.
  */
 import { cpus, totalmem } from 'node:os';
 import { dlopen, FFIType, ptr } from 'bun:ffi';
@@ -15,6 +14,11 @@ import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
 import { resolveMemoryLimits } from '../../memory-limits.ts';
+import { StartupPriority } from './startup-priority.ts';
+import {
+  applyCpuCap, applyMemoryLimit, CLASS_CPU_RATE_CONTROL, CLASS_EXTENDED_LIMIT,
+  EXTENDED_LIMIT_SIZE, OFF_JOB_MEMORY_LIMIT, OFF_LIMIT_FLAGS, OFF_PRIORITY_CLASS,
+} from './job-limits.ts';
 import {
   commandLineOf,
   cpuMsOf,
@@ -30,18 +34,12 @@ import type { NativeProcessInfo, NativeProcessExit, ProcessSample, ProcessEventS
 
 // -- Win32 constants --------------------------------------------------------
 
-const JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200;
-const JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x20;
-const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
 const BELOW_NORMAL_PRIORITY_CLASS = 0x4000;
-const CPU_RATE_CONTROL_ENABLE = 0x1;
-const CPU_RATE_CONTROL_HARD_CAP = 0x4;
+const NORMAL_PRIORITY_CLASS = 0x20;
 
 const CLASS_BASIC_PROCESS_ID_LIST = 3;
 const CLASS_ASSOCIATE_COMPLETION_PORT = 7;
 const CLASS_BASIC_AND_IO_ACCOUNTING = 8;
-const CLASS_EXTENDED_LIMIT = 9;
-const CLASS_CPU_RATE_CONTROL = 15;
 
 const MSG_ACTIVE_PROCESS_ZERO = 4;
 const MSG_NEW_PROCESS = 6;
@@ -62,16 +60,6 @@ const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 const ERROR_INVALID_PARAMETER = 87;
 const KILL_EXIT_CODE = 9;
 
-// -- Struct offsets, all x64 ------------------------------------------------
-
-/** JOBOBJECT_EXTENDED_LIMIT_INFORMATION. */
-const EXTENDED_LIMIT_SIZE = 144;
-/** JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags. */
-const OFF_LIMIT_FLAGS = 16;
-/** BasicLimitInformation.PriorityClass. Offset 60 is SchedulingClass and is ignored. */
-const OFF_PRIORITY_CLASS = 56;
-/** ExtendedLimitInformation.JobMemoryLimit, after the 64-byte basic part and IO_COUNTERS. */
-const OFF_JOB_MEMORY_LIMIT = 120;
 /** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
 const OFF_TOTAL_USER_TIME = 0;
 /** ...TotalKernelTime. */
@@ -205,6 +193,7 @@ interface TrackedProcess {
 
 interface ThreadJob {
   handle: number;
+  startup: StartupPriority;
   key: number;
   pids: Set<number>;
   lastCpu100ns: bigint;
@@ -294,11 +283,16 @@ export function setProcessLimits(next: ProcessLimits): void {
   limits = { ...next };
   const api = native;
   if (api === null) return;
+  let capped = false;
   if (globalJob !== 0) {
     applyMemoryLimit(api, globalJob, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
-    applyCpuCap(api, globalJob);
+    const written = applyCpuCap(api, globalJob, limits.agentCpuCapPercent);
+    capped = written && limits.agentCpuCapPercent > 0 && limits.agentCpuCapPercent < 100;
   }
-  for (const job of threadJobs.values()) applyThreadLimits(api, job.handle);
+  for (const job of threadJobs.values()) {
+    if (capped) job.startup.apply();
+    else job.startup.set(false);
+  }
 }
 
 /** The global job's CPU rate control as the kernel holds it. Read by the tests only. */
@@ -312,13 +306,13 @@ export function cpuRateOfGlobalJob(): { flags: number; rate: number } | null {
 }
 
 /** The kernel's memory limit and flags. Null selects the global job; read by tests only. */
-export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number } | null {
+export function memoryLimitOfJob(threadId: string | null): { flags: number; bytes: number; priority: number } | null {
   const handle = threadId === null ? globalJob : threadJobs.get(threadId)?.handle;
   if (native === null || !handle) return null;
   const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
   if (!native.queryJobInfo(handle, CLASS_EXTENDED_LIMIT, buffer)) return null;
   const view = new DataView(buffer.buffer);
-  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)) };
+  return { flags: view.getUint32(OFF_LIMIT_FLAGS, true), bytes: Number(view.getBigUint64(OFF_JOB_MEMORY_LIMIT, true)), priority: view.getUint32(OFF_PRIORITY_CLASS, true) };
 }
 
 export function jobsCapability(): TraceCapability {
@@ -365,10 +359,20 @@ export function assignToThreadJob(threadId: string, pid: number): boolean {
       // the process is already in the global job when it joins the thread job.
       if (!api.assign(globalJob, handle)) nestingRefused = true;
     }
+    if (nestingRefused || globalJob === 0) job.startup.set(false);
     return api.assign(job.handle, handle);
   } finally {
     api.close(handle);
   }
+}
+
+export function setThreadStartup(threadId: string, active: boolean): void {
+  const api = ensureNative();
+  const job = active && api ? ensureThreadJob(api, threadId) : threadJobs.get(threadId);
+  if (!api || !job) return;
+  const capped = active && !nestingRefused && globalJob !== 0 && applyCpuCap(api, globalJob, limits.agentCpuCapPercent);
+  const configured = limits.agentCpuCapPercent > 0 && limits.agentCpuCapPercent < 100;
+  job.startup.set(active && configured && capped);
 }
 
 export function terminateThreadJob(threadId: string): boolean {
@@ -402,6 +406,7 @@ export function releaseThreadJob(threadId: string): void {
   if (job === undefined || job.pids.size > 0) return;
   threadJobs.delete(threadId);
   threadsByKey.delete(job.key);
+  job.startup.close();
   native?.close(job.handle);
 }
 
@@ -485,42 +490,6 @@ function ensureNative(): Native | null {
   }
 }
 
-function applyCpuCap(api: Native, job: number): void {
-  const percent = limits.agentCpuCapPercent;
-  const buffer = new Uint8Array(8);
-  // 0 and 100 mean no cap. They are still written, as all zeros: a cap set
-  // earlier stays on the job until something replaces it, and zeros on a job
-  // that never had one succeed and change nothing.
-  if (percent > 0 && percent < 100) {
-    const view = new DataView(buffer.buffer);
-    view.setUint32(0, CPU_RATE_CONTROL_ENABLE | CPU_RATE_CONTROL_HARD_CAP, true);
-    // CpuRate is in hundredths of a percent of the whole machine.
-    view.setUint32(4, Math.max(1, Math.round(percent * 100)), true);
-  }
-  api.setJobInfo(job, CLASS_CPU_RATE_CONTROL, buffer);
-}
-
-function applyThreadLimits(api: Native, job: number): void {
-  applyMemoryLimit(api, job, limits.threadMemoryCapMb * 1.1, true);
-}
-
-function applyMemoryLimit(api: Native, job: number, mb: number, thread = false): void {
-  const buffer = new Uint8Array(EXTENDED_LIMIT_SIZE);
-  const view = new DataView(buffer.buffer);
-  let flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (thread) {
-    flags |= JOB_OBJECT_LIMIT_PRIORITY_CLASS;
-    view.setUint32(OFF_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS, true);
-  }
-  // Windows rounds down to pages. A zero limit would refuse every allocation.
-  if (mb > 0) {
-    flags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
-    view.setBigUint64(OFF_JOB_MEMORY_LIMIT, BigInt(Math.floor(mb * 1024 * 1024 / 4096) * 4096), true);
-  }
-  view.setUint32(OFF_LIMIT_FLAGS, flags, true);
-  api.setJobInfo(job, CLASS_EXTENDED_LIMIT, buffer);
-}
-
 function associatePort(api: Native, handle: number, key: number): void {
   if (completionPort === 0) completionPort = api.createPort();
   if (completionPort === 0) return;
@@ -539,7 +508,7 @@ function ensureGlobalJob(api: Native): void {
   if (handle === 0) return;
   applyMemoryLimit(api, handle, Math.min(limits.budgetMb * 1.1, totalmem() / 1048576 * 0.9));
   globalJob = handle;
-  applyCpuCap(api, handle);
+  applyCpuCap(api, handle, limits.agentCpuCapPercent);
   associatePort(api, handle, GLOBAL_JOB_KEY);
 }
 
@@ -550,19 +519,17 @@ function ensureThreadJob(api: Native, threadId: string): ThreadJob | null {
   ensureGlobalJob(api);
   const handle = api.createJob();
   if (handle === 0) return null;
-  applyThreadLimits(api, handle);
-
   const key = nextKey;
   nextKey += 1;
   associatePort(api, handle, key);
 
-  const job: ThreadJob = { handle, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
+  const startup = new StartupPriority((active) => applyMemoryLimit(api, handle, limits.threadMemoryCapMb * 1.1, active ? NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS));
+  const job: ThreadJob = { handle, startup, key, pids: new Set(), lastCpu100ns: 0n, lastSampleAt: 0 };
+  startup.apply();
   threadJobs.set(threadId, job);
   threadsByKey.set(key, threadId);
   return job;
 }
-
-// -- the completion port drain ----------------------------------------------
 
 function ensureWorker(port: number): void {
   if (worker !== null || workerFailure !== null) return;
@@ -839,7 +806,10 @@ function teardown(): Promise<void> {
   if (api !== null) {
     for (const entry of tracked.values()) api.close(entry.handle);
     // Closing a job handle kills what is still in it: KILL_ON_JOB_CLOSE.
-    for (const job of threadJobs.values()) api.close(job.handle);
+    for (const job of threadJobs.values()) {
+      job.startup.close();
+      api.close(job.handle);
+    }
     if (globalJob !== 0) api.close(globalJob);
   }
   tracked.clear();

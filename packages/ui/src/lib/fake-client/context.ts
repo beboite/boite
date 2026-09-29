@@ -236,8 +236,6 @@ export class FakeContext {
       publicKey: `fake-public-key-${coreId}`
     };
     this.settings = {
-      maxConcurrentTurns: 6,
-      perAccountConcurrency: 2,
       warmProcessMinutes: 0,
       worktreeStorage: { mode: 'project', directory: null },
       listenOnLan: false,
@@ -266,8 +264,6 @@ export class FakeContext {
       }
     };
     this.scheduler = {
-      maxConcurrentTurns: this.settings.maxConcurrentTurns,
-      perAccountConcurrency: this.settings.perAccountConcurrency,
       running: [],
       queued: []
     };

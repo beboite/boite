@@ -862,10 +862,6 @@ export const fr: Translation = {
     profileName: 'Agent {count}',
     profileLabel: 'Profil de l’agent',
     removeProfile: 'Supprimer le profil',
-    maxAgents: 'Agents au total',
-    maxConcurrent: 'En parallèle',
-    maxTurns: 'Tours de l’équipe',
-    maxMinutes: 'Minutes par tour',
     pause: 'Suspendre l’équipe',
     resume: 'Reprendre l’équipe',
     launch: 'Lancer un agent',
@@ -876,7 +872,6 @@ export const fr: Translation = {
     agentsShort: 'agents',
     turnsShort: 'tours',
     usage: 'Consommation de l’équipe',
-    limitReached: "Limite de tours atteinte. Augmentez-la dans les réglages pour continuer.",
     openThread: 'Ouvrir la conversation',
     backToTeam: 'Retour aux agents',
     stop: 'Arrêter',
@@ -1355,8 +1350,6 @@ export const fr: Translation = {
     app: 'Application',
     tourReplay: 'Revoir la présentation',
     execution: 'Exécution des agents',
-    maxConcurrentTurnsHint: 'Nombre de tours exécutés en même temps, toutes conversations confondues. Les suivants attendent leur tour.',
-    perAccountConcurrencyHint: "Nombre de tours qu'un même compte exécute à la fois.",
     warmProcessMinutesHint: "Durée pendant laquelle un agent reste chargé après un tour, pour que le message suivant parte plus vite. 0 l'arrête aussitôt.",
     projects: 'Projets',
     language: 'Langue',
@@ -1428,8 +1421,6 @@ export const fr: Translation = {
     coreUrl: 'URL du cœur',
     token: 'Jeton',
     connect: 'Connecter',
-    maxConcurrentTurns: 'Tours simultanés maximum',
-    perAccountConcurrency: 'Simultanéité par compte',
     warmProcessMinutes: 'Minutes de processus gardé chaud',
     listenOnLan: 'Accessible sur le réseau local',
     listenOnLanHint: "Permet à un téléphone du même réseau d'atteindre cet ordinateur. Prend effet au prochain démarrage de Boite ; une option --host ou --lan l'emporte.",
@@ -1577,6 +1568,11 @@ export const fr: Translation = {
   },
 
   experiments: {
+    whip: {
+      title: 'Fouet',
+      hint: 'Un bouton en bas à gauche secoue la fenêtre Boite à chaque coup. Dans un navigateur ou une fenêtre maximisée, il secoue toute l’interface. Respecte la réduction des animations',
+      action: 'Fouetter'
+    },
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {

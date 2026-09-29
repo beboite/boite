@@ -44,7 +44,7 @@ export async function protocolLoad(perProvider: number): Promise<void> {
   const pids = new Set<number>();
   try {
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
-    await client.call('settings.set', { maxConcurrentTurns: total, perAccountConcurrency: perProvider, warmProcessMinutes: 1, asyncQuestions: false });
+    await client.call('settings.set', { warmProcessMinutes: 1, asyncQuestions: false });
     const project = await client.call('projects.add', { path: dataDir, name: 'Protocol stress' });
     const threads: ThreadSummary[] = [];
     for (const { protocol } of providers) {

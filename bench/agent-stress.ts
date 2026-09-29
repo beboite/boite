@@ -128,14 +128,13 @@ try {
   }
 
   for (const concurrency of [...new Set([6, cap])]) {
-    await owner.call('settings.set', { maxConcurrentTurns: concurrency, perAccountConcurrency: concurrency });
     let maxRunning = 0, maxQueued = 0, schedulerBytes = 0;
     const violations: string[] = [];
     const off = owner.on('scheduler.updated', state => {
       maxRunning = Math.max(maxRunning, state.running.length);
       maxQueued = Math.max(maxQueued, state.queued.length);
       schedulerBytes += JSON.stringify(state).length;
-      if (state.running.length > concurrency) violations.push(`cap exceeded: ${state.running.length}`);
+      if (state.running.length > concurrency) violations.push(`workload concurrency exceeded: ${state.running.length}`);
       if (new Set(state.running.map(t => t.threadId)).size !== state.running.length) violations.push('duplicate running thread');
     });
     const probe = await startHealthProbe(core.url);
@@ -143,7 +142,19 @@ try {
     const prompt = `load-${concurrency} ` + 'abcdefgh ijklmnop '.repeat(16);
     const start = performance.now();
     try {
-      const turns = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt })));
+      // The load generator bounds this workload; independent turns have no scheduler quota.
+      const turns: Turn[] = new Array(created.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(concurrency, created.length) }, async () => {
+        for (;;) {
+          const index = next++;
+          const thread = created[index];
+          if (!thread) return;
+          const turn = await owner.call('turns.start', { threadId: thread.id, prompt });
+          turns[index] = turn;
+          await until(() => watchers[0]!.finished.has(turn.id), `turn ${turn.id} finishes`);
+        }
+      }));
       const acceptMs = performance.now() - start;
       await until(() => turns.every(t => watchers[0]!.finished.has(t.id)), 'all turns finish');
       await until(() => watchers.slice(1).every(w => turns.slice(0, watched.length).every(t => w.finished.has(t.id))), 'reader finishes');
@@ -206,11 +217,10 @@ try {
   assert.equal(text(complete.messages.filter(m => m.turnId === reconnectTurns[0]!.id)), reconnectPrompt);
   record({ scenario: 'reader reconnect', uninterruptedTurns: reconnectTurns.length, incrementalSnapshot: catchUp.messagesFrom === firstDelta.messageId });
 
-  await owner.call('settings.set', { maxConcurrentTurns: cap, perAccountConcurrency: cap });
   const interrupted = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] must be stopped' })));
   const busy = await owner.call('scheduler.get', {});
-  assert.equal(busy.running.length, Math.min(cap, count));
-  assert.equal(busy.queued.length, Math.max(0, count - cap));
+  assert.equal(busy.running.length, count);
+  assert.equal(busy.queued.length, 0);
   const stopStart = performance.now();
   const stops = await Promise.all(created.map(t => owner.call('turns.stop', { threadId: t.id })));
   assert(stops.every(s => s.stopped));
@@ -246,7 +256,7 @@ try {
   record({ scenario: 'crash recovery', recovered: lost.length, runningAtCrash: beforeCrash.running.length,
     queuedAtCrash: beforeCrash.queued.length, restartMs, coreBytes: workingSet(core.pid) });
   report.status = 'passed';
-  console.log('PASS: streams, concurrency caps, cancellation and crash recovery');
+  console.log('PASS: streams, workload concurrency, cancellation and crash recovery');
 } catch (error) {
   report.status = 'failed';
   report.error = error instanceof Error ? error.stack : String(error);

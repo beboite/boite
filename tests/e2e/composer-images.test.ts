@@ -57,8 +57,9 @@ test('pasted images have linked references and a preview that leaves the compose
       expect(await page.evaluate('document.querySelectorAll("[data-testid=composer-attachment].highlighted").length')).toBe(1);
       expect(await page.evaluate('(() => { const preview = document.querySelector("[data-testid=composer-image-preview]").getBoundingClientRect(); const input = document.querySelector("[data-testid=composer-input]").getBoundingClientRect(); return preview.bottom <= input.top && input.bottom < innerHeight && preview.width <= innerWidth; })()')).toBe(true);
       await capture(`composer-images-${mobile ? 'phone' : 'desktop'}.png`);
-      for (const selector of ['[data-testid=composer-input]', '[data-testid=composer-image-preview] img']) {
-        const inside = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })()`);
+      const insidePoints = await page.evaluate<Array<{ x: number; y: number }>>(`Array.from(document.querySelectorAll('[data-testid=composer-input], [data-testid=composer-image-preview] img'), el => { const r = el.getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 }; })`);
+      expect(insidePoints).toHaveLength(2);
+      for (const inside of insidePoints) {
         await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...inside });
         await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...inside });
         expect(await page.evaluate('document.querySelector("[data-testid=composer-image-preview]") !== null')).toBe(true);

@@ -70,7 +70,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 |---|---|---|
 | `new-thread` | `mod+n` | A draft in the open project |
 | `palette` | `mod+k` | The command palette, also the command button at the foot of the sidebar |
-| `sidebar` | `mod+b` | Fold or unfold the sidebar |
+| `sidebar` | `mod+s` | Fold or unfold the thread sidebar |
 | `panel` | `mod+alt+b` | The right panel, on an open thread |
 | `browser` | `mod+shift+j` | The browser surface, in the shell |
 | `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
@@ -79,7 +79,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `terminal` | `mod+j` | The thread's shell under the chat ([terminal.md](terminal.md)) |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
-| `stash` | `mod+s` | Put the composer text aside, or take it back |
+| `stash` | `mod+shift+s` | Put the composer text aside, or take it back |
 | `send-and-draft` | `mod+enter` | Send, then a fresh draft on the same choice |
 | `add-project` | none | The folder dialog in the shell, General in a browser |
 | `pin` | none | Pin or unpin the open thread |
@@ -101,6 +101,10 @@ A digit chord matches the physical key too, so `alt+3` fires on a layout
 where the top row types another character without Shift. In a plain browser
 tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
 always reach it.
+
+While a writable file editor has focus, `mod+s` saves its file. Elsewhere it toggles
+the thread sidebar and keeps the browser's save dialog closed. The panel button's
+tooltip shows its current chord, including any custom binding.
 
 `Ctrl+Q` in the shell, the quit hold, is not in the table and cannot move.
 Neither can the shell's zoom, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` (`+` and `-` of

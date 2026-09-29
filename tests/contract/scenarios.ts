@@ -254,7 +254,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   },
   'settings.set refuses a value of the wrong kind and names the field': async (env) => {
     const cases: [Record<string, unknown>, string][] = [
-      [{ maxConcurrentTurns: 1.5 }, 'maxConcurrentTurns'],
+      [{ agentMemoryBudgetPercent: 10.5 }, 'agentMemoryBudgetPercent'],
       [{ warmProcessMinutes: -1 }, 'warmProcessMinutes'],
       [{ agentCpuCapPercent: 150 }, 'agentCpuCapPercent'],
       [{ focusGuard: 'yes' }, 'focusGuard'],

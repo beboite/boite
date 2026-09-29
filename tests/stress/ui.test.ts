@@ -19,7 +19,7 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
   let failed = false;
   try {
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
-    await client.call('settings.set', { maxConcurrentTurns: 64, perAccountConcurrency: 64, asyncQuestions: false });
+    await client.call('settings.set', { asyncQuestions: false });
     const account = (await client.call('accounts.list', {})).find(a => a.providerId === 'echo')!;
     const project = await client.call('projects.add', { path: core.dataDir, name: 'Stress workspace' });
     const threads = [];
@@ -94,7 +94,7 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
       .map(a => a.finished.catch(() => undefined)))`);
     await page.screenshot(join(artifacts, 'phone.png'));
     assert.equal((await client.call('threads.list', { projectId: project.id })).length, 1000);
-    console.log(JSON.stringify({ scenario: 'UI stress', threads: 1000, backgroundTurns: 256, concurrency: 64,
+    console.log(JSON.stringify({ scenario: 'UI stress', threads: 1000, backgroundTurns: 256,
       bootMs, typingMs, foregroundMs, longestTaskMs: Math.max(0, ...timing.longTasks),
       maxTimerLagMs: Math.max(0, ...timing.timerLag), artifacts }));
     assert(typingMs < 5_000, `typing stalled for ${typingMs.toFixed(0)} ms`);
