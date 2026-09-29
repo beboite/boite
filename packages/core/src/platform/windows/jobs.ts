@@ -611,12 +611,12 @@ function retireWorker(): void {
   running.onerror = null;
   let done = false;
   const finish = (force: boolean): void => {
-    if (done) return;
+    // Core teardown may have taken ownership of this same stopping Worker.
+    if (done || retiring !== running) return;
     done = true;
     clearTimeout(timer);
     running.onmessage = null;
     if (force) running.terminate();
-    if (retiring !== running) return;
     retiring = null;
     const again = restartWanted;
     restartWanted = false;
