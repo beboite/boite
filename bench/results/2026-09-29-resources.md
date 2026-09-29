@@ -250,24 +250,54 @@ Windows check does not replace the paired Linux measurements above.
 {"teams":8,"children":64,"ticks":16,"cpuMs":31,"wallMs":34.072900000000004,"notifications":1,"snapshots":1,"wireBytes":5998,"rssBeforeMiB":80.69140625,"sampledPeakRssMiB":90.1875,"bun":"1.4.2","platform":"win32"}
 ```
 
+## Post-integration bundle check
+
+On 2026-09-30, the CI preview combined this branch with `c26a03a6`, including
+settings synchronization and update shutdown. A fresh local build of that
+combination reproduced the UI sizes reported by the failed desktop job.
+Shortening only the scope-class prefix keeps Svelte's full hash. Loading the
+settings synchronization implementation on first use removes it from startup.
+
+```sh
+NODE_ENV=production bun run build:ui
+bun run build:core
+bun scripts/ci/budgets.ts
+```
+
+| Uncompressed artifact | Before | After | Difference |
+| --- | ---: | ---: | ---: |
+| UI entry | 526,386 bytes | 519,026 bytes | -7,360 bytes |
+| Whole UI, excluding compressed copies | 3,395,116 bytes | 3,359,837 bytes | -35,279 bytes |
+| Core main bundle | 818,586 bytes | 818,586 bytes | 0 bytes |
+
+The UI passes its unchanged 520,000-byte entry and 3,382,700-byte total limits.
+The local core exceeds its former limit by 987 bytes; CI measured 818,547
+bytes, or 947 above that limit. The new 820,000-byte limit adds 2,400 bytes,
+or 0.29%, preserving readable function names in errors.
+These are emitted-file measurements, not CPU or resident-memory savings.
+The deferred-import cancellation extension failed without its post-import
+stop check, then passed after restoration; the original slow-read protection
+and stage-error recovery assertions remain.
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero
   errors and warnings.
-- `bun run --cwd packages/core test`: 1,273 passed, 22 skipped, zero failed;
-  all 128 files ran in fresh Bun processes, four at once, in 192.84 seconds.
-- `bun run --cwd packages/ui test --maxWorkers=4`: 1,006 tests passed in 143 files,
-  in 133.97 seconds with four workers.
+- `bun run --cwd packages/core test`: 1,283 passed, 22 skipped, zero failed;
+  all 129 files ran in fresh Bun processes, four at once, in 153.65 seconds.
+- `bun run --cwd packages/ui test --maxWorkers=4`: 1,018 tests passed in 144 files,
+  in 119.83 seconds with four workers.
 - `NODE_ENV=production bun run build:ui`: production UI build passed.
-- `BOITE_E2E_PREBUILT_UI=1 bun test tests/e2e/delegation.test.ts
-  tests/e2e/collaboration-ui.test.ts tests/e2e/coordination-live-ui.test.ts
-  tests/e2e/workflows.test.ts tests/e2e/model-switch.test.ts tests/e2e/native-agents.test.ts --parallel=1
-  --timeout 60000`: ten tests passed in six files in 94.21 seconds, covering real RPC,
-  provider protocol fixtures, reload, delegation and phone interaction.
+- `BOITE_E2E_PREBUILT_UI=1 bun test tests/e2e/settings.test.ts
+  tests/e2e/machines.test.ts tests/e2e/app-updates.test.ts
+  tests/e2e/core-update.test.ts tests/e2e/delegation.test.ts
+  tests/e2e/native-agents.test.ts --parallel=1 --timeout 60000`:
+  25 tests passed in six files in 126.75 seconds, covering real RPC, reload,
+  settings cancellation, update shutdown, delegation and phone interaction.
 - Opened `tests/e2e/.artifacts/delegation-desktop.png` and
   `tests/e2e/.artifacts/delegation-phone.png`, plus both native-agent captures:
   selected child transcript, separate native rows and usable composer at both widths.
-- `bun run test:shell --release`: 72 passed, zero failed, in 4.41 seconds.
+- `bun run test:shell --release`: 75 passed, zero failed, in 5.08 seconds.
 - Transient streaming-write failure recovered automatically with no new
   mutation or explicit persistence; the extended scenario failed before the fix.
 - Live native-agent reads leave both current and unrelated SQL rows unchanged;

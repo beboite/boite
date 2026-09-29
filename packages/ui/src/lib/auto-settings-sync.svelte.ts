@@ -1,6 +1,6 @@
 import { untrack } from 'svelte';
 import type { Machine } from './workspace.svelte';
-import { SyncFailure, syncSettings, type SyncReport } from './settings-sync';
+import type { SyncReport } from './settings-sync';
 import { fill, strings } from './strings';
 
 const STORAGE_KEY = 'boite.settings-sync';
@@ -92,10 +92,13 @@ export class AutoSettingsSync {
       if (stopped || running) return;
       running = true;
       this.busy[target.id] = true;
+      let sync: typeof import('./settings-sync') | undefined;
       try {
+        sync = await import('./settings-sync');
+        if (stopped) return;
         do {
           pending = false;
-          const report = await syncSettings(
+          const report = await sync.syncSettings(
             { client: from, providers: source.store.providers, accounts: source.store.accounts },
             { client: to, providers: target.store.providers, accounts: target.store.accounts }, abort.signal
           );
@@ -109,7 +112,7 @@ export class AutoSettingsSync {
       } catch (error) {
         if (!stopped) {
           const message = error instanceof Error ? error.message : String(error);
-          target.store.error = error instanceof SyncFailure
+          target.store.error = sync && error instanceof sync.SyncFailure
             ? fill(strings.machines.syncStopped, { stage: strings.machines.syncStages[error.stage], error: message }) : message;
           this.failures.set(target.id, target.store.error);
         }

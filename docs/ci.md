@@ -143,8 +143,13 @@ to 520 KB, 10% above the 462 KB that `bun run build:ui` then
 moves a thread from its messages and menus, folds changed files and archives
 projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
-one in the change that explains the growth. Timings are not
-gated: they vary too much on shared runners.
+one in the change that explains the growth. On 2026-09-30, the resource audit
+integrated native-agent summaries, settings synchronization and update shutdown:
+the core measured 818,547 bytes in CI, 947 above the old cap. Its limit moved
+from 817,600 to 820,000 bytes, retaining readable function names in errors.
+The UI keeps both limits; shorter scope-class prefixes and loading settings
+synchronization on first use reduce its emitted bytes. Timings are not gated:
+they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
