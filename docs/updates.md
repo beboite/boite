@@ -4,7 +4,10 @@ General settings contains the desktop update card. It names the installed
 version and channel, the available version, its publication date and release
 notes. When an update is ready, the title bar offers installation directly
 from the conversation, with a confirmation before restarting. A separate
-details action opens the update card.
+info button opens the update card. The close button hides the title bar's update
+controls for that version and channel, including after restarting the app.
+Installation remains available in General settings. A different version or
+channel shows the controls again.
 
 ## Boite and Boite Nightly
 

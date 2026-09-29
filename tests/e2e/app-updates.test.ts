@@ -106,6 +106,39 @@ test('the titlebar installs with confirmation without leaving chat', async () =>
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
 }, 30_000);
 
+test('dismissing a ready update persists while settings still offer installation', async () => {
+  await page.navigate(`${base}/?fake=1&open=recent&appUpdate=ready`);
+  await width(880);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
+  if (await page.evaluate(`document.querySelector('${id('error-toast')} .dismiss') !== null`)) {
+    await page.click(`${id('error-toast')} .dismiss`);
+    await page.waitFor(`document.querySelector('${id('error-toast')}') === null`);
+  }
+  await capture('compact-ready');
+  await pickDesktopLocale('fr');
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-actions')}').getBoundingClientRect().width`)).toBeLessThan(160);
+  await capture('compact-ready-fr');
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-dismiss')}') !== null`)).toBe(true);
+  await page.click(id('titlebar-update-dismiss'));
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}') === null`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-details')}') === null`)).toBe(true);
+  await page.reload();
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
+  await page.click(id('settings-tab-general'));
+  await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') === null`)).toBe(true);
+  await capture('dismissed-settings');
+  await page.click(id('app-update-install'));
+  await page.waitFor(`document.querySelector('${id('confirm-cancel')}')`);
+  await page.click(id('confirm-cancel'));
+  await page.navigate(`${base}/?fake=1&open=recent&appUpdate=ready&appUpdateChannel=nightly`);
+  await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
+}, 30_000);
+
 test('ready desktop updates show versions, notes and a restart confirmation', async () => {
   await settings('ready', true);
   await page.waitFor(`document.querySelector('${id('app-update-install')}')`);

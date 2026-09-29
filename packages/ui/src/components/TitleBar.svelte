@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CircleArrowDown, PanelLeftClose, PanelLeftOpen } from '@lucide/svelte';
+  import { CircleArrowDown, Info, PanelLeftClose, PanelLeftOpen, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
@@ -124,7 +124,8 @@
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
   {/if}
-  {#if showAppUpdateUi() && appUpdater.ready}
+  {#if showAppUpdateUi() && appUpdater.announceReady}
+    <div class="update-actions" data-testid="titlebar-update-actions">
     <button
       type="button"
       class="small update-ready"
@@ -139,12 +140,21 @@
     </button>
     <button
       type="button"
-      class="ghost small update-details"
+      class="ghost small icon"
       title={strings.appUpdate.detailsTitlebar}
       aria-label={strings.appUpdate.detailsTitlebar}
       onclick={openUpdate}
       data-testid="titlebar-update-details"
-    >{strings.appUpdate.detailsAction}</button>
+    ><Info size={14} strokeWidth={1.75} /></button>
+    <button
+      type="button"
+      class="ghost small icon"
+      title={strings.appUpdate.dismissTitlebar}
+      aria-label={strings.appUpdate.dismissTitlebar}
+      onclick={() => appUpdater.dismiss()}
+      data-testid="titlebar-update-dismiss"
+    ><X size={14} strokeWidth={1.75} /></button>
+    </div>
   {/if}
   {#if inShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
@@ -216,12 +226,14 @@
     color: var(--color-muted-foreground);
   }
 
-  .update-ready {
+  .update-actions {
+    display: flex;
+    align-items: center;
     flex: none;
-    gap: 5px;
+    gap: 2px;
   }
 
-  .update-details { flex: none; }
+  .update-ready { gap: 4px; font-size: var(--text-xs); }
 
   .controls {
     display: flex;
