@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -7,7 +7,9 @@ const ROOT = resolve(import.meta.dir, '../..');
 const NSIS = join(process.env.LOCALAPPDATA ?? '', 'tauri', 'NSIS');
 const GENERATED = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, 'apps/shell/src-tauri/target'), 'release/nsis/x64');
 const ready = process.platform === 'win32' && existsSync(join(NSIS, 'makensis.exe')) && existsSync(join(GENERATED, 'utils.nsh'));
-const scratch = ready ? mkdtempSync(join(tmpdir(), 'boite-shortcuts-')) : '';
+// Windows runners can expose TEMP through an 8.3 profile path. Shell links
+// store its expanded spelling, which the NSIS target comparison expects.
+const scratch = ready ? realpathSync.native(mkdtempSync(join(tmpdir(), 'boite-shortcuts-'))) : '';
 const running = new Set<Bun.Subprocess>();
 afterAll(async () => {
   for (const child of running) { child.kill(); await child.exited; }
@@ -34,6 +36,7 @@ describe.skipIf(!ready)('installer shortcuts', () => {
     expect(removeEnd).toBeGreaterThan(removeStart);
     const remove = template.slice(removeStart, removeEnd)
       .replace(/^.*!insertmacro MUI_STARTMENU_GETFOLDER.*$/m, '    StrCpy $AppStartMenuFolder ""');
+    const finishAction = template.match(/^!define MUI_FINISHPAGE_SHOWREADME_FUNCTION (\w+)$/m)![1]!;
     const script = [
       'Unicode true', 'SetCompress off', 'RequestExecutionLevel user', 'SilentInstall silent',
       `OutFile "${setup}"`,
@@ -49,12 +52,15 @@ describe.skipIf(!ready)('installer shortcuts', () => {
       'Var OldMainBinaryName', 'Var AppStartMenuFolder',
       nsisFunction('.onInit'), nsisFunction('RestorePreviousInstallLocation'),
       nsisFunction('CreateOrUpdateStartMenuShortcut'), nsisFunction('CreateOrUpdateDesktopShortcut'),
+      finishAction === 'CreateOrUpdateDesktopShortcut' ? '' : nsisFunction(finishAction),
       'Section Install',
-      '  FileOpen $0 "$INSTDIR\\mode.txt" w', '  FileWrite $0 $UpdateMode', '  FileClose $0',
       '  StrCpy $OldMainBinaryName "boite-shortcut-test.exe"',
       '  FileOpen $0 "$INSTDIR\\boite-shortcut-test.exe" w', '  FileWrite $0 "new version"', '  FileClose $0',
       '  CreateDirectory "$INSTDIR\\start-menu"', '  CreateDirectory "$INSTDIR\\desktop"',
       '  Call CreateOrUpdateStartMenuShortcut', '  Call CreateOrUpdateDesktopShortcut',
+      '  ${GetOptions} $CMDLINE "/REQUESTSHORTCUT" $0',
+      '  ${IfNot} ${Errors}', `    Call ${finishAction}`, '  ${EndIf}',
+      '  FileOpen $0 "$INSTDIR\\mode.txt" w', '  FileWrite $0 $UpdateMode', '  FileClose $0',
       '  WriteUninstaller "$INSTDIR\\uninstall.exe"', 'SectionEnd',
       'Section Uninstall', remove, 'SectionEnd',
     ].join('\n').replaceAll('$SMPROGRAMS', '$INSTDIR\\start-menu').replaceAll('$DESKTOP', '$INSTDIR\\desktop');
@@ -91,6 +97,15 @@ describe.skipIf(!ready)('installer shortcuts', () => {
       // A user who removed these links must not get new ones on an update.
       await run(setup, [...flags, `/D=${install}`]);
       for (const path of links) expect(existsSync(path)).toBe(false);
+
+      // The finish-page checkbox is an explicit request, including /NS.
+      await run(setup, [...flags, '/NS', '/REQUESTSHORTCUT', `/D=${install}`]);
+      expect(readFileSync(join(install, 'mode.txt'), 'utf8')).toBe('1');
+      expect(existsSync(links[0]!)).toBe(false);
+      expect(existsSync(links[1]!)).toBe(true);
+      const requested = statSync(links[1]!).mtimeMs;
+      await run(setup, [...flags, '/REQUESTSHORTCUT', `/D=${install}`]);
+      expect(statSync(links[1]!).mtimeMs).toBe(requested);
     }, 30_000);
   }
 });

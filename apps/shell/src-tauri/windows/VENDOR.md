@@ -12,6 +12,8 @@ Local changes preserve pinned shortcuts during updates:
 - The directory page keeps updates at the path used by existing pins.
 - The shortcut functions return before saving a link whose target is already
   the current executable. Binary-name migrations still update old links.
+- The finish-page checkbox can recreate a missing desktop link on request;
+  automatic update calls still leave missing links absent.
 
 When updating the Tauri CLI, compare this file with the new upstream template
 and reapply these changes. Keep its MIT notice. Run `bun run build:shell` and

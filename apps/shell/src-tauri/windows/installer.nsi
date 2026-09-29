@@ -423,7 +423,7 @@ Var AppStartMenuFolder
 ; Use show readme button in the finish page as a button create a desktop shortcut
 !define MUI_FINISHPAGE_SHOWREADME
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
-!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateDesktopShortcutOnRequest
 ; Show run app after installation.
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
@@ -988,6 +988,17 @@ Function CreateOrUpdateStartMenuShortcut
     CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
     !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
   !endif
+FunctionEnd
+
+Function CreateDesktopShortcutOnRequest
+  ; Honour the finish-page checkbox while keeping automatic updates silent.
+  Push $UpdateMode
+  Push $NoShortcutMode
+  StrCpy $UpdateMode 0
+  StrCpy $NoShortcutMode 0
+  Call CreateOrUpdateDesktopShortcut
+  Pop $NoShortcutMode
+  Pop $UpdateMode
 FunctionEnd
 
 Function CreateOrUpdateDesktopShortcut
