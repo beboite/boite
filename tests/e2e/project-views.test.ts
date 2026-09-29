@@ -1,0 +1,109 @@
+import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { BrowserPage, freePort } from './lib/cdp.ts';
+import { startUi } from './lib/ui.ts';
+
+let server: { close(): Promise<void> };
+let page: BrowserPage;
+let url: string;
+const id = (name: string) => `[data-testid="${name}"]`;
+async function capture(name: string) {
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.screenshot(join(import.meta.dir, '.artifacts', name));
+}
+beforeAll(async () => {
+  const port = await freePort();
+  server = await startUi(port);
+  url = `http://127.0.0.1:${port}/?fake=1&open=recent&machines=1`;
+  page = await BrowserPage.launch({ url, windowSize: { width: 1300, height: 850 } });
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
+}, 30_000);
+afterAll(async () => { await page?.close(); await server?.close(); });
+
+test('recent view filters one owning project and creates its draft', async () => {
+  await page.click(id('view-recent'));
+  await capture('project-views-desktop.png');
+  expect(await page.evaluate(`!!document.querySelector('${id('project-filter')}')`)).toBe(true);
+  await page.click(id('project-filter'));
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+  expect(await page.evaluate(`document.activeElement?.getAttribute('role')`)).toBe('menuitem');
+  await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 1`);
+  expect(await page.evaluate(`document.querySelector('${id('thread-row')}').dataset.machineId`)).toBe('http://builder.test');
+  await page.click(id('new-thread'));
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.draft?.projectId === 'p-notes'`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.machineId`)).toBe('http://builder.test');
+  await capture('project-filter-desktop.png');
+  await page.evaluate(`globalThis.__boiteTest.workspace.select(globalThis.__boiteTest.workspace.machines[0].store, 't-trace')`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'n', code: 'KeyN', modifiers: 2, windowsVirtualKeyCode: 78 });
+  await page.waitFor(`globalThis.__boiteTest.workspace.active.machineId === 'http://builder.test' && globalThis.__boiteTest.workspace.active.draft?.projectId === 'p-notes'`);
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.archiveProject('p-notes', true)`);
+  await page.waitFor(`document.querySelector('${id('project-filter')}')?.textContent.includes('All projects') && document.querySelectorAll('${id('thread-row')}').length === 7`);
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.archiveProject('p-notes', false)`);
+  await page.click(id('project-filter'));
+  await page.click(`${id('project-filter-menu')} [data-value=all]`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
+  await page.click(id('sidebar-search-open'));
+  await page.waitFor(`document.querySelector('${id('palette-input')}')`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.waitFor(`!document.querySelector('${id('palette-input')}')`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'k', code: 'KeyK', modifiers: 2, windowsVirtualKeyCode: 75 });
+  await page.waitFor(`document.querySelector('${id('palette-input')}')`);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.waitFor(`!document.querySelector('${id('palette-input')}')`);
+}, 20_000);
+
+test('projects follow user activity, then keep a dragged custom order after reload', async () => {
+  await page.click(id('view-projects'));
+  await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[1].store; s.threads = s.threads.map(t => t.projectId === 'p-notes' ? {...t, lastUserMessageAt: Date.now() + 1000} : t); })()`);
+  const keys = () => page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('project')}')).map(e => JSON.stringify([e.dataset.machineId, e.dataset.projectId]))`);
+  await page.waitFor(`document.querySelector('${id('project')}')?.dataset.projectId === 'p-notes'`);
+  expect((await keys())[0]).toBe(JSON.stringify(['http://builder.test', 'p-notes']));
+  const activityOrder = await keys();
+  await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[0].store; s.threads = s.threads.map(t => ({...t, updatedAt: Date.now() + 10000})); })()`);
+  expect(await keys()).toEqual(activityOrder);
+  await page.click(id('view-projects'));
+  expect(await page.evaluate(`document.querySelector('${id('view-projects')}').dataset.order`)).toBe('manual');
+  const before = await keys();
+  await page.evaluate(`(() => { const rows = document.querySelectorAll('${id('project')}'); const dataTransfer = new DataTransfer(); rows[3].querySelector('${id('project-row')}').dispatchEvent(new DragEvent('dragstart', {bubbles:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer})); rows[0].dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer})); })()`);
+  expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
+  await page.click(id('view-projects'));
+  expect(await keys()).toEqual(activityOrder);
+  await page.click(id('view-projects'));
+  expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
+  await capture('project-order-desktop.png');
+  await page.navigate(url);
+  await page.waitFor(`document.querySelectorAll('${id('project')}').length === 4`);
+  expect(await keys()).toEqual([before[3]!, ...before.slice(0, 3)]);
+}, 20_000);
+
+test('phone exposes project filtering and custom-order controls without overflow', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelector('${id('mobile-list')}')`);
+  await page.click(id('mobile-view-recent'));
+  await page.click(id('mobile-project-filter'));
+  await page.evaluate(`Array.from(document.querySelectorAll('${id('mobile-project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
+  await page.waitFor(`document.querySelectorAll('${id('mobile-list')} .thread').length === 1`);
+  await capture('project-filter-phone.png');
+  await page.click(id('mobile-view-projects'));
+  await page.waitFor(`document.querySelectorAll('${id('mobile-project-group')}').length === 4`);
+  await page.click(id('mobile-project-order'));
+  await page.click(`${id('mobile-project-order-menu')} [data-value=down]`);
+  await capture('project-order-phone.png');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.navigate(url);
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelector('${id('mobile-view-projects')}')?.textContent.includes('Projets')`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await capture('project-order-phone-fr.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.navigate(url);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  await page.waitFor(`document.querySelector('${id('view-projects')}')`);
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
+  await page.waitFor(`document.querySelector('${id('sidebar')}')?.getBoundingClientRect().width === 208`);
+  await capture('project-order-narrow-fr.png');
+  expect(await page.evaluate(`(() => { const views = Array.from(document.querySelectorAll('${id('sidebar')} .toolbar .view')); return views.length === 2 && views.every(e => e.scrollWidth <= e.clientWidth); })()`)).toBe(true);
+  expect(page.errors()).toEqual([]);
+}, 20_000);
