@@ -285,6 +285,9 @@ export const fr: Translation = {
   },
 
   appUpdate: {
+    released: 'Sortie {time}',
+    changelog: 'Changelog sur GitHub',
+    hideReminder: 'Masquer le rappel',
     heading: "Mises à jour de l'application",
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
@@ -634,7 +637,7 @@ export const fr: Translation = {
     trace: 'Trace',
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
-    panelHint: "L'établi à côté de cette conversation",
+    panelHint: 'Navigateur, fichiers et outils de cette conversation',
     terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',

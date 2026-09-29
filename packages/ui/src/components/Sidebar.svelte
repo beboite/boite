@@ -298,15 +298,14 @@
       <ArchivedProjects entries={shelved} {multi} />
     {/if}
   </div>
-  {#if store.owner && work.shows('sidebar.add-project')}
-    <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
-      oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}
-      ><Plus size={13} />{strings.sidebar.addProject}</button
-    >
-  {/if}
-  {#if store.page === 'chat'}<AppUpdateNotice {store} />{/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
+    {#if store.owner && work.shows('sidebar.add-project')}
+      <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
+        title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
+        oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
+    {/if}
+    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
@@ -512,10 +511,6 @@
     margin-right: auto;
   }
 
-  .add-project {
-    margin: 0 8px 6px;
-    justify-content: flex-start;
-  }
   @keyframes leave {
     to {
       opacity: 0;

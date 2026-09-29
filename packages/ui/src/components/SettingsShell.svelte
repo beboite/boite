@@ -23,7 +23,6 @@
   import SettingsHome, { type SettingsEntry, type SettingsTile } from './SettingsHome.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { providerGroups } from '../lib/provider-family';
   import { workspace } from '../lib/workspace.svelte';
 
@@ -60,7 +59,6 @@
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     general: [
-      ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
@@ -267,7 +265,7 @@
       {/if}
       </div>
     {/each}
-    <div class="update-footer"><AppUpdateNotice {store} /></div>
+    <div class="update-footer"><AppUpdateNotice /></div>
   </nav>
 
   {#if toc[tab]}

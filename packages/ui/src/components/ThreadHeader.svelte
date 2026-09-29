@@ -230,16 +230,15 @@
       {#if thread}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost icon"
           class:on={store.panelOpen}
           title={strings.thread.panelHint}
-          aria-label={strings.thread.panel}
+          aria-label={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
           <PanelRight size={16} strokeWidth={1.75} />
-          <span class="label">{strings.thread.panel}</span>
         </button>
       {/if}
 </div>

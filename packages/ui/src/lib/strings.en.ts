@@ -278,6 +278,9 @@ export const strings = {
   },
 
   appUpdate: {
+    released: 'Released {time}',
+    changelog: 'Changelog on GitHub',
+    hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
@@ -651,7 +654,7 @@ export const strings = {
     traceHint: 'Processes this thread launched',
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
-    panelHint: 'The workbench beside this thread',
+    panelHint: 'Browser, files and tools beside this conversation',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',

@@ -1,14 +1,14 @@
 # Desktop updates
 
-General settings contains the desktop update card. It names the installed
-version and channel, the available version, its publication date and release
-notes. When an update is ready, the sidebar footer shows one Update pill. Its label
-opens the update card, where installation requires confirmation before restarting.
-The close button inside the pill hides it for that version and channel,
-including after restarting the app.
-Installation remains available in General settings. A different version or
-channel shows the controls again.
-The settings navigation keeps the same pill at its foot.
+The sidebar footer has an update icon beside the other controls. Its popup
+names the release and how long ago it was published, links to its changelog on
+GitHub, and offers installation with a restart confirmation. Release channel
+options show the installed version and let you switch channels.
+
+A dot marks an update ready to install. Hide reminder clears that dot for the
+version and channel, including after restarting the app. The icon stays
+available for installation; a different release lights the dot again.
+The settings navigation keeps the same icon at its foot.
 
 ## Boite and Boite Nightly
 
@@ -38,8 +38,8 @@ silently moved.
 ## Download and restart
 
 The first automatic check starts eight seconds after the desktop UI mounts,
-then repeats every six hours. The card's Check for updates button checks at
-once; it stays on the card during a check, disabled, and only makes way for
+then repeats every six hours. The popup's Check for updates button checks at
+once; it stays in the popup during a check, disabled, and only makes way for
 the download progress and the install action. Checks and downloads run one at
 a time. A ready update is kept until installation or
 a channel change, without downloading the same version every six hours.
@@ -62,7 +62,7 @@ shell, so before launching the installer the shell asks it to stop through its
 authenticated `POST /shutdown` and waits up to 12 seconds, then ends it. Until
 the installer takes over, the shell refuses to start a core again, so the
 window's reconnect cannot relaunch the old executable. If the core cannot be
-stopped, nothing is installed and the card shows why; if the installer cannot
+stopped, nothing is installed and the popup shows why; if the installer cannot
 launch, the next reconnect starts the core again. A remote
 core is not touched by the desktop updater.
 
