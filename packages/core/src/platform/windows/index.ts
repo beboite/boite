@@ -20,6 +20,7 @@ export const platform: ProcessPlatform = {
     guard.setGuardMute(settings.muteAgents);
   },
   attach: jobs.assignToThreadJob,
+  startup: jobs.setThreadStartup,
   terminate: jobs.terminateThreadJob,
   terminateProcess: jobs.terminateJobProcess,
   terminateUnassigned(pid) {

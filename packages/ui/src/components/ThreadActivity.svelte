@@ -58,14 +58,15 @@
   let history = $derived([...(loop?.history ?? [])].reverse());
   const detailsId = $props.id();
 
-  // The dock's height while a question is open in it, for the margin the
-  // timeline keeps under its last answer. Goal, loop and tasks fit the fixed one.
+  // Questions reserve reading room; tasks only move the return button.
   let height = $state(0);
   $effect(() => {
     dockRoom.height = visible && shown && questionOpen ? height : 0;
+    dockRoom.clearance = visible ? height : 0;
   });
   $effect(() => () => {
     dockRoom.height = 0;
+    dockRoom.clearance = 0;
   });
   function measure(node: HTMLElement): { destroy(): void } | undefined {
     // jsdom lays nothing out and ships no ResizeObserver: the margin stays fixed.

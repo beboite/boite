@@ -6,6 +6,7 @@ import type { ProcessRecord, ThreadSummary } from '@boite/contracts';
 import { cpuRateOfGlobalJob, memoryLimitOfJob } from '../src/platform/windows/jobs.ts';
 import { resolveMemoryLimits } from '../src/memory-limits.ts';
 import { processPlatform } from '../src/platform/index.ts';
+import { STARTUP_PRIORITY } from '../src/procs.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -59,6 +60,25 @@ afterEach(async () => {
 });
 
 describeWindows('windows job objects', () => {
+  test('launch priority expires without a ready signal and keeps caps and other threads unchanged', async () => {
+    const deadline = STARTUP_PRIORITY.ms;
+    STARTUP_PRIORITY.ms = 3000;
+    try {
+      harness.core.procs.spawn('initializing', 'ping', ['-n', '30', '127.0.0.1'], { startup: true });
+      harness.core.procs.spawn('background', 'ping', ['-n', '30', '127.0.0.1']);
+      const client = await harness.connect();
+      await client.call('settings.set', { threadMemoryCapMb: 500, agentCpuCapPercent: 50 });
+      expect(memoryLimitOfJob('initializing')).toMatchObject({ priority: 0x20, flags: 0x2220, bytes: Math.floor(500 * 1048576 * 1.1 / 4096) * 4096 });
+      expect(memoryLimitOfJob('background')?.priority).toBe(0x4000);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 5000 });
+      await until('launch priority to expire', () => memoryLimitOfJob('initializing')?.priority === 0x4000, 6000);
+      expect(harness.core.procs.liveCount('initializing')).toBeGreaterThan(0);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 5000 });
+    } finally {
+      STARTUP_PRIORITY.ms = deadline;
+    }
+  });
+
   test('global and thread memory limits are resolved and updated on existing jobs', async () => {
     const client = await harness.connect();
     const child = harness.core.procs.spawn('memory-cap', 'ping', ['-n', '30', '127.0.0.1']);
@@ -66,8 +86,8 @@ describeWindows('windows job objects', () => {
     for (const [percent, cap] of [[60, 0], [10, 1048576], [25, 300], [90, 0], [60, 0]] as const) {
       await client.call('settings.set', { agentMemoryBudgetPercent: percent, threadMemoryCapMb: cap });
       const resolved = resolveMemoryLimits(harness.core.settings.get(), totalBytes);
-      expect(memoryLimitOfJob(null)).toEqual({ flags: 0x2200, bytes: Math.floor(Math.min(resolved.budgetMb * 1048576 * 1.1, totalBytes * 0.9) / 4096) * 4096 });
-      expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
+      expect(memoryLimitOfJob(null)).toMatchObject({ flags: 0x2200, bytes: Math.floor(Math.min(resolved.budgetMb * 1048576 * 1.1, totalBytes * 0.9) / 4096) * 4096 });
+      expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, priority: 0x4000, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     }
     harness.core.procs.killTree('memory-cap');
@@ -190,8 +210,9 @@ describeWindows('windows job objects', () => {
     const client = await harness.connect();
     const threadId = 'cpu-cap';
     // A process in a thread job is what builds the global job the cap lives on.
-    const child = harness.core.procs.spawn(threadId, 'ping', ['-n', '30', '127.0.0.1']);
+    const child = harness.core.procs.spawn(threadId, 'ping', ['-n', '30', '127.0.0.1'], { startup: true });
     expect(cpuRateOfGlobalJob()).not.toBeNull();
+    expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
 
     const rateAfter = async (percent: number): Promise<{ flags: number; rate: number } | null> => {
       await client.call('settings.set', { agentCpuCapPercent: percent });
@@ -200,8 +221,19 @@ describeWindows('windows job objects', () => {
     // ENABLE | HARD_CAP, and the rate in hundredths of a percent.
     expect(await rateAfter(3)).toEqual({ flags: 0x5, rate: 300 });
     expect(await rateAfter(0)).toEqual({ flags: 0, rate: 0 });
+    expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
     expect(await rateAfter(40)).toEqual({ flags: 0x5, rate: 4000 });
     expect(await rateAfter(100)).toEqual({ flags: 0, rate: 0 });
+
+    for (const percent of [0, 100]) {
+      await rateAfter(percent);
+      const uncappedId = `uncapped-start-${percent}`;
+      const uncapped = harness.core.procs.spawn(uncappedId, 'ping', ['-n', '30', '127.0.0.1'], { startup: true });
+      expect(memoryLimitOfJob(uncappedId)?.priority).toBe(0x4000);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 0, rate: 0 });
+      harness.core.procs.killTree(uncappedId);
+      await uncapped.exited;
+    }
 
     harness.core.procs.killTree(threadId);
     await child.exited;
