@@ -23,6 +23,8 @@ pub struct HoverState {
     /// Whether the popup is open: set by `show`, cleared by `hide` and when the
     /// window goes away. A hover while it is open leaves it exactly as it is.
     open: AtomicBool,
+    /// Placement must finish before resize events use the window's current monitor.
+    placing: AtomicBool,
     /// Counts every opening, so a release planned at a hide knows whether the
     /// popup was opened again since.
     opened: AtomicU64,
@@ -53,6 +55,7 @@ impl HoverState {
     /// replays the page's opening.
     fn opening(&self) -> bool {
         if self.open.swap(true, Ordering::AcqRel) { return false; }
+        self.placing.store(true, Ordering::Release);
         self.opened.fetch_add(1, Ordering::AcqRel);
         true
     }
@@ -178,6 +181,18 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
     if let Some(profile) = crate::window::webview_profile() { builder = builder.data_directory(profile); }
     if let Some(args) = crate::window::test_browser_args() { builder = builder.additional_browser_args(&args); }
     let window = builder.build()?;
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        // Moving to another DPI can resize the native frame after present() placed it.
+        if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Moved(_)) {
+            let state = handle.state::<HoverState>();
+            if state.placing.load(Ordering::Acquire) || !state.open.load(Ordering::Acquire) { return; }
+            // Hidden test shells still exercise the requested popup's native geometry.
+            if let Some(popup) = handle.get_webview_window(LABEL).filter(|popup| crate::window::hidden() || popup.is_visible().unwrap_or(false)) {
+                if let Err(error) = keep_inside(&popup) { eprintln!("[shell] the quota window placement failed: {error}"); }
+            }
+        }
+    });
     #[cfg(windows)]
     if native_frame {
         let rounded = window.hwnd().map_err(|error| error.to_string()).and_then(|hwnd| crate::platform::dwm::round_corners(hwnd.0));
@@ -186,12 +201,35 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
     Ok(window)
 }
 
+fn keep_inside<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    let Some(monitor) = window.current_monitor()? else { return Ok(()) };
+    let origin = monitor.position(); let size = monitor.size(); let work = monitor.work_area();
+    let bounds = (origin.x as f64, origin.y as f64, origin.x as f64 + size.width as f64, origin.y as f64 + size.height as f64);
+    let area = available_area(bounds, (work.position.x as f64, work.position.y as f64,
+        work.position.x as f64 + work.size.width as f64, work.position.y as f64 + work.size.height as f64), &hidden_appbars(bounds));
+    let outer = window.outer_size()?;
+    let inner = window.inner_size()?;
+    let width = (outer.width as f64).min((area.2 - area.0 - 16.0).max(1.0));
+    let height = (outer.height as f64).min((area.3 - area.1 - 16.0).max(1.0));
+    if width < outer.width as f64 || height < outer.height as f64 {
+        let frame_width = outer.width.saturating_sub(inner.width) as f64;
+        let frame_height = outer.height.saturating_sub(inner.height) as f64;
+        window.set_size(tauri::PhysicalSize::new((width - frame_width).max(1.0) as u32, (height - frame_height).max(1.0) as u32))?;
+    }
+    let at = window.outer_position()?;
+    let x = (at.x as f64).clamp(area.0 + 8.0, (area.2 - width - 8.0).max(area.0 + 8.0)) as i32;
+    let y = (at.y as f64).clamp(area.1 + 8.0, (area.3 - height - 8.0).max(area.1 + 8.0)) as i32;
+    if x != at.x || y != at.y { window.set_position(PhysicalPosition::new(x, y))?; }
+    Ok(())
+}
+
 /// Opens the popup at `point`. A popup already open is left exactly as it is.
 pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tauri::Result<()> {
     let state = app.state::<HoverState>();
     forget_a_closed_window(app);
     if !state.opening() { return Ok(()); }
     let shown = present(app, point);
+    state.placing.store(false, Ordering::Release);
     match shown {
         Err(_) => state.closed(),
         // A test shell never shows the window, and the pointer is the user's.

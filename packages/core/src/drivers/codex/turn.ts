@@ -11,6 +11,7 @@ const LIVE_OUTPUT_MAX = 16_000;
 const LIVE_OUTPUT_BEAT_MS = 250;
 
 interface ToolEntry {
+  nativeAgents?: ToolView['nativeAgents'];
   index: number;
   name: string;
   input: unknown;
@@ -246,6 +247,7 @@ export class CodexTurn {
     if (view.input !== undefined) entry.input = view.input;
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
+    entry.nativeAgents = view.nativeAgents;
     this.tools.set(itemId, entry);
     this.dirty.delete(itemId);
     this.drawTool(itemId, entry);
@@ -259,6 +261,7 @@ export class CodexTurn {
       input: entry.input,
       output: entry.output,
       status: entry.status,
+      ...(entry.nativeAgents ? { nativeAgents: entry.nativeAgents } : {}),
     });
   }
 }

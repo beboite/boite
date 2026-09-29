@@ -164,15 +164,17 @@
   </section>
 {/if}
 
-<nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
-  {#if experimentOn('resident-agents')}<button class="ghost" class:active={store.page === 'agents'} aria-current={store.page === 'agents' ? 'page' : undefined} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /><span>{strings.agents.heading}</span></button>{/if}
+<div class="mobile-navigation">
+  {#if experimentOn('resident-agents')}<button class="ghost icon agents-launcher" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /></button>{/if}
+  <nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
   <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} data-testid="mobile-conversations" onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
   <button class="ghost" class:active={store.page === 'chat' && screen === 'activity'} aria-current={store.page === 'chat' && screen === 'activity' ? 'page' : undefined} data-testid="mobile-activity" onclick={() => show('activity')}><span class="activity-icon"><Activity size={20} />{#if waiting.length}<span class="badge">{waiting.length}</span>{/if}</span><span>{strings.mobile.activity}</span></button>
   <button class="ghost" class:active={store.page === 'settings'} aria-current={store.page === 'settings' ? 'page' : undefined} data-testid="mobile-settings" onclick={() => store.showSettings()}><Settings size={20} /><span>{strings.settings.heading}</span></button>
-</nav>
+  </nav>
+</div>
 
 <style>
-  .mobile-header, .mobile-list, .mobile-tabs { display: none; }
+  .mobile-header, .mobile-list, .mobile-navigation { display: none; }
   @media (max-width: 720px) {
     .mobile-header.settings { display: none; }
     .mobile-header { display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 4px max(12px, env(safe-area-inset-right)) 4px max(12px, env(safe-area-inset-left)); background: var(--color-background); padding-top: max(4px, env(safe-area-inset-top)); }
@@ -197,14 +199,16 @@
     .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
     .title .draft :global(svg) { margin: 0 0 0 6px; color: var(--color-accent); }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
-    .mobile-tabs { display: flex; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
+    .mobile-navigation { display: flex; align-items: center; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }
+    .agents-launcher { flex: none; width: var(--touch-target); height: var(--touch-target); color: var(--color-muted-foreground); }
+    .mobile-tabs { display: flex; flex: 1; min-width: 0; }
     .mobile-tabs button { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 52px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
     .mobile-tabs button.active { color: var(--color-accent); background: transparent; }
     .activity-icon { position: relative; height: 20px; }
     .badge { position: absolute; top: -6px; left: 14px; min-width: 16px; border-radius: var(--radius-sm); padding: 0 3px; background: var(--color-live); color: var(--color-background); font-size: var(--text-xs); }
     .mobile-header { grid-row: 1; grid-column: 1; }
     .mobile-list { grid-row: 3; grid-column: 1; position: relative; z-index: 1; min-height: 0; }
-    .mobile-tabs { grid-row: 4; grid-column: 1; }
-    :global(html[data-keyboard='open']) .mobile-tabs { display: none; }
+    .mobile-navigation { grid-row: 4; grid-column: 1; }
+    :global(html[data-keyboard='open']) .mobile-navigation { display: none; }
   }
 </style>

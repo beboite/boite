@@ -22,9 +22,9 @@ if (mode === 'serve') {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ ok: true, version, pid: process.pid });
-    if (url.pathname === '/shutdown' && request.method === 'POST' && request.headers.get('authorization') === `Bearer ${token}`) {
+    if ((url.pathname === '/shutdown' || url.pathname === '/shutdown-if-idle' && url.searchParams.get('pid') === String(process.pid)) && request.method === 'POST' && request.headers.get('authorization') === `Bearer ${token}`) {
       setTimeout(() => process.exit(0), 20);
-      return Response.json({ ok: true }, { status: 202 });
+      return Response.json({ ok: true, pid: process.pid }, { status: 202 });
     }
     return new Response('no', { status: 404 });
   } });
@@ -172,7 +172,8 @@ fn a_core_stopped_for_an_install_stays_stopped_until_the_hold_is_released() {
     publish(&state.slot, resolve_core(&state));
     let first = current_endpoint(&state).expect("the first core answers");
     let first_pid = spawned_pid(&state).unwrap();
-    state.stop_for_install().expect("the core stops on request");
+    let control = Mutex::new(crate::update_stop::InstallState::Waiting);
+    assert!(state.wait_for_install(&control, || {}).expect("the idle core stops on request"));
     assert!(!platform::process::alive(first_pid), "the core outlived the stop");
     // The window asks again once it lost the core: nothing may start.
     assert_eq!(current_endpoint(&state).err().as_deref(), Some(HELD));

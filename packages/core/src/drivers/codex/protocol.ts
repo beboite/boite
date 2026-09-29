@@ -1,4 +1,4 @@
-import type { PermissionMode, ToolStatus } from '@boite/contracts';
+import type { NativeAgentUpdate, PermissionMode, ToolStatus } from '@boite/contracts';
 
 /** What the agent sees as `clientInfo.name`. */
 export const CLIENT_NAME = 'boite';
@@ -135,6 +135,13 @@ export interface CodexItem {
   questions?: { title?: string; options?: string[] | null }[] | null;
   /** `sleep`: how long the agent waits before it goes on. */
   durationMs?: number;
+  receiverThreadIds?: string[];
+  prompt?: string | null;
+  model?: string | null;
+  agentsStates?: Record<string, { status: string; message?: string | null } | undefined>;
+  agentThreadId?: string;
+  agentPath?: string;
+  kind?: string;
 }
 
 /**
@@ -185,6 +192,7 @@ export type Timer = ReturnType<typeof setTimeout>;
 
 /** What one Codex `ThreadItem` is drawn as, or null when the contract has no part for it. */
 export interface ToolView {
+  nativeAgents?: NativeAgentUpdate[];
   name: string;
   input: unknown;
   output: string | null;

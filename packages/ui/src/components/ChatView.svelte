@@ -4,7 +4,6 @@
   import type { ProjectId } from '@boite/contracts';
   import { separator, type MenuItem } from '../lib/menu';
   import { fill, strings } from '../lib/strings';
-  import { experimentOn } from '../lib/experiments.svelte';
   import { levelName, projectName } from '../lib/format';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -123,10 +122,7 @@
     {/if}
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
-    {#if thread?.agentSessionId}
-      <!-- An agent's own thread is written to from its page, which the experiment gates. -->
-      {#if experimentOn('resident-agents')}<button class="ghost" onclick={() => store.showAgents()}>{strings.agents.heading}</button>{/if}
-    {:else}
+    {#if !thread?.agentSessionId}
       <Composer {store} centered={!thread} />
     {/if}
 

@@ -15,6 +15,11 @@ Everything below runs from the repository root, on a `bun install` that has
 already happened. The rules these commands are meant to prove are in
 [../AGENTS.md](../AGENTS.md).
 
+The E2E core fixture clears an inherited `BOITE_UI_DIR` so runs started from
+the installed desktop serve this checkout's UI. A test can still set its own
+UI directory explicitly. `ui.test.ts` checks the served entry script against
+this checkout's production build before exercising it.
+
 ## Desktop updater tests
 
 Desktop updater checks use a local HTTP fixture and a signed inert payload in
@@ -319,9 +324,10 @@ Enter during a running turn queues the message and its attachments. Each pending
 message shows above the composer as a user bubble with a dashed outline. Up in
 an empty composer takes the newest pending message out of the queue for editing;
 clicking a pending message does the same. Enter again in the emptied composer,
-or Send now under the bubbles, stops the current turn and sends the oldest
-pending message next; the others wait for its turn. Escape stops the current
-turn too. Pending messages then run in their original order. An Escape that closes something first (a popover, a menu, a
+or Send now under the bubbles, stops the current turn. All messages already
+queued then go into the next turn together, in their original order, with their
+attachments and preview references. Messages added during that send wait for
+the following turn. Escape stops the current turn too. An Escape that closes something first (a popover, a menu, a
 confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
 Escape is needed to stop. A failed send preserves the queue for an explicit retry.

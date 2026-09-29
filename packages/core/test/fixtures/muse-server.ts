@@ -17,11 +17,12 @@
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
+  /\[(agents|command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 type Directive =
+  | 'agents'
   | 'command'
   | 'approve'
   | 'edit'
@@ -204,6 +205,12 @@ async function runTurn(turnId: string, text: string): Promise<void> {
   let usage: Record<string, number> | undefined;
   for (const directive of directives) {
     switch (directive) {
+      case 'agents': {
+        const item = { itemId: 'native-muse', kind: 'subagent', turnId, revision: 1, status: 'inProgress', objective: 'Review parser boundaries', role: 'reviewer' };
+        notify('item/started', { item });
+        notify('item/completed', { item: { ...item, revision: 2, status: 'completed', result: { summary: 'Parser checked' } } });
+        break;
+      }
       case 'command': {
         const itemId = nextItemId();
         notify('item/started', { item: toolItem(itemId, turnId, 1, 'inProgress') });

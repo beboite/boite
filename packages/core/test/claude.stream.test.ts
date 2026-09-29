@@ -20,6 +20,23 @@ import {
 
 useClaudeHarness();
 
+test('Claude Agent tools reach Team while child text remains on its sidechain', async () => {
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  scripted(fake => {
+    fake.emit(init('sess-native'));
+    fake.emit(assistant('sess-native', [{ type: 'tool_use', id: 'native-claude', name: 'Agent', input: { description: 'Parser review', prompt: 'Review parser boundaries', model: 'sonnet' } }]));
+    fake.emit(sdk({ ...assistant('sess-native', [{ type: 'text', text: 'Private child work' }]), parent_tool_use_id: 'native-claude' }));
+    fake.emit(toolResult('sess-native', 'native-claude', 'Parser checked'));
+    fake.emit(success('sess-native'));
+  });
+  expect(await runTurn(client, threadId, 'Review')).toBe('done');
+  expect((await client.call('delegation.get', { threadId })).nativeAgents).toEqual([
+    expect.objectContaining({ toolId: 'native-claude', name: 'Parser review', model: 'sonnet', status: 'done', result: 'Parser checked' }),
+  ]);
+  expect(JSON.stringify((await client.call('threads.get', { threadId })).messages)).not.toContain('Private child work');
+});
+
 describe('claude driver', () => {
   test('a scripted turn maps deltas, the tool pair, the usage and the session id', async () => {
     const client = await harness.connect();

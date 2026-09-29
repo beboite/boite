@@ -6,29 +6,50 @@ import type { Store } from './store.svelte';
 export type ComposerState = NonNullable<Store['composerStates'][string]>;
 
 /**
- * Sends the next queued prompt of a thread; a refusal pauses the queue. The
- * prompt leaves the queue while it is on the wire: a turn the core was already
- * running puts it back at the head, to go out once that turn is over.
+ * Sends the prompts already queued together, in order. New arrivals wait for
+ * the following turn. A refusal restores the original entries and pauses them.
  */
 export async function drainQueue(store: Store, threadId: string, state: ComposerState): Promise<void> {
-  const entry = state.queued.shift();
-  if (entry === undefined) return;
-  state.sending = true;
-  const accepted = await store.send(entry.text, threadId, entry.attachments, entry.previewReferences ?? []);
-  if (!accepted) {
-    state.queued.unshift(entry);
-    // Pause after a refusal. The prompt goes back in the box for an explicit
-    // retry only when it is the whole queue: taking it out from under the
-    // ones behind it would send them in the order they were not typed in.
-    state.paused = true;
-    if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
-      const back = state.queued.shift()!;
-      state.text = back.text;
-      state.attachments = back.attachments;
-      state.previewReferences = back.previewReferences ?? [];
+  if (state.sending || state.queued.length === 0) return;
+  const entries = state.queued.splice(0);
+  let text = '';
+  const attachments: Attachment[] = [];
+  const previewReferences: PreviewReference[] = [];
+  const referenceIds = new Set<string>();
+  for (const [index, entry] of entries.entries()) {
+    if (index > 0) text += '\n\n';
+    const offset = text.length;
+    text += entry.text;
+    attachments.push(...entry.attachments);
+    for (const reference of entry.previewReferences ?? []) {
+      let id = reference.id;
+      let suffix = 0;
+      while (referenceIds.has(id)) id = `${reference.id.slice(0, 60)}-queue-${++suffix}`;
+      referenceIds.add(id);
+      previewReferences.push({ ...reference, id,
+        ...(reference.mention ? { mention: { start: reference.mention.start + offset, end: reference.mention.end + offset } } : {})
+      });
     }
   }
-  state.sending = false;
+  state.sending = true;
+  let accepted = false;
+  try {
+    accepted = await store.send(text, threadId, attachments, previewReferences);
+  } finally {
+    if (!accepted) {
+      state.queued.unshift(...entries);
+      // A lone refused prompt returns to the empty input. A batch keeps its
+      // separate entries in the queue so they remain editable.
+      state.paused = true;
+      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
+        const back = state.queued.shift()!;
+        state.text = back.text;
+        state.attachments = back.attachments;
+        state.previewReferences = back.previewReferences ?? [];
+      }
+    }
+    state.sending = false;
+  }
 }
 
 /** What a sent prompt held, as the composer takes it back: its words, its pictures and files, its page references. */

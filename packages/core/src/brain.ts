@@ -238,6 +238,7 @@ export class BrainStore {
     this.core.journal.setSetting('brain', { path, enabled: config.enabled, ...(autoPull ? { autoPull } : {}), ...(globalInstructions !== undefined ? { globalInstructions } : {}), ...(boiteGuide !== undefined ? { boiteGuide } : {}) });
     this.links.apply(this.globalRoot());
     this.schedulePull();
+    this.core.bus.emit('brain.configured', this.config());
     return this.status();
   }
 
