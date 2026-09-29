@@ -29,7 +29,9 @@ test('agent deliverables and file links open in chat on desktop and paired phone
     writeFileSync(join(core.dataDir, 'handoff.pdf'), pdf);
     await client.call('threads.subscribe', { threadId: thread.id });
     const done = client.next('turn.finished');
-    await client.call('turns.start', { threadId: thread.id, prompt: 'Your deliverable is attached below. Read [project notes](notes.txt), [the PDF](handoff.pdf), or https://example.com/review.' });
+    const notesPath = join(core.dataDir, 'notes.txt').replaceAll('\\', '/');
+    const notesLink = process.platform === 'win32' ? `/${notesPath}` : notesPath;
+    await client.call('turns.start', { threadId: thread.id, prompt: `Your deliverable is attached below. Read [project notes](<${notesLink}:2>), [the PDF](handoff.pdf), or https://example.com/review.` });
     await done;
     await client.call('artifacts.publish', { threadId: thread.id, path: 'handoff.pdf' });
     for (const mobile of [false, true]) {
@@ -44,7 +46,7 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       const downloaded = await page.evaluate<string>('fetch(document.querySelector("[data-testid=artifact-download]").href).then(r => r.text())');
       expect(downloaded).toBe(pdf.toString());
       expect(await page.evaluate(`document.querySelector('[data-testid=text-part] a[href="https://example.com/review"]') !== null`)).toBe(true);
-      await page.click('a[data-file-path="notes.txt"]');
+      await page.click(`a[data-file-path=${JSON.stringify(notesPath)}]`);
       await page.waitFor(mobile ? 'document.querySelector("[data-testid=chat-file] [role=alert]")' : 'document.querySelector("[data-testid=artifact-content] pre")');
       expect(await page.text('[data-testid=chat-file]')).toContain(mobile ? 'owner connection' : 'Ready for review.');
       await page.evaluate('Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))');
