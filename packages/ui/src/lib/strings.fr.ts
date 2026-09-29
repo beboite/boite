@@ -285,6 +285,9 @@ export const fr: Translation = {
   },
 
   appUpdate: {
+    released: 'Sortie {time}',
+    changelog: 'Changelog sur GitHub',
+    hideReminder: 'Masquer le rappel',
     heading: "Mises à jour de l'application",
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
     unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
@@ -314,12 +317,11 @@ export const fr: Translation = {
     retry: 'Réessayer',
     download: 'Télécharger',
     install: 'Installer et redémarrer',
-    readyAction: 'Installer la mise à jour',
-    detailsAction: 'Détails',
+    readyAction: 'Mise à jour',
+    dismissNotice: 'Masquer cette notification de mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
     installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
-    readyTitlebar: 'Installer la mise à jour prête',
-    detailsTitlebar: 'Ouvrir les détails de la mise à jour'
+    detailsNotice: 'Ouvrir les détails de la mise à jour'
   },
 
   connection: {
@@ -635,7 +637,7 @@ export const fr: Translation = {
     trace: 'Trace',
     traceHint: 'Processus lancés par cette conversation',
     panel: 'Panneau',
-    panelHint: "L'établi à côté de cette conversation",
+    panelHint: 'Navigateur, fichiers et outils de cette conversation',
     terminalHint: 'Terminal dans le dossier de cette conversation',
     cwd: 'Répertoire de travail',
     model: 'Modèle',

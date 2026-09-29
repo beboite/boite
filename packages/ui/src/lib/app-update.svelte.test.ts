@@ -30,6 +30,25 @@ function backend(overrides: Partial<AppUpdateBackend> = {}): AppUpdateBackend {
   };
 }
 
+test('a dismissed offer stays installable and a different version or channel is announced', () => {
+  const updater = new AppUpdater();
+  updater.snapshot = snapshot({ phase: 'ready', version: '2.1.0' });
+  try {
+    updater.dismiss();
+    expect(updater.announceReady).toBe(false);
+    expect(updater.ready).toBe(true);
+    updater.snapshot = snapshot({ phase: 'checking' });
+    updater.snapshot = snapshot({ phase: 'ready', version: '2.1.0' });
+    expect(updater.announceReady).toBe(false);
+    updater.snapshot = { ...updater.snapshot, version: '2.2.0' };
+    expect(updater.announceReady).toBe(true);
+    updater.snapshot = { ...updater.snapshot, version: '2.1.0', channel: 'nightly' };
+    expect(updater.announceReady).toBe(true);
+  } finally {
+    window.localStorage.removeItem('boite.app-update-dismissed');
+  }
+});
+
 class FakeClock implements UpdateClock {
   next = 1;
   timeouts = new Map<number, () => void>();

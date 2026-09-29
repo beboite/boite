@@ -278,6 +278,9 @@ export const strings = {
   },
 
   appUpdate: {
+    released: 'Released {time}',
+    changelog: 'Changelog on GitHub',
+    hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
     unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
@@ -307,12 +310,11 @@ export const strings = {
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
-    readyAction: 'Install update',
-    detailsAction: 'Details',
+    readyAction: 'Update',
+    dismissNotice: 'Dismiss this update notification',
     installTitle: 'Install the Boite update?',
     installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
-    readyTitlebar: 'Install the ready app update',
-    detailsTitlebar: 'Open app update details'
+    detailsNotice: 'Open app update details'
   },
 
   connection: {
@@ -652,7 +654,7 @@ export const strings = {
     traceHint: 'Processes this thread launched',
     /** The header's button: it shows or hides the panel, whatever surface is in it. */
     panel: 'Panel',
-    panelHint: 'The workbench beside this thread',
+    panelHint: 'Browser, files and tools beside this conversation',
     terminalHint: "Terminal in this thread's folder",
     cwd: 'Working directory',
     model: 'Model',

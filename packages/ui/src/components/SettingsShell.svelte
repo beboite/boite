@@ -2,6 +2,7 @@
   import { MediaQuery } from 'svelte/reactivity';
   import { tick } from 'svelte';
   import MobileSettings from './MobileSettings.svelte';
+  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import BrainPage from './BrainPage.svelte';
   import { ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
@@ -22,7 +23,6 @@
   import SettingsHome, { type SettingsEntry, type SettingsTile } from './SettingsHome.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
-  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { providerGroups } from '../lib/provider-family';
   import { workspace } from '../lib/workspace.svelte';
 
@@ -59,7 +59,6 @@
 
   let children: Partial<Record<SettingsTab, { id: string; label: string }[]>> = $derived({
     general: [
-      ...(showAppUpdateUi() ? [{ id: 'app-update', label: strings.appUpdate.heading }] : []),
       { id: 'conversations', label: strings.settings.conversations },
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
@@ -266,6 +265,7 @@
       {/if}
       </div>
     {/each}
+    <div class="update-footer"><AppUpdateNotice /></div>
   </nav>
 
   {#if toc[tab]}
@@ -348,6 +348,8 @@
     padding: 20px 14px;
     overflow-y: auto;
   }
+
+  .update-footer { margin-top: auto; padding-top: 16px; flex: none; }
 
   .back {
     justify-content: flex-start;

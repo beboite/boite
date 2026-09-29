@@ -31,6 +31,20 @@ test('header and project layout', async () => {
   if (process.env.BOITE_CAPTURE_BEFORE) return;
   expect(await page.evaluate(`document.querySelectorAll('${id('titlebar')}').length`)).toBe(1);
   expect(await page.evaluate(`document.querySelector('${id('titlebar')}').contains(document.querySelector('${id('thread-title')}'))`)).toBe(true);
+  expect(await page.evaluate(`(() => {
+    const project = document.querySelector('${id('header-project')}').getBoundingClientRect();
+    const title = document.querySelector('${id('thread-title')}').getBoundingClientRect();
+    const sidebar = document.querySelector('${id('sidebar')}').getBoundingClientRect();
+    return project.right <= title.left && title.left >= sidebar.right;
+  })()`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 880, height: 820, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(440)');
+  await page.waitFor(`document.querySelector('${id('sidebar')}').getBoundingClientRect().width === 440`);
+  expect(await page.evaluate(`document.querySelector('${id('thread-title')}').getBoundingClientRect().left >= document.querySelector('${id('sidebar')}').getBoundingClientRect().right`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('header-wide-sidebar.png');
+  await page.evaluate('window.__boiteTest.workspace.active.setSidebarWidth(280)');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1310, height: 820, deviceScaleFactor: 1, mobile: false });
   await pointerClick(id('sidebar-toggle'));
   await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
   await capture('header-collapsed.png');

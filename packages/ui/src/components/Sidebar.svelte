@@ -20,6 +20,7 @@
   import ArchivedDrawer from './ArchivedDrawer.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
+  import AppUpdateNotice from './AppUpdateNotice.svelte';
   import MachineStatus from './MachineStatus.svelte';
   import ThreadCard from './ThreadCard.svelte';
   import DraftRow from './DraftRow.svelte';
@@ -297,14 +298,14 @@
       <ArchivedProjects entries={shelved} {multi} />
     {/if}
   </div>
-  {#if store.owner && work.shows('sidebar.add-project')}
-    <button class="ghost small add-project" data-testid="add-project" bind:this={projectButton} onclick={addProject}
-      oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}
-      ><Plus size={13} />{strings.sidebar.addProject}</button
-    >
-  {/if}
   <div class="foot">
     <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
+    {#if store.owner && work.shows('sidebar.add-project')}
+      <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
+        title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
+        oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
+    {/if}
+    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
@@ -507,13 +508,17 @@
   }
   /* The machine button, when there is one, sits alone on the left. */
   .foot :global(.machines) {
+    min-width: var(--control-sm);
     margin-right: auto;
   }
-
-  .add-project {
-    margin: 0 8px 6px;
-    justify-content: flex-start;
+  .foot :global(.machines .menu),
+  .foot :global(.machines .trigger) { max-width: 100%; }
+  .foot :global(button.icon) {
+    flex: none;
+    width: var(--control-sm);
+    height: var(--control-sm);
   }
+
   @keyframes leave {
     to {
       opacity: 0;
