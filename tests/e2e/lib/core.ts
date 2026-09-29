@@ -51,7 +51,8 @@ export async function startCore(options: StartCoreOptions = {}): Promise<Running
       String(port),
       ...(options.args ?? []),
     ],
-    env: { ...process.env, BOITE_DATA_DIR: dataDir, BOITE_DRAFTS_DIR: join(dataDir, 'Documents', 'Boite'), BOITE_ECHO: '1', BOITE_HOST_AGENTS: '0', BOITE_TELEMETRY_URL: '', ...(options.env ?? {}) },
+    // An inherited UI override would serve an installed app instead of this checkout.
+    env: { ...process.env, BOITE_UI_DIR: '', BOITE_DATA_DIR: dataDir, BOITE_DRAFTS_DIR: join(dataDir, 'Documents', 'Boite'), BOITE_ECHO: '1', BOITE_HOST_AGENTS: '0', BOITE_TELEMETRY_URL: '', ...(options.env ?? {}) },
     stdout: 'pipe',
     stderr: 'pipe',
   });
