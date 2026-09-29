@@ -102,7 +102,7 @@ where the top row types another character without Shift. In a plain browser
 tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
 always reach it.
 
-While the file editor has focus, `Ctrl+S` saves its file. Elsewhere it toggles
+While a writable file editor has focus, `mod+s` saves its file. Elsewhere it toggles
 the thread sidebar and keeps the browser's save dialog closed. The panel button's
 tooltip shows its current chord, including any custom binding.
 

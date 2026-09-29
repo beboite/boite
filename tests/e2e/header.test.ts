@@ -55,6 +55,14 @@ test('sidebar shortcuts preserve the prompt and file edits, and toggle both pane
   await chord();
   await page.waitFor(`!document.querySelector('${id('file-dirty')}')`);
   expect(await page.evaluate(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded')`)).toBe('true');
+  // A read-only editor cannot save, so Ctrl+S still reaches the thread sidebar.
+  await page.evaluate(`__boiteTest.workspace.active.principal = 'session'`);
+  await page.waitFor(`document.querySelector('${id('file-text')}').readOnly`);
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'false'`);
+  await chord();
+  await page.waitFor(`document.querySelector('${id('sidebar-toggle')}').getAttribute('aria-expanded') === 'true'`);
+  await page.evaluate(`__boiteTest.workspace.active.principal = 'owner'`);
   await page.evaluate(`document.querySelector('${id('composer-input')}').focus()`);
   await chord(true);
   await page.waitFor(`document.querySelector('${id('composer-input')}').value === ''`);

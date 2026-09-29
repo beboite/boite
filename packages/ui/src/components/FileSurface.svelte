@@ -134,11 +134,11 @@
 
   /** Tab writes two spaces rather than leaving the editor for the next control. */
   function onEditorKey(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
+    if (!readOnly && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
       // Saving belongs to the focused editor; elsewhere Ctrl+S folds the sidebar.
       event.preventDefault();
       event.stopPropagation();
-      if (!readOnly) void save();
+      void save();
       return;
     }
     if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
