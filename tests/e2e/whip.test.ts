@@ -72,6 +72,20 @@ test('the Whip experiment shows a bottom-left button, shakes the whole app and t
     return rect.left < 24 && rect.bottom <= tabs.top && composer.bottom <= rect.top && rect.width >= 44 && rect.height >= 44;
   })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
+  await page.click('[data-testid=mobile-settings]');
+  await page.click('[data-testid=settings-tab-experiments]');
+  await page.click('[data-testid=experiment-resident-agents]');
+  await page.navigate(url);
+  await page.waitFor('document.querySelector("[data-testid=mobile-agents]")');
+  await settled();
+  expect(await page.evaluate(`(() => {
+    const whip = document.querySelector('${button}').getBoundingClientRect();
+    const agents = document.querySelector('[data-testid=mobile-agents]');
+    const tabs = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect();
+    const composer = document.querySelector('[data-testid=composer]').getBoundingClientRect();
+    return whip.bottom <= agents.getBoundingClientRect().top && whip.bottom <= tabs.top && composer.bottom <= whip.top && agents.closest('nav') === null;
+  })()`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-agents-phone.png'));
   expect(await shake()).toBe(true);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click(button);

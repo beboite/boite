@@ -711,7 +711,7 @@
   @media (max-width: 720px) {
     .app:not(.shell) { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
     .app:not(.shell).whip-enabled { grid-template-rows: auto auto minmax(0, 1fr) calc(var(--touch-target) + 24px) auto; }
-    .app:not(.shell).whip-enabled :global(.mobile-tabs) { grid-row: 5; }
+    .app:not(.shell).whip-enabled :global(.mobile-navigation) { grid-row: 5; }
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
