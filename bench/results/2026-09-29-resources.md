@@ -24,6 +24,24 @@ median RSS. MiB means 1,048,576 bytes.
 | 8 teams, 64 children, 16 load ticks | 510 ms | 166 ms | 67.4% | 95.43 MiB | 86.73 MiB | 9.1% |
 | Idle core, 10 seconds | 73.28 ms | 73.96 ms | No improvement | 60.58 MiB | 60.56 MiB | No improvement |
 
+Additional medians and exact work counts for the same runs:
+
+| Workload | Metric | Before | After |
+| --- | --- | ---: | ---: |
+| 128 streams, reading one thread | Elapsed time | 13,595 ms | 564 ms |
+| 128 streams, reading one thread | SQLite part updates | 4,096 | 128 |
+| 64 process roots, 100 sampling ticks | Elapsed time | 1,703 ms | 636 ms |
+| 64 process roots, 100 sampling ticks | Procfs reads | 80,336 | 21,800 |
+| 8 teams, 64 children, 16 load ticks | Elapsed time | 268.94 ms | 99.82 ms |
+| 8 teams, 64 children, 16 load ticks | Selected-team snapshots | 128 | 1 |
+| 8 teams, 64 children, 16 load ticks | Serialized JSON characters | 738,560 | 5,770 |
+
+The journal saves 12,212 ms of accumulated CPU and 172.79 MiB of sampled peak
+RSS in this workload. The sampler saves 1,127 ms CPU and 7.70 MiB RSS. Team
+refreshes save 344 ms CPU and 8.70 MiB RSS. These absolute differences use the
+unrounded medians. They cover equal work; they are not per-second rates for a
+running application.
+
 ### Streaming journal
 
 `bun bench/streaming-load.ts 128 32` seeds 256 KiB per stream, appends text to
