@@ -59,7 +59,7 @@ test('the browser follows layout changes without measuring its slot on every idl
     return Math.abs(slot.x - frame.x) < 2 && Math.abs(slot.width - frame.width) < 2;
   })()`);
   let release!: () => void;
-  const waiting = new Promise<void>(resolve => { release = resolve; });
+  let waiting = new Promise<void>(resolve => { release = resolve; });
   const site = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch() {
     await waiting;
     return new Response('<title>Local preview</title><main>Local preview loaded</main>', { headers: { 'content-type': 'text/html' } });
@@ -72,6 +72,11 @@ test('the browser follows layout changes without measuring its slot on every idl
     release();
     await page.waitFor(`!document.querySelector('${id('browser-loading')}')`);
     expect(await page.evaluate(`document.querySelector('${id('browser-url')}').value`)).toBe(`http://127.0.0.1:${site.port}/`);
+    waiting = new Promise<void>(resolve => { release = resolve; });
+    await page.click(id('browser-reload'));
+    await page.waitFor(`document.querySelector('${id('browser-loading')}')`);
+    release();
+    await page.waitFor(`!document.querySelector('${id('browser-loading')}')`);
     await page.type(id('browser-url'), 'javascript:alert(1)');
     await page.evaluate(`document.querySelector('${id('browser-url')}').form.requestSubmit()`);
     await page.waitFor(`document.querySelector('${id('browser-error')}')`);
