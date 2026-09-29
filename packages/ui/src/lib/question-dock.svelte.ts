@@ -8,11 +8,10 @@ export const questionDock = $state<{ focus: string | null; nonce: number }>({ fo
 
 /*
  * How tall the dock above the composer stands. It floats over the end of the
- * timeline, which keeps a fixed margin for its folded rows; an open question
- * is taller than that, so the timeline grows its margin to this height and the
- * last answer stays readable above it.
+ * timeline. Open questions grow the reading margin; all visible rows reserve
+ * clearance for the return button without moving the text when tasks expand.
  */
-export const dockRoom = $state<{ height: number }>({ height: 0 });
+export const dockRoom = $state<{ height: number; clearance: number }>({ height: 0, clearance: 0 });
 
 export function showDockedQuestion(questionId: string): void {
   questionDock.focus = questionId;
