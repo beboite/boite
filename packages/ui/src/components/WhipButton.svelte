@@ -20,7 +20,8 @@
       if (disposed) return;
       const root = document.getElementById('app');
       if (!root) return;
-      const duration = parseFloat(getComputedStyle(root).getPropertyValue('--dur-whip'));
+      const cssDuration = getComputedStyle(root).getPropertyValue('--dur-whip').trim();
+      const duration = parseFloat(cssDuration) * (cssDuration.endsWith('ms') ? 1 : 1000);
       animation = root.animate([
         { transform: 'translate(0, 0) rotate(0deg)' },
         { transform: 'translate(-12px, 3px) rotate(-0.35deg)' },

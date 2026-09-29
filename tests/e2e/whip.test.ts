@@ -15,11 +15,33 @@ async function settled() {
     .map(animation => animation.finished.catch(() => {}))])`);
 }
 
+async function shake() {
+  // Sample inside the page: another CDP round trip can miss the entire hit on a busy runner.
+  return page.evaluate<boolean>(`(async () => {
+    const root = document.getElementById('app');
+    document.querySelector('${button}').click();
+    const [animation] = root.getAnimations();
+    if (!animation) return false;
+    let moved = false;
+    let frame;
+    const sample = () => {
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(root).transform);
+      moved ||= matrix.m41 !== 0 || matrix.m42 !== 0;
+      frame = requestAnimationFrame(sample);
+    };
+    sample();
+    await animation.finished;
+    cancelAnimationFrame(frame);
+    return moved;
+  })()`);
+}
+
 beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
   page = await BrowserPage.launch({ url });
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.waitFor('document.querySelector("[data-testid=nav-settings]")');
 }, 60_000);
 
@@ -36,9 +58,7 @@ test('the Whip experiment shows a bottom-left button, shakes the whole app and t
   await page.click('[data-testid=settings-back]');
   await settled();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-desktop.png'));
-  await page.click(button);
-  await page.waitFor(`getComputedStyle(document.getElementById('app')).transform !== 'none'`);
-  await page.waitFor(`document.getElementById('app').getAnimations().length === 0`);
+  expect(await shake()).toBe(true);
   expect(await page.evaluate(`getComputedStyle(document.getElementById('app')).transform`)).toBe('none');
   await page.navigate(url);
   await page.waitFor(`document.querySelector('${button}')`);
@@ -52,9 +72,7 @@ test('the Whip experiment shows a bottom-left button, shakes the whole app and t
     return rect.left < 24 && rect.bottom <= tabs.top && composer.bottom <= rect.top && rect.width >= 44 && rect.height >= 44;
   })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
-  await page.click(button);
-  await page.waitFor(`document.getElementById('app').getAnimations().length > 0`);
-  await page.waitFor(`document.getElementById('app').getAnimations().length === 0`);
+  expect(await shake()).toBe(true);
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click(button);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);
@@ -62,9 +80,12 @@ test('the Whip experiment shows a bottom-left button, shakes the whole app and t
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-experiments]');
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  await page.click(button);
-  await page.waitFor(`document.getElementById('app').getAnimations().length > 0`);
-  await page.click(toggle);
+  expect(await page.evaluate(`(() => {
+    document.querySelector('${button}').click();
+    const running = document.getElementById('app').getAnimations().length;
+    document.querySelector('${toggle}').click();
+    return running;
+  })()`)).toBe(1);
   await page.waitFor(`document.querySelector('${button}') === null`);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);
   expect(await page.evaluate('JSON.parse(localStorage.getItem("boite.experiments")).includes("whip")')).toBe(false);

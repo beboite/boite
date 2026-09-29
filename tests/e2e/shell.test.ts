@@ -684,6 +684,7 @@ shellTest('voice capture loads its packaged worklet under the native content sec
 
 shellTest('the Whip button moves the native window and restores its position', async () => {
   if (!page) throw new Error('the shell page is missing');
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.click(testid('nav-settings'));
   await page.click(testid('settings-tab-experiments'));
   await page.click(testid('experiment-whip'));
@@ -713,6 +714,7 @@ shellTest('the Whip button moves the native window and restores its position', a
   await page.click(testid('settings-tab-experiments'));
   await page.click(testid('experiment-whip'));
   await page.click(testid('settings-back'));
+  await page.send('Emulation.setEmulatedMedia', { features: [] });
 }, TIMEOUT);
 
 shellTest('window controls draw maximize and restore without a second status indicator', async () => {
@@ -984,13 +986,13 @@ shellTest('native preview references attach to the composer and highlight from s
     await child.waitFor(`typeof window.__boiteStopPreviewPick === 'function'`);
     // Even while the data-only picker is armed, a page gets no host commands.
     const refused = await child.evaluate<string[]>(`(async () => {
-      if (!window.__TAURI_INTERNALS__?.invoke) return ['unavailable'];
+      if (!window.__TAURI_INTERNALS__?.invoke) throw new Error('Tauri invoke bridge unavailable');
       return Promise.all(['core_endpoint', 'whip_window'].map(async command => {
         try { await window.__TAURI_INTERNALS__.invoke(command); return 'allowed'; }
         catch { return 'refused'; }
       }));
     })()`);
-    expect(refused).not.toContain('allowed');
+    expect(refused).toEqual(['refused', 'refused']);
     await child.click('#native-preview-target');
     await page.waitFor(`document.querySelector('${testid('composer')} ${testid('preview-reference')}')`);
     expect(await page.text(`${testid('composer')} ${testid('preview-reference')}`)).toBe('@Save changes');

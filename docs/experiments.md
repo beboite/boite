@@ -8,8 +8,8 @@ A phone has its own Experiments row under Settings, This phone.
 
 Shows a Whip button at the bottom left, above the sidebar footer or phone tabs.
 Each hit shakes the native Boite window and returns it to its original position.
-Maximized and fullscreen windows, browsers and phones shake the whole interface
-instead. Hits do not overlap. Turning the experiment off removes the button
+Maximized and fullscreen windows, browsers, phones and window managers that
+ignore positioning shake the whole interface instead. Hits do not overlap. Turning the experiment off removes the button
 immediately. Reduced motion disables the shake.
 
 ## Chat files and previews
