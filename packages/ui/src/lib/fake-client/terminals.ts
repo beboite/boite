@@ -21,7 +21,7 @@ export function terminalMethods(ctx: FakeContext) {
       const id = `terminal:${thread.id}`;
       if (!ctx.terminals.has(id)) ctx.terminals.set(id, { cwd: thread.cwd, output: `PS ${thread.cwd}> `, line: '' });
       const shell = ctx.terminals.get(id)!;
-      return { id, cwd: shell.cwd, output: shell.output };
+      return { id, cwd: shell.cwd, output: shell.output, sequence: shell.sequence ?? 0 };
     },
     'terminals.write': async (params) => {
       const shell = ctx.terminals.get(params.id);
@@ -44,7 +44,10 @@ export function terminalMethods(ctx: FakeContext) {
         }
       }
       shell.output += echo;
-      if (echo.length > 0) ctx.emit('terminal.output', { id: params.id, data: echo });
+      if (echo.length > 0) {
+        shell.sequence = (shell.sequence ?? 0) + 1;
+        ctx.emit('terminal.output', { id: params.id, data: echo, sequence: shell.sequence });
+      }
       return { ok: true };
     },
     'terminals.resize': async (params) => {

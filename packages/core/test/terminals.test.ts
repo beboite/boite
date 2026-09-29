@@ -128,6 +128,7 @@ describe('terminals', () => {
       expect(events).toBeLessThan(chunks / 2);
       const again = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
       expect(again.output).toBe(text.slice(-HISTORY_CHARS));
+      expect(again.sequence).toBe(events);
     } finally {
       spy.mockRestore();
     }

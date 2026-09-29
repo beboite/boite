@@ -62,7 +62,11 @@ test('global instructions are persisted, repaired at startup and removed when sh
 test('automatic pull settings persist and reject invalid intervals', async () => {
   const autoPull = { onStartup: true, intervalMinutes: 15 };
   const owner = await h.connect();
+  const changes: unknown[] = [];
+  owner.on('brain.configured', config => changes.push(config));
   await owner.call('brain.configure', { path: root, enabled: true, autoPull });
+  await waitFor(() => changes.length === 1);
+  expect(changes[0]).toMatchObject({ path: root, enabled: true, autoPull });
   expect(new BrainStore(h.core).config().autoPull).toEqual(autoPull);
   for (const intervalMinutes of [-1, 0.5, 1441, NaN]) {
     await expect(h.core.brain.configure({ path: root, enabled: true, autoPull: { onStartup: true, intervalMinutes } })).rejects.toThrow('intervalMinutes');
