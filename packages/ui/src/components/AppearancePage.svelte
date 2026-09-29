@@ -8,10 +8,11 @@
   import { isExperimentEnabled, subscribeExperiments } from '../lib/experiments';
   import { effectiveGlass, hasMaterialChoice, readGlass, setGlass, supportedGlass, type Glass } from '../lib/glass';
   import { fill, LOCALES, localeSetting, setLocaleSetting, strings, type LocaleSetting } from '../lib/i18n.svelte';
-  import { readTheme, setTheme, type Theme } from '../lib/theme';
+  import { readTheme, setTheme, THEME_STORAGE_KEY, type Theme } from '../lib/theme';
+  import { COLORS_EVENT } from '../lib/theme-colors';
   import { readChatWidth, setChatWidth, type ChatWidth } from '../lib/chat-width';
   import { matchingPreset, work, type PanelStart, type Profile, type StartIn } from '../lib/work-prefs.svelte';
-  import { ACCENT_PRESETS, readAccent, setAccent } from '../lib/accent';
+  import ThemeColors from './ThemeColors.svelte';
   import { controlGroups } from '../lib/control-groups';
   import type { Store } from '../lib/store.svelte';
   import SurfaceIcon from './SurfaceIcon.svelte';
@@ -27,9 +28,6 @@
   ]);
   /** Lit while the buttons are exactly one preset's; a device that picked its own lights neither. */
   let preset = $derived(matchingPreset(work.current.hidden));
-
-  let accent = $state(untrack(() => readAccent()));
-  function pickAccent(hue: number) { accent = hue; setAccent(hue); }
 
   /*
    * A face's own name, the same in every language; `system` is the one the
@@ -145,9 +143,12 @@
     const followFaces = (event: StorageEvent) => {
       if (event.key === FONT_KEY) font = readFont();
       if (event.key === MONO_KEY) mono = readMono();
+      if (event.key === THEME_STORAGE_KEY || event.key === null) theme = readTheme();
     };
     window.addEventListener('storage', followFaces);
-    return () => { stopZoom(); stopExperiments(); window.removeEventListener('storage', followFaces); };
+    const followTheme = () => { theme = readTheme(); };
+    window.addEventListener(COLORS_EVENT, followTheme);
+    return () => { stopZoom(); stopExperiments(); window.removeEventListener('storage', followFaces); window.removeEventListener(COLORS_EVENT, followTheme); };
   });
 
   function pickMaterial(next: Glass) {
@@ -192,17 +193,7 @@
         {/each}
       </div>
     </div>
-    <div class="switch-row accent-row">
-      <span class="text">{strings.settings.accent}<InfoTip topic={strings.settings.accent} text={strings.settings.accentHint} /></span>
-      <div class="accent-controls">
-        <div class="swatches" role="group" aria-label={strings.settings.accent}>
-          {#each ACCENT_PRESETS as hue, index (hue)}
-            <button type="button" class="swatch" data-accent-swatch style:--accent-hue={hue} aria-label={strings.settings.accentNames[index]} aria-pressed={accent === hue} data-testid="accent-{hue}" onclick={() => pickAccent(hue)}></button>
-          {/each}
-        </div>
-        <input class="hue" type="range" min="0" max="360" step="1" value={accent} aria-label={strings.settings.accentCustom} data-testid="accent-hue" oninput={event => pickAccent(Number(event.currentTarget.value))} />
-      </div>
-    </div>
+    <ThemeColors />
     <div class="switch-row">
       <span class="text">{strings.settings.chatWidth}<InfoTip topic={strings.settings.chatWidth} text={strings.settings.chatWidthHint} /></span>
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
@@ -379,19 +370,10 @@
   .toggle .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: opacity var(--dur-2); }
   .toggle.off .glyph, .toggle.off .name { opacity: 0.5; }
   .toggle.off { background: transparent; border-style: dashed; }
-  .accent-controls { display: grid; gap: 10px; min-width: 220px; }
-  .swatches { display: flex; gap: 7px; }
-  .swatch { width: 26px; height: 26px; padding: 0; border-radius: 50%; background: var(--color-accent); border: 3px solid var(--color-surface-2); transition: transform var(--dur-2) var(--ease-out-quint); }
-  .swatch:hover { transform: scale(1.12); }
-  .swatch[aria-pressed='true'] { outline: 2px solid var(--color-foreground); outline-offset: 2px; }
-  .hue { appearance: none; width: 100%; min-height: 0; height: 8px; padding: 0; background: var(--accent-spectrum); border: none; border-radius: 999px; cursor: pointer; }
-  .hue::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; box-shadow: var(--shadow-e1); }
-  .hue::-moz-range-thumb { width: 14px; height: 14px; background: var(--color-foreground); border: 2px solid var(--color-surface-2); border-radius: 50%; }
   /* Scoped under the page so it outranks the shared row, which centres its children.
      On a phone a label sits above its choices: side by side, a French label was
      squeezed to one word a line and ran under the three-option control. */
   @media (max-width: 720px) {
-    :global(.settings .page) .accent-row,
     :global(.settings .page) .switch-row:has(.segmented) { flex-direction: column; align-items: stretch; }
     :global(.settings .page) .segmented { display: flex; }
     .faces { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -399,10 +381,6 @@
     /* A code face runs wide: each name takes the room it needs, a step smaller. */
     .monos button { flex: 1 1 auto; min-width: auto; padding: 0 6px; font-size: var(--text-xs); }
     .card-head .segmented { flex: 1 1 100%; }
-    /* A 26 px dot keeps its look and gets a finger-sized hit box. */
-    .swatches { flex-wrap: wrap; gap: 18px; padding: 9px; margin: 0 -9px -9px; }
-    .swatch { position: relative; }
-    .swatch::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
   }
   /* The options in one track, the chosen one filled like a primary button. */
   .segmented {

@@ -195,6 +195,11 @@ test('agent update notices wait until the tour closes without dismissing pending
 }, 20_000);
 
 test('an unavailable onboarding chunk does not hide agent update notices or block the app', async () => {
+  // Compile the lazy Settings styles before the isolated browser tests the
+  // missing tour chunk. Cold Vite transforms are not application startup.
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid=nav-settings]');
+  await page.waitFor(`document.querySelector('[data-testid=settings]')`, 30_000);
   const offline = await BrowserPage.launch({ url: 'about:blank', showTour: true });
   try {
     await offline.send('Network.enable', {});
@@ -209,4 +214,4 @@ test('an unavailable onboarding chunk does not hide agent update notices or bloc
   } finally {
     await offline.close();
   }
-}, 30_000);
+}, 60_000);
