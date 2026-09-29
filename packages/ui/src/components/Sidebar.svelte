@@ -64,6 +64,7 @@
             ? []
             : machine.store
                 .threadsOf(project.id)
+                .slice()
                 .sort(compareThreads)
                 .map((thread) => ({ store: machine.store, threadId: thread.id }))
         )
@@ -230,6 +231,7 @@
         {@const owner = machine.store}
         {@const threads = owner
           .threadsOf(project.id)
+          .slice()
           .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
