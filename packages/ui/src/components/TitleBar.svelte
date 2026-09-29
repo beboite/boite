@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CircleArrowDown, Info, PanelLeftClose, PanelLeftOpen, X } from '@lucide/svelte';
+  import { CircleArrowDown, PanelLeftClose, PanelLeftOpen, X } from '@lucide/svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import ThreadHeader from './ThreadHeader.svelte';
   import type { Window as TauriWindow } from '@tauri-apps/api/window';
@@ -125,35 +125,27 @@
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
   {/if}
   {#if showAppUpdateUi() && appUpdater.announceReady}
-    <div class="update-actions" data-testid="titlebar-update-actions">
-    <button
-      type="button"
-      class="small update-ready"
-      title={strings.appUpdate.readyTitlebar}
-      aria-label={strings.appUpdate.readyTitlebar}
-      disabled={appUpdateInstall.preparing}
-      onclick={() => void appUpdateInstall.request()}
-      data-testid="titlebar-update-ready"
-    >
-      <CircleArrowDown size={14} strokeWidth={1.75} />
-      <span>{strings.appUpdate.readyAction}</span>
-    </button>
-    <button
-      type="button"
-      class="ghost small icon"
-      title={strings.appUpdate.detailsTitlebar}
-      aria-label={strings.appUpdate.detailsTitlebar}
-      onclick={openUpdate}
-      data-testid="titlebar-update-details"
-    ><Info size={14} strokeWidth={1.75} /></button>
-    <button
-      type="button"
-      class="ghost small icon"
-      title={strings.appUpdate.dismissTitlebar}
-      aria-label={strings.appUpdate.dismissTitlebar}
-      onclick={() => appUpdater.dismiss()}
-      data-testid="titlebar-update-dismiss"
-    ><X size={14} strokeWidth={1.75} /></button>
+    <div class="update-actions" role="group" aria-label={strings.appUpdate.heading} data-testid="titlebar-update-actions">
+      <button
+        type="button"
+        class="small update-ready"
+        title={strings.appUpdate.detailsTitlebar}
+        aria-label={strings.appUpdate.detailsTitlebar}
+        disabled={appUpdateInstall.preparing}
+        onclick={openUpdate}
+        data-testid="titlebar-update-ready"
+      >
+        <CircleArrowDown size={14} strokeWidth={1.75} />
+        <span>{strings.appUpdate.readyAction}</span>
+      </button>
+      <button
+        type="button"
+        class="ghost small icon update-dismiss"
+        title={strings.appUpdate.dismissTitlebar}
+        aria-label={strings.appUpdate.dismissTitlebar}
+        onclick={() => appUpdater.dismiss()}
+        data-testid="titlebar-update-dismiss"
+      ><X size={14} strokeWidth={1.75} /></button>
     </div>
   {/if}
   {#if inShell}
@@ -230,10 +222,27 @@
     display: flex;
     align-items: center;
     flex: none;
-    gap: 2px;
+    height: var(--control-sm);
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
   }
 
-  .update-ready { gap: 4px; font-size: var(--text-xs); }
+  .update-actions button {
+    height: 100%;
+    border: none;
+    background: transparent;
+  }
+  .update-actions button:hover:not(:disabled) { background: var(--color-hover); }
+  .update-ready {
+    gap: 5px;
+    font-size: var(--text-xs);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+  .update-actions .update-dismiss {
+    border-left: 1px solid var(--color-edge);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
 
   .controls {
     display: flex;

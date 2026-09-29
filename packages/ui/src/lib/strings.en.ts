@@ -307,12 +307,10 @@ export const strings = {
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
-    readyAction: 'Install',
+    readyAction: 'Update',
     dismissTitlebar: 'Dismiss this update notification',
-    detailsAction: 'Details',
     installTitle: 'Install the Boite update?',
     installBody: 'Boite will close and its core will stop, with the agent turns, background agents and routines running on this computer. The core starts again with the new version. Interrupted turns do not restart automatically.',
-    readyTitlebar: 'Install the ready app update',
     detailsTitlebar: 'Open app update details'
   },
 

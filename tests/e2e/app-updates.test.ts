@@ -57,7 +57,7 @@ test('titlebar details open and scroll to the card on the first and later clicks
       return original.call(this, options);
     };
   })()`);
-  await page.click(id('titlebar-update-details'));
+  await page.click(id('titlebar-update-ready'));
   await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
   expect(await page.evaluate('window.__appUpdateScrollTarget')).toBe('settings-app-update');
   await capture('titlebar-first-click');
@@ -66,44 +66,53 @@ test('titlebar details open and scroll to the card on the first and later clicks
   expect(await page.evaluate(`document.querySelector('${id('settings-tab-general')}').hasAttribute('aria-expanded')`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('.subcategories.open') === null`)).toBe(true);
   await page.evaluate('window.__appUpdateScrollTarget = null');
-  await page.click(id('titlebar-update-details'));
+  await page.click(id('titlebar-update-ready'));
   await page.waitFor(`window.__appUpdateScrollTarget === 'settings-app-update'`);
 }, 30_000);
 
-test('the titlebar installs with confirmation without leaving chat', async () => {
+test('the update pill opens details and installation still requires confirmation', async () => {
   await page.navigate(`${base}/?fake=1&appUpdate=ready&appUpdateChannel=nightly`);
   await width(880);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}')`);
-  await page.waitFor(`document.querySelector('${id('titlebar-update-details')}')`);
+  expect((await page.text(id('titlebar-update-ready'))).trim()).toBe('Update');
+  expect(await page.evaluate(`document.querySelectorAll('${id('titlebar-update-actions')} button').length`)).toBe(2);
   expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
   await capture('main-ready');
 
   await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
+  await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
-  expect(await page.evaluate(`document.querySelector('${id('nav-settings')}') !== null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') !== null`)).toBe(true);
   await capture('main-confirmation');
   await page.click(id('confirm-cancel'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
   expect(await page.evaluate(`document.querySelector('${id('titlebar-update-ready')}') !== null`)).toBe(true);
 
+  await page.click(id('settings-back'));
   await pickDesktopLocale('fr');
+  expect((await page.text(id('titlebar-update-ready'))).trim()).toBe('Mise à jour');
   expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
   await capture('main-ready-fr');
   await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
+  await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await capture('main-confirmation-fr');
   await page.click(id('confirm-cancel'));
   await page.waitFor(`document.querySelector('${id('confirm-cancel')}') === null`);
 
+  await page.click(id('settings-back'));
   await pickDesktopLocale('en');
   await page.click(id('titlebar-update-ready'));
+  await page.waitFor(`document.querySelector('${id('app-update-install')}')`);
+  await page.click(id('app-update-install'));
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await page.click(id('confirm-ok'));
   await page.waitFor(`document.querySelector('${id('titlebar-update-ready')}') === null`);
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-install')}') === null`)).toBe(true);
 }, 30_000);
 
 test('dismissing a ready update persists while settings still offer installation', async () => {

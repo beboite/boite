@@ -314,12 +314,10 @@ export const fr: Translation = {
     retry: 'Réessayer',
     download: 'Télécharger',
     install: 'Installer et redémarrer',
-    readyAction: 'Installer',
+    readyAction: 'Mise à jour',
     dismissTitlebar: 'Masquer cette notification de mise à jour',
-    detailsAction: 'Détails',
     installTitle: 'Installer la mise à jour de Boite ?',
     installBody: "Boite va se fermer et son cœur va s'arrêter, avec les tours d'agents, les agents d'arrière-plan et les routines en cours sur cet ordinateur. Le cœur redémarre avec la nouvelle version. Les tours interrompus ne redémarrent pas automatiquement.",
-    readyTitlebar: 'Installer la mise à jour prête',
     detailsTitlebar: 'Ouvrir les détails de la mise à jour'
   },
 
