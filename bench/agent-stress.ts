@@ -144,18 +144,18 @@ try {
     try {
       // The load generator bounds this workload; independent turns have no scheduler quota.
       const turns: Turn[] = new Array(created.length);
-      let next = 0;
+      let next = 0, acceptMs = 0;
       await Promise.all(Array.from({ length: Math.min(concurrency, created.length) }, async () => {
         for (;;) {
           const index = next++;
           const thread = created[index];
           if (!thread) return;
           const turn = await owner.call('turns.start', { threadId: thread.id, prompt });
+          acceptMs = performance.now() - start;
           turns[index] = turn;
           await until(() => watchers[0]!.finished.has(turn.id), `turn ${turn.id} finishes`);
         }
       }));
-      const acceptMs = performance.now() - start;
       await until(() => turns.every(t => watchers[0]!.finished.has(t.id)), 'all turns finish');
       await until(() => watchers.slice(1).every(w => turns.slice(0, watched.length).every(t => w.finished.has(t.id))), 'reader finishes');
       const wallMs = performance.now() - start;

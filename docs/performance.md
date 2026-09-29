@@ -13,9 +13,11 @@ bun run bench:stress --threads 1000 --concurrency 64 --clients 0 --output stress
 ```
 
 These are offline tests on fresh temporary data directories. The benchmark
-checks every streamed answer and persisted turn, global concurrency, mass
+checks every streamed answer and persisted turn, workload concurrency, mass
 cancellation, a reader reconnect and recovery after killing the core. It runs
-both six turns at a time and the requested concurrency. Additional readers
+both six turns at a time and the requested concurrency, bounded by the load
+generator rather than scheduler quotas. Cancellation and crash scenarios start
+all 1,000 long-running turns together. Additional readers
 alternate local connections with compressed, paced remote connections.
 An independent process probes HTTP health, so parsing the load generator's
 WebSocket frames cannot delay the observer.
@@ -39,7 +41,8 @@ Scheduler notifications publish the newest snapshot in each 16-millisecond
 window. Turn, message and permission events keep their immediate delivery.
 `scheduler.get` always reads the current state.
 
-On Windows with Bun 1.4.2, 2026-09-29:
+Initial measurements on Windows with Bun 1.4.2, 2026-09-29, before scheduler
+launch limits were retired:
 
 | Scenario | Observed result |
 | --- | --- |
