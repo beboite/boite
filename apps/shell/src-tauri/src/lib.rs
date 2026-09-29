@@ -18,6 +18,7 @@ mod resident;
 mod tray;
 mod updater;
 mod window;
+mod whip;
 
 // Tauri links its manifest into binaries, but not the library test executable.
 // Native updater tests import TaskDialogIndirect, which needs Common Controls v6.
@@ -104,12 +105,14 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_updater)
         .manage(Reveal::default())
+        .manage(whip::WhipState::default())
         .manage(quota_window::HoverState::default())
         .manage(CloseBehavior { enabled: AtomicBool::new(close_to_tray), path: preferences_path })
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
             local_files::open_local_file,
             window::shell_ready,
+            whip::whip_window,
             tray::quit_shell,
             notify,
             closing::close_behavior,
