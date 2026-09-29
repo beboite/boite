@@ -11,7 +11,7 @@ import { freshWork, work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
 /**
  * The three composer keys, on the whole app over the in-memory fake: Ctrl+Enter
  * sends and opens the next draft, ArrowUp walks this thread's sent prompts, and
- * Ctrl+S puts the text aside and takes it back. Then the reasoning chip, which
+ * Ctrl+Shift+S puts the text aside and takes it back. Then the reasoning chip, which
  * carries the level the picker used to hide.
  */
 
@@ -70,7 +70,7 @@ test('preview references survive queuing and a failed drain, and stashing refuse
   const reference = store.composerStates['t-trace']!.previewReferences![0]!;
   await waitFor(() => input().value.endsWith('@Save'));
   input().focus();
-  press('s', { ctrlKey: true });
+  press('s', { ctrlKey: true, shiftKey: true });
   expect(store.error).toContain('cannot be stashed');
   expect(input().value).toBe('Change the selected control @Save');
   expect(store.composerStates['t-trace']?.previewReferences).toEqual([reference]);
@@ -268,14 +268,19 @@ test('ArrowUp recalls the sent prompts of this thread and ArrowDown comes back',
   expect(input().value).toBe('the newer one');
 });
 
-test('Ctrl+S stashes the composer under the thread, and an empty one takes it back', async () => {
+test('Ctrl+S folds the sidebar without stashing, and Ctrl+Shift+S stashes and restores the composer', async () => {
   await mountOnFake();
   await store.open('t-trace');
   await waitFor(() => store.openThread?.id === 't-trace' && !store.busy);
 
   await type('a prompt I am not ready to send');
   input().focus();
+  const collapsed = store.sidebarCollapsed;
   expect(press('s', { ctrlKey: true })).toBe(false);
+  expect(store.sidebarCollapsed).toBe(!collapsed);
+  expect(input().value).toBe('a prompt I am not ready to send');
+  expect(window.localStorage.getItem(STASH_STORAGE_KEY)).toBeNull();
+  expect(press('s', { ctrlKey: true, shiftKey: true })).toBe(false);
 
   expect(input().value).toBe('');
   expect(JSON.parse(window.localStorage.getItem(STASH_STORAGE_KEY) ?? 'null')).toEqual({
@@ -284,14 +289,14 @@ test('Ctrl+S stashes the composer under the thread, and an empty one takes it ba
 
   // The empty composer takes it back, and the stash is spent.
   input().focus();
-  press('s', { ctrlKey: true });
+  press('s', { ctrlKey: true, shiftKey: true });
   expect(input().value).toBe('a prompt I am not ready to send');
   expect(input().selectionStart).toBe('a prompt I am not ready to send'.length);
   expect(window.localStorage.getItem(STASH_STORAGE_KEY)).toBeNull();
 
   // The browser's own save dialog stays shut wherever the focus is.
   input().blur();
-  expect(press('s', { ctrlKey: true })).toBe(false);
+  expect(press('s', { ctrlKey: true, shiftKey: true })).toBe(false);
 });
 
 /** The reasoning chip of the composer bar, or null while the model offers no scale. */

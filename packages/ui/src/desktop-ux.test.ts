@@ -369,7 +369,7 @@ test('ArrowUp in an empty box of a thread at rest recalls the last prompt to edi
   expect(userTexts()).toEqual(before);
 });
 
-test('Ctrl+S on a recalled prompt sets the text aside and leaves edit mode, so the next prompt is new', async () => {
+test('Ctrl+Shift+S on a recalled prompt sets the text aside and leaves edit mode, so the next prompt is new', async () => {
   await openIdleThread();
   const before = userTexts();
   const box = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -377,7 +377,7 @@ test('Ctrl+S on a recalled prompt sets the text aside and leaves edit mode, so t
   press(box, 'ArrowUp');
   flushSync();
   await waitFor(() => document.querySelector('[data-testid=composer-editing]') !== null);
-  box.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+  box.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
   flushSync();
   await waitFor(() => document.querySelector('[data-testid=composer-editing]') === null);
   expect(box.value).toBe('');

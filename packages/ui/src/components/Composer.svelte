@@ -564,7 +564,7 @@
     stateForInput().previewReferences = restored.references;
   }
 
-  /** Ctrl+S: text goes aside for this thread, an empty composer takes it back. */
+  /** The stash chord sets text aside for this thread; an empty composer takes it back. */
   function stash() {
     if (previewReferences.length) { store.error = strings.previewComments.stashUnsupported; return; }
     const key = store.threadKey(store.openThread?.id ?? DRAFT_STASH_KEY);
