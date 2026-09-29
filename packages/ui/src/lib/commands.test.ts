@@ -31,7 +31,7 @@ function ids(): string[] {
 }
 
 test('the list carries every app command, the thread ones only while one is open', async () => {
-  // The import and Agents rows ride behind their experiments, off until the switch is on.
+  // Session import joins the palette; persistent agents only have their launcher.
   expect(ids()).not.toContain('import-session');
   expect(ids()).not.toContain('agents');
   setExperiment('session-import', true);
@@ -41,7 +41,6 @@ test('the list carries every app command, the thread ones only while one is open
     'add-project',
     'import-session',
     'sidebar',
-    'agents',
     'settings',
     'appearance',
     'archived',
@@ -72,7 +71,6 @@ test('the list carries every app command, the thread ones only while one is open
     'trace',
     'terminal',
     'sidebar',
-    'agents',
     'settings',
     'appearance',
     'archived',
@@ -117,7 +115,7 @@ test('runCommand dispatches: the theme is stored and stamped, settings opens on 
   expect(store.page).toBe('chat');
 });
 
-test('a hidden trace card stays in the palette, and Agents opens its page', async () => {
+test('a hidden trace card stays in the palette, while persistent agents only open from their launcher', async () => {
   await store.open('t-descriptors');
   // The palette is the way back to a button put away in Appearance.
   work.show('panel.trace', false);
@@ -129,7 +127,10 @@ test('a hidden trace card stays in the palette, and Agents opens its page', asyn
   runCommand(store, 'agents', false);
   expect(store.page).toBe('chat');
   setExperiment('resident-agents', true);
+  expect(ids()).not.toContain('agents');
   runCommand(store, 'agents', false);
+  expect(store.page).toBe('chat');
+  store.showAgents();
   expect(store.page).toBe('agents');
 });
 

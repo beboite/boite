@@ -84,8 +84,6 @@ export function appCommands(store: Store, inShell: boolean): PaletteItem[] {
     }
   }
   items.push(row('sidebar', strings.palette.sidebar));
-  // The Agents page is an experiment: off, the row would lead nowhere.
-  if (experimentOn('resident-agents')) items.push({ id: 'agents', kind: 'command', label: strings.palette.agents, keywords: 'agents profiles groups routines teams' });
   items.push(row('settings', strings.palette.settings, 'preferences'));
   items.push(row('appearance', strings.palette.appearance, 'theme material buttons toolbar'));
   // The one way back to an archived thread: no chord, so written like the tour.
@@ -172,7 +170,6 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
     case 'workflows': store.showChat(); store.panel.toggleKind('workflow'); break;
     case 'terminal': if (open) { store.showChat(); store.toggleTerminal(); } break;
     case 'sidebar': store.toggleSidebar(); break;
-    case 'agents': store.showAgents(); break;
     case 'settings': store.showSettings(); break;
     case 'appearance': store.showSettings('appearance'); break;
     case 'archived': store.showSettings('general', 'archived'); break;

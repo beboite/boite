@@ -12,7 +12,9 @@ checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
 these Boite-managed teams, and appear in their own section of Team. The global
 Persistent agents page holds agents with their own roles, memory and missions;
-it is not the list of children of a conversation.
+it is not the list of children of a conversation. Enable it in Settings >
+Experiments to reveal its bottom-left launcher, which opens a dedicated
+interface. It adds no conversation panel or mobile navigation tab.
 
 Team shows whether Boite workflows are disabled, enabled or paused before the
 settings are expanded. Its agent, turn and token budget counts only Boite
