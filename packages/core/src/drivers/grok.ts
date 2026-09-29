@@ -75,7 +75,8 @@ export function grokReasoningEffortOf(meta: unknown): string | null {
 
 /**
  * A model's effort scale out of its `_meta`, or null when the agent offers
- * none. The levels keep the agent's order; the default is the entry flagged
+ * none. Grok lists highest effort first; expose lowest first for the slider.
+ * The default is the entry flagged
  * `default: true`, then `_meta.reasoningEffort` when it names a level, then the
  * first level, so the picker always has one to show.
  */
@@ -102,5 +103,5 @@ export function grokEffortOf(meta: unknown): ModelInfo['effort'] | null {
 
   const current = stringOf(meta['reasoningEffort']);
   const fallback = current !== null && levels.some((level) => level.id === current) ? current : (levels[0] as EffortLevel).id;
-  return { levels, default: flagged ?? fallback };
+  return { levels: levels.reverse(), default: flagged ?? fallback };
 }
