@@ -9,6 +9,8 @@ import { freshDataDir, killProcessTree, removeDirectory, startCore } from './lib
 const TIMEOUT = 120_000;
 const READY_TIMEOUT_MS = 30_000;
 const CORE_GONE_TIMEOUT_MS = 5_000;
+// main.ts allows ten seconds to drain before forcing exit; leave time to observe it.
+const RESIDENT_SHUTDOWN_TIMEOUT_MS = 15_000;
 const HARD_KILL_TIMEOUT_MS = 3_000;
 const POLL_MS = 100;
 
@@ -302,7 +304,7 @@ shellTest('a resident core finishes agent work after shell exit, is adopted, and
     await ownPage.evaluate(`window.__TAURI_INTERNALS__.invoke('core_endpoint')`);
     expect((await waitForHealthyCore(ownDataDir)).pid).toBe(found.pid);
     expect(await client.call('core.shutdown', {})).toEqual({ ok: true });
-    await waitUntil(() => !pidAlive(found!.pid), CORE_GONE_TIMEOUT_MS);
+    await waitUntil(() => !pidAlive(found!.pid), RESIDENT_SHUTDOWN_TIMEOUT_MS);
     expect(pidAlive(found.pid)).toBe(false);
   } finally {
     client?.close(); await ownPage?.close();

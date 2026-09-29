@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
-import { AGENT_OPEN_TODOS_MAX } from '../src/todos.ts';
+import { addTodo, AGENT_OPEN_TODOS_MAX } from '../src/todos.ts';
 import { echoThread, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -149,9 +149,12 @@ describe('the todo list of a project', () => {
   });
 
   test('an agent is refused a card past the open limit, the user is not, and a confirmed card frees a place', async () => {
-    for (let index = 0; index < AGENT_OPEN_TODOS_MAX; index++) {
-      await client.call('todos.add', { threadId, text: `card ${index}` });
-    }
+    // Seed the boundary in one transaction; the permission checks below use real RPC.
+    harness.core.journal.db.transaction(() => {
+      for (let index = 0; index < AGENT_OPEN_TODOS_MAX; index++) {
+        addTodo(harness.core, { threadId, text: `card ${index}` });
+      }
+    })();
     const agent = await agentClient();
     try {
       await expect(agent.call('todos.add', { threadId, text: 'one more' })).rejects.toThrow(

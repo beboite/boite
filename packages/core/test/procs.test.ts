@@ -34,7 +34,8 @@ describe('procs', () => {
     });
     await new Promise<void>((resolve, reject) => { child.once('exit', () => resolve()); child.once('error', reject); });
     await waitFor(() => harness.core.procs.liveCount(threadId) === 0);
-    const record = harness.core.journal.listProcesses(threadId, 10)[0];
+    const record = harness.core.journal.listProcesses(threadId, 10).find(record => record.pid === child.pid);
+    expect(record).toBeDefined();
     expect(record?.cpuMs).not.toBeNull();
     expect(record?.peakMemoryBytes).toBeGreaterThan(0);
     expect(record?.ioBytes).not.toBeNull();
@@ -130,7 +131,8 @@ describe('procs', () => {
     const done = await echoThread(harness, client, 'ran one, now done');
     const idle = await echoThread(harness, client, 'never ran one');
     const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
-    await harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]).exited;
+    const completed = harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]);
+    await completed.exited;
     await waitFor(() => harness.core.procs.liveCount(done.threadId) === 0, 5000);
     const long = process.platform === 'win32' ? ['cmd', ['/c', 'ping -n 30 127.0.0.1 > nul']] as const : ['sleep', ['30']] as const;
     harness.core.procs.spawn(running.threadId, long[0], [...long[1]]);
@@ -149,7 +151,10 @@ describe('procs', () => {
       await harness.core.procs.stopAndWait(running.threadId);
     }
     // The trace still has what exited.
-    expect((await client.call('trace.get', { threadId: done.threadId })).length).toBe(1);
+    const trace = await client.call('trace.get', { threadId: done.threadId });
+    expect(trace.find(record => record.pid === completed.record.pid)?.exitedAt).toBeNumber();
+    // Windows can also report a console child; every recorded process must be finished.
+    expect(trace.every(record => record.exitedAt !== null)).toBe(true);
     expect(await client.call('resources.list', {})).toEqual([]);
   }, 20000);
 

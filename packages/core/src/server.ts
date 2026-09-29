@@ -1,10 +1,10 @@
-import type { RpcEvents, ThreadId } from '@boite/contracts';
+import type { RpcEventName, RpcEvents, ThreadId } from '@boite/contracts';
 import { FILE_ROUTE, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode } from '@boite/contracts';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { basename, dirname, join, normalize, resolve, sep } from 'node:path';
-import { eventThreadId } from './bus.ts';
+import { eventThreadId, type EventPayload } from './bus.ts';
 import { mayReceiveEvent } from './access.ts';
 import type { Core } from './core.ts';
 import { messageOf } from './errors.ts';
@@ -12,6 +12,7 @@ import type { Connection } from './router.ts';
 import type { SocketData } from './server/connection.ts';
 import { ServerConnection } from './server/connection.ts';
 import { handleFrame } from './server/frame.ts';
+import { FrameQueue } from './server/frame-queue.ts';
 export { ServerConnection } from './server/connection.ts';
 
 const DEFAULT_HELLO_TIMEOUT_MS = 5000;
@@ -32,6 +33,8 @@ const PREAUTH_SOCKETS_PER_ADDRESS = 8;
  * file a paused video stops reading is fetched again by `Range`.
  */
 const HTTP_IDLE_TIMEOUT_S = 60;
+/** Scheduler snapshots replace each other; turn and message events still go out immediately. */
+const SCHEDULER_WINDOW_MS = 16;
 
 /**
  * The UI build. `packages/core/src` and `packages/core/dist` are the same depth,
@@ -337,6 +340,7 @@ export function startServer(options: ServerOptions): RunningServer {
     for (const [connection, peer] of peers) if (!connection.authenticated) yield peer;
   }
   const frames = new Set<Promise<void>>();
+  const incoming = new FrameQueue((connection, raw) => handleFrame(core, connection, raw));
   const peerRequests = new Set<Promise<Response>>();
   let stopping = false;
 
@@ -428,7 +432,9 @@ export function startServer(options: ServerOptions): RunningServer {
           connection.close(RpcCloseCode.Unauthorized, 'hello frame too large');
           return;
         }
-        const frame = handleFrame(core, socket.data.connection, typeof raw === 'string' ? raw : raw.toString());
+        const text = typeof raw === 'string' ? raw : raw.toString();
+        // Hello remains immediate and bounded by the pre-auth frame limit.
+        const frame = connection.authenticated ? incoming.enqueue(connection, text) : handleFrame(core, connection, text);
         frames.add(frame);
         void frame.catch((error: unknown) => core.log('error', messageOf(error))).finally(() => frames.delete(frame));
       },
@@ -436,6 +442,7 @@ export function startServer(options: ServerOptions): RunningServer {
       drain(socket) { socket.data.connection.drain(); },
 
       close(socket) {
+        incoming.drop(socket.data.connection);
         core.speech.cancel(socket.data.connection.id);
         clearTimeout(helloTimers.get(socket.data.connection));
         helloTimers.delete(socket.data.connection);
@@ -469,7 +476,7 @@ export function startServer(options: ServerOptions): RunningServer {
     },
   };
 
-  const off = core.bus.onAny((name, payload) => {
+  const broadcast = (name: RpcEventName, payload: EventPayload): void => {
     const scoped =
       name.startsWith('message.') ||
       name.startsWith('permission.') ||
@@ -493,6 +500,23 @@ export function startServer(options: ServerOptions): RunningServer {
       if (name === 'todos.updated' && !mayReadTodos(core, connection, (payload as RpcEvents['todos.updated']).projectId)) continue;
       connection.sendEvent(name, payload);
     }
+  };
+  let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;
+  let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+  const off = core.bus.onCommitted((name, payload) => {
+    if (name !== 'scheduler.updated') {
+      broadcast(name, payload);
+      return;
+    }
+    // A thousand queued turns used to serialize and compress every intermediate
+    // queue for every reader. Only the newest snapshot in this window is useful.
+    pendingScheduler = payload as RpcEvents['scheduler.updated'];
+    schedulerTimer ??= setTimeout(() => {
+      schedulerTimer = null;
+      const latest = pendingScheduler;
+      pendingScheduler = null;
+      if (latest !== null) broadcast('scheduler.updated', latest);
+    }, SCHEDULER_WINDOW_MS);
   });
 
   return {
@@ -501,7 +525,11 @@ export function startServer(options: ServerOptions): RunningServer {
     url: core.baseUrl(),
     async stop(): Promise<void> {
       stopping = true;
+      incoming.close();
       off();
+      if (schedulerTimer !== null) clearTimeout(schedulerTimer);
+      schedulerTimer = null;
+      pendingScheduler = null;
       for (const timer of helloTimers.values()) clearTimeout(timer);
       helloTimers.clear();
       for (const connection of connections) connection.close(1001, 'core stopping');

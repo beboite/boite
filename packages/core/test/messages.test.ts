@@ -16,18 +16,20 @@ afterEach(async () => {
 
 /** `count` complete messages written straight into the journal, in order. */
 function seed(threadId: string, count: number): void {
-  for (let index = 0; index < count; index += 1) {
-    const message: Message = {
-      id: `msg_${String(index).padStart(4, '0')}`,
-      threadId,
-      turnId: 'trn_seed',
-      role: index % 2 === 0 ? 'user' : 'assistant',
-      parts: [{ type: 'text', text: `message ${index}` }],
-      state: 'complete',
-      createdAt: 1_000 + index,
-    };
-    harness.core.journal.putMessage(message);
-  }
+  harness.core.journal.db.transaction(() => {
+    for (let index = 0; index < count; index += 1) {
+      const message: Message = {
+        id: `msg_${String(index).padStart(4, '0')}`,
+        threadId,
+        turnId: 'trn_seed',
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        parts: [{ type: 'text', text: `message ${index}` }],
+        state: 'complete',
+        createdAt: 1_000 + index,
+      };
+      harness.core.journal.putMessage(message);
+    }
+  })();
 }
 
 function ids(messages: Message[]): string[] {
@@ -168,39 +170,41 @@ describe('message paging', () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
     // One finished turn per message pair, in journal order, then a queued one with no message yet.
-    for (let index = 0; index < 150; index += 1) {
+    harness.core.journal.db.transaction(() => {
+      for (let index = 0; index < 150; index += 1) {
+        harness.core.journal.putTurn({
+          id: `trn_${String(index).padStart(4, '0')}`,
+          threadId,
+          status: 'done',
+          queuedAt: 1_000 + index,
+          startedAt: 1_000 + index,
+          finishedAt: 1_001 + index,
+          usage: null,
+          error: null,
+        });
+      }
+      for (let index = 0; index < 300; index += 1) {
+        harness.core.journal.putMessage({
+          id: `msg_${String(index).padStart(4, '0')}`,
+          threadId,
+          turnId: `trn_${String(Math.floor(index / 2)).padStart(4, '0')}`,
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          parts: [{ type: 'text', text: `message ${index}` }],
+          state: 'complete',
+          createdAt: 1_000 + index,
+        });
+      }
       harness.core.journal.putTurn({
-        id: `trn_${String(index).padStart(4, '0')}`,
+        id: 'trn_queued',
         threadId,
-        status: 'done',
-        queuedAt: 1_000 + index,
-        startedAt: 1_000 + index,
-        finishedAt: 1_001 + index,
+        status: 'queued',
+        queuedAt: 5_000,
+        startedAt: null,
+        finishedAt: null,
         usage: null,
         error: null,
       });
-    }
-    for (let index = 0; index < 300; index += 1) {
-      harness.core.journal.putMessage({
-        id: `msg_${String(index).padStart(4, '0')}`,
-        threadId,
-        turnId: `trn_${String(Math.floor(index / 2)).padStart(4, '0')}`,
-        role: index % 2 === 0 ? 'user' : 'assistant',
-        parts: [{ type: 'text', text: `message ${index}` }],
-        state: 'complete',
-        createdAt: 1_000 + index,
-      });
-    }
-    harness.core.journal.putTurn({
-      id: 'trn_queued',
-      threadId,
-      status: 'queued',
-      queuedAt: 5_000,
-      startedAt: null,
-      finishedAt: null,
-      usage: null,
-      error: null,
-    });
+    })();
 
     const thread = await client.call('threads.get', { threadId });
     const turnIds = thread.turns.map((turn) => turn.id);

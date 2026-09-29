@@ -13,9 +13,11 @@ test('memory RPC reads applied limits and threads.get recovers bounded memory no
     if (process.platform === 'darwin') expect(status.availableBytes).toBeNull();
     else expect(status.availableBytes).toBeGreaterThan(0);
     const { threadId } = await echoThread(harness, client);
-    for (let at = 0; at < 103; at++) {
-      harness.core.bus.emit('resources.memory', { threadId, kind: 'thread-cap', state: 'ok', at });
-    }
+    harness.core.journal.db.transaction(() => {
+      for (let at = 0; at < 103; at++) {
+        harness.core.bus.emit('resources.memory', { threadId, kind: 'thread-cap', state: 'ok', at });
+      }
+    })();
     const thread = await client.call('threads.get', { threadId });
     expect(thread.memoryEvents).toHaveLength(100);
     expect(thread.memoryEvents?.[0]?.at).toBe(3);
