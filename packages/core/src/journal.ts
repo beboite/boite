@@ -290,7 +290,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'coordination:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
       }
     })();

@@ -25,6 +25,7 @@ test('removal stops the family and clears its stored history while keeping proje
   for (const id of [threadId, childId]) {
     harness.core.journal.setSetting(`move-note:${id}`, { text: 'old move' });
     harness.core.journal.setSetting(`memory-notices:${id}`, [{ text: 'old notice' }]);
+    harness.core.journal.setSetting(`coordination:${id}`, { resources: 'private conversation resources' });
   }
   const removed: string[] = [];
   client.on('thread.removed', event => removed.push(event.threadId));
@@ -39,6 +40,7 @@ test('removal stops the family and clears its stored history while keeping proje
     expect(harness.core.journal.listTurns(id)).toEqual([]);
     expect(harness.core.journal.getSetting(`move-note:${id}`)).toBeUndefined();
     expect(harness.core.journal.getSetting(`memory-notices:${id}`)).toBeUndefined();
+    expect(harness.core.journal.getSetting(`coordination:${id}`)).toBeUndefined();
     expect(harness.core.journal.db.query('SELECT COUNT(*) AS n FROM events WHERE thread_id = ?').get(id)).toEqual({ n: 0 });
   }
   for (const turn of turns) expect(harness.core.journal.getTurn(turn.id)).toBeNull();

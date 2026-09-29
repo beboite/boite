@@ -283,6 +283,8 @@ export function threadMethods(ctx: FakeContext) {
         }
         for (const thread of family) {
           ctx.threads.delete(thread.id);
+          ctx.coordination.delete(thread.id);
+          ctx.letters.delete(thread.id);
           clearTimeout(ctx.activityTimers.get(thread.id));
           ctx.activityTimers.delete(thread.id);
           for (const [key, request] of ctx.turnRequests) if (request.turn.threadId === thread.id) ctx.turnRequests.delete(key);
