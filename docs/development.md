@@ -223,7 +223,8 @@ Delete is separate from Archive. The thread's row and title menus offer it to
 the owner, and both archived lists have a delete button. Every deletion asks
 for confirmation, even for an idle thread. `threads.remove { threadId }`
 stops the conversation and its sub-threads, waits for their processes to exit,
-then removes their messages, turns, events and traces from the journal.
+then removes their messages, turns, events, traces, delegation and workflow
+history in one journal transaction.
 `thread.removed` updates every connected client and the project archive count.
 The conversation cannot be restored; project files, Git worktrees and branches,
 and transcripts stored by native providers stay on disk. Persistent agent

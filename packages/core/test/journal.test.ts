@@ -139,6 +139,31 @@ describe('journal', () => {
     expect((journal.db.query('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys).toBe(0);
   });
 
+  test('thread deletion commits delegated and workflow history without removal listeners, or rolls everything back', () => {
+    const thread = { id: 'thr_gone', projectId: 'prj', title: 't', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, speed: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    for (const id of ['gone', 'keep']) {
+      journal.putThread({ ...thread, id: `thr_${id}` });
+      journal.db.query('INSERT INTO delegated_agents VALUES (?, ?, ?, ?, ?, ?)').run(`child_${id}`, `thr_${id}`, id, id, 'worker', 'delegated task');
+      journal.db.query('INSERT INTO delegation_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, `thr_${id}`, `thr_${id}`, `child_${id}`, id, id, 'received', 1, '{"text":"delegated message"}');
+      journal.db.query('INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?)').run(id, `thr_${id}`, 'stopped', 1, 1, '{"task":"workflow prompt"}');
+      journal.db.query('INSERT INTO workflow_steps VALUES (?, ?, ?)').run(`step_${id}`, id, 'step');
+      journal.db.query('INSERT INTO workflow_requests VALUES (?, ?, ?, ?)').run(`thr_${id}`, id, id, id);
+    }
+    const counts = () => ['threads', 'delegated_agents', 'delegation_messages', 'workflow_runs', 'workflow_steps', 'workflow_requests']
+      .map(table => (journal.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
+    // Refuse the last delete to prove earlier dependent deletes cannot commit alone.
+    journal.db.exec("CREATE TRIGGER interrupt_delete BEFORE DELETE ON threads BEGIN SELECT RAISE(ABORT, 'interrupted removal'); END");
+    expect(() => journal.deleteThreads(['thr_gone'])).toThrow('interrupted removal');
+    expect(counts()).toEqual([2, 2, 2, 2, 2, 2]);
+    journal.db.exec('DROP TRIGGER interrupt_delete');
+    journal.deleteThreads(['thr_gone']);
+    journal.close();
+    journal = new Journal(file);
+    expect(counts()).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(journal.getThread('thr_gone')).toBeNull();
+    expect(journal.getThread('thr_keep')).not.toBeNull();
+  });
+
   test('event retention deletes old events from the front and keeps the agents revision', () => {
     const now = Date.now();
     const old = now - 40 * 86_400_000;

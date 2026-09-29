@@ -274,8 +274,8 @@ export class Journal {
     return ids;
   }
 
+  /** Erase conversation history and its dependent records in one transaction, before client notifications. */
   deleteThreads(threadIds: string[]): void {
-    this.stream.forgetThreads(new Set(threadIds));
     // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
@@ -285,10 +285,16 @@ export class Journal {
         for (const id of threadIds) query.run(id);
       }
       for (const id of threadIds) {
+        this.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(id, id);
+        this.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(id, id, id);
+        this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
+        this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
+        this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
         for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
       }
     })();
+    this.stream.forgetThreads(new Set(threadIds));
   }
 
   // -- sessions -------------------------------------------------------------

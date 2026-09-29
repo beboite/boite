@@ -73,7 +73,9 @@ Nothing replays events, so they are a recent trail: a pass a minute after start
 and then daily deletes those older than 30 days, 5,000 per timer tick, keeping
 the newest agents event whose id is the agents revision. Removing a project
 deletes its threads' events with them. Deleting one conversation does the same
-for that conversation and its sub-threads, after their work stops.
+for that conversation and its sub-threads, after their work stops. Delegation
+and workflow history are erased in that same transaction; client notification
+listeners only finish in-memory cleanup.
 
 Text deltas are coalesced per thread every 16 ms before they reach a socket or
 the message. Streamed text is no event of its own: it is journaled as the
