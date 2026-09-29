@@ -71,7 +71,7 @@ passed on 2026-09-29 after grouping synchronous startup and completion writes:
 | Scheduler payloads at 64 concurrent turns | 1.19 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
 | All 1,000 turns running together, cold then already used | Cancellation in 7.8/7.7 s with the 30-second RPC deadline unchanged |
 | Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 17.0 s restart |
-| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.54 s, typing in 2.6 ms and maximum timer lag 40 ms; desktop and phone checked |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.50 s, typing in 5.8 ms and maximum timer lag 57 ms; desktop and phone checked |
 
 Background machine load was not controlled. These single runs establish
 failures and reproducible checks. They do not
