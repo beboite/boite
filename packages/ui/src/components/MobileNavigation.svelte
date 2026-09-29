@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Settings } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Search, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -13,9 +13,11 @@
   import type { ThreadSummary } from '@boite/contracts';
   import Menu from './Menu.svelte';
   import ThreadState from './ThreadState.svelte';
+  import ProjectViews from './ProjectViews.svelte';
+  import { projectKey, projectView } from '../lib/project-view.svelte';
+  import { compareThreads } from '../lib/thread-order';
 
   let { store, screen = $bindable('chat') }: { store: Store; screen: 'chat' | 'threads' | 'activity' } = $props();
-  let search = $state('');
   /** The clock the rows' times read, a minute's precision is all they show. */
   let now = $state(Date.now());
   $effect(() => {
@@ -28,6 +30,9 @@
   let several = $derived(machines.length > 1);
   let place = $derived([several ? machine?.label : null, store.connection === 'ready' ? null : strings.connection[store.connection]].filter(Boolean).join(' · '));
   let project = $derived(store.openProject ?? store.projects.find(p => p.archived !== true));
+  let groups = $derived(projectView.sorted(machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))));
+  let selected = $derived(projectView.selected(groups));
+  let draftOwner = $derived(screen === 'threads' && workspace.view === 'recent' && selected ? selected.machine.store : store);
   let entries = $derived(machines.flatMap(machine => {
     const byId = new Map(machine.store.projects.map(p => [p.id, p]));
     return machine.store.threads.filter(t => !t.archived).map(thread => ({ machine, thread, project: thread.projectId === null ? undefined : byId.get(thread.projectId) }));
@@ -35,8 +40,10 @@
   let waiting = $derived(entries.filter(e => e.thread.status === 'waiting'));
   let active = $derived(entries.filter(e => ['waiting', 'running', 'queued'].includes(e.thread.status)));
   let rows = $derived((screen === 'activity' ? active : entries)
-    .filter(e => `${e.thread.title} ${projectName(e.project)} ${e.machine.label}`.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt));
+    .filter(e => screen === 'activity' || (!e.thread.parentThreadId && !e.project?.archived && (workspace.view !== 'recent' || !selected || (e.machine.id === selected.machine.id && e.thread.projectId === selected.project.id))))
+    .sort((a, b) => screen === 'activity'
+      ? (Number(b.thread.status === 'waiting') - Number(a.thread.status === 'waiting')) || b.thread.updatedAt - a.thread.updatedAt
+      : compareThreads(a.thread, b.thread)));
   let projects = $derived([...machines.flatMap(m => m.store.projects.filter(p => p.archived !== true).map(p => ({
     id: JSON.stringify([m.id, p.id]), label: projectName(p), hint: several ? m.label : '', projectTile: { project: p, store: m.store },
     active: m.store === store && p.id === project?.id
@@ -53,7 +60,6 @@
   function show(next: typeof screen) {
     store.showChat();
     store.sidebarOpen = false;
-    search = '';
     from = next === 'chat' && screen !== 'chat' ? screen : null;
     screen = next;
   }
@@ -81,6 +87,11 @@
     await workspace.select(target.store, undefined, projectId);
     show('chat');
   }
+  async function newThread() {
+    if (screen === 'threads' && workspace.view === 'recent' && selected) await workspace.select(selected.machine.store, undefined, selected.project.id);
+    else store.startDraft(project?.id);
+    show('chat');
+  }
 </script>
 
 <header class="mobile-header" class:settings={store.page !== 'chat'} data-testid="mobile-header">
@@ -97,16 +108,16 @@
     <button class="ghost icon" data-testid="mobile-project-actions" aria-label={strings.sidebar.projectMenu}
       onclick={(event) => project && projectMenu(event, store, project)}><Ellipsis size={20} /></button>
   {/if}
-  <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!project || store.connection !== 'ready'} onclick={() => { store.startDraft(project?.id); show('chat'); }}><Plus size={21} /></button>
+  <button class="ghost icon" data-testid="mobile-new" aria-label={strings.sidebar.newThread} disabled={!groups.length || draftOwner.connection !== 'ready'} onclick={newThread}><Plus size={21} /></button>
 </header>
 
 {#if store.page === 'chat' && screen !== 'chat'}
   <section class="mobile-list" data-testid="mobile-list" aria-label={screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}>
     <div class="list-heading">
-      <h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>
-      <input type="search" bind:value={search} aria-label={strings.mobile.search} placeholder={strings.mobile.search} />
+      <div class="heading-row"><h1>{screen === 'activity' ? strings.mobile.activity : strings.mobile.threads}</h1>{#if screen === 'activity'}<button class="ghost icon" aria-label={strings.sidebar.search} onclick={() => store.paletteOpen = true}><Search size={18} /></button>{/if}</div>
+      {#if screen === 'threads'}<ProjectViews entries={groups} {store} prefix="mobile-" />{/if}
     </div>
-    {#each rows as row (`${row.machine.id}:${row.thread.id}`)}
+    {#snippet threadRow(row: typeof rows[number])}
       <div class="row">
         <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
           <span class="summary"><span class="title">{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail">{several ? `${projectName(row.project)} · ${row.machine.label}` : projectName(row.project)}</span></span>
@@ -114,9 +125,31 @@
         </button>
         <Menu items={rowItems(row.machine.store, row.thread)} onpick={(action) => rowAction(row.machine.store, row.thread, action)} label={strings.sidebar.threadMenu} placement="bottom" variant="ghost" testid="mobile-thread-menu-{row.thread.id}"><Ellipsis size={18} /></Menu>
       </div>
+    {/snippet}
+    {#if screen === 'threads' && workspace.view === 'projects'}
+      {#each groups as group (projectKey(group))}
+        <section data-testid="mobile-project-group" data-project-id={group.project.id} data-machine-id={group.machine.id}>
+          <div class="project-heading">
+            <h2>{projectName(group.project)}{#if several}<span>{group.machine.label}</span>{/if}</h2>
+            {#if projectView.order === 'manual'}
+              <Menu items={[
+                { id: 'up', label: strings.sidebar.moveProjectUp, disabled: projectKey(groups[0]!) === projectKey(group) },
+                { id: 'down', label: strings.sidebar.moveProjectDown, disabled: projectKey(groups[groups.length - 1]!) === projectKey(group) }
+              ]} onpick={action => projectView.step(groups, projectKey(group), action === 'up' ? -1 : 1)} label={strings.sidebar.customOrder} placement="bottom" variant="ghost" testid="mobile-project-order"><Ellipsis size={18} /></Menu>
+            {/if}
+          </div>
+          {#each rows.filter(row => row.machine.id === group.machine.id && row.thread.projectId === group.project.id) as row (row.thread.id)}
+            {@render threadRow(row)}
+          {:else}<p class="empty">{strings.sidebar.noThreads}</p>{/each}
+        </section>
+      {/each}
+      {#each rows.filter(row => row.thread.projectId === null) as row (`${row.machine.id}:${row.thread.id}`)}{@render threadRow(row)}{/each}
     {:else}
+      {#each rows as row (`${row.machine.id}:${row.thread.id}`)}{@render threadRow(row)}{/each}
+    {/if}
+    {#if rows.length === 0 && (screen === 'activity' || workspace.view === 'recent' || groups.length === 0)}
       <p class="empty">{screen === 'activity' ? strings.mobile.noActivity : strings.mobile.noThreads}</p>
-    {/each}
+    {/if}
   </section>
 {/if}
 
@@ -139,9 +172,12 @@
     .identity :global(.trigger) { min-height: var(--touch-target); margin-block: -13px -6px; }
     .mobile-list { display: block; position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--color-background); padding: 8px max(12px, env(safe-area-inset-right)) 20px max(12px, env(safe-area-inset-left)); }
     .list-heading { padding: 14px 4px; }
+    .heading-row { display: flex; align-items: center; justify-content: space-between; }
     h1 { font-size: var(--text-lg); margin: 0; }
     p { font-size: var(--text-sm); }
-    input { width: 100%; }
+    .project-heading { display: flex; align-items: center; padding: 10px 12px 0; gap: 8px; }
+    .project-heading h2 { flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+    .project-heading span { display: block; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
     .row { display: flex; align-items: center; border-bottom: 1px solid var(--color-border); }
     .row :global(.menu) { flex: none; }
     .thread { display: flex; flex: 1; min-width: 0; gap: 12px; align-items: center; min-height: 76px; height: auto; text-align: left; border-radius: var(--radius-md); padding: 14px 12px; }

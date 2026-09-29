@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, Copy, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -10,10 +10,19 @@ import { fill, strings } from './strings';
 import { projectName } from './format';
 import { undo } from './undo.svelte';
 
-export function projectMenu(event: MouseEvent, owner: Store, project: Project) {
+export function projectMenu(event: MouseEvent, owner: Store, project: Project, reorder?: {
+  up: boolean;
+  down: boolean;
+  move: (direction: -1 | 1) => void;
+}) {
   const management: MenuItem[] = [
     { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft },
     separator('back-sep'),
+    ...(reorder ? [
+      { id: 'move-up', label: strings.sidebar.moveProjectUp, glyph: ArrowUp, disabled: !reorder.up },
+      { id: 'move-down', label: strings.sidebar.moveProjectDown, glyph: ArrowDown, disabled: !reorder.down },
+      separator('order-sep')
+    ] : []),
     ...(owner.owner
       ? [
           ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession, glyph: Import }] : []),
@@ -29,7 +38,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project) {
     { id: 'new', label: strings.sidebar.newThread, glyph: Plus },
     { id: 'copy', label: strings.sidebar.copyPath, title: project.path, glyph: Copy },
     { id: 'archived', label: strings.sidebar.viewArchivedThreads, glyph: History },
-    ...(owner.owner || project.kind !== 'drafts'
+    ...(owner.owner || project.kind !== 'drafts' || reorder
       ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›' }]
       : [])
   ];
@@ -39,6 +48,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project) {
     async function pick(action) {
       if (action === 'manage') return contextMenu.follow(management, pick);
       if (action === 'back') return contextMenu.follow(main, pick);
+      if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
       if (action === 'new') await workspace.select(owner, undefined, project.id);
       if (action === 'copy') await owner.copy(project.path);
       if (action === 'archived') {

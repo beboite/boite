@@ -106,15 +106,25 @@ network reachability and TLS configuration belong to the host deployment.
 
 ## Two views
 
-Projects is the default. Every connected machine's projects appear together,
-with pinned threads first inside each project. Recent flattens the list and
-sorts it by the most recent accepted user message. Assistant output, generated
-titles, pins and load events do not move a thread in Recent. Threads without
-a user message use their creation time. The view is remembered on this device.
+Projects is the default. Projects appear by recent user activity, using the
+latest accepted user message among their visible threads, or creation time
+when no message exists. Assistant output and title changes leave that order
+alone. Click Projects again to switch to Custom order, then drag project
+headers to rearrange them. Their menus also offer Move project up and Move
+project down, including on a phone. Switching back to recent activity keeps
+the saved custom arrangement. The view and custom order belong to this device.
 
-All machines can be narrowed to one machine from the filter button beside Settings at the bottom of the sidebar. Search
-matches thread titles, project names and machine names. The command palette and
-the draft's project picker also include every connected host.
+Recent flattens the list. Its All projects picker can limit conversations and
+drafts to one project on one machine. The new-conversation button and Ctrl+N
+then create a draft in that project. An archived or removed selection falls
+back to All projects. Inside projects and in Recent, pinned threads come
+first, followed by threads needing attention and then recent user messages.
+
+All machines can be narrowed to one machine from the filter button beside
+Settings at the bottom of the sidebar. The search icon opens the command
+palette, also available with Ctrl+K, without a permanent search field.
+It matches thread titles, project names and machine names across connected
+hosts. The draft's project picker also includes every connected host.
 
 Cards have a title row and a second row for the project and machine icon. The
 machine name remains in the tooltip and accessible label. An associated PR
@@ -155,3 +165,5 @@ all hosts continue receiving summaries. Driver protocols remain unchanged.
 restart, reload and disconnect. Its fake fixture deliberately reuses thread and
 project IDs on two hosts and produces desktop and phone captures. Core tests
 cover user-message timestamps, origin validation and PR metadata parsing.
+`tests/e2e/project-views.test.ts` checks project filtering, draft routing,
+recent and custom ordering, drag and menu moves, reloads and phone layouts.

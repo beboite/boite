@@ -164,7 +164,7 @@ test('in forced colors a focused text field still shows where the keyboard is', 
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   try {
     await page.navigate(`${origin}/?fake=1&open=recent`);
-    await page.waitFor(`document.querySelector('${id('composer-input')}') && document.querySelector('${id('sidebar-search')}')`);
+    await page.waitFor(`document.querySelector('${id('composer-input')}') && document.querySelector('${id('sidebar-search-open')}')`);
     // A key first, so the focus that follows reads as the keyboard's.
     const ring = async (name: string) => {
       await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
@@ -177,7 +177,9 @@ test('in forced colors a focused text field still shows where the keyboard is', 
       })()`);
     };
     const composer = await ring('composer-input');
-    const search = await ring('sidebar-search');
+    await page.click(id('sidebar-search-open'));
+    await page.waitFor(`document.querySelector('${id('palette-input')}')`);
+    const search = await ring('palette-input');
     await capture('readability-forced-focus');
     expect(composer).toMatch(/^solid [1-9]/);
     expect(search).toMatch(/^solid [1-9]/);

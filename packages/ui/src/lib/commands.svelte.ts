@@ -10,6 +10,7 @@ import { archiveThread, reopenLastArchived } from './archive';
 import { lastAnswer } from './message-display';
 import { sidebarRows } from './sidebar-rows.svelte';
 import { workspace } from './workspace.svelte';
+import { projectView } from './project-view.svelte';
 import { experimentOn } from './experiments.svelte';
 import { openTour } from './onboarding.svelte';
 import type { PaletteItem } from './palette';
@@ -150,7 +151,12 @@ export function runCommand(store: Store, id: string, inShell: boolean): void {
   // too: these five are the owner's, whatever key was pressed.
   if (!store.owner && OWNER_COMMANDS.has(id)) return;
   switch (id) {
-    case 'new-thread': store.showChat(); store.startDraft(); break;
+    case 'new-thread': {
+      const selected = workspace.view === 'recent' ? projectView.selected(workspace.machines.flatMap(machine => machine.store.projects.filter(project => !project.archived).map(project => ({ machine, project })))) : undefined;
+      if (selected) void workspace.select(selected.machine.store, undefined, selected.project.id);
+      else { store.showChat(); store.startDraft(); }
+      break;
+    }
     case 'palette': store.paletteOpen = !store.paletteOpen; break;
     case 'add-project':
       store.projectPickerOpen = true;

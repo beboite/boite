@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, ChevronRight, Ellipsis, Folder, List, LoaderCircle, Plus, Search, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -14,6 +14,8 @@
   import { sidebarRows } from '../lib/sidebar-rows.svelte';
   import { projectMenu } from '../lib/project-menu';
   import { work } from '../lib/work-prefs.svelte';
+  import { PROJECT_DRAG_TYPE, projectKey, projectView } from '../lib/project-view.svelte';
+  import ProjectViews from './ProjectViews.svelte';
   import ArchivedDrawer from './ArchivedDrawer.svelte';
   import ArchivedProjects from './ArchivedProjects.svelte';
   import LimitsGlance from './LimitsGlance.svelte';
@@ -35,24 +37,20 @@
   /** A filter on a machine that has since gone filters nothing, so the list never empties itself. */
   let shownFilter = $derived(machines.some((m) => m.id === filter) ? filter : null);
   let visible = $derived(machines.filter((m) => shownFilter === null || m.id === shownFilter));
-  let needle = $derived(store.search.trim().toLowerCase());
   let all = $derived(visible.flatMap((machine) => machine.store.projects.map((project) => ({ machine, project }))));
   /** An archived project leaves the list for the fold under it; its threads keep running. */
-  let groups = $derived(all.filter(({ project }) => project.archived !== true));
+  let groups = $derived(projectView.sorted(all.filter(({ project }) => project.archived !== true)));
   let shelved = $derived(all.filter(({ project }) => project.archived === true));
+  let selected = $derived(projectView.selected(groups));
+  let recentGroups = $derived(selected ? [selected] : groups);
   let recent = $derived(
-    groups
+    recentGroups
       .flatMap(({ machine, project }) =>
         machine.store
           .threadsOf(project.id)
-          .filter((thread) => `${thread.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
           .map((thread) => ({ machine, project, thread }))
       )
       .sort((a, b) => compareThreads(a.thread, b.thread))
-  );
-  let target = $derived(store.openProject ?? store.projects.find((p) => p.archived !== true));
-  let newLabel = $derived(
-    target ? fill(strings.sidebar.newThreadIn, { project: projectName(target) }) : strings.sidebar.newThread
   );
   // Alt+1 to Alt+9 count the rows as drawn: this view, open projects only.
   $effect(() => {
@@ -63,7 +61,7 @@
             ? []
             : machine.store
                 .threadsOf(project.id)
-                .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
+                .slice()
                 .sort(compareThreads)
                 .map((thread) => ({ store: machine.store, threadId: thread.id }))
         )
@@ -76,9 +74,33 @@
   function addProject() {
     store.projectPickerOpen = true;
   }
+  function openProjectMenu(event: MouseEvent, machine: Machine, project: Project) {
+    const key = projectKey({ machine, project });
+    projectMenu(event, machine.store, project, projectView.order === 'manual' ? {
+      up: groups[0] !== undefined && projectKey(groups[0]) !== key,
+      down: groups.at(-1) !== undefined && projectKey(groups.at(-1)!) !== key,
+      move: direction => projectView.step(groups, key, direction)
+    } : undefined);
+  }
   /** The project a dragged thread row hovers, drawn with the accent outline; only another project of the row's machine takes it. */
   let dropOver = $state<string | null>(null);
+  let draggedProject = $state<string | null>(null);
+  let dropAfter = $state(false);
+  function dragProject(event: DragEvent, machine: Machine, project: Project) {
+    if (projectView.order !== 'manual' || !event.dataTransfer) { event.preventDefault(); return; }
+    draggedProject = projectKey({ machine, project });
+    event.dataTransfer.setData(PROJECT_DRAG_TYPE, draggedProject);
+    event.dataTransfer.effectAllowed = 'move';
+  }
   function dragOver(event: DragEvent, machine: Machine, project: Project, key: string) {
+    if (draggedProject && event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      dropOver = key;
+      const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      dropAfter = event.clientY > bounds.top + bounds.height / 2;
+      return;
+    }
     if (!event.dataTransfer?.types.includes(THREAD_DRAG_TYPE) || !takesDrop(threadDrag.current, machine.id, project.id)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -90,6 +112,13 @@
     if (dropOver === key) dropOver = null;
   }
   function drop(event: DragEvent, machine: Machine, project: Project) {
+    if (draggedProject && event.dataTransfer?.types.includes(PROJECT_DRAG_TYPE)) {
+      event.preventDefault();
+      projectView.move(groups, draggedProject, projectKey({ machine, project }), dropAfter);
+      draggedProject = null;
+      dropOver = null;
+      return;
+    }
     const drag = threadDrag.current;
     dropOver = null;
     threadDrag.current = null;
@@ -124,54 +153,18 @@
   style:--sidebar-width={`${store.sidebarWidth}px`}
   data-testid="sidebar"
 >
-  {#if groups.length > 0}
-    <div class="top">
-      <label class="search"
-        ><Search size={15} /><input
-          bind:value={store.search}
-          placeholder={strings.sidebar.search}
-          aria-label={strings.sidebar.search}
-          data-testid="sidebar-search"
-          spellcheck="false"
-        /></label
-      >
-      <button
-        class="icon"
-        title={`${newLabel}${store.keyHint('new-thread')}`}
-        aria-label={newLabel}
-        data-testid="new-thread"
-        onclick={() => store.startDraft()}><Plus size={16} /></button
-      >
-    </div>
-  {/if}
-  <div class="views" aria-label={strings.sidebar.search}>
-    <button
-      class="ghost small"
-      class:chosen={workspace.view === 'projects'}
-      aria-pressed={workspace.view === 'projects'}
-      data-testid="view-projects"
-      onclick={() => workspace.setView('projects')}><Folder size={13} />{strings.machines.projects}</button
-    >
-    <button
-      class="ghost small"
-      class:chosen={workspace.view === 'recent'}
-      aria-pressed={workspace.view === 'recent'}
-      title={strings.machines.recentHint}
-      data-testid="view-recent"
-      onclick={() => workspace.setView('recent')}><List size={14} />{strings.machines.recent}</button
-    >
-  </div>
+  <div class="views"><ProjectViews entries={groups} {store} /></div>
   <div class="scroll">
     {#if groups.length === 0}<p class="empty">{strings.sidebar.noProjects}</p>{/if}
     {#if workspace.view === 'recent'}
       {#each visible as machine (machine.id)}
-        {#each machine.store.draftEntries as entry (entry.projectId)}
+        {#each machine.store.draftEntries.filter(entry => !selected || (selected.machine.id === machine.id && selected.project.id === entry.projectId)) as entry (entry.projectId)}
           <DraftRow owner={machine.store} {entry} />
         {/each}
       {/each}
-      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} showProject={groups.length > 1} showMachine={multi} />{/each}
+      {#each recent as entry (`${entry.machine.id}:${entry.thread.id}`)}<ThreadCard {...entry} {now} showProject={recentGroups.length > 1} showMachine={multi} />{/each}
       {#if groups.length > 0 && recent.length === 0}<p class="none">
-          {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
+          {strings.sidebar.noThreads}
         </p>{/if}
     {:else}
       {#each visible as machine (machine.id)}
@@ -183,7 +176,7 @@
         {@const owner = machine.store}
         {@const threads = owner
           .threadsOf(project.id)
-          .filter((t) => `${t.title} ${projectName(project)} ${machine.label}`.toLowerCase().includes(needle))
+          .slice()
           .sort(compareThreads)}
         {@const collapsed = owner.isCollapsed(project.id)}
         {@const rollup = collapsed ? projectRollup(owner.threadsOf(project.id)) : null}
@@ -192,6 +185,8 @@
         <section
           class="project"
           class:drop={dropOver === dropKey}
+          class:reordering={dropOver === dropKey && draggedProject !== null}
+          class:after={dropAfter}
           data-testid="project"
           data-project-id={project.id}
           data-machine-id={machine.id}
@@ -201,16 +196,19 @@
           ondrop={(event) => drop(event, machine, project)}
         >
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="head" oncontextmenu={(e) => projectMenu(e, owner, project)}>
+          <div class="head" oncontextmenu={(e) => openProjectMenu(e, machine, project)}>
             <button
               class="ghost toggle"
               data-testid="project-row"
               data-project-id={project.id}
+              draggable={projectView.order === 'manual'}
+              ondragstart={(event) => dragProject(event, machine, project)}
+              ondragend={() => { draggedProject = null; dropOver = null; }}
               aria-expanded={!collapsed}
               title={multi ? `${project.path} · ${machine.label}` : project.path}
               onclick={() => owner.toggleProject(project.id)}
             >
-              <span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
+              {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
               /><span class="name">{projectName(project)}</span
               >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
@@ -222,7 +220,7 @@
               data-testid="project-menu"
               title={strings.sidebar.projectMenu}
               aria-label={strings.sidebar.projectMenu}
-              onclick={(e) => projectMenu(e, owner, project)}><Ellipsis size={15} /></button
+              onclick={(e) => openProjectMenu(e, machine, project)}><Ellipsis size={15} /></button
             >
           </div>
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
@@ -230,7 +228,7 @@
               {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
               {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={multi} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
-                  {needle ? strings.sidebar.noMatch : strings.sidebar.noThreads}
+                  {strings.sidebar.noThreads}
                 </p>{/if}
               <ArchivedDrawer store={owner} {project} />
             </div>
@@ -241,7 +239,7 @@
     {/if}
   </div>
   <div class="foot">
-    <MachineStatus {store} filter={shownFilter} onfilter={id => (filter = id)} />
+    <MachineStatus {store} filter={shownFilter} onfilter={id => { if (id && selected && selected.machine.id !== id) projectView.pick('all'); filter = id; }} />
     {#if store.owner && work.shows('sidebar.add-project')}
       <button class="ghost icon" data-testid="add-project" bind:this={projectButton} onclick={addProject}
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
@@ -288,56 +286,7 @@
     min-height: 0;
   }
 
-  .top {
-    display: flex;
-    gap: 6px;
-    padding: 8px 10px;
-  }
-  .search {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    height: var(--control);
-    padding: 0 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-2);
-    color: var(--color-subtle);
-  }
-  .search:focus-within {
-    border-color: var(--color-edge);
-  }
-  .search input {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    font-size: var(--text-sm);
-  }
-  .search input:focus {
-    outline: none;
-  }
-  /* The two rules of the sidebar stop short of its edges: on the
-     frame a full-width line would run into the window's edge. */
-  .views {
-    display: flex;
-    gap: 3px;
-    margin: 0 10px;
-    padding: 2px 0 10px;
-    border-bottom: 1px solid var(--color-border);
-  }
-  .views button {
-    flex: 1;
-    color: var(--color-muted-foreground);
-  }
-  .views .chosen {
-    background: var(--color-active);
-    color: var(--color-foreground);
-  }
+  .views { margin: 0 10px; }
   .scroll {
     flex: 1;
     min-height: 0;
@@ -356,6 +305,9 @@
     border-color: var(--color-accent);
     background: var(--color-accent-soft);
   }
+  .project.reordering { box-shadow: inset 0 2px var(--color-accent); }
+  .project.reordering.after { box-shadow: inset 0 -2px var(--color-accent); }
+  .toggle[draggable='true'] { cursor: grab; }
   .head {
     display: flex;
     align-items: center;

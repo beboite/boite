@@ -393,6 +393,13 @@ export const strings = {
   },
 
   sidebar: {
+    allProjects: 'All projects',
+    filterProject: 'Filter by project',
+    recentOrder: 'Recent activity',
+    customOrder: 'Custom order',
+    toggleOrder: 'Click again to switch project order',
+    moveProjectUp: 'Move project up',
+    moveProjectDown: 'Move project down',
     search: 'Search threads',
     newThread: 'New thread',
     newThreadIn: 'New thread in {project}',
