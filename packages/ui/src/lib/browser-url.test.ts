@@ -7,6 +7,7 @@ test('addresses distinguish local dev servers, public hosts and search queries',
   expect(normalizeUrl('[::1]:8080')).toBe('http://[::1]:8080/');
   expect(normalizeUrl('example.com/path')).toBe('https://example.com/path');
   expect(normalizeUrl('how to write svelte')).toBe('https://www.google.com/search?q=how%20to%20write%20svelte');
+  expect(normalizeUrl('error: cannot find module')).toBe('https://www.google.com/search?q=error%3A%20cannot%20find%20module');
   expect(normalizeUrl('https://example.com/a?q=1#test')).toBe('https://example.com/a?q=1#test');
 });
 

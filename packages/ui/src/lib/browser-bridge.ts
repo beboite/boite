@@ -59,7 +59,7 @@ export function normalizeUrl(input: string): string | null {
   if (text === '') return null;
   const local = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
   const host = /^(?:[\w-]+\.)+[\w-]+(?::\d+)?(?:[/?#]|$)/.test(text);
-  const scheme = /^[a-z][a-z0-9+.-]*:/i.test(text);
+  const scheme = /^[a-z][a-z0-9+.-]*:\S*$/i.test(text);
   const candidate = local ? `http://${text}` : host ? `https://${text}` : scheme ? text : null;
   if (candidate === null) return `https://www.google.com/search?q=${encodeURIComponent(text)}`;
   try {

@@ -23,6 +23,8 @@ pub struct HoverState {
     /// Whether the popup is open: set by `show`, cleared by `hide` and when the
     /// window goes away. A hover while it is open leaves it exactly as it is.
     open: AtomicBool,
+    /// Placement must finish before resize events use the window's current monitor.
+    placing: AtomicBool,
     /// Counts every opening, so a release planned at a hide knows whether the
     /// popup was opened again since.
     opened: AtomicU64,
@@ -53,6 +55,7 @@ impl HoverState {
     /// replays the page's opening.
     fn opening(&self) -> bool {
         if self.open.swap(true, Ordering::AcqRel) { return false; }
+        self.placing.store(true, Ordering::Release);
         self.opened.fetch_add(1, Ordering::AcqRel);
         true
     }
@@ -182,7 +185,10 @@ fn build_popup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>
     window.on_window_event(move |event| {
         // Moving to another DPI can resize the native frame after present() placed it.
         if matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Moved(_)) {
-            if let Some(popup) = handle.get_webview_window(LABEL) {
+            let state = handle.state::<HoverState>();
+            if state.placing.load(Ordering::Acquire) || !state.open.load(Ordering::Acquire) { return; }
+            // Hidden test shells still exercise the requested popup's native geometry.
+            if let Some(popup) = handle.get_webview_window(LABEL).filter(|popup| crate::window::hidden() || popup.is_visible().unwrap_or(false)) {
                 if let Err(error) = keep_inside(&popup) { eprintln!("[shell] the quota window placement failed: {error}"); }
             }
         }
@@ -223,6 +229,7 @@ pub fn show<R: Runtime>(app: &AppHandle<R>, point: PhysicalPosition<f64>) -> tau
     forget_a_closed_window(app);
     if !state.opening() { return Ok(()); }
     let shown = present(app, point);
+    state.placing.store(false, Ordering::Release);
     match shown {
         Err(_) => state.closed(),
         // A test shell never shows the window, and the pointer is the user's.
