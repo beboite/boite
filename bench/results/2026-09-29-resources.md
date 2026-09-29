@@ -281,20 +281,28 @@ The deferred-import cancellation extension failed without its post-import
 stop check, then passed after restoration; the original slow-read protection
 and stage-error recovery assertions remain.
 
+At `ced5379f`, the base's question-card Enter behavior adds 118 bytes to both
+UI measurements: the entry is 519,144 bytes and the whole UI is 3,359,955.
+The production build passed; QuestionCard and both settings-sync suites passed
+all 20 targeted tests in 7.19 seconds. The additional `ui.test.ts` end-to-end
+run passed 21 tests and 150 assertions in 24.97 seconds. Its question desktop
+capture and Markdown desktop/phone captures were opened after regeneration.
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero
   errors and warnings.
 - `bun run --cwd packages/core test`: 1,283 passed, 22 skipped, zero failed;
   all 129 files ran in fresh Bun processes, four at once, in 153.65 seconds.
-- `bun run --cwd packages/ui test --maxWorkers=4`: 1,018 tests passed in 144 files,
-  in 119.83 seconds with four workers.
+- `bun run --cwd packages/ui test --maxWorkers=4` at `4f458c4c`: 1,018 tests passed
+  in 144 files in 119.83 seconds with four workers; the subsequent base
+  integration's affected paths were checked separately as recorded above.
 - `NODE_ENV=production bun run build:ui`: production UI build passed.
 - `BOITE_E2E_PREBUILT_UI=1 bun test tests/e2e/settings.test.ts
   tests/e2e/machines.test.ts tests/e2e/app-updates.test.ts
   tests/e2e/core-update.test.ts tests/e2e/delegation.test.ts
   tests/e2e/native-agents.test.ts --parallel=1 --timeout 60000`:
-  25 tests passed in six files in 126.75 seconds, covering real RPC, reload,
+  25 tests passed at `4f458c4c` in six files in 126.75 seconds, covering real RPC, reload,
   settings cancellation, update shutdown, delegation and phone interaction.
 - Opened `tests/e2e/.artifacts/delegation-desktop.png` and
   `tests/e2e/.artifacts/delegation-phone.png`, plus both native-agent captures:
