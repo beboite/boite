@@ -228,7 +228,7 @@
   /* Four pixels of card around every line: the rows and the toggle carry their
      own inline padding, so a hover fill sits inset by the same four pixels on
      every side and the air above the first line equals the air under the last. */
-  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */

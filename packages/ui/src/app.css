@@ -219,6 +219,13 @@
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-frame: 0 3px 8px rgb(0 0 0 / 0.24);
 
+  /* The composer and its activity dock share a translucent fill and top reflection. */
+  --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
+  --color-activity-surface: color-mix(in oklab, var(--color-surface) 82%, transparent);
+  --color-composer-focus: color-mix(in srgb, var(--color-foreground) 24%, transparent);
+  --composer-glaze: linear-gradient(145deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.012) 48%, transparent);
+  --shadow-composer: 0 6px 20px rgb(0 0 0 / 0.24), inset 0 1px 0 rgb(255 255 255 / 0.06);
+
   --font-fallback: ui-sans-serif, system-ui, 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
   --font-mono-fallback: 'Cascadia Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
   /* Every face Settings, Appearance offers, one stack each: the pick swaps
@@ -339,6 +346,8 @@ html[data-chat-width='full'] {
   --shadow-e2: 0 8px 24px rgb(0 0 0 / 0.12), 0 0 0 1px rgb(0 0 0 / 0.06);
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.18), 0 0 0 1px rgb(0 0 0 / 0.08);
   --shadow-frame: 0 2px 6px rgb(0 0 0 / 0.07);
+  --composer-glaze: linear-gradient(145deg, rgb(255 255 255 / 0.7), rgb(255 255 255 / 0.18) 48%, transparent);
+  --shadow-composer: 0 6px 20px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.8);
   color-scheme: light;
 }
 
@@ -1168,8 +1177,7 @@ html[data-theme='grain'] body::after {
 }
 
 html[data-theme='grain'] .composer {
-  background: color-mix(in oklab, var(--color-surface-2) 62%, transparent);
-  backdrop-filter: blur(12px) saturate(1.14);
+  --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 62%, transparent);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1222,8 +1230,7 @@ html[data-glass] #app {
 }
 
 html[data-glass] .composer {
-  background: color-mix(in oklab, var(--color-surface-2) 70%, transparent);
-  backdrop-filter: blur(12px) saturate(1.14);
+  --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 70%, transparent);
 }
 
 /* Keyframes shared by the components. */
