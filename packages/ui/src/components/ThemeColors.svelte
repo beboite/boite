@@ -204,11 +204,12 @@
     .editor, .editor.customizing { grid-template-columns: minmax(0, 1fr); gap: 16px; }
     .selection { align-items: start; flex-direction: column; }
     .customize { min-height: var(--touch-target); }
+    .preview-rail { width: var(--touch-target); min-width: var(--touch-target); }
+    .preview-chat button { min-height: var(--touch-target); }
     .role-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .role { gap: 8px; padding: 6px; }
     .swatches { grid-column: 1 / -1; gap: 16px; padding: 12px 8px; }
-    .swatch { position: relative; }
-    .swatch::before { content: ''; position: absolute; inset: -11px; border-radius: 50%; }
+    .swatch { width: var(--touch-target); height: var(--touch-target); }
     .contrast .mode { margin-left: 0; flex-basis: 100%; }
     .actions button { min-height: var(--touch-target); }
   }

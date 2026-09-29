@@ -381,6 +381,7 @@ test('every phone control on the chat, the panel, the list and Appearance takes 
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
     await page.click('[data-testid=colors-customize]');
     await page.waitFor(`document.querySelector('[data-accent-swatch]')`);
+    await page.evaluate(`document.querySelector('[data-accent-swatch]').scrollIntoView({block:'center'})`);
     await capture('mobile-theme-controls-touch.png');
     expect(await page.evaluate<string[]>(smallTargets)).toEqual([]);
   } finally {
