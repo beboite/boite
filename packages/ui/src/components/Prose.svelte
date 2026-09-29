@@ -140,7 +140,8 @@
     font-size: var(--text-sm);
     padding: 1px 5px;
     border-radius: var(--radius-sm);
-    background: var(--color-surface-2);
+    background: var(--color-code-background);
+    color: var(--color-code-foreground);
     border: 1px solid var(--color-border);
   }
 
@@ -148,7 +149,8 @@
     margin: 6px 0 10px;
     padding: 10px 12px;
     border-radius: var(--radius-md);
-    background: var(--color-surface-2);
+    background: var(--color-code-background);
+    color: var(--color-code-foreground);
     border: 1px solid var(--color-border);
     overflow: auto;
   }

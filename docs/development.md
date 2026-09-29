@@ -795,6 +795,34 @@ These disclosures share the activity spacing tokens in `app.css`: 4 px row
 padding, an 8 px icon gap, 30 px desktop rows and 44 px phone touch targets.
 Text blocks stay 12 px away from activity rows.
 
+### Theme colours
+
+Settings, Appearance offers Original, OLED, Catppuccin (Mocha/Latte), Tokyo Night
+(Night/Day), Nord, Gruvbox and Amethyst as a list of named buttons.
+OLED switches to dark appearance
+and uses pure black for the conversation, sidebar and code background.
+Choose Customize colours to reveal five editable colours:
+background, sidebar and frame, panels and messages, text, and accent. Click a
+colour row to edit it with the colour field, hue slider
+or hex input. The field supports touch and arrow keys; Shift takes larger steps.
+Undo restores the colours before the current edit. Reset returns the active
+appearance to its original palette.
+
+Light and dark palettes are stored separately on this device under
+`boite.theme-colors.v1`. System follows the operating system and selects the
+matching palette; Grain uses the dark colours. Secondary text and borders are
+part of each preset; editing a main colour makes its dependent colours follow
+automatically. Low text contrast offers a correction, measured
+against the solid surfaces. Window transparency can change that contrast.
+Vite generates the prepaint script from the same validation and colour math
+as the runtime, so reloads restore the colours before the UI mounts.
+Community palette sources and license notices ship in
+`packages/ui/public/theme-licenses.txt`.
+
+`bun test tests/e2e/theme-colors.test.ts` exercises palette selection, custom
+colours, reloads, separate appearances, contrast correction, undo and phone
+controls. It writes desktop and phone captures under `tests/e2e/.artifacts/`.
+
 ### Faces and zoom
 
 Settings, Appearance, Reading picks the text face and the code face for this

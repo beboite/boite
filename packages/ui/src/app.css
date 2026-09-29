@@ -154,6 +154,8 @@
 }
 
 :root {
+  --color-code-background: var(--color-surface-2);
+  --color-code-foreground: var(--color-foreground);
   --color-background: #101013;
   /* The window's frame: title bar and rails on one grey, the work
      inset in cards of the page colour with an edge that reads. */
@@ -178,6 +180,9 @@
   --color-accent-ink: #101013;
   --color-reasoning: var(--color-accent);
   --accent-spectrum: linear-gradient(to right, oklch(68% .19 0), oklch(68% .19 60), oklch(68% .19 120), oklch(68% .19 180), oklch(68% .19 240), oklch(68% .19 300), oklch(68% .19 360));
+  --picker-white: #ffffff;
+  --picker-black: #000000;
+  --picker-hues: linear-gradient(to right, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
   --color-reasoning-on: #ffffff;
   --color-live: #eab308;
   --color-success: #4ade80;
@@ -293,6 +298,275 @@
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 
   color-scheme: dark;
+}
+
+/* Theme families own their surface hierarchy, selection, code and status colours.
+ * Community palettes are adapted for Boite's panels and readable UI text.
+ * Sources and redistribution notices: public/theme-licenses.txt.
+ */
+:root {
+  --palette-dark-default-background: #101013;
+  --palette-dark-default-frame: #1a1a1d;
+  --palette-dark-default-surface: #1b1b1f;
+  --palette-dark-default-foreground: #ececf1;
+  --palette-light-default-background: #f3f3f6;
+  --palette-light-default-frame: #e7e7ec;
+  --palette-light-default-surface: #ffffff;
+  --palette-light-default-foreground: #1c1c21;
+  --palette-grain-theme-color: #1a1a1e;
+
+  /* dark-oled */
+  --palette-dark-oled-background: #000000;
+  --palette-dark-oled-frame: #000000;
+  --palette-dark-oled-surface: #0b0b0f;
+  --palette-dark-oled-foreground: #e6e7eb;
+  --palette-dark-oled-accent: #8cbcff;
+  --palette-dark-oled-surface-low: #000000;
+  --palette-dark-oled-surface-high: #15151a;
+  --palette-dark-oled-muted-foreground: #adb0ba;
+  --palette-dark-oled-subtle: #878b96;
+  --palette-dark-oled-border: #232329;
+  --palette-dark-oled-edge: #363640;
+  --palette-dark-oled-frame-edge: #232329;
+  --palette-dark-oled-hover: #16161d;
+  --palette-dark-oled-active: #232331;
+  --palette-dark-oled-selection: #26384f;
+  --palette-dark-oled-accent-soft: #15273f;
+  --palette-dark-oled-code-background: #000000;
+  --palette-dark-oled-code-foreground: #e6e7eb;
+  --palette-dark-oled-success: #8fccb0;
+  --palette-dark-oled-danger: #f09aab;
+  --palette-dark-oled-live: #e1c18b;
+
+  /* dark-catppuccin */
+  --palette-dark-catppuccin-background: #1e1e2e;
+  --palette-dark-catppuccin-frame: #11111b;
+  --palette-dark-catppuccin-surface: #181825;
+  --palette-dark-catppuccin-foreground: #cdd6f4;
+  --palette-dark-catppuccin-accent: #cba6f7;
+  --palette-dark-catppuccin-surface-low: #181825;
+  --palette-dark-catppuccin-surface-high: #313244;
+  --palette-dark-catppuccin-muted-foreground: #bac2de;
+  --palette-dark-catppuccin-subtle: #a6adc8;
+  --palette-dark-catppuccin-border: #313244;
+  --palette-dark-catppuccin-edge: #45475a;
+  --palette-dark-catppuccin-frame-edge: #313244;
+  --palette-dark-catppuccin-hover: #313244;
+  --palette-dark-catppuccin-active: #45475a;
+  --palette-dark-catppuccin-selection: #45475a;
+  --palette-dark-catppuccin-accent-soft: #313047;
+  --palette-dark-catppuccin-code-background: #11111b;
+  --palette-dark-catppuccin-code-foreground: #cdd6f4;
+  --palette-dark-catppuccin-success: #a6e3a1;
+  --palette-dark-catppuccin-danger: #f38ba8;
+  --palette-dark-catppuccin-live: #f9e2af;
+
+  /* light-catppuccin */
+  --palette-light-catppuccin-background: #eff1f5;
+  --palette-light-catppuccin-frame: #dce0e8;
+  --palette-light-catppuccin-surface: #ffffff;
+  --palette-light-catppuccin-foreground: #4c4f69;
+  --palette-light-catppuccin-accent: #8839ef;
+  --palette-light-catppuccin-surface-low: #e6e9ef;
+  --palette-light-catppuccin-surface-high: #ccd0da;
+  --palette-light-catppuccin-muted-foreground: #5c5f77;
+  --palette-light-catppuccin-subtle: #6c6f85;
+  --palette-light-catppuccin-border: #ccd0da;
+  --palette-light-catppuccin-edge: #bcc0cc;
+  --palette-light-catppuccin-frame-edge: #ccd0da;
+  --palette-light-catppuccin-hover: #e6e9ef;
+  --palette-light-catppuccin-active: #ccd0da;
+  --palette-light-catppuccin-selection: #bcc0cc;
+  --palette-light-catppuccin-accent-soft: #e6def5;
+  --palette-light-catppuccin-code-background: #e6e9ef;
+  --palette-light-catppuccin-code-foreground: #4c4f69;
+  --palette-light-catppuccin-success: #40a02b;
+  --palette-light-catppuccin-danger: #d20f39;
+  --palette-light-catppuccin-live: #df8e1d;
+
+  /* dark-tokyo-night */
+  --palette-dark-tokyo-night-background: #1a1b26;
+  --palette-dark-tokyo-night-frame: #16161e;
+  --palette-dark-tokyo-night-surface: #1f2335;
+  --palette-dark-tokyo-night-foreground: #c0caf5;
+  --palette-dark-tokyo-night-accent: #7aa2f7;
+  --palette-dark-tokyo-night-surface-low: #16161e;
+  --palette-dark-tokyo-night-surface-high: #24283b;
+  --palette-dark-tokyo-night-muted-foreground: #a9b1d6;
+  --palette-dark-tokyo-night-subtle: #737aa2;
+  --palette-dark-tokyo-night-border: #292e42;
+  --palette-dark-tokyo-night-edge: #3b4261;
+  --palette-dark-tokyo-night-frame-edge: #292e42;
+  --palette-dark-tokyo-night-hover: #1f2335;
+  --palette-dark-tokyo-night-active: #292e42;
+  --palette-dark-tokyo-night-selection: #283457;
+  --palette-dark-tokyo-night-accent-soft: #223251;
+  --palette-dark-tokyo-night-code-background: #0c0e14;
+  --palette-dark-tokyo-night-code-foreground: #c0caf5;
+  --palette-dark-tokyo-night-success: #9ece6a;
+  --palette-dark-tokyo-night-danger: #f7768e;
+  --palette-dark-tokyo-night-live: #e0af68;
+
+  /* light-tokyo-night */
+  --palette-light-tokyo-night-background: #e1e2e7;
+  --palette-light-tokyo-night-frame: #d0d5e3;
+  --palette-light-tokyo-night-surface: #e9eaf0;
+  --palette-light-tokyo-night-foreground: #2d4f9b;
+  --palette-light-tokyo-night-accent: #2e7de9;
+  --palette-light-tokyo-night-surface-low: #d0d5e3;
+  --palette-light-tokyo-night-surface-high: #c4c8da;
+  --palette-light-tokyo-night-muted-foreground: #6172b0;
+  --palette-light-tokyo-night-subtle: #68709a;
+  --palette-light-tokyo-night-border: #b4b5b9;
+  --palette-light-tokyo-night-edge: #8990b3;
+  --palette-light-tokyo-night-frame-edge: #b4b5b9;
+  --palette-light-tokyo-night-hover: #d0d5e3;
+  --palette-light-tokyo-night-active: #c4c8da;
+  --palette-light-tokyo-night-selection: #b7c1e3;
+  --palette-light-tokyo-night-accent-soft: #cdd9ee;
+  --palette-light-tokyo-night-code-background: #d0d5e3;
+  --palette-light-tokyo-night-code-foreground: #3760bf;
+  --palette-light-tokyo-night-success: #587539;
+  --palette-light-tokyo-night-danger: #c64343;
+  --palette-light-tokyo-night-live: #8c6c3e;
+
+  /* dark-nord */
+  --palette-dark-nord-background: #2e3440;
+  --palette-dark-nord-frame: #242933;
+  --palette-dark-nord-surface: #3b4252;
+  --palette-dark-nord-foreground: #eceff4;
+  --palette-dark-nord-accent: #88c0d0;
+  --palette-dark-nord-surface-low: #2e3440;
+  --palette-dark-nord-surface-high: #434c5e;
+  --palette-dark-nord-muted-foreground: #d8dee9;
+  --palette-dark-nord-subtle: #b4becf;
+  --palette-dark-nord-border: #434c5e;
+  --palette-dark-nord-edge: #4c566a;
+  --palette-dark-nord-frame-edge: #3b4252;
+  --palette-dark-nord-hover: #3b4252;
+  --palette-dark-nord-active: #434c5e;
+  --palette-dark-nord-selection: #4c566a;
+  --palette-dark-nord-accent-soft: #354b58;
+  --palette-dark-nord-code-background: #242933;
+  --palette-dark-nord-code-foreground: #eceff4;
+  --palette-dark-nord-success: #a3be8c;
+  --palette-dark-nord-danger: #bf616a;
+  --palette-dark-nord-live: #ebcb8b;
+
+  /* light-nord */
+  --palette-light-nord-background: #eceff4;
+  --palette-light-nord-frame: #d8dee9;
+  --palette-light-nord-surface: #ffffff;
+  --palette-light-nord-foreground: #2e3440;
+  --palette-light-nord-accent: #5e81ac;
+  --palette-light-nord-surface-low: #e5e9f0;
+  --palette-light-nord-surface-high: #d8dee9;
+  --palette-light-nord-muted-foreground: #434c5e;
+  --palette-light-nord-subtle: #4c566a;
+  --palette-light-nord-border: #d8dee9;
+  --palette-light-nord-edge: #b5bfce;
+  --palette-light-nord-frame-edge: #c4cdd9;
+  --palette-light-nord-hover: #e5e9f0;
+  --palette-light-nord-active: #d8dee9;
+  --palette-light-nord-selection: #c0d5e1;
+  --palette-light-nord-accent-soft: #dce5ef;
+  --palette-light-nord-code-background: #e5e9f0;
+  --palette-light-nord-code-foreground: #2e3440;
+  --palette-light-nord-success: #a3be8c;
+  --palette-light-nord-danger: #bf616a;
+  --palette-light-nord-live: #ebcb8b;
+
+  /* dark-gruvbox */
+  --palette-dark-gruvbox-background: #282828;
+  --palette-dark-gruvbox-frame: #1d2021;
+  --palette-dark-gruvbox-surface: #32302f;
+  --palette-dark-gruvbox-foreground: #ebdbb2;
+  --palette-dark-gruvbox-accent: #fe8019;
+  --palette-dark-gruvbox-surface-low: #282828;
+  --palette-dark-gruvbox-surface-high: #3c3836;
+  --palette-dark-gruvbox-muted-foreground: #d5c4a1;
+  --palette-dark-gruvbox-subtle: #bdae93;
+  --palette-dark-gruvbox-border: #3c3836;
+  --palette-dark-gruvbox-edge: #504945;
+  --palette-dark-gruvbox-frame-edge: #3c3836;
+  --palette-dark-gruvbox-hover: #32302f;
+  --palette-dark-gruvbox-active: #504945;
+  --palette-dark-gruvbox-selection: #665c54;
+  --palette-dark-gruvbox-accent-soft: #473522;
+  --palette-dark-gruvbox-code-background: #1d2021;
+  --palette-dark-gruvbox-code-foreground: #ebdbb2;
+  --palette-dark-gruvbox-success: #b8bb26;
+  --palette-dark-gruvbox-danger: #fb4934;
+  --palette-dark-gruvbox-live: #fabd2f;
+
+  /* light-gruvbox */
+  --palette-light-gruvbox-background: #fbf1c7;
+  --palette-light-gruvbox-frame: #ebdbb2;
+  --palette-light-gruvbox-surface: #f9f5d7;
+  --palette-light-gruvbox-foreground: #3c3836;
+  --palette-light-gruvbox-accent: #af3a03;
+  --palette-light-gruvbox-surface-low: #f2e5bc;
+  --palette-light-gruvbox-surface-high: #ebdbb2;
+  --palette-light-gruvbox-muted-foreground: #504945;
+  --palette-light-gruvbox-subtle: #665c54;
+  --palette-light-gruvbox-border: #d5c4a1;
+  --palette-light-gruvbox-edge: #bdae93;
+  --palette-light-gruvbox-frame-edge: #d5c4a1;
+  --palette-light-gruvbox-hover: #f2e5bc;
+  --palette-light-gruvbox-active: #ebdbb2;
+  --palette-light-gruvbox-selection: #d5c4a1;
+  --palette-light-gruvbox-accent-soft: #f0d9b5;
+  --palette-light-gruvbox-code-background: #f2e5bc;
+  --palette-light-gruvbox-code-foreground: #3c3836;
+  --palette-light-gruvbox-success: #79740e;
+  --palette-light-gruvbox-danger: #9d0006;
+  --palette-light-gruvbox-live: #b57614;
+
+  /* dark-amethyst */
+  --palette-dark-amethyst-background: #181223;
+  --palette-dark-amethyst-frame: #100d19;
+  --palette-dark-amethyst-surface: #261d37;
+  --palette-dark-amethyst-foreground: #eee5ff;
+  --palette-dark-amethyst-accent: #bfa1ff;
+  --palette-dark-amethyst-surface-low: #1d162b;
+  --palette-dark-amethyst-surface-high: #302442;
+  --palette-dark-amethyst-muted-foreground: #c8b6e0;
+  --palette-dark-amethyst-subtle: #ab98c2;
+  --palette-dark-amethyst-border: #3b2a54;
+  --palette-dark-amethyst-edge: #574071;
+  --palette-dark-amethyst-frame-edge: #332545;
+  --palette-dark-amethyst-hover: #2b2040;
+  --palette-dark-amethyst-active: #432761;
+  --palette-dark-amethyst-selection: #58387c;
+  --palette-dark-amethyst-accent-soft: #39254f;
+  --palette-dark-amethyst-code-background: #110e1c;
+  --palette-dark-amethyst-code-foreground: #eee5ff;
+  --palette-dark-amethyst-success: #97d9bd;
+  --palette-dark-amethyst-danger: #eda9cc;
+  --palette-dark-amethyst-live: #e1c18b;
+
+  /* light-amethyst */
+  --palette-light-amethyst-background: #fbf8ff;
+  --palette-light-amethyst-frame: #e8dff5;
+  --palette-light-amethyst-surface: #ffffff;
+  --palette-light-amethyst-foreground: #3d2c56;
+  --palette-light-amethyst-accent: #7048ad;
+  --palette-light-amethyst-surface-low: #f3edf9;
+  --palette-light-amethyst-surface-high: #ece3f5;
+  --palette-light-amethyst-muted-foreground: #635276;
+  --palette-light-amethyst-subtle: #78628c;
+  --palette-light-amethyst-border: #ded1ec;
+  --palette-light-amethyst-edge: #c9b5dd;
+  --palette-light-amethyst-frame-edge: #d9c9e9;
+  --palette-light-amethyst-hover: #f0e9f8;
+  --palette-light-amethyst-active: #e6d8f2;
+  --palette-light-amethyst-selection: #dac5ee;
+  --palette-light-amethyst-accent-soft: #ede2f8;
+  --palette-light-amethyst-code-background: #f2edf8;
+  --palette-light-amethyst-code-foreground: #3d2c56;
+  --palette-light-amethyst-success: #34755d;
+  --palette-light-amethyst-danger: #a14572;
+  --palette-light-amethyst-live: #866325;
 }
 
 /* The conversation's width, stamped by `lib/chat-width.ts`: wider for a big

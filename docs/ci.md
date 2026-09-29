@@ -142,12 +142,17 @@ to 520 KB, 10% above the 462 KB that `bun run build:ui` then
 moves a thread from its messages and menus, folds changed files and archives
 projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
-one in the change that explains the growth. Timings are not
-gated: they vary too much on shared runners. On 2026-09-29, `bun run build:ui`,
-`bun run build:core` and `bun scripts/ci/budgets.ts` measured 3322.8 KB for the
-UI and 804.1 KB for the core after permanent deletion was integrated with
-current main. The UI limit is 3739000 bytes, about 10% above that measurement;
-integration retains main's larger 578000-byte entry and 904000-byte core limits.
+one in the change that explains the growth. On 2026-09-29 the compact theme
+picker, colour math, persistence and prepaint handling added 9,000 bytes to
+the entry chunk and 57,141 bytes to the complete UI, including palette CSS,
+French strings and community license notices. The Windows desktop jobs measured
+524,773 / 3,393,503 bytes on `main` at `c26a03a` and 533,773 / 3,450,644 bytes
+with the themes at `bedd795`. The UI limits moved to 588,000 and 3,796,000 bytes,
+about 10% above the combined build; the core limit stayed at 817,600 bytes.
+The later account connection changes raised the core limit to 904,000 bytes
+([measurements](performance.md)).
+Timings are not
+gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
