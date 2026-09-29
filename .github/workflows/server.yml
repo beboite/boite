@@ -6,6 +6,10 @@ on:
       publish:
         type: boolean
         default: false
+      defer-manifest:
+        description: Upload tested image digests now; let the caller publish tags after its checks.
+        type: boolean
+        default: false
       tags:
         description: Newline-separated image tags, without the image name.
         type: string
@@ -88,34 +92,11 @@ jobs:
           retention-days: 1
 
   manifest:
-    if: inputs.publish
+    if: inputs.publish && !inputs.defer-manifest
     needs: build
-    runs-on: ubuntu-24.04
+    uses: ./.github/workflows/server-manifest.yml
     permissions:
       contents: read
       packages: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          pattern: server-digest-*
-          path: digests
-          merge-multiple: true
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish multi-platform tags
-        env:
-          IMAGE_TAGS: ${{ inputs.tags }}
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}/boite-server"
-          tags=()
-          while IFS= read -r tag; do
-            [[ -z "$tag" ]] && continue
-            [[ "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]] || exit 1
-            tags+=(--tag "$image:$tag")
-          done <<< "$IMAGE_TAGS"
-          test "${#tags[@]}" -gt 0
-          docker buildx imagetools create "${tags[@]}" "$(<digests/amd64)" "$(<digests/arm64)"
+    with:
+      tags: ${{ inputs.tags }}

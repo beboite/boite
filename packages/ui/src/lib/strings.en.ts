@@ -1359,6 +1359,7 @@ export const strings = {
     everyday: 'Essentials',
     developer: 'Everything',
     header: 'Conversation header',
+    composer: 'Message bar',
     sidebar: 'Sidebar',
     panel: 'Side panel menu',
     project: 'Project name',

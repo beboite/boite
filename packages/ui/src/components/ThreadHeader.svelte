@@ -10,9 +10,7 @@
   import { projectName } from '../lib/format';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
-  import { contextLevel, contextPercent } from '../lib/tokens';
   import type { Store } from '../lib/store.svelte';
-  import ContextControl from './ContextControl.svelte';
   import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
@@ -98,11 +96,6 @@
     if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
     return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
   });
-
-  /** A hidden gauge comes back on its own once the context is nearly full: a limit nobody can see is a trap. */
-  let showContext = $derived(
-    work.shows('header.context') || contextLevel(thread?.context ? contextPercent(thread.context) : null) === 'full'
-  );
 
   function titleAction(action: string) {
     const open = store.openThread;
@@ -193,10 +186,6 @@
           <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
-      {/if}
-      {#if thread && showContext}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></span>
       {/if}
       {#if thread && hasTeam && work.shows('header.agents')}
         <button
@@ -323,7 +312,6 @@
   .pending :global(svg) { flex: none; }
   .pending-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .control { display: contents; }
   .title { min-width: 0; }
   .title-menu { display: none; }
   @media (max-width: 720px) {

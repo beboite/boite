@@ -13,6 +13,10 @@
   import ModelPicker from './ModelPicker.svelte';
   import Dictation from './Dictation.svelte';
   import ComposerOptions from './ComposerOptions.svelte';
+  import ContextControl from './ContextControl.svelte';
+  import { work } from '../lib/work-prefs.svelte';
+  import { controlMenu } from '../lib/controls';
+  import { contextLevel, contextPercent } from '../lib/tokens';
 
   /**
    * The row under the composer's box: the model, effort, mode and worktree
@@ -52,6 +56,8 @@
   let bar = $state<HTMLDivElement | undefined>(undefined);
 
   let bound = $derived(store.openThread !== null);
+  // Keep the stored visibility preference and reveal a nearly full context.
+  let showContext = $derived(work.shows('header.context') || contextLevel(store.openThread?.context ? contextPercent(store.openThread.context) : null) === 'full');
   /** Every agent can read uploaded files through its local tools. */
   let canAttach = $derived(provider !== null && provider !== undefined);
 
@@ -221,6 +227,10 @@
 
 
 
+  {#if bound && showContext}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="context-control" oncontextmenu={(event) => controlMenu(event, store, 'header.context')}><ContextControl {store} /></div>
+  {/if}
   {#if store.busy}
     <button type="button" class="icon stop" data-testid="composer-stop" title={strings.composer.stop} aria-label={strings.composer.stop} onclick={() => void store.stop()}>
       <Square size={12} strokeWidth={2.5} />
@@ -277,6 +287,7 @@
   .attach {
     padding: 0 7px;
   }
+  .context-control { flex: none; }
 
   /* Off it reads like the other chips; on it takes the active fill, the same as a pressed tab. */
   .mode-icon { display: inline-flex; }

@@ -843,14 +843,16 @@ test('the guided connection signs OpenCode in from a terminal too, then hands it
   expect(store.accountOf('a-opencode')?.status).toBe('ok');
 });
 
-test('the header wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
+test('the composer wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
   await mountOnFake();
   await waitFor(() => store.openThread?.id === 't-descriptors');
 
   // 31k of 200k, just compacted: the ring reads 16 percent and the divider says what went.
   await waitFor(() => document.querySelector('[data-testid=context-meter]') !== null);
   const meter = query('[data-testid=context-meter]');
-  expect(meter.textContent?.trim()).toBe('16%');
+  expect(meter.closest('[data-testid=composer]')).not.toBeNull();
+  expect(query('[data-testid=context-trigger]').textContent?.trim()).toBe('');
+  expect(meter.dataset.percent).toBe('16');
   expect(meter.dataset.level).toBe('low');
   query<HTMLButtonElement>('[data-testid=context-trigger]').click();
   await waitFor(() => document.querySelector('[data-testid=context-popup]') !== null);
