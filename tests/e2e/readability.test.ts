@@ -21,11 +21,46 @@ beforeAll(async () => {
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('connecting another machine keeps thread rows at their single-machine height', async () => {
+  await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
+  const height = () => page.evaluate<number>(`document.querySelector('[data-thread-id="t-descriptors"]').getBoundingClientRect().height`);
+  await page.evaluate(`window.__machines = globalThis.__boiteTest.workspace.machines; globalThis.__boiteTest.workspace.machines = window.__machines.slice(0, 1)`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
+  const single = await height();
+  await page.evaluate(`globalThis.__boiteTest.workspace.machines = window.__machines`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
+  await capture('readability-thread-density');
+  expect(await height()).toBeCloseTo(single, 1);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`)).toBe(true);
+  await page.click(id('view-recent'));
+  await page.click(id('project-filter'));
+  await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 1`);
+  expect(await height()).toBeCloseTo(single, 1);
+  await capture('readability-thread-filtered');
+  await page.click(id('project-filter'));
+  await page.click(`${id('project-filter-menu')} [data-value=all]`);
+  await page.click(id('view-projects'));
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
+  await page.waitFor(`document.querySelector('${id('sidebar')}').getBoundingClientRect().width <= 210`);
+  await capture('readability-thread-narrow');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')} .headline')).every(e => e.scrollWidth <= e.clientWidth)`)).toBe(true);
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(280)`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelector('${id('mobile-list')} .thread')`);
+  await capture('readability-thread-phone');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.click(`${id('mobile-list')} .thread`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await page.click('[data-thread-id="t-trace"]');
+}, 30_000);
+
 test('thread metadata, message identity and expandable trace fit a narrow panel', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('usage-pill')}') === null`)).toBe(true);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('.metadata')).every(e => !e.textContent.includes('No PR') && !e.textContent.includes('My computer') && !e.textContent.includes('Builder'))`)).toBe(true);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => e.nextElementSibling?.classList.contains('machine') && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => e.closest('.thread').querySelector('.machine') && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
   await page.evaluate(`window.__openedPr = null; window.open = (url) => { window.__openedPr = url; return null; }`);
   const prUrl = await page.evaluate<string>(`document.querySelector('${id('thread-pr')}').href`);
   await page.click(id('thread-pr'));
