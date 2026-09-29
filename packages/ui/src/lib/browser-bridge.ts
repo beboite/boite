@@ -57,7 +57,11 @@ export interface BrowserBridge {
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (text === '') return null;
-  const local = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}(?::\d+)?(?:[/?#]|$)/.exec(text);
+  const first = Number(ipv4?.[1]), second = Number(ipv4?.[2]);
+  const lan = ipv4 !== null && (first === 10 || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168) || (first === 169 && second === 254));
+  const local = lan || /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(text);
   const host = /^(?:[\w-]+\.)+[\w-]+(?::\d+)?(?:[/?#]|$)/.test(text);
   const scheme = /^[a-z][a-z0-9+.-]*:\S*$/i.test(text);
   const candidate = local ? `http://${text}` : host ? `https://${text}` : scheme ? text : null;

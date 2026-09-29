@@ -49,9 +49,10 @@ iframe with the sites that allow it. [machines.md](machines.md) has the origins
 and the bridge.
 
 The address field accepts public hosts, local development addresses such as
-`localhost:5173`, and search terms. Local addresses use HTTP when no scheme is
-given; public hosts use HTTPS. Loading and navigation failures appear in the
-toolbar. A page zoom other than 100% has a reset button.
+`localhost:5173` or a private IPv4 server, and search terms. Loopback, private
+and link-local IPv4 addresses use HTTP when no scheme is given; public hosts
+use HTTPS. Loading and navigation failures appear in the toolbar. A page zoom
+other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
 
