@@ -200,10 +200,10 @@ test('the scheduler never says Saved after a refused save, and refuses an out-of
   await mountOnFake();
   store.showSettings('advanced');
   await waitFor(() => document.querySelector('[data-testid=scheduler-save]') !== null);
-  const field = query<HTMLInputElement>('[data-testid=setting-maxConcurrentTurns]');
-  field.value = '0';
+  const field = query<HTMLInputElement>('[data-testid=setting-warmProcessMinutes]');
+  field.value = '-1';
   field.dispatchEvent(new Event('input', { bubbles: true }));
-  await waitFor(() => document.querySelector('[data-testid=setting-error-maxConcurrentTurns]') !== null);
+  await waitFor(() => document.querySelector('[data-testid=setting-error-warmProcessMinutes]') !== null);
   expect(query<HTMLButtonElement>('[data-testid=scheduler-save]').disabled).toBe(true);
 
   field.value = '7';

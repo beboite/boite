@@ -6,8 +6,6 @@ import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
   worktreeStorage: { mode: 'project', directory: null },
-  maxConcurrentTurns: 6,
-  perAccountConcurrency: 2,
   warmProcessMinutes: 0,
   listenOnLan: false,
   agentCpuCapPercent: 75,
@@ -26,7 +24,9 @@ export class SettingsStore {
   get(): Settings {
     const stored = this.core.journal.getSetting('settings');
     if (typeof stored !== 'object' || stored === null) return { ...DEFAULT_SETTINGS };
-    const patch = stored as Partial<Settings>;
+    const patch = { ...stored } as Partial<Settings>;
+    Reflect.deleteProperty(patch, 'maxConcurrentTurns');
+    Reflect.deleteProperty(patch, 'perAccountConcurrency');
     return { ...DEFAULT_SETTINGS, ...patch };
   }
 

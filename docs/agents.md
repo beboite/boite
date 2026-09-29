@@ -175,9 +175,10 @@ executions and pauses queued work for review. Routes are checked again just
 before driver launch. This controls Boite-managed launches; it does not prevent
 an unrestricted shell from invoking a provider independently.
 
-Children reuse the existing delegation driver and global scheduler. Each new
-request or routine has a bounded delegation budget; its child results share
-that budget. Completed children remain in history when a new episode begins.
+Children reuse the existing delegation driver and scheduler. Each new request
+or routine has its own delegation usage counters, with no child count, turn
+count or duration quota. Completed children remain in history when a new
+episode begins.
 Configuration and account grants remain owner-only. A paired device can read
 the brain and policy, converse and handle decisions on the selected host.
 

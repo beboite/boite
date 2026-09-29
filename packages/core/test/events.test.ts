@@ -23,9 +23,9 @@ test('a second connection sees settings, providers, projects and accounts change
   const actor = await harness.connect();
   const watcher = await harness.connect();
 
-  const settingsUpdated = watcher.next('settings.updated', (settings) => settings.maxConcurrentTurns === 9);
-  await actor.call('settings.set', { maxConcurrentTurns: 9 });
-  expect((await settingsUpdated).maxConcurrentTurns).toBe(9);
+  const settingsUpdated = watcher.next('settings.updated', (settings) => settings.warmProcessMinutes === 9);
+  await actor.call('settings.set', { warmProcessMinutes: 9 });
+  expect((await settingsUpdated).warmProcessMinutes).toBe(9);
 
   const path = join(harness.dataDir, 'a-project');
   mkdirSync(path, { recursive: true });

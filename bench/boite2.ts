@@ -181,8 +181,7 @@ export async function idleThreads(): Promise<IdleThreads> {
 }
 
 export interface EchoRun {
-  cap: number;
-  perAccountCap: number;
+  clientConcurrency: number;
   threads: number;
   wallMs: number;
   firstDeltaMs: number[];
@@ -193,16 +192,10 @@ export interface EchoRun {
   cadenceMs: number;
 }
 
-export async function echoTurns(cap: number, threads = 50, promptWords = 300): Promise<EchoRun> {
+export async function echoTurns(clientConcurrency: number, threads = 50, promptWords = 300): Promise<EchoRun> {
   const opened = await openCore();
   const { client, pid } = opened;
-  // Every thread here holds the one echo account, so perAccountConcurrency (2 by
-  // default) binds before maxConcurrentTurns and the cap under test would do
-  // nothing. Both are raised together.
-  const settings = await client.call('settings.set', {
-    maxConcurrentTurns: cap,
-    perAccountConcurrency: cap,
-  });
+  // Workload concurrency belongs to the benchmark client.
   const project = await benchProject(client);
   const account = await echoAccount(client);
 
@@ -244,11 +237,17 @@ export async function echoTurns(cap: number, threads = 50, promptWords = 300): P
   await Bun.sleep(400);
 
   const wallStart = performance.now();
-  const requests = created.map((thread) => {
-    startedAt.set(thread.id, performance.now());
-    return client.call('turns.start', { threadId: thread.id, prompt });
-  });
-  await Promise.all(requests);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(clientConcurrency, threads) }, async () => {
+    for (;;) {
+      const thread = created[next++];
+      if (!thread) return;
+      const done = client.next('turn.finished', turn => turn.threadId === thread.id, 120_000);
+      startedAt.set(thread.id, performance.now());
+      await client.call('turns.start', { threadId: thread.id, prompt });
+      await done;
+    }
+  }));
   await allDone;
   const wallMs = performance.now() - wallStart;
 
@@ -273,8 +272,7 @@ export async function echoTurns(cap: number, threads = 50, promptWords = 300): P
   await closeCore(opened);
   await removeDirectory(project.directory);
   return {
-    cap: settings.maxConcurrentTurns,
-    perAccountCap: settings.perAccountConcurrency,
+    clientConcurrency,
     threads,
     wallMs,
     firstDeltaMs,
