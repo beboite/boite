@@ -16,6 +16,7 @@
     onfocus: () => void;
   } = $props();
   let selected = $state<Attachment | null>(null);
+  let previewElement = $state<HTMLElement>();
   const preview = new Closing();
   const images = $derived(attachments.filter(attachment => attachment.kind === 'image'));
   const visible = $derived(selected?.kind === 'image' && attachments.includes(selected) && !unresolvedAssetId(selected) ? selected : null);
@@ -35,8 +36,12 @@
   }
 </script>
 
+<svelte:document onpointerdowncapture={(event) => {
+  if (preview.open && event.target instanceof Node && !previewElement?.closest('[data-testid="composer"]')?.contains(event.target)) preview.hide();
+}} />
+
 {#if visible && preview.shown}
-  <section class="image-preview" class:closing={preview.closing} use:preview.attach onanimationend={preview.end}
+  <section bind:this={previewElement} class="image-preview" class:closing={preview.closing} use:preview.attach onanimationend={preview.end}
     class:highlighted={highlighted === visible} data-testid="composer-image-preview"
     aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(visible) + 1) })}>
     <header>

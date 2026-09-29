@@ -821,7 +821,8 @@ removed when a conversation is archived or a project is removed.
 Image attachments insert numbered `[Image 1]` references at the composer caret.
 Hovering or focusing a reference highlights its thumbnail. Clicking either
 opens an inline preview above the input, which stays editable. Escape or the
-close button dismisses the preview; removing an image updates the remaining
+close button dismisses the preview, as does a click outside the image and composer.
+Removing an image updates the remaining
 references to match attachment order. `bun test tests/e2e/composer-images.test.ts`
 checks this flow and captures desktop and phone layouts.
 

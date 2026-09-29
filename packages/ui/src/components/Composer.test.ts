@@ -721,6 +721,19 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
   expect(input().value).toBe('Keep writing while looking');
   query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
+  input().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  query('[data-testid=composer-image-preview] img').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  expect(document.querySelector('[data-testid=composer-image-preview]')).not.toBeNull();
+  const outside = document.createElement('button');
+  document.body.appendChild(outside);
+  outside.focus();
+  outside.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') === null);
+  expect(document.activeElement).toBe(outside);
+  expect(input().value).toBe('Keep writing while looking');
+  outside.remove();
+  query<HTMLButtonElement>('[data-testid=composer-image-open]').click();
+  await waitFor(() => document.querySelector('[data-testid=composer-image-preview]') !== null);
 
   query<HTMLButtonElement>('[data-testid=composer-attachment-remove]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-attachments]') === null);
