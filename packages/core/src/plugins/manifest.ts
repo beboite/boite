@@ -15,7 +15,7 @@ export const POOL_PROVIDERS: readonly ProviderId[] = ['antigravity', 'antigravit
 export const MANIFEST_MAX_BYTES = 64 * 1024;
 
 const FIELDS = ['schema', 'id', 'name', 'version', 'description', 'homepage', 'executable', 'artifacts', 'provides'] as const;
-const FEATURES = ['accountPools'] as const;
+const FEATURES = ['accountPools', 'browser'] as const;
 const ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const EXECUTABLE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -139,7 +139,16 @@ class Reader {
       this.refuse('provides', `an object naming at least one of ${FEATURES.join(', ')}`, value);
     }
     this.keys(value, 'provides.', FEATURES);
+    const out: PluginManifest['provides'] = {};
+    if (value['browser'] !== undefined) {
+      const browser = value['browser'];
+      if (!isRecord(browser)) this.refuse('provides.browser', 'an object with protocol', browser);
+      this.keys(browser, 'provides.browser.', ['protocol']);
+      if (browser['protocol'] !== 'agent-browser-0.37') this.refuse('provides.browser.protocol', 'agent-browser-0.37', browser['protocol']);
+      out.browser = { protocol: 'agent-browser-0.37' };
+    }
     const pools = value['accountPools'];
+    if (pools === undefined && out.browser) return out;
     if (!isRecord(pools)) this.refuse('provides.accountPools', 'an object with providers', pools);
     this.keys(pools, 'provides.accountPools.', ['providers']);
     const providers = pools['providers'];
@@ -150,7 +159,7 @@ class Reader {
         this.refuse(`provides.accountPools.providers[${index}]`, expected, provider);
       }
     });
-    return { accountPools: { providers: [...(providers as string[])] } };
+    return { ...out, accountPools: { providers: [...(providers as string[])] } };
   }
 }
 
@@ -216,9 +225,11 @@ export const POOL_COMMANDS = {
 
 /** What the owner is shown before an install: every command line Boite may run. */
 export function commandsOf(manifest: PluginManifest): string[] {
-  if (poolsOf(manifest).length === 0) return [];
+  const browser = manifest.provides.browser ? [`${manifest.executable} (native daemon, Jev browser tasks)`] : [];
+  if (poolsOf(manifest).length === 0) return browser;
   const run = (args: readonly string[]) => [manifest.executable, ...args].join(' ');
   return [
+    ...browser,
     run(POOL_COMMANDS.list('<pool>', false)),
     run(POOL_COMMANDS.list('<pool>', true)),
     run(POOL_COMMANDS.add('<pool>')),

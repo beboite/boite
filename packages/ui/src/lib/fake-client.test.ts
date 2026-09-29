@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type BrowserTask, type RpcMethodName } from '@boite/contracts';
 
 afterEach(() => vi.useRealTimers());
 
@@ -337,6 +337,76 @@ test('fake threads reject unknown providers even when speed is omitted', async (
     const before = await client.call('threads.list', {});
     await expect(client.call('threads.create', { projectId: 'p-boite', providerId: 'unknown', accountId: 'a-echo' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
     expect(await client.call('threads.list', {})).toEqual(before);
+  } finally { client.close(); }
+});
+
+test('fake browser tasks reject missing and archived threads without adding a task', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const before = (await client.call('browser.status', {})).tasks;
+    const request = { pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } };
+    await expect(client.call('browser.start', { ...request, threadId: 'missing-thread' })).rejects.toThrow();
+    await client.call('threads.archive', { threadId: 't-descriptors', archived: true });
+    await expect(client.call('browser.start', { ...request, threadId: 't-descriptors' })).rejects.toThrow();
+    expect((await client.call('browser.status', {})).tasks).toEqual(before);
+  } finally { client.close(); }
+});
+
+test('seeded browser tasks belong to an existing thread', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const threads = new Set((await client.call('threads.list', {})).map(thread => thread.id));
+    for (const task of (await client.call('browser.status', {})).tasks) expect(threads.has(task.threadId)).toBe(true);
+  } finally { client.close(); }
+});
+
+test('fake thread archive cancels only its unfinished browser tasks and restore leaves tasks unchanged', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const finished = await client.call('browser.cancel', { threadId: 't-trace', id: 'browser-fixture' });
+    const request = { pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } };
+    const own = await client.call('browser.start', { ...request, threadId: 't-trace' });
+    const other = await client.call('browser.start', { ...request, threadId: 't-descriptors' });
+    const updates: BrowserTask[] = [];
+    client.on('browser.updated', task => updates.push(task));
+
+    await client.call('threads.archive', { threadId: 't-trace' });
+    const cancelled = (await client.call('browser.list', { threadId: 't-trace' })).find(task => task.id === own.id)!;
+    expect(cancelled).toMatchObject({ ...own, status: 'cancelled', message: 'The task was cancelled.', finishedAt: expect.any(Number) });
+    expect(updates).toEqual([cancelled]);
+    expect((await client.call('browser.list', { threadId: 't-trace' })).find(task => task.id === finished.id)).toEqual(finished);
+    expect(await client.call('browser.list', { threadId: 't-descriptors' })).toEqual([other]);
+
+    await client.call('threads.archive', { threadId: 't-trace' });
+    await client.call('threads.archive', { threadId: 't-trace', archived: false });
+    await client.call('threads.archive', { threadId: 't-descriptors', archived: false });
+    expect(await client.call('browser.list', { threadId: 't-trace' })).toEqual([cancelled, finished]);
+    expect(await client.call('browser.list', { threadId: 't-descriptors' })).toEqual([other]);
+    expect(updates).toEqual([cancelled]);
+  } finally { client.close(); }
+});
+
+test('fake project removal cancels its browser tasks before deleting threads and releases the plugin', async () => {
+  const client = new FakeClient({ delayMs: 0, browserTask: true });
+  await client.connect();
+  try {
+    const project = await client.call('projects.add', { path: '/workspace/browser-removal' });
+    const thread = await newThread(client, project.id);
+    const task = await client.call('browser.start', { threadId: thread.id, pluginId: 'jev-browser', url: 'https://example.org', goal: 'Save', completion: { text: 'Saved' } });
+    const events: string[] = [];
+    client.on('browser.updated', updated => { if (updated.id === task.id) events.push(updated.status); });
+    client.on('thread.removed', removed => { if (removed.threadId === thread.id) events.push('removed'); });
+
+    await client.call('projects.remove', { projectId: project.id });
+    expect(events).toEqual(['cancelled', 'removed']);
+    const status = await client.call('browser.status', {});
+    expect(status.tasks.find(item => item.id === task.id)?.status).toBe('cancelled');
+    expect(status.tasks.find(item => item.id === 'browser-fixture')?.status).toBe('running');
+    await client.call('browser.cancel', { threadId: 't-trace', id: 'browser-fixture' });
+    expect((await client.call('plugins.uninstall', { id: 'jev-browser' })).status).toBe('not-installed');
   } finally { client.close(); }
 });
 

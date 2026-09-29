@@ -49,6 +49,7 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  ctx.plugins.stopThread(thread.id);
   // A waiting move goes with the thread, before its turn ends and would apply it.
   dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);

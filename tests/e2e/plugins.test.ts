@@ -119,6 +119,43 @@ test('in a 390 pixel column the page wraps instead of scrolling sideways', async
   await page.evaluate(`document.getElementById('plugins-column').remove()`);
 }, 30_000);
 
+test('the installed Jev plugin exposes host settings at desktop and phone column widths', async () => {
+  await page.click(`${row('jev-browser')} ${id('plugin-install')}`);
+  await page.waitFor(`document.querySelector('${id('browser-plugin')}')`);
+  await page.click(id('browser-enabled'));
+  await page.click(id('browser-save'));
+  await page.waitFor(`document.querySelector('${id('browser-plugin')}').textContent.includes('Browser settings saved')`);
+  await page.navigate(await page.evaluate<string>(`location.origin + '/?fake=1&browser-task=1'`));
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.click(id('nav-settings'));
+  await page.click(id('settings-tab-plugins'));
+  await page.waitFor(`document.querySelector('${id('browser-task')}')`);
+  await scrollTo(row('jev-browser'));
+  await capture('jev-desktop.png');
+  const narrow = () => page.evaluate(`(() => { const style=document.createElement('style'); style.id='jev-column'; style.textContent='.settings > nav { display:none !important; } .settings > section { flex:0 0 390px !important; max-width:390px; }'; document.head.append(style); })()`);
+  await narrow();
+  await scrollTo(row('jev-browser'));
+  expect(await page.evaluate(`(() => { const el=document.querySelector('${id('browser-plugin')}'); return el.scrollWidth<=el.clientWidth; })()`)).toBe(true);
+  await captureColumn('jev-390.png');
+  await page.evaluate(`document.getElementById('jev-column').remove()`);
+  await page.click(id('settings-tab-appearance'));
+  await page.click(id('locale-fr'));
+  await page.click(id('settings-tab-plugins'));
+  await page.waitFor(`document.querySelector('${id('browser-save')}').textContent.includes('Enregistrer')`);
+  await scrollTo(row('jev-browser'));
+  await capture('jev-fr-desktop.png');
+  await narrow();
+  await scrollTo(row('jev-browser'));
+  await captureColumn('jev-fr-390.png');
+  await page.evaluate(`document.getElementById('jev-column').remove()`);
+  await page.click(id('settings-tab-appearance'));
+  await page.click(id('locale-en'));
+  await page.click(id('settings-tab-plugins'));
+  await page.waitFor(`document.querySelector('${id('browser-save')}').textContent.includes('Save browser')`);
+  await page.click(id('browser-cancel'));
+  await page.waitFor(`document.querySelector('${id('browser-task')}').dataset.status==='cancelled'`);
+}, 30_000);
+
 test('a phone-wide window gets the phone settings, which leave plugins to the desktop', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor(`document.querySelector('${id('mobile-settings-home')}')`);

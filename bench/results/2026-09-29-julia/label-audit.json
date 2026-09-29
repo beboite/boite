@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29",
+  "sourceHashes": {
+    "originalDecisionDatasetSha256": "da4440e6289fc13199a06984b947afdb2474f2dabb2c771c6db6b151148831a4",
+    "naturalDecisionDatasetSha256": "9d8250eeee094ae00d84092ed3fdc17cb7fcf2eddd9380ffc018a89fadfc5c6f",
+    "originalLabelAuditSha256": "605f2722c0b3046fccdfda16010885bf3c9d570ffe758a07a6d9eb00f6cc732f",
+    "originalReplayResultsSha256": "a1f0c7be27115b8f34ad24c67394ad5cc29164311ea6400400bfa6258152d766"
+  },
+  "reviewedCases": 52,
+  "indexBase": 0,
+  "method": "Expert semantic review of all questions and candidates. Historical-match labels remain unchanged. Additional acceptable indices follow the stated local question and original goal, including unspecified product variants and equivalent facts. This retrospective review is not an independent holdout.",
+  "multipleAcceptedCases": [
+    {
+      "id": "amazon-product-comparison-02",
+      "historicalExpected": 3,
+      "acceptableIndices": [
+        0,
+        2,
+        3,
+        5
+      ],
+      "acceptableOptions": [
+        "link \"Logitech MX Master 3S pour Mac - Souris Bluetooth Sans Fil\" [@e604]",
+        "link \"Logitech MX Master 3S - Souris Sans Fil avec D\u00e9filement Ultra-Rapide\" [@e545]",
+        "link \"Logitech MX Master 3S - Souris sans fil performante (Graphite)\" [@e535]",
+        "link \"Logitech MX Master 3S Souris sans Fil performante avec d\u00e9filement Ultra-Rapide, Ergo, 8K DPI, Track on Glass, clic Silencieux, Bluetooth, Windows, Linux, Chrome, Noir\" [@e631]"
+      ],
+      "reason": "The question asks for a product matching MX Master 3S without selecting colour, operating-system edition or a first result. Each accepted title names that model; Anywhere 3S and Master 4 are different models.",
+      "provenance": {
+        "observationSha256": "5a9f7f913d95d07e17ed541dedc554a843d77948d625eb97d5550e0321494875",
+        "rawStateSha256": "6b0fc139a91fe2dd70a525fc9955ac056a1e108a15f66590775044848fe7b612",
+        "commandsSha256": "2b5bc260e5f13b82eb7056c3a5baf4171afab2395070b9f3fcfa30293fbf59ab"
+      }
+    },
+    {
+      "id": "amazon-product-comparison-04",
+      "historicalExpected": 5,
+      "acceptableIndices": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "acceptableOptions": [
+        "link \"Logitech Lift for Business, souris ergonomique verticale, sans fil\" [@e1976]",
+        "link \"Logitech Lift Souris Ergonomique Verticale, Sans Fil, Bluetooth ou r\u00e9cepteur USB Logi Bolt + Mouse Pad - Studio Series, Tapis de Souris d'Ordinateur\" [@e1993]",
+        "link \"Logitech Lift Souris Ergonomique Verticale, sans Fil, Bluetooth+Clavier Ergonomique sans Fil\" [@e2066]",
+        "link \"Logitech Lift Left Souris Ergonomique Verticale\" [@e1985]",
+        "link \"Logitech Lift Souris Ergonomique Verticale\" [@e1961]"
+      ],
+      "reason": "The question asks for a matching Lift product page without restricting handedness, business edition or bundles. All accepted titles include the Lift mouse itself. The co2CREA case is an accessory, not the requested mouse. Bundle prices are a later reporting concern, not a restriction stated in this local question.",
+      "provenance": {
+        "observationSha256": "1332ccd9165b9b467a060f473d206b2b37b39f2dc6bf7634b49cd14c7034f0e7",
+        "rawStateSha256": "aad998250435af591ef4224b6836d38c0073e5c819a20214cd1887c7d7b85159",
+        "commandsSha256": "2b5bc260e5f13b82eb7056c3a5baf4171afab2395070b9f3fcfa30293fbf59ab"
+      }
+    },
+    {
+      "id": "amazon-product-comparison-06",
+      "historicalExpected": 3,
+      "acceptableIndices": [
+        1,
+        3
+      ],
+      "acceptableOptions": [
+        "49,99\u00a0\u20ac",
+        "49,99\u20ac"
+      ],
+      "reason": "Both 49,99 EUR strings encode the same monetary amount. A whitespace difference before the currency sign cannot make one price correct and the other wrong.",
+      "provenance": {
+        "observationSha256": "ab49ef432ca645080e04c9f25c4291dee5f25ce5446647bf734e5721ef11703a",
+        "rawStateSha256": "c85be6a6a039ae914663b08bb79edb0cd332cdc48ede368f6d75de599bf77828"
+      }
+    },
+    {
+      "id": "github-release-download-03",
+      "historicalExpected": 0,
+      "acceptableIndices": [
+        0,
+        2
+      ],
+      "acceptableOptions": [
+        "Open observed link \"v1.63.0\" | https://github.com/microsoft/playwright/releases/tag/v1.63.0",
+        "Open observed link \"v1.63.0\" | https://github.com/microsoft/playwright/releases#release-v1.63.0"
+      ],
+      "reason": "The tag release page and the v1.63.0 release-list anchor both open the requested release entry with details/assets. The tree URL opens source files rather than a release entry; other anchors select other releases.",
+      "provenance": {
+        "observationSha256": "75bc8394ac3941473c33dd0eebfbaf6d142b0c56409e239956b7214e8f48dd6f",
+        "rawStateSha256": "8843c3f95eaeb6006973038a8e8132361c8af35a03b0e8a362b241b540b39cf5",
+        "commandsSha256": "aecf7227baa317e3162191b441cd2e4ee98fb0eced7f45941e6506822559ebe9"
+      }
+    },
+    {
+      "id": "wikipedia-language-history-source-05",
+      "historicalExpected": 2,
+      "acceptableIndices": [
+        1,
+        2,
+        3,
+        5
+      ],
+      "acceptableOptions": [
+        "Open observed link \"The Making of the Apollo 11 Mission Patch\" | https://www.nasa.gov/feature/the-making-of-the-apollo-11-mission-patch",
+        "Open observed link \"Apollo 11 Mission Overview\" | https://www.nasa.gov/mission_pages/apollo/missions/apollo11.html",
+        "Open observed link \"Apollo 11 Lunar Landing Mission\" | https://www.hq.nasa.gov/alsj/a11/A11_PressKit.pdf",
+        "Open observed link \"Apollo 11, The Fifth Mission: The First Lunar Landing\" | https://history.nasa.gov/SP-4029/Apollo_11a_Summary.htm"
+      ],
+      "reason": "The question asks for one observed NASA reference and does not name a particular reference. Each accepted observed URL belongs to NASA, including the NASA-hosted mission press-kit PDF. The Wikimedia image links are not NASA references.",
+      "provenance": {
+        "observationSha256": "ffdf348a55152dcdba2af21012d35ae86591ad6c805d855c151415561f257e55",
+        "rawStateSha256": "fb2cb18a5b6acd29beb2799abe3f308df2e7068ccd30fb00504a64d1a95e396a",
+        "commandsSha256": "16cd0586af67d2ad465c74684a60138892b4efe88002c557a8d87eb1d2be4d86"
+      }
+    },
+    {
+      "id": "google-flights-roundtrip-04",
+      "historicalExpected": 3,
+      "acceptableIndices": [
+        3,
+        4
+      ],
+      "acceptableOptions": [
+        "option \"Lisbonne, Portugal\" [@e116]",
+        "option \"A\u00e9roport international de Lisbonne (LIS)\" [@e118]"
+      ],
+      "reason": "Both the city Lisbon in Portugal and its LIS airport resolve the destination to Lisbon. The original task specifies Lisbon, not an all-airports city entity. The other Lisbon suggestions are US cities.",
+      "provenance": {
+        "observationSha256": "d239c8a8846fef948ab0544d88929f8bf8a7fe27cbf5c8326680f6c9c176ad25",
+        "rawStateSha256": "51a48cc1cb6fe7b40e9391537fe42e398aec7340f4e6ca352dc64a2214ec6279",
+        "commandsSha256": "988f33e6f0bed185c85c91bd84802cbffd926e8e229c818f95f171da0c71ef2b"
+      }
+    }
+  ],
+  "scopedEvidenceDeletion": [
+    {
+      "id": "github-issue-investigation-04",
+      "lostEvidence": "Standalone comment counts, including 40, disappear while comments labels remain. A 40 substring in character-count metadata is not preserved fact evidence.",
+      "cause": "The original scoped preparation ignores tokens shorter than three characters and removes lines whose score is zero.",
+      "provenance": {
+        "observationSha256": "b47bffe38f9051d46e5cfd12c9e7478a871552944c07c584e27c7a744c3ae4db",
+        "rawStateSha256": "a4a1cfb51617714ff568367eb057ac63a9df4f7683f4d53bbab6ae6a0e460d60"
+      }
+    },
+    {
+      "id": "google-maps-walking-05",
+      "lostEvidence": "The exact selected duration 1 h disappears while alternative durations 1 h 1 min and 1 h 5 min remain. Substring matching does not establish selected-duration evidence.",
+      "cause": "The original scoped preparation ignores tokens shorter than three characters and removes lines whose score is zero.",
+      "provenance": {
+        "observationSha256": "37a2bb9a7e73f5d9a0a6adb321ce57c93f873862ec1e317be2ea57c1ad8123cf",
+        "rawStateSha256": "8a7bf9c0c5c954a9f3d2ac373376dc16529e4953f96340460c4fda69a1eaa450"
+      }
+    },
+    {
+      "id": "google-maps-walking-06",
+      "lostEvidence": "Both route distances 4,4 km and 4,6 km disappear while the 500 m map-scale distractor remains.",
+      "cause": "The original scoped preparation ignores tokens shorter than three characters and removes lines whose score is zero.",
+      "provenance": {
+        "observationSha256": "37a2bb9a7e73f5d9a0a6adb321ce57c93f873862ec1e317be2ea57c1ad8123cf",
+        "rawStateSha256": "8a7bf9c0c5c954a9f3d2ac373376dc16529e4953f96340460c4fda69a1eaa450"
+      }
+    }
+  ],
+  "cookieWordingSensitivity": {
+    "amazon-product-comparison-01": {
+      "primary": [
+        1
+      ],
+      "literalBannerDismissal": [
+        1,
+        2
+      ],
+      "reason": "Dismiss optional cookies is normally a request to refuse them, which remains primary. The wording does not explicitly say reject; accepting also dismisses the banner, so a pure instruction-following conclusion should report this ambiguity sensitivity."
+    },
+    "booking-hotel-filters-01": {
+      "primary": [
+        3
+      ],
+      "literalBannerDismissal": [
+        0,
+        3
+      ],
+      "reason": "Same distinction between refusing cookies and merely dismissing the banner. The primary convention keeps Refuser, while the literal banner interpretation admits Accepter."
+    }
+  },
+  "interpretation": [
+    "Scoped accuracy combines state preparation and selector decisions; it is not a pure model-accuracy measurement.",
+    "Rejected requests violate the 48-token option contract and are reported separately from accepted prediction accuracy.",
+    "Explicit local subgoals and finite candidates are supplied. These cases do not measure autonomous navigation, execution or task decomposition.",
+    "Cases and labels are expert-curated, retrospective and correlated.",
+    "Cookie dismissal wording has a separate literal-banner interpretation. Primary refusal labels and sensitivity labels remain distinct."
+  ]
+}

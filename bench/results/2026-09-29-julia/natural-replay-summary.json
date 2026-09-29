@@ -1,0 +1,134 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "date": "2026-09-29",
+    "indexBase": 0,
+    "backend": "onnx",
+    "maxLength": 8192,
+    "cpuThreads": 2,
+    "datasetArtifact": "natural-decision-cases.json",
+    "datasetArtifactSha256": "2dbe3b9f32bd5d91e2743c5e6c64c5534745b0a47d61c813ada574cfd31dc839",
+    "labelAuditArtifact": "label-audit.json",
+    "labelAuditArtifactSha256": "f6816615db7616f962d3232da4ce16fd2534eb45301f0559145850e64c0d121d",
+    "originalNaturalDatasetSha256": "9d8250eeee094ae00d84092ed3fdc17cb7fcf2eddd9380ffc018a89fadfc5c6f",
+    "replayCliSourceSha256": "c3822d5b73d563be1ac235ef12698c38a76fcebcd0e9fb8b353d048a41c7fda7",
+    "hashDefinitions": {
+      "savedSourceRowFileSha256": "Exact bytes of the original saved JSON input row, including its indentation and line endings.",
+      "serializedRowSha256": "UTF-8 bytes of JSON.stringify(row), with state,question,options,type in that order.",
+      "preparedStateSha256": "UTF-8 bytes of the exact row.state sent to the model, including the original task-goal prefix.",
+      "requestBodySha256": "UTF-8 bytes of JSON.stringify({rows:[row],backend:\"onnx\",maxLength:8192}), matching the original driver and replay CLI."
+    },
+    "requestHashLimit": "The original drivers saved the complete input row. Request-body hashes are reconstructed from those rows and the verified driver serialization; HTTP wire bytes were not captured independently.",
+    "scoring": "Historical matches use unchanged expected indices. Semantic matches use the public acceptableIndices sets. Only accepted responses receive correctness labels.",
+    "interpretation": "Retrospective expert-curated replay with supplied local subgoals and candidates. Results cover input preparation and selection and do not measure autonomous browser completion or an independent holdout.",
+    "preparation": {
+      "statePrefix": "Task goal: {task.goal}\n",
+      "type": "choice",
+      "rowFieldOrder": [
+        "state",
+        "question",
+        "options",
+        "type"
+      ],
+      "requestFieldOrder": [
+        "rows",
+        "backend",
+        "maxLength"
+      ],
+      "full": "Retain complete supplied state unchanged after the original goal prefix.",
+      "targetState": "Local actions retain the first three prefix lines, the first 500 subsequent body characters and the entire suffix beginning with the candidate-control marker. Facts and completions retain their full state.",
+      "localRouter": "Select local_action cases only; retain the first two title/URL lines and append the explicit body/DOM omission note used by the CLI."
+    },
+    "attemptCount": 144,
+    "sourceSummarySha256": "3b27f88e2672ea888474bc0152ddf97584657a659b0e1867b41e4919c61cf4e5",
+    "percentileDefinition": "Sort ascending and select index min(n-1,floor(n*q)). The median at q=0.5 is the upper median for an even number of observations, not the mean of the two central values.",
+    "serverLatencyDefinition": "Top-level response.elapsedMs. Row elapsedMs is exported separately.",
+    "sourceArtifacts": [
+      "natural-language-replay-results.json",
+      "natural-local-router-replay-results.json"
+    ],
+    "verification": {
+      "sourceCaseEquality": 52,
+      "savedInputPreparationEquality": 144,
+      "historicalScoreEquality": 144,
+      "originalSummaryEquality": true,
+      "networkRequests": 0
+    }
+  },
+  "summary": [
+    {
+      "configuration": "natural-full",
+      "attempts": 52,
+      "accepted": 52,
+      "historicalMatches": 23,
+      "semanticMatches": 25,
+      "medianServerMs": 3326.3325770385563,
+      "p95ServerMs": 24468.82553701289,
+      "medianWallMs": 3463.4908000000287,
+      "medianTokens": 1445,
+      "byKind": {
+        "local_action": {
+          "attempts": 40,
+          "historicalMatches": 16,
+          "semanticMatches": 18
+        },
+        "fact_verification": {
+          "attempts": 11,
+          "historicalMatches": 6,
+          "semanticMatches": 6
+        },
+        "completion_verification": {
+          "attempts": 1,
+          "historicalMatches": 1,
+          "semanticMatches": 1
+        }
+      }
+    },
+    {
+      "configuration": "natural-target-state",
+      "attempts": 52,
+      "accepted": 52,
+      "historicalMatches": 27,
+      "semanticMatches": 30,
+      "medianServerMs": 1084.944927948527,
+      "p95ServerMs": 18839.526224008296,
+      "medianWallMs": 1089.6116000000038,
+      "medianTokens": 651,
+      "byKind": {
+        "local_action": {
+          "attempts": 40,
+          "historicalMatches": 20,
+          "semanticMatches": 23
+        },
+        "fact_verification": {
+          "attempts": 11,
+          "historicalMatches": 6,
+          "semanticMatches": 6
+        },
+        "completion_verification": {
+          "attempts": 1,
+          "historicalMatches": 1,
+          "semanticMatches": 1
+        }
+      }
+    },
+    {
+      "configuration": "natural-local-router",
+      "attempts": 40,
+      "accepted": 40,
+      "historicalMatches": 20,
+      "semanticMatches": 23,
+      "medianServerMs": 307.2331940056756,
+      "p95ServerMs": 731.3401660067029,
+      "medianWallMs": 318.5066000000006,
+      "medianTokens": 226,
+      "byKind": {
+        "local_action": {
+          "attempts": 40,
+          "historicalMatches": 20,
+          "semanticMatches": 23
+        }
+      }
+    }
+  ]
+}

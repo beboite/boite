@@ -429,7 +429,7 @@ export class ThreadStore {
     }
   }
 
-  archive(threadId: ThreadId, archived: boolean): ThreadSummary {
+  async archive(threadId: ThreadId, archived: boolean): Promise<ThreadSummary> {
     this.require(threadId);
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
@@ -450,6 +450,7 @@ export class ThreadStore {
     const saved = this.save({ ...thread, archived }, 'thread.archived');
     // The sidebar counts a project's archived threads; a sub-thread is not one of them.
     if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    if (archived) await this.core.browser.stopThread(threadId);
     return saved;
   }
 

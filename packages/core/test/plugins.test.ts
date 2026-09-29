@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -32,6 +33,34 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+test.each(['ENOENT', 'EACCES'])('plugin state handles a directory inspection failure: %s', async (code) => {
+  harness = await startTestCore();
+  const dir = join(harness.dataDir, 'plugins', 'kebacc-switcher');
+  mkdirSync(dir, { recursive: true });
+  const original = fs.lstatSync;
+  const failure = Object.assign(new Error(`lstat ${code}`), { code });
+  const stat = spyOn(fs, 'lstatSync').mockImplementation(((path, options) => {
+    if (path === dir) throw failure;
+    return original(path, options as never);
+  }) as typeof fs.lstatSync);
+  try {
+    if (code === 'ENOENT') expect(harness.core.plugins.state('kebacc-switcher').status).toBe('not-installed');
+    else expect(() => harness!.core.plugins.state('kebacc-switcher')).toThrow(failure);
+    expect(stat).toHaveBeenCalled();
+  } finally { stat.mockRestore(); }
+});
+
+test('plugin state rejects a dangling plugin directory link', async () => {
+  harness = await startTestCore();
+  const root = join(harness.dataDir, 'plugins');
+  const target = join(harness.dataDir, 'link-target');
+  mkdirSync(root, { recursive: true });
+  mkdirSync(target);
+  fs.symlinkSync(target, join(root, 'kebacc-switcher'), process.platform === 'win32' ? 'junction' : 'dir');
+  fs.rmdirSync(target);
+  expect(() => harness!.core.plugins.state('kebacc-switcher')).toThrow('must not be a symbolic link');
+});
 
 /** Every download answered from memory: tests never reach the network. */
 function serveDownloads(files: Record<string, Uint8Array | number>): string[] {
@@ -283,7 +312,7 @@ describe('plugins from a git URL', () => {
     const dir = join(harness.dataDir, 'plugins', 'seat-pool');
     const record = JSON.parse(readFileSync(join(dir, 'installed.json'), 'utf8')) as { source: { commit: string } };
     expect(record.source.commit).toBe(repo.commit);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'seat-pool']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser', 'seat-pool']);
 
     // A preview is used once.
     await expect(client.call('plugins.add', { previewId: preview.previewId! })).rejects.toThrow('unknown or expired');
@@ -304,7 +333,7 @@ describe('plugins from a git URL', () => {
     const removed = await client.call('plugins.uninstall', { id: 'seat-pool' });
     expect(removed.status).toBe('not-installed');
     expect(existsSync(dir)).toBe(false);
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser']);
     await expect(client.call('plugins.install', { id: 'seat-pool' })).rejects.toThrow('unknown plugin');
   }, 30_000);
 
@@ -390,7 +419,7 @@ describe('plugins from a git URL', () => {
     await waitFor(() => harness!.core.plugins.state('seat-pool').status !== 'installing');
     expect(harness.core.plugins.state('seat-pool')).toMatchObject({ status: 'installed', source: { commit: repo.commit } });
     await client.call('plugins.uninstall', { id: 'seat-pool' });
-    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher']);
+    expect((await client.call('plugins.list', {})).map((plugin) => plugin.id)).toEqual(['kebacc-switcher', 'jev-browser']);
   }, 30_000);
 
   test('an installed.json the core no longer accepts is listed as rejected: it can be removed, never run', async () => {

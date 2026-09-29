@@ -326,7 +326,7 @@ export class ProjectStore {
     this.removing.add(projectId);
     try {
       const threads = this.core.journal.listThreads(projectId);
-      for (const thread of threads) this.core.threads.archive(thread.id, true);
+      await Promise.all(threads.map((thread) => this.core.threads.archive(thread.id, true)));
       await Promise.all(threads.map((thread) => this.core.scheduler.stopAndWait(thread.id)));
       await Promise.all(threads.map((thread) => this.core.procs.stopAndWait(thread.id)));
       // A thread's shell runs under its own trace id: it is gone too before the records go.

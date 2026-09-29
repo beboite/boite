@@ -35,6 +35,7 @@ import { SpeechStore } from './speech.ts';
 import { Telemetry } from './telemetry.ts';
 import { HarnessUpdates } from './providers/updates.ts';
 import { Coordination } from './coordination.ts';
+import { BrowserStore } from './browser.ts';
 import { Delegation } from './delegation.ts';
 import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
@@ -130,6 +131,7 @@ export class Core {
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
   readonly coordination: Coordination;
+  readonly browser: BrowserStore;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
   readonly brain: BrainStore;
@@ -220,6 +222,7 @@ export class Core {
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
     this.coordination = new Coordination(this);
+    this.browser = new BrowserStore(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
     this.brain = new BrainStore(this);
@@ -312,6 +315,7 @@ export class Core {
   async close(): Promise<void> {
     await this.agentRuntime.close();
     this.#stopping = true;
+    await this.browser.close();
     await this.brain.close();
     this.updates.close();
     await this.drain();

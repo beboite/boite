@@ -59,6 +59,9 @@ boite attach <file>               publish a file snapshot in chat, at most 5 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
+boite browser run <request.json> delegate a bounded Jev browser task
+boite browser list               task progress and results for this thread
+boite browser cancel <id>        stop one browser task
 boite open trace|tasks|changes|files [dir]
 boite status                     git status: branch, upstream, one row per change
 boite ask <question> [option ...] [--multiple]
@@ -87,6 +90,9 @@ boite workflow output|templates|save|start
 boite help
 ```
 
+The browser request file is read locally by the CLI. Its schema and the
+owner's setup are in [browser automation](browser-automation.md).
+
 Persistent agents with the `routines` tool enabled can schedule work from their
 direct conversation. `agent schedule` accepts `name`, `prompt`, and `schedule`,
 for example `{"kind":"daily","time":"09:00","timezone":"Europe/Paris"}`.
@@ -96,7 +102,7 @@ To edit or pause a routine, include its `id`, `expectedRevision` and `enabled`.
 The host enqueues occurrences even when clients are closed. An unfinished
 occurrence blocks overlap and missed intervals never create a catch-up burst.
 
-Paths are resolved against the current directory and must stay inside the
+Panel paths are resolved against the current directory and must stay inside the
 thread's working directory; the core refuses the rest by name. `show src/a.ts:12`
 opens the file at line 12. A `show`, `diff`, `browse` or `open` answers
 `shown: yes` when a client subscribed to the thread received the request, and

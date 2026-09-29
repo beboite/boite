@@ -38,12 +38,16 @@ export function mayReceiveEvent(name: RpcEventName, connection: Connection): boo
  * token that sits in the environment of a process the user did not write. Read
  * this as the CLI's manual: the agent says where it is, shows the user
  * something, keeps its task list and the project's cards, reads the changes and
- * the files around it. Delegation can start a child only on owner-approved
+ * the files around it. Browser tasks start an owner-enabled plugin in an
+ * isolated process group. Delegation can start a child only on owner-approved
  * routes configured for that thread. Every call is held to the token's
  * thread; team methods check the relationship before reaching a child. None
  * of these methods changes the owner's trust, routes or permissions.
  */
 export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMethodName, string>([
+  ['browser.start', 'bounded browser tasks for its own thread, only after the owner installs a plugin and enables automation'],
+  ['browser.list', 'progress and verified completion for its own browser tasks'],
+  ['browser.cancel', 'stopping only a browser task that belongs to its thread'],
   ['agents.routine.save', 'bounded durable scheduling for its own identity from its direct conversation, when the owner enabled routines'],
   ['agents.snapshot', 'only the persistent identity, context and resources of this execution'],
   ['agents.history', 'older messages, work and memory of this execution context, under the snapshot rules'],

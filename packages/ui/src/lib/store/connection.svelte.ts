@@ -142,6 +142,7 @@ export class Connection {
             long: params.get('long') === '1',
             delegationDemo: params.get('team') === '1',
             uninstalled: params.get('uninstalled') === '1',
+            browserTask: params.get('browser-task') === '1',
             ...(params.get('principal') === 'session' ? { principal: 'session' as const } : {})
           })
         );

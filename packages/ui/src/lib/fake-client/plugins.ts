@@ -1,5 +1,7 @@
 import {
   RpcErrorCode,
+  type BrowserStatus,
+  type BrowserTask,
   type PluginManifest,
   type PluginPool,
   type PluginPreview,
@@ -12,29 +14,69 @@ import {
 import { RpcFailure } from '../client';
 import { fakePluginPools, fakePlugins, PLUGIN_STEPS, poolCommands } from './plugins-seed';
 import { INSTALL_STEP_MS } from './providers';
+import { T0 } from './shared';
 
-type PluginMethod = Extract<RpcMethodName, `plugins.${string}`>;
+type PluginMethod = Extract<RpcMethodName, `plugins.${string}` | `browser.${string}`>;
 type Handlers = { [M in PluginMethod]: (params: RpcParams<M>) => RpcResult<M> | Promise<RpcResult<M>> };
 
 interface PluginHost {
-  emit(event: 'plugins.updated', plugin: RpcEvents['plugins.updated']): void;
+  emit<E extends 'plugins.updated' | 'browser.updated'>(event: E, payload: RpcEvents[E]): void;
   now(): number;
   nextId(): number;
   delayMs(): number;
+  requireThread(id: string): { archived: boolean };
 }
 
 /** Owns plugin state and installation cancellation for one in-memory client. */
 export class FakePlugins {
   constructor(private readonly host: PluginHost) {}
+  #browser: BrowserStatus = { config: { enabled: false, executablePath: null }, keyAvailable: true, tasks: [] };
+  seedBrowserTask(): void {
+    const plugin = this.#requirePlugin('jev-browser');
+    plugin.version = plugin.availableVersion; plugin.status = 'installed';
+    this.#browser.config.enabled = true;
+    this.host.requireThread('t-trace');
+    this.#browser.tasks = [{ id: 'browser-fixture', threadId: 't-trace', pluginId: plugin.id, goal: 'Save weekly notifications', url: 'https://example.org', status: 'running', step: 1, maxSteps: 20, startedAt: T0, finishedAt: null, message: 'Checking the page', inputTokens: 120 }];
+  }
   close(): void { for (const [id, run] of this.#pluginRuns) this.#pluginRuns.set(id, run + 1); }
+  stopThread(threadId: string): void {
+    for (const task of this.#browser.tasks) {
+      if (task.threadId === threadId && task.finishedAt === null) this.#cancelBrowserTask(task);
+    }
+  }
   handles(method: RpcMethodName): method is PluginMethod { return Object.hasOwn(this.handlers, method); }
   async call(method: PluginMethod, params: unknown): Promise<unknown> { return this.handlers[method](params as never); }
   private readonly handlers: Handlers = {
+    'browser.status': () => structuredClone(this.#browser),
+    'browser.configure': (params) => {
+      this.#browser.config = structuredClone(params);
+      if (!params.enabled) for (const task of this.#browser.tasks) if (task.finishedAt === null) this.#cancelBrowserTask(task);
+      return structuredClone(this.#browser);
+    },
+    'browser.list': (params) => {
+      this.host.requireThread(params.threadId);
+      return structuredClone(this.#browser.tasks.filter(task => task.threadId === params.threadId));
+    },
+    'browser.start': (request) => {
+      const plugin = this.#requirePlugin(request.pluginId);
+      if (!this.#browser.config.enabled || plugin.status !== 'installed' || !plugin.browser) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Install the browser plugin and enable browser automation first.' });
+      if (this.host.requireThread(request.threadId).archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Unarchive the thread before starting a browser task.' });
+      const active = this.#browser.tasks.filter(task => task.finishedAt === null);
+      if (active.length >= 2 || active.some(task => task.threadId === request.threadId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for an active browser task or cancel it first.' });
+      const task: BrowserTask = { id: `browser-${this.host.nextId()}`, threadId: request.threadId, pluginId: request.pluginId, goal: request.goal, url: request.url, status: 'running', step: 0, maxSteps: request.maxSteps ?? 20, startedAt: Date.now(), finishedAt: null, message: 'Starting the browser', inputTokens: 0 };
+      this.#browser.tasks.unshift(task); this.host.emit('browser.updated', structuredClone(task)); return structuredClone(task);
+    },
+    'browser.cancel': (params) => {
+      const task = this.#browser.tasks.find(task => task.id === params.id && task.threadId === params.threadId);
+      if (!task) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'browser task id must belong to the named thread' });
+      this.#cancelBrowserTask(task); return structuredClone(task);
+    },
     'plugins.list': (params) => { return structuredClone(this.#plugins).sort((a, b) => a.origin === b.origin ? (a.origin === 'url' ? a.id.localeCompare(b.id) : 0) : a.origin === 'recommended' ? -1 : 1); },
     'plugins.inspect': (params) => { return this.#inspectPlugin(params); },
     'plugins.add': (params) => { return this.#addPlugin(params.previewId); },
     'plugins.install': (params) => {
       const plugin = this.#requirePlugin(params.id);
+      this.#requireIdleBrowser(plugin.id);
       if (plugin.status === 'installing') return structuredClone(plugin);
       if (plugin.status === 'rejected' && plugin.origin === 'url') {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${plugin.id} was refused (${plugin.rejected?.message ?? ''}). Remove it, then add it again from its URL.` });
@@ -55,6 +97,7 @@ export class FakePlugins {
     },
     'plugins.uninstall': (params) => {
       const plugin = this.#requirePlugin(params.id);
+      this.#requireIdleBrowser(plugin.id);
       if (plugin.status === 'installing') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Wait for the current plugin operation before uninstalling.' });
       this.#pluginRuns.set(plugin.id, (this.#pluginRuns.get(plugin.id) ?? 0) + 1);
       if (plugin.origin === 'url') return this.#dropPlugin(plugin);
@@ -75,6 +118,15 @@ export class FakePlugins {
       return structuredClone(pools);
     },
   };
+
+  #cancelBrowserTask(task: BrowserTask): void {
+    Object.assign(task, { status: 'cancelled', message: 'The task was cancelled.', finishedAt: Date.now() });
+    this.host.emit('browser.updated', structuredClone(task));
+  }
+
+  #requireIdleBrowser(id: string): void {
+    if (this.#browser.tasks.some(task => task.pluginId === id && task.finishedAt === null)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'Cancel this plugin\'s browser tasks before installing or uninstalling.' });
+  }
 
   #plugins: PluginState[] = fakePlugins();
 
@@ -176,7 +228,8 @@ export class FakePlugins {
     const plugin: PluginState = {
       id: manifest.id, name: manifest.name, origin: 'url', description: manifest.description, homepage: manifest.homepage,
       version: existing?.version ?? null, availableVersion: manifest.version, status: 'installing', progress: 0, error: null,
-      source: preview.source, artifact: preview.artifact, platform: preview.platform, commands: preview.commands, pools, rejected: null
+      source: preview.source, artifact: preview.artifact, platform: preview.platform, commands: preview.commands, pools, rejected: null,
+      ...(manifest.provides.browser ? { browser: manifest.provides.browser } : {})
     };
     if (existing !== undefined) Object.assign(existing, plugin);
     else this.#plugins.push(plugin);

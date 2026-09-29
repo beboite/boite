@@ -1,0 +1,4411 @@
+{
+  "scope": "Separate prototype cohorts; do not merge timings with the main four-arm campaign.",
+  "nativeLuna": {
+    "campaign": "2026-09-24T16:50:35.137Z",
+    "expected": 8,
+    "reviewed": 8,
+    "pending": [],
+    "complete": true,
+    "protocol": {
+      "tasks": [
+        {
+          "id": "github-issue-investigation",
+          "url": "https://github.com/microsoft/playwright/issues",
+          "hosts": [
+            "github.com"
+          ],
+          "goal": "In microsoft/playwright issues, find CLOSED issues labelled browser-chromium, sort by most commented, and open the first matching issue. Report its title, issue number, author, and the total comment count displayed beside that issue in the sorted list, not a count of currently loaded comment nodes. Then inspect the linked author profile in a second tab and report their public display name. Keep both the issue and profile tabs available. Do not sign in, post, react, or change an account.",
+          "rubric": [
+            "Observed issue search restricts closed issues and browser-chromium label, ordered by most comments.",
+            "Opened first matching issue and extracted title, number, author and the total comment count displayed in the sorted issue list.",
+            "Opened that author profile in another tab, extracted public display name, and retained both tabs."
+          ]
+        },
+        {
+          "id": "github-release-download",
+          "url": "https://github.com/microsoft/playwright",
+          "hosts": [
+            "github.com",
+            "codeload.github.com",
+            "release-assets.githubusercontent.com"
+          ],
+          "goal": "Starting from the repository, find the latest stable Playwright release, report its version and release date, expand its Assets if needed, and download the Source code (zip) archive. Stop once the file is saved. Do not execute or unpack the downloaded code.",
+          "rubric": [
+            "Navigated from repository to latest stable release.",
+            "Reported visible release version and date.",
+            "Downloaded that release Source code (zip), with nonempty ZIP file saved and linked source URL recorded."
+          ]
+        },
+        {
+          "id": "google-maps-walking",
+          "url": "https://www.google.com/maps",
+          "hosts": [
+            "google.com",
+            "google.fr",
+            "gstatic.com"
+          ],
+          "goal": "Find walking directions from Gare de Lyon, Paris, to Musee d Orsay, Paris. Select walking rather than driving or transit, inspect the route details, and report the duration and distance displayed. Keep the selected walking route visible. Decline optional cookies and location access; do not use current location.",
+          "rubric": [
+            "Correct Paris origin and destination populated.",
+            "Walking mode selected with an actual route displayed.",
+            "Reported duration and distance match visible selected route, with route details inspected."
+          ]
+        },
+        {
+          "id": "amazon-product-comparison",
+          "url": "https://www.amazon.fr/",
+          "hosts": [
+            "amazon.fr"
+          ],
+          "goal": "Compare Logitech MX Master 3S and Logitech Lift mice on Amazon France. Use search, open a matching product page for each in separate tabs, and report the exact displayed product name, selected colour, price or explicit unavailability, and seller for each. Keep both product pages available. Do not add to cart, buy, sign in, or change delivery address. Dismiss optional cookies.",
+          "rubric": [
+            "Search used to locate the two requested mouse models.",
+            "Two matching product pages retained in separate tabs.",
+            "Each exact title, selected colour, price or explicit unavailable state, and seller are backed by visible product-page evidence."
+          ]
+        },
+        {
+          "id": "booking-hotel-filters",
+          "url": "https://www.booking.com/",
+          "hosts": [
+            "booking.com"
+          ],
+          "goal": "Search Paris hotels for 12 October 2026 to 15 October 2026, one room for two adults and no children. Filter to 4-star hotels, sort lowest price first, and report the first three matching property names and their displayed total stay prices with currency. Keep the filtered results visible. Do not reserve, sign in, or enter contact/payment details. Dismiss optional cookies and sign-in offers.",
+          "rubric": [
+            "Paris, exact dates, one room, two adults and zero children confirmed in results.",
+            "4-star filter and lowest-price ordering visibly selected.",
+            "First three properties and total stay prices with currency match filtered result cards."
+          ]
+        },
+        {
+          "id": "youtube-search-filters",
+          "url": "https://www.youtube.com/",
+          "hosts": [
+            "youtube.com",
+            "google.com"
+          ],
+          "goal": "Search YouTube for Blender geometry nodes tutorial. Apply the Video type and Over 20 minutes duration filters. Open the first matching video result, expand its description, and report its title, channel, duration, and one sentence from the expanded description. Keep the video page visible and muted. Do not sign in, like, subscribe, comment, or solve a CAPTCHA.",
+          "rubric": [
+            "Search query and Video / Over 20 minutes filters observed.",
+            "First matching video opened with title, channel and duration read.",
+            "Description expanded and reported sentence present in visible description."
+          ]
+        },
+        {
+          "id": "wikipedia-language-history-source",
+          "url": "https://en.wikipedia.org/wiki/Main_Page",
+          "hosts": [
+            "wikipedia.org",
+            "nasa.gov"
+          ],
+          "goal": "Search for Apollo 11. Open the article, switch it to French through the language interface, open its revision history in a second tab, then return to the French article and open one NASA reference from its references/external links in a third tab. Report the French article title, latest visible revision date, and NASA page title and URL. Keep the article, history and NASA page available. Do not edit anything.",
+          "rubric": [
+            "Apollo 11 found through search and switched to French through language control.",
+            "French revision history retained separately and latest visible date reported.",
+            "A NASA reference opened from that article in a third tab and page title/URL observed; all three tabs retained."
+          ]
+        },
+        {
+          "id": "google-flights-roundtrip",
+          "url": "https://www.google.com/travel/flights",
+          "hosts": [
+            "google.com",
+            "google.fr"
+          ],
+          "goal": "Find round-trip economy flights from Paris to Lisbon for 12 October 2026 outbound and 15 October 2026 return, for two adults. Restrict to nonstop flights. Select an outbound option and a return option, and report the selected airlines, departure times and displayed total price/currency. Stop at the itinerary or booking-options summary without opening a booking provider, signing in, or buying. Dismiss optional cookies.",
+          "rubric": [
+            "Paris to Lisbon round trip, exact dates, economy and two adults confirmed.",
+            "Nonstop filter selected and outbound and return options chosen.",
+            "Selected itinerary summary supports both airlines, departure times and displayed total price/currency."
+          ]
+        }
+      ],
+      "modes": [
+        "agent-browser-vision"
+      ],
+      "repetitions": 1,
+      "timeoutMs": 180000,
+      "maxActions": 60,
+      "maxDecisions": null,
+      "model": "gpt-6-luna",
+      "effort": "max",
+      "tier": "priority",
+      "recorded": false,
+      "isolatedContext": true,
+      "campaignLane": "native-kernel-luna",
+      "campaignConcurrency": 2,
+      "cadence": "one conversation per task with steered observations",
+      "directCapture": true,
+      "nativeDownloadCorrection": true,
+      "transportCorrection": "Independent loopback native connection; borrowed receiver invalidated the original Wikipedia cohort.",
+      "sourceHashes": {
+        "browser-lab.ts": "123aba299c91fb7c336ac96fdd13b32263206d7147dca96fea9948a46fc1dc1b",
+        "browser-lab-page.ts": "be90e04c21dd05aaa8fd28664c3ce95627c2108d3fb367636513d06deab60b63",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "96bc65fe26a33b9a8c665ca9404c51f9de56445c26c38463793678cae4c523ce",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-recording.ts": "3d9e19fd8c2e04e20f298070dc7efc98921757c112520a0c826fc009764455ee",
+        "browser-lab-corrected.ts": "8bbab638ed91b038c375f44208d438414ceaee870e3a0aa4035169bb5c27ff69",
+        "browser-lab-transport-fix.ts": "a7de0ce1ba3d49e03fe5363fc9dd6f5316b6bffe95ac959313741e7b87db5a1b",
+        "browser-lab-capture.ts": "e214babe3d14d11813aaa94905e512d07fa04c2c9789e2ff4c9ca1ea04df1f61",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496"
+      },
+      "binaryHash": "70bd758b2a5a72b18055f60ff877d2297d036c4104e3bc94af6f7c1ceb941408"
+    },
+    "modes": {
+      "agent-browser-vision": {
+        "expected": 8,
+        "reviewed": 8,
+        "scored": 8,
+        "excluded": 0,
+        "succeeded": 6,
+        "allTiming": {
+          "n": 8,
+          "medianMs": 75752.85355,
+          "p90Ms": 180866.6201
+        },
+        "successfulTiming": {
+          "n": 6,
+          "medianMs": 72151.0736,
+          "p90Ms": 90122.6472
+        },
+        "categories": {
+          "complete": 6,
+          "incorrect-answer": 1,
+          "tool-error": 1
+        }
+      }
+    },
+    "cleanup": {
+      "browserZero": 8,
+      "modelGroupsZero": true
+    },
+    "attempts": [
+      {
+        "id": "agent-browser-vision-github-issue-investigation-1",
+        "task": "github-issue-investigation",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              6
+            ],
+            "note": "The issue query explicitly contains is:closed, label:browser-chromium and sort:comments-desc. The rendered list shows the closed Chromium issues ordered by comment counts."
+          },
+          {
+            "met": true,
+            "observations": [
+              6,
+              8
+            ],
+            "note": "The first sorted row is issue 27997, the Playwright-Java browser.newContext error, by sheekha-jain with 40 list comments. The issue is opened and the answer matches these fields. A redundant stale-ref click failed after the coordinate click had already opened the issue."
+          },
+          {
+            "met": true,
+            "observations": [
+              11
+            ],
+            "note": "The author's profile displays sheekha-jain with no separate public display name. The final inventory retains the issue in t1 and this profile in t2, matching the answer."
+          }
+        ],
+        "capturesViewed": [
+          6,
+          8,
+          11
+        ],
+        "timing": {
+          "totalMs": 75657.6867,
+          "executionMs": 74267.3413,
+          "startupMs": 1390.3454000000002,
+          "commandMs": 2616.67899999999,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 6,
+        "actionErrors": 1,
+        "observations": 11,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 406572,
+            "inputTokens": 403640,
+            "cachedInputTokens": 330240,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 2932,
+            "reasoningOutputTokens": 2327
+          },
+          "usageUpdates": 11,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 10,
+            "batchCommandsRequested": 11,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "a9375c3d361c6a36d6d677fb71674a6372bac7c766438aa5a07e8427225b383b",
+          "commands": "b43c32b0b25f695038077fc6cf60c6d7ffa3acc7c4f171ccd9cb009be3828fd6",
+          "observations": {
+            "1": {
+              "json": "a8e97cefb33b2b54bb887875be9eb88c8ed5d1ded5996c29f823cd18ec28f328",
+              "png": "c1e24ec57f7529ee07b17a1dc9c9b05eb1b5798e446e77c2cc5ff4e1479b0b9f"
+            },
+            "2": {
+              "json": "ba3ca3a83528c8ee4e5ecf40b32a4b71738d73757e5e742a6e2efb9b1a2afa42",
+              "png": "44b6d7338b80a7ceb49f9db0353fa0d160cdbb9348e82b50ce2efb9f07393a19"
+            },
+            "3": {
+              "json": "fe3ab5781ddc03cca36afd194d2992df013cd426d86cebcc9f7f1525286689bb",
+              "png": "44b6d7338b80a7ceb49f9db0353fa0d160cdbb9348e82b50ce2efb9f07393a19"
+            },
+            "4": {
+              "json": "fb6b29148c908d9785d80cd179a6145a1ac55d9220a4e27f88b9448255c4e4be",
+              "png": "ff596b24dbfc5702dddc7003af1846db0d2ef67ac328d3a2b6b4f27c7be4ea6d"
+            },
+            "5": {
+              "json": "1566b5f3a8a7e3b8a5b92e68d5d27f37eaf084a25ee4eb321ba6fda1ea0e51d3",
+              "png": "a5be096ac957150a0cac12579e747905573551dcc3583ed512ecc7ed5e9aac25"
+            },
+            "6": {
+              "json": "d33aa07e5863a1552798f0cd426c096ac0390edd9d8a93017f2b82582dffd9d8",
+              "png": "17a0ae42a8e65a541ef14e6860423026624350c5b84e87a4fef53594c7e0501a"
+            },
+            "7": {
+              "json": "e497ce49fc7a40369d7868c7c8b027f0a044486327e0a5261b8c497ae2dc82ca",
+              "png": "817875c1ad3fbae7624b638966accaacb0c730562cc35b0440cffeedde9b5f55"
+            },
+            "8": {
+              "json": "7f4663b934056741244bad2e2a92ebc2276d686ae8d566583117b7692b9c9e0c",
+              "png": "5bbfc22d96538ce16cd862fa54b966c7f084f30e166432d18a0aa82e96c85d85"
+            },
+            "9": {
+              "json": "5f0e1c6d06a3ee51bdf66f15e98adca4490bc14e65ab3a60fa1d2ea98704e0a8",
+              "png": "376be9ad901ea8c5b3d64f9e5170bc99bf694b2f150dace2a53d7811760daeca"
+            },
+            "10": {
+              "json": "a08cf7b97a13272ea0a883cfc2322ea25107ea56ecf71ea5d03366044d975380",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            },
+            "11": {
+              "json": "eeab10cda14309105f87e4d289b328fbebf492cd7b97144b7d31df959faec5b8",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-github-release-download-1",
+        "task": "github-release-download",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": false,
+        "category": "incorrect-answer",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              2,
+              3,
+              9
+            ],
+            "note": "From the repository the agent opens the observed v1.63.0 release link. The release and releases list mark v1.63.0 Latest.",
+            "met": true
+          },
+          {
+            "observations": [
+              3,
+              9,
+              17
+            ],
+            "note": "The version is supported, but the saved release field and captures show only 3 weeks ago. September 04 appears in reaction timestamps, not a release-date field. The asserted September 4, 2026 release date is not independently supported by this trial evidence.",
+            "met": false
+          },
+          {
+            "observations": [
+              16,
+              17
+            ],
+            "note": "The observed Source code (zip) ref downloads the v1.63.0 archive. The saved file is 42,612,768 bytes with ZIP header 504b0304 and independently matching SHA256. The helper result records the exact codeload source URL and matching download GUID.",
+            "met": true
+          }
+        ],
+        "capturesViewed": [
+          3,
+          9,
+          17
+        ],
+        "timing": {
+          "totalMs": 109680.2815,
+          "executionMs": 108176.80129999999,
+          "startupMs": 1503.4802000000054,
+          "commandMs": 8454.268299999836,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 13,
+        "actionErrors": 1,
+        "observations": 17,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1120999,
+            "inputTokens": 1117059,
+            "cachedInputTokens": 973824,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 3940,
+            "reasoningOutputTokens": 3041
+          },
+          "usageUpdates": 17,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 16,
+            "batchCommandsRequested": 19,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "c05118b0a7945c651303ff2360c21c6db906adec83ae63eaab1b51074ae30189",
+          "commands": "f720ffee28343c8456155eda56980f32ba2f034e96c5a0f1fec8f62f7e052301",
+          "observations": {
+            "1": {
+              "json": "9db7b2318860027a14807312dde5238d318fa0868b6bc20f9d0be77bb0d669c3",
+              "png": "a9288f34d8787fb61878e4815d68fe2f7691393cbb17180bda877d2ca60a6db1"
+            },
+            "2": {
+              "json": "d1b76d41b8aef456a69695db29d56913cd3720afbeed10e74e4f7b66505ec3fc",
+              "png": "2804c545f9ee1fd36f5fa83c0a740aaaa8832acfe60845c96fc3f1e77a57b1fc"
+            },
+            "3": {
+              "json": "186b897db9e205f8e2b089756b4dbf87e23946cacb25da05a1159d9803b7931d",
+              "png": "a24fc43da2f79d54f4c383abdc9a6cb39629a5a5713d2c30c55d41ac4f56cb34"
+            },
+            "4": {
+              "json": "ffc2dc388925960993fb77ce89bdfdb3d568bd38d5356feb6c09218aba832836",
+              "png": "a24fc43da2f79d54f4c383abdc9a6cb39629a5a5713d2c30c55d41ac4f56cb34"
+            },
+            "5": {
+              "json": "e062549e0ff718ad8d77a09538f566874883586392dc1a36853ed61ed852e5df",
+              "png": "a24fc43da2f79d54f4c383abdc9a6cb39629a5a5713d2c30c55d41ac4f56cb34"
+            },
+            "6": {
+              "json": "5c82b9dfa361a15198bbba78dab096da3e0e74043df0a75e4d565d6373fbe60b",
+              "png": "a394e21ed9e71e514b7ac7695ec674f509a1e38863d7802c13dc3d3bb9ef9546"
+            },
+            "7": {
+              "json": "77334c55c099571327a0c5958fab14a396c996b5f3cc61182af39de2e42c0964",
+              "png": "aae47ae95a3a1c2bbbc35f135e454e43716e9753875dea941e4bb8ce37d6c777"
+            },
+            "8": {
+              "json": "88cf177a88781f9b6d929d4f7833d676d94081f3f0c63864d9c47b8a8264f20e",
+              "png": "3de4eb6452325b9363ac96b773429dcbaf336f9e6e5c7d1ccbba5d557b2cbbdd"
+            },
+            "9": {
+              "json": "349b54cd050efc2d2851a87e3ff10a3e910d605f7637f9cc0c2dab2ced2129a1",
+              "png": "eedf05a44a01f21bbc4b8fc270c6ee39aaf3dd3f325c3734f88e1edde3de0bf7"
+            },
+            "10": {
+              "json": "55fcb7128dd5592fd1a3d9f1029a931fc62ad9074611a8143709f797cc16f0cd",
+              "png": "eedf05a44a01f21bbc4b8fc270c6ee39aaf3dd3f325c3734f88e1edde3de0bf7"
+            },
+            "11": {
+              "json": "66409c9163e3694fdcf781b8587bf8413abf8778d30ed62db656f68f0f707da8",
+              "png": "eedf05a44a01f21bbc4b8fc270c6ee39aaf3dd3f325c3734f88e1edde3de0bf7"
+            },
+            "12": {
+              "json": "a34ee158a01d5d2f084c81324dbbb0923a33fe60c4a6e79231850f109ae1b8f0",
+              "png": "eedf05a44a01f21bbc4b8fc270c6ee39aaf3dd3f325c3734f88e1edde3de0bf7"
+            },
+            "13": {
+              "json": "bf1bd5d35b16c093d4fd28e03569ef575c1cb6f46937ba360f17f8791c48a602",
+              "png": "a24fc43da2f79d54f4c383abdc9a6cb39629a5a5713d2c30c55d41ac4f56cb34"
+            },
+            "14": {
+              "json": "2319850814e30a6841d62137619e592d1d5ef32f20da015c97835b39e7bb8975",
+              "png": "84a2e790d94400442339b52ba860b8c2914989c4c1334a85bd1ef9f781c104b8"
+            },
+            "15": {
+              "json": "1c9e8b0b89ac2bf1d3f453ac64beaf6d6cf02955e8c25b663e97dfdff9372e51",
+              "png": "280ae152e580d1f1e48df0e88855440bf2ccf14d03dd962cd23028130827a5f9"
+            },
+            "16": {
+              "json": "f0266fbcf012f21333fa6fb077c97410a631f16974da1662d9ce492954d70100",
+              "png": "ff1261d5e4d03b57747f485610a4900283451255cd12bafad67d76ad0ddd36de"
+            },
+            "17": {
+              "json": "a9fbd5f7b0c491a84dc6bd6eebe2c34c6bf8868bd88258fe32d23102abe15cf6",
+              "png": "ff1261d5e4d03b57747f485610a4900283451255cd12bafad67d76ad0ddd36de"
+            }
+          },
+          "download": "a5e93fab1a07523554337ee1e759681c9b3b5038ff184811edea59a61b4bde03"
+        }
+      },
+      {
+        "id": "agent-browser-vision-google-maps-walking-1",
+        "task": "google-maps-walking",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              11,
+              13
+            ],
+            "note": "The displayed origin is Gare de Lyon, Place Louis Armand, 75012 Paris, and destination is Musee d Orsay, 75007 Paris."
+          },
+          {
+            "met": true,
+            "observations": [
+              11
+            ],
+            "note": "The walking icon is selected and an actual dotted walking route runs between the correct endpoints via Voie Georges Pompidou."
+          },
+          {
+            "met": true,
+            "observations": [
+              13
+            ],
+            "note": "The expanded turn-by-turn details show 1 h and 4.4 km via Voie Georges Pompidou, matching the answer. The selected walking route remains visible."
+          }
+        ],
+        "capturesViewed": [
+          11,
+          13
+        ],
+        "timing": {
+          "totalMs": 52828.870800000004,
+          "executionMs": 52100.092000000004,
+          "startupMs": 728.7788,
+          "commandMs": 1649.6229999999923,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 9,
+        "actionErrors": 0,
+        "observations": 13,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 326830,
+            "inputTokens": 324842,
+            "cachedInputTokens": 271616,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 1988,
+            "reasoningOutputTokens": 1363
+          },
+          "usageUpdates": 13,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 12,
+            "batchCommandsRequested": 15,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "8c9f5d172d3ebc52661ebf087d2291f7c3966ff4cad8ae24f07a8582f3b7c6c6",
+          "commands": "8ae789f4a420a78d91e57b52f6fa2af471f25f88ac98f4345da927b7be600002",
+          "observations": {
+            "1": {
+              "json": "9ff321e052fc116a46bfbabbe31893a0c4447e20ff0d4e8248edc8a49b28822d",
+              "png": "ed5a3228857f2a1306e9ee77dd7c823ac610c231fde64057e54aee4314e20b12"
+            },
+            "2": {
+              "json": "2c1b5dacf759c86d380c0b991eed24b5a2b49fa047b595e48caea751daf9694c",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "3": {
+              "json": "c2c2d4c3c1855f0972912b1a9d6418e599c335d042c9435cd8e73b0fb3a009d3",
+              "png": "29ed374875aa2d2ec206e4eac0046b0ffbc1d377610268013a558d7e892e2bfb"
+            },
+            "4": {
+              "json": "0364593865e84d2ee84a413b86472ec50fb8076db5bb04cbbc206cf448f60753",
+              "png": "f6e0a2f8662b004ca1c46c24a530931f20e397ae233eb391e1e46314db6ca6da"
+            },
+            "5": {
+              "json": "a2ecbc2884ce27956f542e39e4890fa8429a4feccf7a3ce8d179e27acb2d2f28",
+              "png": "5cd9b36ef995da93249b06aa5e3f506fa497da325298ac3d80eab9b41aeb1331"
+            },
+            "6": {
+              "json": "f7a844859f22f836b7e3a61adc888ba92b42df673487000b560fb7fc1102653c",
+              "png": "056616ec8154c05180af2fb2d80b1677f7ebcd7369d76530b2738c029a81d3c6"
+            },
+            "7": {
+              "json": "78eba6b3ac628faa975508be3046be9ccd605c731e715448a54a4d93087b249f",
+              "png": "8c505e785440b7261890156ee0f954086d4399830cd86688a0132b403f425e94"
+            },
+            "8": {
+              "json": "9ad71abede8e62eb1964584922017cc683cd49c603e5f49a7b59cf859fbefb2b",
+              "png": "48fc0ef60d9ccd304a806acd77084e7421a35c5f7fa72db9b8fc3c9b2ebcde51"
+            },
+            "9": {
+              "json": "b736bb151f810bb11847f1d0607e006c6e8377b0d163286088672242c5c82247",
+              "png": "e37a3df7546b904c801176b4a60f6cc089f7f7b3911d975ad87a014b480a3013"
+            },
+            "10": {
+              "json": "3149641c26b9b1c0ae3f89f1f2e0025dffba1dfa05bfcbe39245ae6a4f0ed2ac",
+              "png": "8429fe03a50918b4b25c2c728e1ce28c20da8d28fc66509ad827d9c9a4db7537"
+            },
+            "11": {
+              "json": "67b5d23bc5f993cb5fa3741b2339117728b04fc684dd09f5ba7195b7344e082e",
+              "png": "87ffac0ec6d1d4374faae64efe0c7a94ebae63d1d9122b086c91d16e24aba14d"
+            },
+            "12": {
+              "json": "b90aff3cb1f143cceca4d30cc268c9476fbeb614738a1706bea77fa01a68fefa",
+              "png": "1163563a15b121a0311def52776a2938b42bbf81a2744eee37bd8bdaab0fe9ad"
+            },
+            "13": {
+              "json": "0237bd3c43394ecd1d4c90ad832bc0e38ba474e466b6f1e2486942c4c27d64b4",
+              "png": "1163563a15b121a0311def52776a2938b42bbf81a2744eee37bd8bdaab0fe9ad"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-amazon-product-comparison-1",
+        "task": "amazon-product-comparison",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "Separate Amazon searches for Logitech MX Master 3S and Logitech Lift locate matching product results.",
+            "observations": [
+              4,
+              8
+            ],
+            "met": true
+          },
+          {
+            "note": "The final tab inventory retains MX Master 3S product B0FHHV6YR5 in t2 and Lift product B07W4DGC27 in t3.",
+            "observations": [
+              5,
+              10
+            ],
+            "met": true
+          },
+          {
+            "note": "The displayed headings and adjacent feature text match both quoted product names. MX Master 3S is Graphite, 89.00 EUR, sold by maxorium and shipped by Amazon. Lift is Gris, 49.99 EUR, sold by Amazon. These fields match the answer and saved product-page state.",
+            "observations": [
+              5,
+              10
+            ],
+            "met": true
+          }
+        ],
+        "capturesViewed": [
+          5,
+          10
+        ],
+        "timing": {
+          "totalMs": 68644.46049999999,
+          "executionMs": 67928.67189999999,
+          "startupMs": 715.7885999999999,
+          "commandMs": 8308.22299999991,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 8,
+        "actionErrors": 0,
+        "observations": 10,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 603442,
+            "inputTokens": 600633,
+            "cachedInputTokens": 475136,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 2809,
+            "reasoningOutputTokens": 1262
+          },
+          "usageUpdates": 10,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 9,
+            "batchCommandsRequested": 12,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "238e0251328c231f02cc07d5c8b840e968fa449d0942633e27c255e45258950c",
+          "commands": "33cf54c94ce134cb1fac863b2895b4ff755403671ea1f3e8cd693833fa07574b",
+          "observations": {
+            "1": {
+              "json": "ff58b5b991a77a80deb166eab4b4c9b41130984e75f3d3328b3efa1b95e3f2d9",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "482c51a538f8fb4a669fc3a6f93bf5695e6e694f722d6f59378bba128f669074",
+              "png": "ebf92687632451f873408351c2a0895e59da4bb7dfcb74dd88847ffa8a34fd13"
+            },
+            "3": {
+              "json": "d4b06ed21f342de4e14ef2ae4560c31aa4aaf13ae3146f29c6f76069099abaa4",
+              "png": "f41cde43b3c743acb799839316a65efd13b5365c5a53cbc51c8db9f865702ced"
+            },
+            "4": {
+              "json": "d2cba464c86a8013ba90747ce12aac65b5107f2480046932bdc92b7a1e7253c4",
+              "png": "4dee8f762dd28c8e359a001d152a639bf28be951ec8c2537e4664a8c46458a90"
+            },
+            "5": {
+              "json": "7bedb8850facad5832f28cc7dc1e70846f0f113b2c611dc5854325c4cb60c43b",
+              "png": "07d6e43bf5f1bb5e50ca68fa39c29519151439893a7dc8cbfa1f1915b29cca4a"
+            },
+            "6": {
+              "json": "79921613e1d8e01fa819ac73766c891a74d125df35eb2f7d3e3817a3d8fd6479",
+              "png": "4dee8f762dd28c8e359a001d152a639bf28be951ec8c2537e4664a8c46458a90"
+            },
+            "7": {
+              "json": "5d31bbfadd231c27da5946b6fc824f4ef70c0fd42d0143d06a5f533efda76dd3",
+              "png": "f8a1943b2fa187bea358521dc9ce5068cc0c3b2711dfa6167b9cd9cd23a32c69"
+            },
+            "8": {
+              "json": "070f9747ae63c6ae9d835f615fe1b4a624a4500003c132a328035cbdf1680e03",
+              "png": "0453c878595cce4243a72f32e5b2c17ff26fd62c60f0eca08b18283a495a4988"
+            },
+            "9": {
+              "json": "2ab77e94cce2b0d3cb83f08b6da83f70d13080362e5c18baf70ecafc40601e7f",
+              "png": "111591faf5ef1d8527b2328861ab6041f9189ec88c5299b8ef053032bc019876"
+            },
+            "10": {
+              "json": "9e69777eef5e3cf957a1710d6d9b7c860735dee1c2a2de8f34190939f85833ff",
+              "png": "7b4b594a663f1c76af4bab26f0af0a9f428d614e028b530cea7fa15eea58ad1d"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-booking-hotel-filters-1",
+        "task": "booking-hotel-filters",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": false,
+        "category": "tool-error",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "The city-page form reaches 12-15 October with two adults, zero children and one room, but confirmed dated Paris search results are not observed. The final search-results document contains only the skip-to-content text.",
+            "met": false,
+            "observations": [
+              5,
+              14,
+              19
+            ]
+          },
+          {
+            "note": "The city page lists 4-star and lowest-price controls, but neither is shown selected in completed filtered results. The attempt ends before this state is established.",
+            "met": false,
+            "observations": [
+              14,
+              19
+            ]
+          },
+          {
+            "note": "No final answer or three filtered stay totals is produced. City-page cards show indicative one-night prices, not the requested filtered three-night stay. The trial hits its 180-second budget after one native click timeout and fourteen direct-capture Target.attachToTarget timeouts; these are tool failures, not evidence of a site block.",
+            "met": false,
+            "observations": [
+              14,
+              19
+            ]
+          }
+        ],
+        "capturesViewed": [
+          5
+        ],
+        "timing": {
+          "totalMs": 180866.6201,
+          "executionMs": 180000.7879,
+          "startupMs": 865.8322000000044,
+          "commandMs": 110600.28050000017,
+          "timedOut": true,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 14,
+        "actionErrors": 2,
+        "observations": 19,
+        "observationErrors": 14,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1191280,
+            "inputTokens": 1187829,
+            "cachedInputTokens": 1059840,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 3451,
+            "reasoningOutputTokens": 2645
+          },
+          "usageUpdates": 20,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 20,
+            "batchCommandsRequested": 25,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "0b9c2f33d2e7225832d76133bf41246e82b3c111c9672e2e4e931ae3dd4b7b16",
+          "commands": "2e8e0305c548f49e92f226dccff0f0e3572a9dd6ed5ab1aad557d91a7eb28f03",
+          "observations": {
+            "1": {
+              "json": "c601f85dfd1c1754d76dc2408642b9b1db95d5ed85cded03e54aaa26f33cfc49",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "c01c60fb7dfbbc44104ca2d33ddb0fa6c96757d759c9cf5209ee123df1b6d481",
+              "png": "2c9d0488de18803135cecedad67efe0e685691a1a8b3b9b382b001d9ca65d1bb"
+            },
+            "3": {
+              "json": "630d5fff126e18052aa89ceeb3e46cd23bddf2c32bd4158287be9a89b44afd0b",
+              "png": "d6c1d2a205b5253d9124885b5fb4e30685c450d7d97d38b9e4990f131e4f023b"
+            },
+            "4": {
+              "json": "c43ca7b95edd4410e169febe925979f4db2190c99ab2f8d2f1163cd74ddfffd8",
+              "png": "d14724599be1e2609f5e229b903a8bf37f24145c75dde8cc6d2d5513b640d5ec"
+            },
+            "5": {
+              "json": "fe406afec8605cbd6663f96f65b1018dc58624fc2c1ef236f1c6f4f5f575f1f7",
+              "png": "d14724599be1e2609f5e229b903a8bf37f24145c75dde8cc6d2d5513b640d5ec"
+            },
+            "6": {
+              "json": "b843a74024cb0c93561bed6db36b1b59f22b1232a17353f49528f76b4ab4a7c3",
+              "png": null
+            },
+            "7": {
+              "json": "745eb01c1ce4ffa2e98ee14dfa77f9f889ddaf23bffa7301c2d914cc6565aba4",
+              "png": null
+            },
+            "8": {
+              "json": "13985de684df182210b53497ff6f5b8cda5a893b7b47df813bead6a4c22cebcf",
+              "png": null
+            },
+            "9": {
+              "json": "6725ae20a94a61beec5bf79de31c92f56ad74f54fda370aec6e55f057bffa2d8",
+              "png": null
+            },
+            "10": {
+              "json": "8503749bc19f6ca8c21b890153dcee2ea9f85faffcc0a4e17e7f374d4384bd18",
+              "png": null
+            },
+            "11": {
+              "json": "8c73198e33f57b89b5f3b0fabd6fd8f244261938c040d2b05c6f58b197f0baa6",
+              "png": null
+            },
+            "12": {
+              "json": "c4f5e8c243eb4c5f25b3e8b730c80ed6b089d68a203fae1ba0f2edb9df26803a",
+              "png": null
+            },
+            "13": {
+              "json": "0422ec555f8ae8cc4c7259942e2d0e77a3875199c2a49f6a706e82f558421f79",
+              "png": null
+            },
+            "14": {
+              "json": "2c00412612e600b38c3fe7d591a3892c4676c665dfde741bba8c287a2fe12220",
+              "png": null
+            },
+            "15": {
+              "json": "694f365e40fc6bb923b23b80411b2138534cca8276d117d3753a5250a921a53f",
+              "png": null
+            },
+            "16": {
+              "json": "88f7ff8a13456c0e66cd02c17dd042f9019978c115caf002198a71b0a90454a6",
+              "png": null
+            },
+            "17": {
+              "json": "2aebd4a018f53a821a63077011f6fb537b31e27c97e54d4b0031bc1a3fcd7d9c",
+              "png": null
+            },
+            "18": {
+              "json": "5623c18c4f952ac2b8d331e0f0dec545324f8080aac8a7376708e52a226b538f",
+              "png": null
+            },
+            "19": {
+              "json": "96bc42b73e4f6408029f7afc75db25aaecdcbcca17d92a3d88402025bd3389a5",
+              "png": null
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-youtube-search-filters-1",
+        "task": "youtube-search-filters",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "The viewed filter dialog shows Videos and Plus de 20 minutes selected for Blender geometry nodes tutorial.",
+            "observations": [
+              13
+            ],
+            "met": true
+          },
+          {
+            "note": "The first organic matching video is Geometry Nodes pour debutants (Tutoriel Blender), by Ryan King Art, with 1:30:06 shown on its result thumbnail. The watch page opens that video and the reported title, channel and duration match. A sponsored card precedes the organic result.",
+            "observations": [
+              14,
+              16,
+              19
+            ],
+            "met": true
+          },
+          {
+            "note": "The description is expanded with its links, chapters and Less control. Its first sentence matches the reported French sentence. The watch page remains visible with an advertisement in the player; the Activate sound control confirms muting.",
+            "observations": [
+              19
+            ],
+            "met": true
+          }
+        ],
+        "capturesViewed": [
+          13,
+          14,
+          19
+        ],
+        "timing": {
+          "totalMs": 75848.02039999998,
+          "executionMs": 74409.7769,
+          "startupMs": 1438.2434999999823,
+          "commandMs": 2586.7271000000765,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 13,
+        "actionErrors": 1,
+        "observations": 19,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1454970,
+            "inputTokens": 1452013,
+            "cachedInputTokens": 1259520,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 2957,
+            "reasoningOutputTokens": 2118
+          },
+          "usageUpdates": 19,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 18,
+            "batchCommandsRequested": 19,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "af99ca1a73daaf274a4d612fa4d45b73ba9dcc27fd8699fdb4ecac1ea2025b4d",
+          "commands": "704298acd8d5dabead3a3d766fcf3df975db3d9730f3c003295644b6c5b58ef8",
+          "observations": {
+            "1": {
+              "json": "4db5c724a571b1d276f54a6f48360188336a6dcb0bc02462b2d5a6474fe992ce",
+              "png": "160d4a0ed7480e4de99ec8a355b111cd4cdbb56c53bcda1551060aa6f9d6bd0d"
+            },
+            "2": {
+              "json": "403bc2ac1b0775e3f839fc31d0d43aaf75f7f62b75ec68e9de6e5a6904a40bfa",
+              "png": "86d3fd8d96b3b43242f22edef3f5ce55045e1ce913e607db9fbccaae43d9ed40"
+            },
+            "3": {
+              "json": "35f924a730f50713699761374cea7975416d4a866bd808603f159915d0304013",
+              "png": "cda9779238606da7e14221db71a73f2dca7a2caaa7e74ab3cf32be8cec896168"
+            },
+            "4": {
+              "json": "5d111618c97b9b8106621c4a70c6ac88d8edad4a53a3df50d8df8e16cb777dd2",
+              "png": "386fb00931408fe633fe22d8398a4f90c06ce639254628cd33fdd3997d36628e"
+            },
+            "5": {
+              "json": "07e80574a7e49a1eeba627f19905f32352744ecac73f3e6efdf0f3d620ea3ff6",
+              "png": "fb058c763e82e7c95fb090bc93b4f37087c61afddc5b0789c9476fe23d9cd5f6"
+            },
+            "6": {
+              "json": "dd917e439fc1a8d50e25fbc221e49e6e5cdf40c11b192c38d9d3f28791a55414",
+              "png": "de89f226aefee30bcd8accf590079517eaf9c393e28dada56bc6af0dd49ee50c"
+            },
+            "7": {
+              "json": "9b77a77ac7b9cf48a91d0ab2a8dd8235844c535e52d4eab37f8a734f8a37dca1",
+              "png": "443ee794e92c2a6bec64ff9c67671482fc8cdca5029714798256209c6f8d4293"
+            },
+            "8": {
+              "json": "5922d42690fca02909ad2be03c4f5a7f04633aa867540372226d4a7839d2487b",
+              "png": "9d4ff6e28c4e28eb5abd94b577272a7687d9ab32488ae1b4ec8ba0711eb1f890"
+            },
+            "9": {
+              "json": "3cdee4da3938c7c830060113e1e5ffb07a09c441417c774a9a6b93a7696b103f",
+              "png": "c8859a5a5105961c17e42a2418f1754956552147e059b2bc53c79e7021c151ec"
+            },
+            "10": {
+              "json": "ac323d0e296a63cc83c284162d73c02970315cf9c7cac671b9680879938351af",
+              "png": "527592e0a960610b4048faf89c3d9b5a828612695d52a44cd78b26327f5282aa"
+            },
+            "11": {
+              "json": "9b4b2413b20f0a093b0b094a7d06e6415d4cf2cf84e5abc6b6604e0e83cd2acc",
+              "png": "337c446664c58bbfd826411a12d9f4501d6f3bac05cfb00335a02aa4c318162c"
+            },
+            "12": {
+              "json": "4d96a04261d4529c0f318d6bf81c416c4097c2e9ec2bf39800f3da13dee33bb5",
+              "png": "dc8298b6d1593639d4e748c2ce88c6da562fb7d5b0c4b4296e1635d5b6311d52"
+            },
+            "13": {
+              "json": "5c6ff61601b550480fadda45ef7864b0ff91119a140f62d6478608151d283858",
+              "png": "155a67eb35fba0a853bf6bae81035ed5f246f1bdb28880cf8918b17ab415d3ec"
+            },
+            "14": {
+              "json": "b2ae0652df00baae2fc73371ce745da741a885e9cd6faaf3d1a664e3c4f8928c",
+              "png": "8060b645ffe5fef4572f1bfddf2bbc95338f0927ab676e5b6e7cf76359232ee2"
+            },
+            "15": {
+              "json": "9a2a309cb1c827b163d7b04974a8d493a0950e79a71cb43f68a12f9f218e179d",
+              "png": "23d46dd9d5ba759b4367e78c2ad5b796f4d62777a5d6bbae4d9b693d4ec15583"
+            },
+            "16": {
+              "json": "a5105ba7be3d31de099718b7010a01c83576539f3b68a329b3394e7fdc0f97fb",
+              "png": "483d32680d1b62dac90228ed29fef66aa7e83673d706eb7f415224403f74ae40"
+            },
+            "17": {
+              "json": "77575e8e812c287ef66e8492ffd7a7b1714ca6eeefb62f39e227bfecee00a0a0",
+              "png": "2201ca5fdfd21a5e6c1110186eb3c49642e9b850ffbf1d6f0ed6c96c1c4760a4"
+            },
+            "18": {
+              "json": "718f88bf392819f20514f35464efbd6adf98238eb118e79ee76b46244bd32e32",
+              "png": "d98171e1c3610595b3ae922902db488f282c5b6be6d2ac2a158e00260afa6211"
+            },
+            "19": {
+              "json": "29308370a8c1270205459299497b3a6ef28b965505499f9674476f7a3685289f",
+              "png": "a089f6769b0a25164a1780863c23a3311da90752b5b791cb5b356d2ea1f6dd9d"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-wikipedia-language-history-source-1",
+        "task": "wikipedia-language-history-source",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "The recorded Apollo 11 search opens the English article, then the viewed language menu and its Francais choice lead to French Apollo 11.",
+            "met": true,
+            "observations": [
+              1,
+              4,
+              5
+            ]
+          },
+          {
+            "note": "The separate French history tab shows 12 septembre 2026 a 17:02 as the newest revision, matching the answer, and remains retained.",
+            "met": true,
+            "observations": [
+              6,
+              9
+            ]
+          },
+          {
+            "note": "After returning to French, the agent opens its observed Lunar Surface Journal Apollo 11 NASA link in t3. The redirected NASA journals page title and URL match the answer. Final inventory retains article, history and NASA tabs.",
+            "met": true,
+            "observations": [
+              5,
+              7,
+              9
+            ]
+          }
+        ],
+        "capturesViewed": [
+          4,
+          6,
+          9
+        ],
+        "timing": {
+          "totalMs": 40272.42050000001,
+          "executionMs": 39545.04600000009,
+          "startupMs": 727.374499999918,
+          "commandMs": 6335.343599999673,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 7,
+        "actionErrors": 0,
+        "observations": 9,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 464928,
+            "inputTokens": 463248,
+            "cachedInputTokens": 376448,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 1680,
+            "reasoningOutputTokens": 1166
+          },
+          "usageUpdates": 9,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 8,
+            "batchCommandsRequested": 9,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "92d2b36d41e252153b8b1718732ba879ecc274b41ad8731fbf39e18deefbc634",
+          "commands": "e854bb1c8335b12e9568013193ead0a5b0ff6d52fff0e78e8cf3bdab1c58ea28",
+          "observations": {
+            "1": {
+              "json": "835239f6c6a870cb8bceacda843166b07844cb32085e1e0d1f3e3cc04887c645",
+              "png": "7ac58c4eb18900195595bba3cf5137bc3f54e90b2a577b6f79280b3fff70d833"
+            },
+            "2": {
+              "json": "a243f5c34a14533c24fcd4f4f74a5e1eff72f693d62ef770340fbad2aa4b88a3",
+              "png": "8510c876667f8dcc0f67c57d9ff9f03b3554ac90e2499739fc94988ff88fd1a4"
+            },
+            "3": {
+              "json": "5c03f89648c74d9181019e5575764dd4b417e64283e38ca8e419fcc43e2f7dba",
+              "png": "1e0815c48aca40ab12a9ab753e62b4110735f9b8c4e78ca492505c785d8174f2"
+            },
+            "4": {
+              "json": "472105dcda30b3ccfc917f11ab263a6eb40f9ed1da91dffc6ceeeb5d255f009a",
+              "png": "1e0815c48aca40ab12a9ab753e62b4110735f9b8c4e78ca492505c785d8174f2"
+            },
+            "5": {
+              "json": "c6a185ba05226689cf4230cc48780ca62aabd1094c1038e063ba4250db4c9711",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "6": {
+              "json": "aa0fc3282499ce818197a5f2089a0007d65fa3ffe765c272917e345832e94899",
+              "png": "ad24d12811adac09339ddf98f5b8d9acc6cb25b114e0379b495bbc7262a17ecc"
+            },
+            "7": {
+              "json": "e0be5539bd3baa3d7e01c95b4bd6ca6a57710ea8f21944a54f2256342ffdfb3b",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "8": {
+              "json": "36353869fa2f23cb36e5e203d1c1104b55f6bb8cf937b2177497b02038f549a4",
+              "png": "a21aeadf68ad6f7c8d6acdb3cd753a0724a890e72dfa848e74e50385d792bdf3"
+            },
+            "9": {
+              "json": "fb279e3dcf5b00113460aa8b8156ce9b95d175918e481c71be412fa64880e89a",
+              "png": "a21aeadf68ad6f7c8d6acdb3cd753a0724a890e72dfa848e74e50385d792bdf3"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-google-flights-roundtrip-1",
+        "task": "google-flights-roundtrip",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              19,
+              21,
+              26
+            ],
+            "met": true,
+            "note": "The search and itinerary summary confirm Paris to Lisbon round trip, economy and two adults. The observed tracking text explicitly records departure 2026-10-12 and return 2026-10-15."
+          },
+          {
+            "observations": [
+              19,
+              21,
+              26
+            ],
+            "met": true,
+            "note": "The Stops dialog shows nonstop selected, the results retain the nonstop filter, and both outbound and return selections appear in the final itinerary."
+          },
+          {
+            "observations": [
+              26
+            ],
+            "met": true,
+            "note": "The final Google Flights summary shows Ryanair BVA-LIS departing 22:20 on October 12 and Ryanair LIS-BVA departing 10:55 on October 15, with a displayed total 321 EUR for two adults. The answer matches; no booking-provider page is opened."
+          }
+        ],
+        "capturesViewed": [
+          19,
+          21,
+          26
+        ],
+        "timing": {
+          "totalMs": 90122.6472,
+          "executionMs": 89318.24919999996,
+          "startupMs": 804.3980000000447,
+          "commandMs": 2918.5445999995572,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 17,
+        "actionErrors": 1,
+        "observations": 26,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 2229085,
+            "inputTokens": 2225504,
+            "cachedInputTokens": 2039168,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 3581,
+            "reasoningOutputTokens": 2447
+          },
+          "usageUpdates": 26,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 25,
+            "batchCommandsRequested": 26,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "bd7bbb47e6ac09391f837d58fe30f48d98da0b8861316ca2b09cda1e8e44b3c0",
+          "commands": "6107633351c0ab2bd6845c5f4810476a275159b352b42794b7294fa5089c0f23",
+          "observations": {
+            "1": {
+              "json": "cc6607d9253484b052cfc9ff6a6cbbcd80298b357bfb550e94abd582aa39c0b5",
+              "png": "dc8edefeda16419faac63bbb24d417095b71f2f7e5d51b51c272e4547a27f7fb"
+            },
+            "2": {
+              "json": "8ebd1fa485843f479dc220aaf0b600dd6c1d6c6b89134126226213d00ca3b570",
+              "png": "6c75dbc4e9d4c2e9dbb44a3f05a74a82f8ca509e75c9d1d000ad6dbb5a1b9cbe"
+            },
+            "3": {
+              "json": "c5fa1e43fc0e1d549253ff160520a590b4371c74b7801089c8b49d59b4498425",
+              "png": "c0264e391bd58102adf099c248e8930df13380683ccbd1f36c24285ccc0b7374"
+            },
+            "4": {
+              "json": "991a158094310fe01afd99ded51e7cdb7f67907b8679c574724c0da21840b0e9",
+              "png": "b5ddadc64e7811733f0bf7807bc043eb3a65df7f39d073b61823da98c985323f"
+            },
+            "5": {
+              "json": "4e48e3a0c20ea9914d91e4cff725006c233ffc8a76a1d86950324cee9fe1194f",
+              "png": "7fc39d100214b0d8ca4a3f39e278c8de9d889e7fa4b194189251d3524a7cc11e"
+            },
+            "6": {
+              "json": "2d1c4a8d9919726611b4801414f4d31a9704095a3ab69219ad7911adc0125c5e",
+              "png": "36b8742b8ca7112effae1c4baa4967bb45c84574c5a7c860518cfba04513a40e"
+            },
+            "7": {
+              "json": "b56cd3c63998ee9a5395a847250c64a97e2528e3040b172a7a12060b05398287",
+              "png": "39f243ea5c8ea4c8f25f654dea679e8996757565c7f7fdbf541d28529ab2b1fd"
+            },
+            "8": {
+              "json": "ed303c313092363381c006c500c67827c1a83cdea1773303a4d4d7323b1c9178",
+              "png": "95c250c06b87757acdda790cb1698230bae083d412a6b9a67556d18c2821586e"
+            },
+            "9": {
+              "json": "70c5d2481a0530e401e5f82571f83633fcfd9fd7af7e946c8ade22fcc0db2166",
+              "png": "7bad326afb132b11c8abce0ecff185b0ddc788ba67ba50f8e5813618d8ebbba3"
+            },
+            "10": {
+              "json": "6a49721ef45d11bfe865e5d5f4b0e0d3b94e0378cdd3561790f44a82cb913d57",
+              "png": "bc0df0af8f32b8ec6b40f185851ac7733b251d46a76d79ea57f7d40dd4f0d7b4"
+            },
+            "11": {
+              "json": "f4f8abae1a24093a9e7c52d0a6486b23cdf2e375a0523477675340b0bd2d21c1",
+              "png": "1e44099df3e44bbdd68330417f81d66625a47a9b77614e76dd3ce945e8e99386"
+            },
+            "12": {
+              "json": "67bcd681ca895749ce545fe7c2db887ac99fc94453223dd7efae3532438e5569",
+              "png": "1e44099df3e44bbdd68330417f81d66625a47a9b77614e76dd3ce945e8e99386"
+            },
+            "13": {
+              "json": "c0a7507dc751a6c1b3980884291ecde6dcd740a1b788a62daeec06023cbb81b2",
+              "png": "b73b34f12ae89539195d4531ef50ae679dbc6e598f5053b8242b26d9dfa46f84"
+            },
+            "14": {
+              "json": "a49318e7b5c6bfef40bb9657597ed2b0ac21e0621810db08217e0482595395ea",
+              "png": "cfb64b9dbfa2fdafb86d480e468eb610f1a0f97e71d2c556d7f6d04d86cfc70b"
+            },
+            "15": {
+              "json": "dcf820272e031dad1b2925c5cc8a847b4624d3edb6b86be54f73d05c5be61dc3",
+              "png": "13fa7591068a788ea7bee9de80315eba112d21f23ffce3eb69a5ef7915c54356"
+            },
+            "16": {
+              "json": "7c08215ec427acca5a175a201c4a7c959a14d315cc2c2865723789a2b44b40ae",
+              "png": "ed2775fb759ffb3eabd25e5a6a19ea7f390e6e8b1795f722b239cf291181a4e9"
+            },
+            "17": {
+              "json": "41a9747fd3f414bf67a5a4b5119b519b70509e4f6ead775ce9b5561d9d5c2a3a",
+              "png": "8154910d77e92fc2146536b7039bbb28817f68f9c64cc1d19301be015e342866"
+            },
+            "18": {
+              "json": "0a912a6f9d7dcc0552552408edbfb3aec779dcce2cfecc58aa9a0ec5b353e29a",
+              "png": "0d4cadcb08565f86a19d5c00c5a85d28cc89e8590db81939628b4fdc7bb94879"
+            },
+            "19": {
+              "json": "95ad6425463ba0bc11a6276ed7531cc2aceb5918121281f1073f81ca51833f7e",
+              "png": "5b9e8eba0e25cc2e7d16423a0f020171d452e32c9d4a652eb80974adffddadd6"
+            },
+            "20": {
+              "json": "f98b7e2e45047962f6251ed969d5883aeede51c936b31ff83ce3f1d15a9c5d21",
+              "png": "12ab9a79c460d059f6358e6ca3e73093dcb82b80767ed26f529eec90d0b53a64"
+            },
+            "21": {
+              "json": "da59a64d48d4f968ab152b2d17f25209c9e29c369413cdec190b68065b8c48e8",
+              "png": "223e86e3aefbbfe54e41e71fe5cd3c22efc08950555e6dba680fe0d747245b36"
+            },
+            "22": {
+              "json": "dd6a9fa551c4913fd17385a25686cb3b21c4f7e54a8a4757d225ae0b46b57037",
+              "png": "5c9524d9e9fcfa5d39f81fef6091995b3a9901a8f2d480d3b6e17ab01599d3af"
+            },
+            "23": {
+              "json": "89b7dcfcb3c8b1999859b707f6a1a33c61585cbd80fa5bf39d888d284c078675",
+              "png": "b1507641296a6bda1addfa4f369ad85a7102a9f8c59025c0014b34614789fb76"
+            },
+            "24": {
+              "json": "3e8b019ae8eb030f13cb6b944754ab5573a8f790d38c1724506b8d29cd092658",
+              "png": "6219988b9046d7eec7feeb40af61a6128b94c08ce36fc5990e947568e489f2df"
+            },
+            "25": {
+              "json": "b6c0ac0235c5be2fe4cd8b2c403e2fbbd26c54801be4f3e49eb635707e0cf4db",
+              "png": "0974880c1c89e288831ac4b69186a8a6fc55b4578dedbfc5ba99834393465271"
+            },
+            "26": {
+              "json": "2d01fda5dd039eafe888fd67953cda016dba63397f80d6295c884b33dec7a2c9",
+              "png": "0974880c1c89e288831ac4b69186a8a6fc55b4578dedbfc5ba99834393465271"
+            }
+          },
+          "download": null
+        }
+      }
+    ]
+  },
+  "memoryPlaywright": {
+    "campaign": "2026-09-24T16:42:13.589Z",
+    "expected": 8,
+    "reviewed": 8,
+    "pending": [],
+    "complete": true,
+    "protocol": {
+      "tasks": [
+        {
+          "id": "github-issue-investigation",
+          "url": "https://github.com/microsoft/playwright/issues",
+          "hosts": [
+            "github.com"
+          ],
+          "goal": "In microsoft/playwright issues, find CLOSED issues labelled browser-chromium, sort by most commented, and open the first matching issue. Report its title, issue number, author, and the total comment count displayed beside that issue in the sorted list, not a count of currently loaded comment nodes. Then inspect the linked author profile in a second tab and report their public display name. Keep both the issue and profile tabs available. Do not sign in, post, react, or change an account.",
+          "rubric": [
+            "Observed issue search restricts closed issues and browser-chromium label, ordered by most comments.",
+            "Opened first matching issue and extracted title, number, author and the total comment count displayed in the sorted issue list.",
+            "Opened that author profile in another tab, extracted public display name, and retained both tabs."
+          ]
+        },
+        {
+          "id": "github-release-download",
+          "url": "https://github.com/microsoft/playwright",
+          "hosts": [
+            "github.com",
+            "codeload.github.com",
+            "release-assets.githubusercontent.com"
+          ],
+          "goal": "Starting from the repository, find the latest stable Playwright release, report its version and release date, expand its Assets if needed, and download the Source code (zip) archive. Stop once the file is saved. Do not execute or unpack the downloaded code.",
+          "rubric": [
+            "Navigated from repository to latest stable release.",
+            "Reported visible release version and date.",
+            "Downloaded that release Source code (zip), with nonempty ZIP file saved and linked source URL recorded."
+          ]
+        },
+        {
+          "id": "google-maps-walking",
+          "url": "https://www.google.com/maps",
+          "hosts": [
+            "google.com",
+            "google.fr",
+            "gstatic.com"
+          ],
+          "goal": "Find walking directions from Gare de Lyon, Paris, to Musee d Orsay, Paris. Select walking rather than driving or transit, inspect the route details, and report the duration and distance displayed. Keep the selected walking route visible. Decline optional cookies and location access; do not use current location.",
+          "rubric": [
+            "Correct Paris origin and destination populated.",
+            "Walking mode selected with an actual route displayed.",
+            "Reported duration and distance match visible selected route, with route details inspected."
+          ]
+        },
+        {
+          "id": "amazon-product-comparison",
+          "url": "https://www.amazon.fr/",
+          "hosts": [
+            "amazon.fr"
+          ],
+          "goal": "Compare Logitech MX Master 3S and Logitech Lift mice on Amazon France. Use search, open a matching product page for each in separate tabs, and report the exact displayed product name, selected colour, price or explicit unavailability, and seller for each. Keep both product pages available. Do not add to cart, buy, sign in, or change delivery address. Dismiss optional cookies.",
+          "rubric": [
+            "Search used to locate the two requested mouse models.",
+            "Two matching product pages retained in separate tabs.",
+            "Each exact title, selected colour, price or explicit unavailable state, and seller are backed by visible product-page evidence."
+          ]
+        },
+        {
+          "id": "booking-hotel-filters",
+          "url": "https://www.booking.com/",
+          "hosts": [
+            "booking.com"
+          ],
+          "goal": "Search Paris hotels for 12 October 2026 to 15 October 2026, one room for two adults and no children. Filter to 4-star hotels, sort lowest price first, and report the first three matching property names and their displayed total stay prices with currency. Keep the filtered results visible. Do not reserve, sign in, or enter contact/payment details. Dismiss optional cookies and sign-in offers.",
+          "rubric": [
+            "Paris, exact dates, one room, two adults and zero children confirmed in results.",
+            "4-star filter and lowest-price ordering visibly selected.",
+            "First three properties and total stay prices with currency match filtered result cards."
+          ]
+        },
+        {
+          "id": "youtube-search-filters",
+          "url": "https://www.youtube.com/",
+          "hosts": [
+            "youtube.com",
+            "google.com"
+          ],
+          "goal": "Search YouTube for Blender geometry nodes tutorial. Apply the Video type and Over 20 minutes duration filters. Open the first matching video result, expand its description, and report its title, channel, duration, and one sentence from the expanded description. Keep the video page visible and muted. Do not sign in, like, subscribe, comment, or solve a CAPTCHA.",
+          "rubric": [
+            "Search query and Video / Over 20 minutes filters observed.",
+            "First matching video opened with title, channel and duration read.",
+            "Description expanded and reported sentence present in visible description."
+          ]
+        },
+        {
+          "id": "wikipedia-language-history-source",
+          "url": "https://en.wikipedia.org/wiki/Main_Page",
+          "hosts": [
+            "wikipedia.org",
+            "nasa.gov"
+          ],
+          "goal": "Search for Apollo 11. Open the article, switch it to French through the language interface, open its revision history in a second tab, then return to the French article and open one NASA reference from its references/external links in a third tab. Report the French article title, latest visible revision date, and NASA page title and URL. Keep the article, history and NASA page available. Do not edit anything.",
+          "rubric": [
+            "Apollo 11 found through search and switched to French through language control.",
+            "French revision history retained separately and latest visible date reported.",
+            "A NASA reference opened from that article in a third tab and page title/URL observed; all three tabs retained."
+          ]
+        },
+        {
+          "id": "google-flights-roundtrip",
+          "url": "https://www.google.com/travel/flights",
+          "hosts": [
+            "google.com",
+            "google.fr"
+          ],
+          "goal": "Find round-trip economy flights from Paris to Lisbon for 12 October 2026 outbound and 15 October 2026 return, for two adults. Restrict to nonstop flights. Select an outbound option and a return option, and report the selected airlines, departure times and displayed total price/currency. Stop at the itinerary or booking-options summary without opening a booking provider, signing in, or buying. Dismiss optional cookies.",
+          "rubric": [
+            "Paris to Lisbon round trip, exact dates, economy and two adults confirmed.",
+            "Nonstop filter selected and outbound and return options chosen.",
+            "Selected itinerary summary supports both airlines, departure times and displayed total price/currency."
+          ]
+        }
+      ],
+      "modes": [
+        "memory-playwright-vision"
+      ],
+      "repetitions": 1,
+      "timeoutMs": 180000,
+      "maxActions": 60,
+      "maxDecisions": 40,
+      "model": "gpt-6-luna",
+      "effort": "max",
+      "tier": "priority",
+      "recorded": false,
+      "isolatedContext": true,
+      "campaignLane": "memory",
+      "campaignConcurrency": 2,
+      "cadence": "Fresh ephemeral thread per JSON decision; latest observation plus at most 6000 characters of agent-maintained memory. No growing conversation history.",
+      "directCapture": true,
+      "nativeDownloadCorrection": false,
+      "transportCorrection": "Independent loopback native connection; launch-owner socket retained only for lifecycle.",
+      "sourceHashes": {
+        "browser-lab.ts": "123aba299c91fb7c336ac96fdd13b32263206d7147dca96fea9948a46fc1dc1b",
+        "browser-lab-page.ts": "be90e04c21dd05aaa8fd28664c3ce95627c2108d3fb367636513d06deab60b63",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "96bc65fe26a33b9a8c665ca9404c51f9de56445c26c38463793678cae4c523ce",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-recording.ts": "3d9e19fd8c2e04e20f298070dc7efc98921757c112520a0c826fc009764455ee",
+        "browser-lab-efficient.ts": "91a03965d34829a0f9e06234686d87bb943227f61e397b9cd817f908f16b818d",
+        "browser-lab-memory.ts": "32e755661a2f36aaeceecc170500b32fef8c76c9ed7cda4eec0b70e0c8c7a07f",
+        "browser-lab-capture.ts": "e214babe3d14d11813aaa94905e512d07fa04c2c9789e2ff4c9ca1ea04df1f61",
+        "browser-lab-transport-fix.ts": "a7de0ce1ba3d49e03fe5363fc9dd6f5316b6bffe95ac959313741e7b87db5a1b"
+      },
+      "binaryHash": "70bd758b2a5a72b18055f60ff877d2297d036c4104e3bc94af6f7c1ceb941408"
+    },
+    "modes": {
+      "memory-playwright-vision": {
+        "expected": 8,
+        "reviewed": 8,
+        "scored": 8,
+        "excluded": 0,
+        "succeeded": 5,
+        "allTiming": {
+          "n": 8,
+          "medianMs": 164492.35394999996,
+          "p90Ms": 181242.27189999993
+        },
+        "successfulTiming": {
+          "n": 5,
+          "medianMs": 91375.20049999998,
+          "p90Ms": 170600.73219999997
+        },
+        "categories": {
+          "complete": 5,
+          "budget": 3
+        }
+      }
+    },
+    "cleanup": {
+      "browserZero": 8,
+      "modelGroupsZero": true
+    },
+    "attempts": [
+      {
+        "id": "memory-playwright-vision-github-issue-investigation-1",
+        "task": "github-issue-investigation",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              4
+            ],
+            "note": "The issue list visibly uses closed issues, browser-chromium, and descending comment count."
+          },
+          {
+            "met": true,
+            "observations": [
+              4,
+              5
+            ],
+            "note": "The first result is issue 27997 by sheekha-jain, with 40 comments in the list. The issue is opened and its full title, number, author and list comment count are correctly reported."
+          },
+          {
+            "met": true,
+            "observations": [
+              5,
+              7,
+              8
+            ],
+            "note": "The linked sheekha-jain profile is opened in a second tab; the visible name and absence of a separate display name are correctly reported, with both tabs retained."
+          }
+        ],
+        "capturesViewed": [
+          4,
+          5,
+          7
+        ],
+        "timing": {
+          "totalMs": 75499.6398,
+          "executionMs": 73361.7616,
+          "startupMs": 2137.8782,
+          "commandMs": 13102.30650000006,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 6,
+        "actionErrors": 2,
+        "observations": 8,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 100109,
+            "inputTokens": 96654,
+            "cachedInputTokens": 27904,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 3455,
+            "reasoningOutputTokens": 2412
+          },
+          "usageUpdates": 7,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "a609c578eb3291f824783488c797de54eac36c83205b66703e834e9c0fd117b1",
+          "commands": "e0e46bd8edb9c78e19d7e8366308eec21d93c82147e4d81ee8b26770a8b104ec",
+          "observations": {
+            "1": {
+              "json": "ed194673b336bc7280ae1623423a627824b552e786e5006a77d6f3b3b2c1224e",
+              "png": "d10342aba385cbbf9f6478c0fb51f6133e8c7002b145972358794052b104c361"
+            },
+            "2": {
+              "json": "f42b6dd8b1ccae1d977e9654d4570daa45787553827bf52ae170426be630dcc6",
+              "png": "27bb0fe8658341797cf590b9ad52ddadd97141c891c564c56edc472869bce09b"
+            },
+            "3": {
+              "json": "d4a18081bb8a47150d8130767ff41b13927605f193a4ec41b8f62af32fac5c86",
+              "png": "bec64b769244cd122ac335a8c0b66cd59f611bd648acf5adf015e0d117a43802"
+            },
+            "4": {
+              "json": "476f49b2076779ec6f3b69bf6edb950c318332bd0e6ec60ba44005b89f6e14c8",
+              "png": "53f6ea1c2c44c668c621c64a9f5b8164f29eb2d0ba5cebe40521fd633c14e6e9"
+            },
+            "5": {
+              "json": "634782f0a8640508a53603cbe556cf7dac702b3cfe5bc8bec662640f7d5a9136",
+              "png": "5bbfc22d96538ce16cd862fa54b966c7f084f30e166432d18a0aa82e96c85d85"
+            },
+            "6": {
+              "json": "423d44b3d533f388b13d5aa805fb19d074fd39cbdda25ecc737f36e3ccf9513e",
+              "png": "9ba3301376ad2d132f4fffab22c2b4f753c27a334dfc71eb1c462e9e0f0a69f5"
+            },
+            "7": {
+              "json": "17f78379a5aa3f116301cd0338090eed26599c968ea1c5d8da864a3f5b9cb63c",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            },
+            "8": {
+              "json": "7ceae64546776d0d924bccfb3c95260d7a45d2cb094e3d70b5017914e7d108a0",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-github-release-download-1",
+        "task": "github-release-download",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": false,
+        "category": "budget",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              2,
+              3
+            ],
+            "note": "The repository exposes the v1.63.0 release link, and the opened release is visibly marked Latest."
+          },
+          {
+            "met": false,
+            "observations": [
+              3,
+              26
+            ],
+            "note": "The release page shows v1.63.0 and 04 Sep 22:40, but the run expires without a final report of version and release date."
+          },
+          {
+            "met": false,
+            "observations": [
+              3,
+              26
+            ],
+            "note": "Assets remains at Loading through the final capture. Repeated observation and scrolling never produce a download action, recorded archive source or saved ZIP."
+          }
+        ],
+        "capturesViewed": [
+          3,
+          26
+        ],
+        "timing": {
+          "totalMs": 181157.65490000002,
+          "executionMs": 180001.19550000003,
+          "startupMs": 1156.4593999999925,
+          "commandMs": 3723.132800000036,
+          "timedOut": true,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 6,
+        "actionErrors": 0,
+        "observations": 26,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 240180,
+            "inputTokens": 231792,
+            "cachedInputTokens": 95232,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 8388,
+            "reasoningOutputTokens": 6121
+          },
+          "usageUpdates": 26,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "7e13996db2fc80b8d27ff74e1bad01cff28344c34a08cd15733965bcb893ab37",
+          "commands": "840ed135a775ba02ba926e9ebb931397896e8925bb46f2ea2784352690d3ff88",
+          "observations": {
+            "1": {
+              "json": "a0fc5f3cfe51c2df1ea21c8d05659babeb599ae256248a4e61274d5ea561b157",
+              "png": "2b5badab195f198b22b99f6e932ed6f14948eae1c24b9ff51c4b4088cf74f616"
+            },
+            "2": {
+              "json": "6a8fda2fe2d24f76d923bc0bd783320c6bfa9e78425ac4f5eee6ab0532b9f11c",
+              "png": "2d253aa3dbe0a48de7cbf093b03b2d038a3e04f47fdd2c46d7f89a033ec3e768"
+            },
+            "3": {
+              "json": "503d5419edba2985acf450ef8fb9d44941b7980f08a950568ca95a94a24b2e30",
+              "png": "ab4856152b8062d2a83c6b6717714d37335b6d3929bb12df5512efe602fa2f09"
+            },
+            "4": {
+              "json": "4d3b9143f1ce932c5165f9405869774e686fe4cdee9813204616e0fcdf73c4b4",
+              "png": "ab4856152b8062d2a83c6b6717714d37335b6d3929bb12df5512efe602fa2f09"
+            },
+            "5": {
+              "json": "b99dddc69d503fe721cedd89d4ddeca346f30a18e7d7c879c9e20dad7a5011fe",
+              "png": "ab4856152b8062d2a83c6b6717714d37335b6d3929bb12df5512efe602fa2f09"
+            },
+            "6": {
+              "json": "c66cd2401977e71a86eb66244341dbebb0c80deedb25c79704b083fee0565e02",
+              "png": "ab4856152b8062d2a83c6b6717714d37335b6d3929bb12df5512efe602fa2f09"
+            },
+            "7": {
+              "json": "496690cc8ff2e6f2c95eeea61b864d536ef08a10b330e0e9c2762403fbcdbdbd",
+              "png": "ab4856152b8062d2a83c6b6717714d37335b6d3929bb12df5512efe602fa2f09"
+            },
+            "8": {
+              "json": "5d57466761c18e9c8feabb244d93a1f665e103a704a6c14861a9694e78199778",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "9": {
+              "json": "baf57c1123966d4ab71879e4548de68bbde0ae40e5895141661c98a722e88944",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "10": {
+              "json": "cf562d0ca34d3ce62b0b9b5dddb08abc12a4c686de38f733c6279e393e22fedd",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "11": {
+              "json": "75f10bf13d7f5156cf60e7cede9ff8f445036c7385f0e03bd147a411886a91f7",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "12": {
+              "json": "d1b5dacb3c540867a526c4c4636fbb52cad3a9e0ac150e0d3133908a6cad35c1",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "13": {
+              "json": "42fc6e807db8d21738105bb3ed2212126481ce1f93cf88e70a4a9a2c441e8ae3",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "14": {
+              "json": "5505041ec1cd518d8d2fba20e8cfa968769da3a2f619d2e201048c1bf2151be1",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "15": {
+              "json": "87d3bbea03aa2880036b4af39d3ae111eaf799830807b1769f192fb5b8d045cc",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "16": {
+              "json": "6ea1c18d09973651d69cfd328924ead4c38f53977f90d48f10d34e46685f8d69",
+              "png": "1a84b9ea02f77ec73c8e7050ed1dc33521f979e5b9adaee7d82088e51c5f7b57"
+            },
+            "17": {
+              "json": "6f6c18dafbe7097fbf743478fb77ff62e6fa298753a5ba9e8cda4650fbe6179f",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "18": {
+              "json": "a6931dc51a843cd36af55bc493edde5872db6c89d0b54d8b5816a49f39f6734f",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "19": {
+              "json": "1e08290e2a373e1bef4ac454acd8341082144e8006b03e5cb722232fba446a7e",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "20": {
+              "json": "3136027cb20720ce27afe035ff92f14108bc62671ecfb773e8c7c1feb32d96ae",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "21": {
+              "json": "549490cca6065d9e1c5b3c20c1ba44c3b141e42501bd1711336e324cf26c0f81",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "22": {
+              "json": "260b217cb934855cf8956c266c0dc191d3243523d4d8d39533cff16b3f5b85ae",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "23": {
+              "json": "145e72f4cabeb1cd39ce028b66984cc12f982cbf99ff345412dbd023cb321f73",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "24": {
+              "json": "2e92da62e8525de2e540333d10647646f867c4f13595b75e1244514fbd49521d",
+              "png": "4d08796b917d11538120e0b639efaf25a81f3f44d0fb093555c09789a61a6323"
+            },
+            "25": {
+              "json": "846aab0dce775c7fb20de770c8fcfbc7cd7fbf85df2bfe85fce91cdc875260e4",
+              "png": "fc09c344ac54a00c7b73e0e93e7ef0d25ba61ddf04244ef63f249a9db36998ab"
+            },
+            "26": {
+              "json": "092cfa009e6d83853ba759d83d6da0e0673193d7bcfedc3105ffa035fbe588cf",
+              "png": "590d97809bdfe9c660dd162eb3c23d43929d89038e6789e67b2843531139f578"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-google-maps-walking-1",
+        "task": "google-maps-walking",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              14,
+              15
+            ],
+            "note": "The route endpoints are Gare de Lyon, Place Louis Armand, Paris and Musee d'Orsay, Paris."
+          },
+          {
+            "met": true,
+            "observations": [
+              14
+            ],
+            "note": "Walking mode is selected and the selected route runs via Voie Georges Pompidou."
+          },
+          {
+            "met": true,
+            "observations": [
+              14,
+              15,
+              16
+            ],
+            "note": "The reported 1 hour and 4.4 km match the selected walking route. The detailed turn list is opened before the step-by-step preview, which retains the route despite unavailable Street View imagery."
+          }
+        ],
+        "capturesViewed": [
+          14,
+          15,
+          16
+        ],
+        "timing": {
+          "totalMs": 91375.20049999998,
+          "executionMs": 90188.19969999997,
+          "startupMs": 1187.000800000009,
+          "commandMs": 1622.5807000001369,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 10,
+        "actionErrors": 1,
+        "observations": 16,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 142201,
+            "inputTokens": 138049,
+            "cachedInputTokens": 57600,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 4152,
+            "reasoningOutputTokens": 2492
+          },
+          "usageUpdates": 15,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "55bd4315cd49a3faa5efa89fa1dabf1018330a389943fc9074b2dc328617ab44",
+          "commands": "5c5eb56d6d0af218f7757f66b55968baea5f428f9e8f85340b6b8af57665445c",
+          "observations": {
+            "1": {
+              "json": "ae2f5622023ca43a1bbd5e655c8dc542374e5c8468c1a687fc1bf0b9825ef7c9",
+              "png": "dc8edefeda16419faac63bbb24d417095b71f2f7e5d51b51c272e4547a27f7fb"
+            },
+            "2": {
+              "json": "5fc70a5dd3e1283ed1f98690f0dba2040193b111c67a56beb53762c3bce8d621",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "3": {
+              "json": "b50304495bfb37dabfaa705e79871a86aa20a3403b874e5da1d64ca25e4e57c9",
+              "png": "9aba2edf6087f24c51608ca60d13ef55e6017c40bb3f9bdab271151a438e7507"
+            },
+            "4": {
+              "json": "b561e1c421f4e72c9ad0002ff5f97b52f7d4212e67e56e517aaae7dbb5af23d1",
+              "png": "de7d1de76956f89a1ef411a8ea03dc207ef5fe2397e2507ee0d4d1e913f363fe"
+            },
+            "5": {
+              "json": "58ad1b12dec1f4e70f1cd2bf0ed232a9da3e55ce719111c67d05234a0a0cb481",
+              "png": "0bd64897d7754a7597752006f1778feab8930b1bb1ee1658c0e4a529cd0bdeb1"
+            },
+            "6": {
+              "json": "8ce7127ded4536dddc9e1d45b012b238c9c336cad245a59c25fee1229ee1b4ea",
+              "png": "a92adfac17f41a9c3081999815bb5d3b1cae662ae81e583fe497ef7ccfb9c842"
+            },
+            "7": {
+              "json": "f707e15952315ae240e4d41f547261c69795fc26b9e53febd9674b960468714f",
+              "png": "3af35f148dddd23c4420a2410f656e6ae178cb23cf2cba3fe7f1b97967e9b16b"
+            },
+            "8": {
+              "json": "1a567846878a90c0a07436d303821078afe210c7f1a4c7ea2a836c402c1e42d7",
+              "png": "cc9fea1d43aad3bfc1762f8d3f45ee4530ab32bfc3141b6c18ec8c33c6e328c9"
+            },
+            "9": {
+              "json": "b2acfba4eed4c312201a04beb25474957200c2009beee8d86daf930f601f41cf",
+              "png": "7e2b51677b3508660f9397de41bc9970ad4567c7ff31b3b5238240e5995c8a55"
+            },
+            "10": {
+              "json": "1fa176372d9b4f46f0fdb5a47c68166cc89082dd9964477c4137d49b66156dc9",
+              "png": "25253cfdba85999d151a5186c6c1f9635bd533007adf85576c388641ec906090"
+            },
+            "11": {
+              "json": "de41dcb967e1dd5df88e1f83b1be86d0df29c738cbec6f41f15d7715997cbf0d",
+              "png": "277fdba7e41012ff720a1868cb25a65fb52a6cf22417e950ecbfeafa2a9dcf8a"
+            },
+            "12": {
+              "json": "1ca95e7c8be75d0285c099e1e7151b65fd645f647f0041374f3ddcced07b4a74",
+              "png": "126fe8d3d1b005f680d32b8232d276f6d55481e0c6d51b5bdadbc55da930625e"
+            },
+            "13": {
+              "json": "f2134caa694be8347f4dd69bab5fcbe1dffc493fe71a5a50cad99ff85c1a36fd",
+              "png": "fc6d4c4e5db748b2a731c986c75f96c8a0387bc592af99ae84d1fb51c45d1182"
+            },
+            "14": {
+              "json": "54f9cb448492150f9837e3b2e5ba602ef9affd87f8ecec0311f51643c5585770",
+              "png": "fc6d4c4e5db748b2a731c986c75f96c8a0387bc592af99ae84d1fb51c45d1182"
+            },
+            "15": {
+              "json": "7f7c088e90ef4fa51e6a7e5ccbef373b4257615b9791bad1bde9cab64709b49a",
+              "png": "ad2b0bc82a07194241cf07cabf9f3a58541da7ca4ec6d94e8129f7e5fa4391d2"
+            },
+            "16": {
+              "json": "186b374e92bc0ccf6078ee07ef5fd8ef6c9c3b4c0cc85ce927416b2f0af70080",
+              "png": "745999e25f0b88e492e2239a9ff0c2c629ecb67d9af01ca9a810cfd5650df6c5"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-amazon-product-comparison-1",
+        "task": "amazon-product-comparison",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": false,
+        "category": "budget",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              5,
+              9,
+              10,
+              11
+            ],
+            "note": "Amazon search is used for Logitech MX Master 3S and Logitech Lift, and matching product links are opened."
+          },
+          {
+            "met": true,
+            "observations": [
+              6,
+              11,
+              13,
+              17
+            ],
+            "note": "The MX Master 3S Graphite and Lift Gris product pages occupy separate retained tabs."
+          },
+          {
+            "met": false,
+            "observations": [
+              6,
+              13,
+              17
+            ],
+            "note": "The pages show prices of EUR 89.00 and EUR 49.99, but no final comparison reports both exact titles, selected colours, prices and sellers. Capture timeouts recur during repeated observations before the budget expires."
+          }
+        ],
+        "capturesViewed": [
+          5,
+          6,
+          9,
+          13
+        ],
+        "timing": {
+          "totalMs": 180709.52969999996,
+          "executionMs": 180001.07069999998,
+          "startupMs": 708.4589999999735,
+          "commandMs": 50125.97150000051,
+          "timedOut": true,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 8,
+        "actionErrors": 0,
+        "observations": 17,
+        "observationErrors": 7,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 259092,
+            "inputTokens": 252103,
+            "cachedInputTokens": 62464,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 6989,
+            "reasoningOutputTokens": 3624
+          },
+          "usageUpdates": 16,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "fe2a10d16b3a11bc65669c4228e726a8732bc0ac265c130a7053653cc634913b",
+          "commands": "eb3718ae56ba0eadd17f500bf2ec876eaf6b9a60e53c9b6c9a381faa88e81733",
+          "observations": {
+            "1": {
+              "json": "c5e13fda6c8456f77f81ba579b6e377ef4c35796ab3d2f0939112de57d3af070",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "dc41f62a5eb21505a71c3fba08d11324a2a13f05d4df00ebf15afc283dd9a908",
+              "png": "9295d98b6c3f39c0aca5623a39ec8a4d6fe0223f68f21f3524f7628de7586a6b"
+            },
+            "3": {
+              "json": "479c5bbb111803abb25e5a189c33a2c84a1675a255070b1d871d237cd06fbb76",
+              "png": "51f22be2f7a16b3012fb94094a5b78c736b41a5fb360346892f9b7c3dd147516"
+            },
+            "4": {
+              "json": "dc34b6b97d98f7b9e3c338f31306b9226d23877bd017fec3adfcc859fce40a5d",
+              "png": "3e4ce2f99e539c77509303abd58cff0d669b8400b8b562bc6f6b0dc73e41ef96"
+            },
+            "5": {
+              "json": "bf372e9e3ec6e198d008fea04a670193d10e1a6e7ce98e002fc17cfc971f2636",
+              "png": "cd6b92fd4488984a80fa8216ec5c3b0ccbf7175972d40d06f0c8392b70cb2db8"
+            },
+            "6": {
+              "json": "6dde29ce85f9056d6d9e935ed5a3ea36da85de47f5ae8e353eafb2fa8e5e41ab",
+              "png": "8f5ef627533e13cf0eaaa7e11fb62bb7aa7dbfd540b88f02f6d459a90a3e79a6"
+            },
+            "7": {
+              "json": "cda06ea66c66ae34c6239fe89d433c97dd656f5062eead9d878e99c2ed7b6b47",
+              "png": null
+            },
+            "8": {
+              "json": "f226258924dda9009b93fe3b4b8ba345703c890c33f112e2b5dab4b3a5b1034a",
+              "png": "70c57802343ece5bf998c5e6f26a4bac86720c6b49c4f2668d1432417b48a4ff"
+            },
+            "9": {
+              "json": "487f9432ae2cf251528175544c9643fcf3cd8501f8fd33cd0b069eda44199195",
+              "png": "96961833000846d4f8e981a79fb7b851ac1ec86ec75e0773d03c0c993fc5c489"
+            },
+            "10": {
+              "json": "297686cf0f03b180a3523c82af5fcbbffbfe84651dac8202ebf92e1a6b08a897",
+              "png": null
+            },
+            "11": {
+              "json": "1aea958790523c039f1116963d2a3d01962a96d5a0e516c6233fa23f20bfc8e5",
+              "png": "f29346aeae60dfe6df284a3fef921decc61df9d723f9578a407abb50b169867c"
+            },
+            "12": {
+              "json": "dfc96151667383348fe6afc5ddbc45f5ae7336ddd3afd919e45408a7957e6d14",
+              "png": null
+            },
+            "13": {
+              "json": "78563599b9c036d2d52a28b64d126bb3c026fa444606f69f5430da92be6b9ec3",
+              "png": "8d3da1c52cec307827e512551e84dc383e3c0d530a032c6f3cc439862890d1df"
+            },
+            "14": {
+              "json": "3bfbd3e764999b4d0958773c966eb26cc17c2198ac76dc0b590fbce60512c215",
+              "png": null
+            },
+            "15": {
+              "json": "66c64570824be5dd85d89a8b3acd91174f228b6facff127236b286505f8b6773",
+              "png": null
+            },
+            "16": {
+              "json": "6ac16d6a86e0c670c024215867270f13a7851cb9da74e7fd47b6985d488b43fc",
+              "png": null
+            },
+            "17": {
+              "json": "ee42c5fd2e61b8963d9a9ae11387bfa7cce622861c6d96bad9031144bd429cea",
+              "png": null
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-booking-hotel-filters-1",
+        "task": "booking-hotel-filters",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": false,
+        "category": "budget",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "Paris, October 12-15 2026 and two adults in one room are entered, but each Search returns the generic city page and resets the dates. No results confirm the requested stay.",
+            "observations": [
+              9,
+              10,
+              23,
+              24,
+              26
+            ],
+            "met": false
+          },
+          {
+            "note": "The generic city list retains its preferred sort; the required four-star filter and lowest-price ordering are never confirmed.",
+            "observations": [
+              23,
+              24,
+              26
+            ],
+            "met": false
+          },
+          {
+            "note": "No final answer reports three property names and total prices for the required filtered three-night stay. The budget expires while dates are being entered again.",
+            "observations": [
+              23,
+              24,
+              26
+            ],
+            "met": false
+          }
+        ],
+        "capturesViewed": [
+          9,
+          10,
+          23,
+          24,
+          26
+        ],
+        "timing": {
+          "totalMs": 181242.27189999993,
+          "executionMs": 180002.30239999993,
+          "startupMs": 1239.9695000000065,
+          "commandMs": 9245.042100000195,
+          "timedOut": true,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 18,
+        "actionErrors": 0,
+        "observations": 26,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 342147,
+            "inputTokens": 333918,
+            "cachedInputTokens": 99072,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 8229,
+            "reasoningOutputTokens": 5098
+          },
+          "usageUpdates": 25,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "05a3d593f5009cb8b668697fef0e9f93bff54b3e9492a15878bcc9e8de1d28ba",
+          "commands": "c55f6c36d3ad741e42c0560d0860cf71fb5d126c646a9c5c8f28663a30ed9b28",
+          "observations": {
+            "1": {
+              "json": "2fa16e55f554af235360a875ac8253326cd36780ed2137baada2a8e69cd80839",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "40263cbb901b053e5fb30003162456d55389bdd97cfe2b89cd055418caac4844",
+              "png": "391b65bdc75774cb0da0b1b3874753aba93ea3a8f581caacaafa2be9dd7c9676"
+            },
+            "3": {
+              "json": "b6fb7117847e4d5aaf32caf9eb5550a0d37914a50b55b8dd56d7c45226acb478",
+              "png": "212c21740734d7f9d392af3e9b8e14f7dbed194f6649af4dea45af849b6688d1"
+            },
+            "4": {
+              "json": "6d344f953f68ece305e7dc2d77e7b7bc4eb4ec099b466a9635655ad3fbfba4fb",
+              "png": "1553921a22a5b71e877ab7df509ded958e5ef51a96ef53258ae707f7d0fffc27"
+            },
+            "5": {
+              "json": "86d6782e0d7ab39d410dfa85efc447ccffabda143a016c6170e11ea51aedacd0",
+              "png": "90c886287070e4029cd680e13d1044c4438948507481a658909dcf3c7b7e34e8"
+            },
+            "6": {
+              "json": "8662794c488d8cf07dac0587efd61edb906a835b45899608f08b4b9da0cef15f",
+              "png": "8e4cfe7437d030778eb474daffbb3931fca874ed60a8c84f7fab788309a55628"
+            },
+            "7": {
+              "json": "cdc1f610d1a757e42c4ad0dc64d3552ae5f528a51b0e04a29fd840138ea7a4ad",
+              "png": "8e4cfe7437d030778eb474daffbb3931fca874ed60a8c84f7fab788309a55628"
+            },
+            "8": {
+              "json": "f062118e1542dc65fc6e5f12c43de5cea170f0d62c2aa9730de7726b64ec7cb2",
+              "png": "2e44fd8c51a627b6b4945bec44f91ae0628e89c14346db0a9f59a6fc726625bf"
+            },
+            "9": {
+              "json": "0bc519df6d2b9e64391fda510b95ade7417a63a420ff5d01ff9f91d8a59a978c",
+              "png": "64dde6a5d97b920edaa7a67c9274efb0a23a36be54cede09ebdd4d9a434fc1e8"
+            },
+            "10": {
+              "json": "18a3d6bfc7a657d06fb46c918198786d7f8fbb39d8e45333418f1c960e1762c1",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "11": {
+              "json": "ef877ec4881da0c1bb830f266526167cb70572845e9f024cad5b6043ffbbdd69",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "12": {
+              "json": "c85486699d1d240ce7806b41a2c68049d30b85ea7e8040c87f5904e77ae5527b",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            },
+            "13": {
+              "json": "8ac934856e1f0217a7ebbc38ff14048d3916e86e53191bc14f558ff95ccd98af",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            },
+            "14": {
+              "json": "93024b30b504fa085d48f0a3b3fb199bac388303db95c2a7bb5622f4b6aefaa4",
+              "png": "01f11415740cda27fd9d4c773b2f8108dae48db9fa111993d4f0192ca81697d3"
+            },
+            "15": {
+              "json": "1d31e9fb1213cb30bfe42dfc5426de80db05ee12854a9a8597622aecc8f6b935",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "16": {
+              "json": "61220092cf1e4cf1fe54d694d9bec5198212acc6c8022329da99ffd4557cb7fb",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "17": {
+              "json": "4662aa907801e15a12d0ccead0f452ae8e3d8d5295731564458ba77787c8954a",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            },
+            "18": {
+              "json": "c22d428e9c3d2a6d2bebd0f8361ea88c573b3bc436b819f9b9a72c22b0b058c5",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            },
+            "19": {
+              "json": "6d9ebe2a23d30fbacb5c67a78852ce98cb92b0d39d5d8d8bff3a2805baf8bb7d",
+              "png": "01f11415740cda27fd9d4c773b2f8108dae48db9fa111993d4f0192ca81697d3"
+            },
+            "20": {
+              "json": "22579c3b21c1c14eb9a0af3edd1eef66bb9795cbe016dc5dfbf24f12f1f5639e",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "21": {
+              "json": "c25b85b61feae2fb6a75eb19953705ea7785064679cda7615005e5f0065c5279",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "22": {
+              "json": "7ed6607635e1ac46030a0521516a45c90ac7630a8cfb97924926ac918666065e",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            },
+            "23": {
+              "json": "c4255564cfe23c9095cff111ff44557389807fe9f13b076e8df6f7f45d54ed4d",
+              "png": "01f11415740cda27fd9d4c773b2f8108dae48db9fa111993d4f0192ca81697d3"
+            },
+            "24": {
+              "json": "1d0bbcbaa3b07aeb1d899dcd560de5164e8a701d3f5a36ca6719513887c881fa",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "25": {
+              "json": "3a37f44a230bb6c71ea418c88d2aefe86a9818df2f9d340903e451a2c2f42c0a",
+              "png": "3371e2457d9b92dc76ef7d9c10100384e81aebb1813f476c702b38fbcaa65057"
+            },
+            "26": {
+              "json": "1ba6d32e9c915068a0c2c2efdf5c00a2067c213b6ef048aa034b34aa7b531779",
+              "png": "dd289c2c354d70a6a8930bc1cc5aafb75cfda8374b5512cec784c54662e48e66"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-youtube-search-filters-1",
+        "task": "youtube-search-filters",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              16,
+              17
+            ],
+            "met": true,
+            "note": "The Blender geometry nodes tutorial query is shown, and the filter dialog confirms both Videos and Over 20 minutes with active removal controls."
+          },
+          {
+            "observations": [
+              17,
+              19,
+              21
+            ],
+            "met": true,
+            "note": "Ryan King Art is the first matching organic video after a sponsored advertisement. Its reported title and player duration of 1:30:05 match the watch page; the result thumbnail rounds to 1:30:06."
+          },
+          {
+            "observations": [
+              20,
+              21
+            ],
+            "met": true,
+            "note": "The expanded description contains the reported sentence about teaching geometry nodes basics to beginners. The watch page is retained and its sound control says Activer le son, confirming muted playback."
+          }
+        ],
+        "capturesViewed": [
+          16,
+          17,
+          20,
+          21
+        ],
+        "timing": {
+          "totalMs": 170600.73219999997,
+          "executionMs": 168916.58539999998,
+          "startupMs": 1684.1467999999877,
+          "commandMs": 15941.535600000061,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 19,
+        "actionErrors": 3,
+        "observations": 21,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 330558,
+            "inputTokens": 322302,
+            "cachedInputTokens": 82688,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 8256,
+            "reasoningOutputTokens": 5699
+          },
+          "usageUpdates": 21,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "2f4f4d41e481fa0b1e5fd5ea613a0dcc521dbb76084025577e2fd0cb291f7ca9",
+          "commands": "eb9973adffbc8d80dde6dae53ac8c5a202dd65de5097ee84dcdef79f237d1605",
+          "observations": {
+            "1": {
+              "json": "707fba042952da5110a316a5b176e0a8dd5a485dce0e22a1df47d63cd254d051",
+              "png": "dd6aa3f62c4468dae622f5fd64ac84b0f2ede360c3ecf1b8677b5fce12c9744c"
+            },
+            "2": {
+              "json": "10a7ace18399e1487f02e053c88546c2639526c79b500b238fd7a2b9fec9d88c",
+              "png": "86d3fd8d96b3b43242f22edef3f5ce55045e1ce913e607db9fbccaae43d9ed40"
+            },
+            "3": {
+              "json": "4b36b5886ed38e5f2d3f8e732db894969f43f89c858c315b1260e41f8c1e729a",
+              "png": "86d3fd8d96b3b43242f22edef3f5ce55045e1ce913e607db9fbccaae43d9ed40"
+            },
+            "4": {
+              "json": "a53bf3a1e04e85b181fd8fdfd351c80315b3029cf9d8137f1d0042f9f12398f5",
+              "png": "9048032ee0f62e7b9d3cf7f621734bed3451f717b575ff00c9c6fe05a72542a5"
+            },
+            "5": {
+              "json": "e25341b7b5eeac7f2d5d3db47d0ad8ddc89b294eb3004dc0192485f0ea87066b",
+              "png": "386fb00931408fe633fe22d8398a4f90c06ce639254628cd33fdd3997d36628e"
+            },
+            "6": {
+              "json": "0b1fcb0db220a211cef825acbe4ec340918e08971a4ac302aa10fd7319bdb12b",
+              "png": "c59bd67966faa8a3d437b5232acc13a543d81e77c797cbb0e32900c0d158088b"
+            },
+            "7": {
+              "json": "2c380822ea9639ace85d4e1dacb41350528d7f881698e1588a6495d8d2f7760b",
+              "png": "179e19d4fd76d81dc7aef19dcc311ac8f960469355e2cf5652070e8aa2cffa0e"
+            },
+            "8": {
+              "json": "9703fc8c796f6be5bde08b14dc2f63b15b114398fdca5de9f206f84c76ea3eab",
+              "png": "bc3e1db4306626412fac938fb0b1d060a8ff674e4b48a3947af7ff7ca6461e18"
+            },
+            "9": {
+              "json": "5a790b108c40429e9e7d080c220ebdb41f98ceff1f8db823ee6bddcd1d56f5f8",
+              "png": "653d0d6027a6a8b3a14303443acd1c0ecf08cdb3130de05437ae8aeda82707b0"
+            },
+            "10": {
+              "json": "54e6c02366e86d1d2ccd776972921b3b2c2dc9c29a6ecacb0256622f8951f363",
+              "png": "865ea9cabfed156e60e663dffd8d56035bd1325f5de695b16d46c7fab1135aef"
+            },
+            "11": {
+              "json": "0aa64d80c0339c701b441083364111d321393e82b45267289de91602117103d2",
+              "png": "42d6a3903f52e19c91ed1ad348eceb36e0fb8a9a4548b524cccbb8c4bf5897f1"
+            },
+            "12": {
+              "json": "ce5631dc7dd2dab8377b1d115fa9bba9cc2946a6a8314d1bf6a4efd48340b821",
+              "png": "c4856860a5a39b399ae463afb3e088e1596149f98ea13afe09997600489c69d1"
+            },
+            "13": {
+              "json": "543ce019ed59fa7d59642c5f07bff5370518356070bf61140aaecf256cbac25b",
+              "png": "05045d5b60c14ac0b6c162784259fd83f8f1abf1a1d586b201c8d6d0f9c7b18a"
+            },
+            "14": {
+              "json": "8346619dc5d276ea4810538e63ed7e51ecd7203f0f419199f4b89b8d21b1a8d0",
+              "png": "ad2f169e9c59bcb9cbbe4eff7a3fbf6e9e71d87aca7ea4610adfdde8378f6f53"
+            },
+            "15": {
+              "json": "69f739a361abc8b28d724a65d210b330013abe77d284e4a77a030184b2857a32",
+              "png": "6d5b776dc2d4be54c8a9cda21b2b41311e7abcaec034a12be08be0abf396b992"
+            },
+            "16": {
+              "json": "96e5f71e5757373a8229b1f36d09da1ac4b7e34993a2828961c3840e2202365f",
+              "png": "ffc827271c3a5f28ef192be23714d603a2472f85da4578c3cd65b0b8e8683cb2"
+            },
+            "17": {
+              "json": "0874d10492b5ea42a13b720a1b7380fead69aa68707e904d450fad1125b95803",
+              "png": "375ac0bcf7c7668935346ef00d6a64f0fc62487ad3090f23cf29716c4ef26bd4"
+            },
+            "18": {
+              "json": "43a7c3452ec335905855c39c16734e39c7d8564c712c02c3360d9155bd0b7cf1",
+              "png": "f3dec87670b43c231e8dba3bb72898dae2ae974da887d8206a6872decc4fbe67"
+            },
+            "19": {
+              "json": "f97b43f9d94481e500c54f8a0d8f6f9176e03830c26c0aa6d0f3aadfd7163885",
+              "png": "944bc53995cd6e7ff64aa5a52fa30fc89ca6a4217d110555b1c9707dec452541"
+            },
+            "20": {
+              "json": "6bbdc9fd629b65cdbedc0755dd981bc4b9fcf69d24ea848e419169f6b00f329b",
+              "png": "353b6c243205e7af31d34056259fffa7f32151a6b5d1d50e6784a4137baf3f1f"
+            },
+            "21": {
+              "json": "d29cc19b2578cfb81f1f0191c9b38f2c2c2fe355d9867bdd29b020e2b6edba0f",
+              "png": "e8a446932d1efa7f479bc30dccf8d4b30d4945945bd6a7228fdbcbe5f94ddcf4"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-wikipedia-language-history-source-1",
+        "task": "wikipedia-language-history-source",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "note": "Apollo 11 is reached using Wikipedia search, then the article language menu is used to select French.",
+            "met": true,
+            "observations": [
+              2,
+              3,
+              5
+            ]
+          },
+          {
+            "note": "The French revision history occupies a retained second tab. Its latest visible revision, 12 September 2026 at 17:02, is correctly reported.",
+            "met": true,
+            "observations": [
+              6,
+              8
+            ]
+          },
+          {
+            "note": "An observed NASA reference opens in a third tab and redirects to the Apollo Lunar Surface Journal and Apollo Flight Journal page. The reported title and destination URL match, with article, history and NASA tabs all retained.",
+            "met": true,
+            "observations": [
+              5,
+              7,
+              8
+            ]
+          }
+        ],
+        "capturesViewed": [
+          3,
+          5,
+          6,
+          8
+        ],
+        "timing": {
+          "totalMs": 78895.37000000011,
+          "executionMs": 78140.19020000007,
+          "startupMs": 755.1798000000417,
+          "commandMs": 6566.7838999994565,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 8,
+        "actionErrors": 1,
+        "observations": 8,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 101860,
+            "inputTokens": 98093,
+            "cachedInputTokens": 28928,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 3767,
+            "reasoningOutputTokens": 2718
+          },
+          "usageUpdates": 7,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "7315bd8bec7ea92b18cb66911f3e50781a528a44c074a89703cb5f6523eb8318",
+          "commands": "b800c41ff6e23485c8e1ba3baacda7becf92d1ef60693607dc85459b6b4bf82c",
+          "observations": {
+            "1": {
+              "json": "36ea291cc6bf5c5db88f3fa0042e29160fc4e769826dc5e59f600c4fa5aae686",
+              "png": "a765e37be1d35ea53aceecbd83e02d3a7e294d5ead29f04a4cb301c11c7c3b44"
+            },
+            "2": {
+              "json": "34a707322852226ec4176a5f3eb6ebe77624317f476a911f576f806fda613689",
+              "png": "8510c876667f8dcc0f67c57d9ff9f03b3554ac90e2499739fc94988ff88fd1a4"
+            },
+            "3": {
+              "json": "d970548fe677b37ac77f11f97d014c5e03fa08a476a1fe67ef326b6a04c34d39",
+              "png": "b3991b11a0b62173a5f81a8c22d41eb9f58857fb45552e734bbb026086a700c2"
+            },
+            "4": {
+              "json": "d1ff9a1708f2380bc26a9ed5b7ddca346ee613df4a5e503894720fe36c249db6",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "5": {
+              "json": "7273984b81f1f9259e87ef530b82ff39e27e2743fd19fb86a6bcc3f33eecbff1",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "6": {
+              "json": "5c063a1f963934936f4c5c5f9d7f486a1098119a22fa969f59fdc5d9b02d0560",
+              "png": "ad24d12811adac09339ddf98f5b8d9acc6cb25b114e0379b495bbc7262a17ecc"
+            },
+            "7": {
+              "json": "a536989c93b303e66ee3faef82721daf68fb7f4cb6aac0b5228ca4d0b3fd836e",
+              "png": "70fed828f22ede41db4e44eadd5bfde2c446a467ea234093b66b62e68266734e"
+            },
+            "8": {
+              "json": "b030574123a4833f7ebda844b3fd0dc8ce68d1e2b93a0425f86a6fdf38d20b67",
+              "png": "5bb3c0a753d5049c498d60e6d0c1f9f3419ccb21d8e3c445099ae2a971b95219"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "memory-playwright-vision-google-flights-roundtrip-1",
+        "task": "google-flights-roundtrip",
+        "mode": "memory-playwright-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              14,
+              20,
+              23
+            ],
+            "met": true,
+            "note": "The results and itinerary confirm Paris-Lisbon round trip, October 12-15 2026, economy, two adults."
+          },
+          {
+            "observations": [
+              17,
+              20,
+              22
+            ],
+            "met": true,
+            "note": "The non-stop-only radio is visibly selected and retained as a filter chip; both outbound and return flights are selected."
+          },
+          {
+            "observations": [
+              22,
+              23
+            ],
+            "met": true,
+            "note": "The final itinerary supports Ryanair departure at 22:20 from BVA to LIS and return at 10:55 from LIS to BVA, total EUR 321 for two adults. The run stops before continuing to the booking provider."
+          }
+        ],
+        "capturesViewed": [
+          14,
+          17,
+          19,
+          20,
+          22,
+          23
+        ],
+        "timing": {
+          "totalMs": 158383.97569999995,
+          "executionMs": 157596.25089999998,
+          "startupMs": 787.7247999999672,
+          "commandMs": 9727.84320000105,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 19,
+        "actionErrors": 3,
+        "observations": 23,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-luna",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 287109,
+            "inputTokens": 280113,
+            "cachedInputTokens": 81664,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 6996,
+            "reasoningOutputTokens": 4138
+          },
+          "usageUpdates": 22,
+          "usageBasis": "sum of final cumulative usage from each independent decision thread",
+          "tools": {
+            "calls": 0,
+            "batchCommandsRequested": 0,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "playwright",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": "1.63.0",
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": null
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "2aeac1fcd5bded26ea26e4b49c4f60db351c855f8e6a54d0daf93ef9fffdc861",
+          "commands": "ec96e22e78255753c3c845fd10b14b0c9ab9ed978cd8fe4710739ff9cb47a6e4",
+          "observations": {
+            "1": {
+              "json": "4a72f463430b7a7db0d99eedc42a2ce8c125ecf9320aef092f95a4d6abd87191",
+              "png": "dc8edefeda16419faac63bbb24d417095b71f2f7e5d51b51c272e4547a27f7fb"
+            },
+            "2": {
+              "json": "428d70c87c389ce1b35e23360b6eb8f75ea5ef88447557ce29c331e744d150b1",
+              "png": "b1c907fd22d4282c19e83190616d043c617fe933046246306639311d47125b75"
+            },
+            "3": {
+              "json": "8699173a92ffc2c14c1e4b538a41f99931d85fa17a60c835287430ad505bafbf",
+              "png": "88ef0e0b74391905b64f25ee64624ad177b898ba5185d20831a2dc9426532787"
+            },
+            "4": {
+              "json": "6c898d1fa1c93fddbce6dbe39b87515d5d5753dc11b10f97f4fd6a91a3b27326",
+              "png": "7a18c0155946874fef3b6726c266051eca3814dcf875733ed01eca27428bce9b"
+            },
+            "5": {
+              "json": "8b01bb2ec4410963bc588e7c4934020da3406724115ff35978693a1e89e15440",
+              "png": "28ebc9e7b074e85f722fc04837fcb31baade0c53be4c565e949ef2349408ba79"
+            },
+            "6": {
+              "json": "ca87e54eb1ce5852ac8e54d13cc8d291216ee52b67548b8381400f980040489a",
+              "png": "5bb4cce1cb5dbbee5cd0ebbd97027271077604e6bac72885d6100cc3bd6885b2"
+            },
+            "7": {
+              "json": "7d2c3ebef3ad8e98048effd81e12fc83a87d787bae1bd8453ecc39f108bd943b",
+              "png": "10411c37302c012ec316ea72094f86c51727bbd386b09045b60e45ad1d0a47bc"
+            },
+            "8": {
+              "json": "3587e9057cfc6465eb82072bd56568f7b36d8c30bf5021366f45e48661150613",
+              "png": "649a9171dc86ce6396f4877e53fabafb63cbd1d4059fcf743625bd64f18dec5e"
+            },
+            "9": {
+              "json": "706db55beba856c85a0b6bfec69d0fff0ff6e2cf7241bbdcfa5e110f501a2869",
+              "png": "060e382e9362ffb939f6f1a42dbeecb9ad39392e2951ec5bda33354b1c95d319"
+            },
+            "10": {
+              "json": "295eda65e774a8b67ba7262e53ebe77a682bfb7bd68e369e35daffd5da5960f5",
+              "png": "bc0df0af8f32b8ec6b40f185851ac7733b251d46a76d79ea57f7d40dd4f0d7b4"
+            },
+            "11": {
+              "json": "d3ed41ce498a2880a1bcb3d596d589f33490ef8f2da5210258c2029fba0e0e64",
+              "png": "1e44099df3e44bbdd68330417f81d66625a47a9b77614e76dd3ce945e8e99386"
+            },
+            "12": {
+              "json": "6e390c5be4c21993fd62d9020eb5b1074c99a1785a4218789badbefb98e02747",
+              "png": "27aeb32bfc4cedbc848cd95154a5224889e970084692ba60848fc95f89b375f9"
+            },
+            "13": {
+              "json": "aeffe833c93bf9d90cdb20324b9f0c9de634ba8996185206ab87d3d213f0ca8a",
+              "png": "cfb64b9dbfa2fdafb86d480e468eb610f1a0f97e71d2c556d7f6d04d86cfc70b"
+            },
+            "14": {
+              "json": "50e80df0fb498a6591a827d7d223bbd83515e2c6b333ec3da4a9b3fa082b3495",
+              "png": "fd72f7f28977eb18b44325a379853535c3e524a5f4521384d5f9a7097d516a15"
+            },
+            "15": {
+              "json": "8d14beff6ed72a0b5850b3c2e794f535ca33f10181ceeeb48e615dd2b49867ee",
+              "png": "ed2775fb759ffb3eabd25e5a6a19ea7f390e6e8b1795f722b239cf291181a4e9"
+            },
+            "16": {
+              "json": "5c6d2f34af15852535d2177e6093e7906ec877dccfbad60ec02cb8c4e3c88629",
+              "png": "9de47d137e13083325bbd3371b4610035c5f627bf4347e6bc1a485aaf8f932db"
+            },
+            "17": {
+              "json": "c46ba19a4183ae6f595ce239de83cb954df3786b1eaebf1432897c97f24869cd",
+              "png": "ce9cea2e7669d5dc1698dcf9c502cbda2fa0961f7387bf54df5222c691651f86"
+            },
+            "18": {
+              "json": "833072b4ef014835118ccb4523bfbf4e64d58494c9c377ec4c93dfecca953192",
+              "png": "d5fdd1bad80c445a63f20a7bd6b7a8e84ef95bf20412c90f7d6f484f0b3a473f"
+            },
+            "19": {
+              "json": "86896ba69e831b40efb34e927552c43858d6e29f1653bc3064ba6f3ca5ca5e2f",
+              "png": "7fe220c0bcc8fb1fa028320c109005d64271ad34a3fbbc40a9a8dac30ca48835"
+            },
+            "20": {
+              "json": "4ec25df5cb3e91ae292c049116b2977a4c0caab85674cb4dbcbe8bf4bf7b49df",
+              "png": "dd95c58272f7a6f4cf6c4fc28f786a6d0d7a1aafbf77a72be58041915647cf45"
+            },
+            "21": {
+              "json": "954357843f785b87e22cffe3da5c4d34ce9cddf9e798ac0c6d88e69240000008",
+              "png": "2ceb5513056221d0ef5e68fb8fc11dd557fadfb950ca678d20642d89031e82b1"
+            },
+            "22": {
+              "json": "d49663fa58e702e36435312a04d7fdd25dfe25fc196d2cd16f88e3bc57c1d4a6",
+              "png": "0974880c1c89e288831ac4b69186a8a6fc55b4578dedbfc5ba99834393465271"
+            },
+            "23": {
+              "json": "79ec2fb753028abe51106b3391f268cc16842d0c4b327a29b25899847ba6c5ce",
+              "png": "0974880c1c89e288831ac4b69186a8a6fc55b4578dedbfc5ba99834393465271"
+            }
+          },
+          "download": null
+        }
+      }
+    ]
+  },
+  "nativeAstra": {
+    "campaign": "2026-09-24T17:01:23.166Z",
+    "expected": 8,
+    "reviewed": 8,
+    "pending": [],
+    "complete": true,
+    "protocol": {
+      "tasks": [
+        {
+          "id": "github-issue-investigation",
+          "url": "https://github.com/microsoft/playwright/issues",
+          "hosts": [
+            "github.com"
+          ],
+          "goal": "In microsoft/playwright issues, find CLOSED issues labelled browser-chromium, sort by most commented, and open the first matching issue. Report its title, issue number, author, and the total comment count displayed beside that issue in the sorted list, not a count of currently loaded comment nodes. Then inspect the linked author profile in a second tab and report their public display name. Keep both the issue and profile tabs available. Do not sign in, post, react, or change an account.",
+          "rubric": [
+            "Observed issue search restricts closed issues and browser-chromium label, ordered by most comments.",
+            "Opened first matching issue and extracted title, number, author and the total comment count displayed in the sorted issue list.",
+            "Opened that author profile in another tab, extracted public display name, and retained both tabs."
+          ]
+        },
+        {
+          "id": "github-release-download",
+          "url": "https://github.com/microsoft/playwright",
+          "hosts": [
+            "github.com",
+            "codeload.github.com",
+            "release-assets.githubusercontent.com"
+          ],
+          "goal": "Starting from the repository, find the latest stable Playwright release, report its version and release date, expand its Assets if needed, and download the Source code (zip) archive. Stop once the file is saved. Do not execute or unpack the downloaded code.",
+          "rubric": [
+            "Navigated from repository to latest stable release.",
+            "Reported visible release version and date.",
+            "Downloaded that release Source code (zip), with nonempty ZIP file saved and linked source URL recorded."
+          ]
+        },
+        {
+          "id": "google-maps-walking",
+          "url": "https://www.google.com/maps",
+          "hosts": [
+            "google.com",
+            "google.fr",
+            "gstatic.com"
+          ],
+          "goal": "Find walking directions from Gare de Lyon, Paris, to Musee d Orsay, Paris. Select walking rather than driving or transit, inspect the route details, and report the duration and distance displayed. Keep the selected walking route visible. Decline optional cookies and location access; do not use current location.",
+          "rubric": [
+            "Correct Paris origin and destination populated.",
+            "Walking mode selected with an actual route displayed.",
+            "Reported duration and distance match visible selected route, with route details inspected."
+          ]
+        },
+        {
+          "id": "amazon-product-comparison",
+          "url": "https://www.amazon.fr/",
+          "hosts": [
+            "amazon.fr"
+          ],
+          "goal": "Compare Logitech MX Master 3S and Logitech Lift mice on Amazon France. Use search, open a matching product page for each in separate tabs, and report the exact displayed product name, selected colour, price or explicit unavailability, and seller for each. Keep both product pages available. Do not add to cart, buy, sign in, or change delivery address. Dismiss optional cookies.",
+          "rubric": [
+            "Search used to locate the two requested mouse models.",
+            "Two matching product pages retained in separate tabs.",
+            "Each exact title, selected colour, price or explicit unavailable state, and seller are backed by visible product-page evidence."
+          ]
+        },
+        {
+          "id": "booking-hotel-filters",
+          "url": "https://www.booking.com/",
+          "hosts": [
+            "booking.com"
+          ],
+          "goal": "Search Paris hotels for 12 October 2026 to 15 October 2026, one room for two adults and no children. Filter to 4-star hotels, sort lowest price first, and report the first three matching property names and their displayed total stay prices with currency. Keep the filtered results visible. Do not reserve, sign in, or enter contact/payment details. Dismiss optional cookies and sign-in offers.",
+          "rubric": [
+            "Paris, exact dates, one room, two adults and zero children confirmed in results.",
+            "4-star filter and lowest-price ordering visibly selected.",
+            "First three properties and total stay prices with currency match filtered result cards."
+          ]
+        },
+        {
+          "id": "youtube-search-filters",
+          "url": "https://www.youtube.com/",
+          "hosts": [
+            "youtube.com",
+            "google.com"
+          ],
+          "goal": "Search YouTube for Blender geometry nodes tutorial. Apply the Video type and Over 20 minutes duration filters. Open the first matching video result, expand its description, and report its title, channel, duration, and one sentence from the expanded description. Keep the video page visible and muted. Do not sign in, like, subscribe, comment, or solve a CAPTCHA.",
+          "rubric": [
+            "Search query and Video / Over 20 minutes filters observed.",
+            "First matching video opened with title, channel and duration read.",
+            "Description expanded and reported sentence present in visible description."
+          ]
+        },
+        {
+          "id": "wikipedia-language-history-source",
+          "url": "https://en.wikipedia.org/wiki/Main_Page",
+          "hosts": [
+            "wikipedia.org",
+            "nasa.gov"
+          ],
+          "goal": "Search for Apollo 11. Open the article, switch it to French through the language interface, open its revision history in a second tab, then return to the French article and open one NASA reference from its references/external links in a third tab. Report the French article title, latest visible revision date, and NASA page title and URL. Keep the article, history and NASA page available. Do not edit anything.",
+          "rubric": [
+            "Apollo 11 found through search and switched to French through language control.",
+            "French revision history retained separately and latest visible date reported.",
+            "A NASA reference opened from that article in a third tab and page title/URL observed; all three tabs retained."
+          ]
+        },
+        {
+          "id": "google-flights-roundtrip",
+          "url": "https://www.google.com/travel/flights",
+          "hosts": [
+            "google.com",
+            "google.fr"
+          ],
+          "goal": "Find round-trip economy flights from Paris to Lisbon for 12 October 2026 outbound and 15 October 2026 return, for two adults. Restrict to nonstop flights. Select an outbound option and a return option, and report the selected airlines, departure times and displayed total price/currency. Stop at the itinerary or booking-options summary without opening a booking provider, signing in, or buying. Dismiss optional cookies.",
+          "rubric": [
+            "Paris to Lisbon round trip, exact dates, economy and two adults confirmed.",
+            "Nonstop filter selected and outbound and return options chosen.",
+            "Selected itinerary summary supports both airlines, departure times and displayed total price/currency."
+          ]
+        }
+      ],
+      "modes": [
+        "agent-browser-vision"
+      ],
+      "repetitions": 1,
+      "timeoutMs": 180000,
+      "maxActions": 60,
+      "maxDecisions": null,
+      "model": "gpt-6-astra",
+      "effort": "max",
+      "tier": "priority",
+      "recorded": false,
+      "isolatedContext": true,
+      "campaignLane": "native-kernel-astra",
+      "campaignConcurrency": 2,
+      "cadence": "one conversation per task with steered observations",
+      "directCapture": true,
+      "nativeDownloadCorrection": true,
+      "transportCorrection": "Independent loopback native connection; borrowed receiver invalidated the original Wikipedia cohort.",
+      "sourceHashes": {
+        "browser-lab.ts": "123aba299c91fb7c336ac96fdd13b32263206d7147dca96fea9948a46fc1dc1b",
+        "browser-lab-page.ts": "be90e04c21dd05aaa8fd28664c3ce95627c2108d3fb367636513d06deab60b63",
+        "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+        "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+        "browser-lab-engine.ts": "96bc65fe26a33b9a8c665ca9404c51f9de56445c26c38463793678cae4c523ce",
+        "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+        "browser-lab-recording.ts": "3d9e19fd8c2e04e20f298070dc7efc98921757c112520a0c826fc009764455ee",
+        "browser-lab-corrected.ts": "8bbab638ed91b038c375f44208d438414ceaee870e3a0aa4035169bb5c27ff69",
+        "browser-lab-transport-fix.ts": "a7de0ce1ba3d49e03fe5363fc9dd6f5316b6bffe95ac959313741e7b87db5a1b",
+        "browser-lab-capture.ts": "e214babe3d14d11813aaa94905e512d07fa04c2c9789e2ff4c9ca1ea04df1f61",
+        "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496"
+      },
+      "binaryHash": "70bd758b2a5a72b18055f60ff877d2297d036c4104e3bc94af6f7c1ceb941408"
+    },
+    "modes": {
+      "agent-browser-vision": {
+        "expected": 8,
+        "reviewed": 8,
+        "scored": 8,
+        "excluded": 0,
+        "succeeded": 7,
+        "allTiming": {
+          "n": 8,
+          "medianMs": 70938.0493,
+          "p90Ms": 134044.0516
+        },
+        "successfulTiming": {
+          "n": 7,
+          "medianMs": 57945.363000000005,
+          "p90Ms": 114337.98779999994
+        },
+        "categories": {
+          "complete": 7,
+          "interaction": 1
+        }
+      }
+    },
+    "cleanup": {
+      "browserZero": 8,
+      "modelGroupsZero": true
+    },
+    "attempts": [
+      {
+        "id": "agent-browser-vision-github-issue-investigation-1",
+        "task": "github-issue-investigation",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "note": "The visible list is restricted to closed browser-chromium issues and sorted by descending comment count.",
+            "observations": [
+              8
+            ]
+          },
+          {
+            "met": true,
+            "note": "The first matching issue 27997 is opened. The reported full title, author sheekha-jain and 40 comments match the sorted list and issue page.",
+            "observations": [
+              8,
+              9
+            ]
+          },
+          {
+            "met": true,
+            "note": "The linked author profile is opened in a second retained tab. Its visible sheekha-jain name and absence of a separate display name are correctly reported.",
+            "observations": [
+              10,
+              11,
+              12
+            ]
+          }
+        ],
+        "capturesViewed": [
+          8,
+          9,
+          11
+        ],
+        "timing": {
+          "totalMs": 53992.80500000001,
+          "executionMs": 52506.853500000005,
+          "startupMs": 1485.9515000000001,
+          "commandMs": 3851.261399999997,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 5,
+        "actionErrors": 0,
+        "observations": 12,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 544247,
+            "inputTokens": 543524,
+            "cachedInputTokens": 459392,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 723,
+            "reasoningOutputTokens": 61
+          },
+          "usageUpdates": 12,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 11,
+            "batchCommandsRequested": 12,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "4c2dd5ff36890084d83274f9c497c7c94f20670de92b44e9c40f8f3f6db799d9",
+          "commands": "6ba33df85a31266ca8bef57fdce358d12f6815a6f2aedfa6e9f318bc899e3613",
+          "observations": {
+            "1": {
+              "json": "e565dfd313da3054a504e77f2689050df69fd6eb4e700e0eca33288e9637995e",
+              "png": "c4e1c0aa438d70503a34ecaff678107d0dd3dbaa3c6dfb852e562e565f73d180"
+            },
+            "2": {
+              "json": "c1d4d6256623c71392b699e885bca732557ac59bd0b37862a1ce7f0436a340ff",
+              "png": "ada6274b576ef3430439bac563b2aaad5a4d2d0559a570be28d4be46f371eda6"
+            },
+            "3": {
+              "json": "7fc6d36ea6720f535c171f4c454cd37d45ea627ad16d06deb4bc3a320cdce46a",
+              "png": "827eb834bcea919aa4524adcbc0703632fa8612fc3bdb9bb039c9eb8e237474c"
+            },
+            "4": {
+              "json": "7c2917cb9db2233e719e44df08dca7c10e2fb78cccb5bfce64f86a27a4a15783",
+              "png": "b7a3254a72b1b1aba7951213bbc64028e9b4412704f27f654872d7ea4ef687c3"
+            },
+            "5": {
+              "json": "8bda64ddb85f4716b62679db96bac09280017b0f1cf9c0b14eaef9460337c35b",
+              "png": "b7a3254a72b1b1aba7951213bbc64028e9b4412704f27f654872d7ea4ef687c3"
+            },
+            "6": {
+              "json": "b47bffe38f9051d46e5cfd12c9e7478a871552944c07c584e27c7a744c3ae4db",
+              "png": "59f2fca3c666eeaddf97be037b286a73bd26b21486e424f7357bddc16a1b2d6c"
+            },
+            "7": {
+              "json": "9e65d0b49ff4676e4011f1c80b57da2ae9c74bc1abbe69ecd3cec319fb8f1d03",
+              "png": "533135d19623f08abf3f87e544fa55a7a8e2c5153efa3095f2edcd9a3d00cc74"
+            },
+            "8": {
+              "json": "ae4be901493b4ed826cabd8b2476a3007923e2a17cbf90702777486abfcdc78f",
+              "png": "533135d19623f08abf3f87e544fa55a7a8e2c5153efa3095f2edcd9a3d00cc74"
+            },
+            "9": {
+              "json": "ae8de1e30502372b066cc5ba1c98a7690b93515fc28192b299d4bf3cac32bb0b",
+              "png": "ef76a9c44e01a9c5cb2eb24fa2963fd31d54ec1060a34f88daed2d82b77cc58c"
+            },
+            "10": {
+              "json": "303df5d73cf2c0eee4b46c60713e4537c444180ef97ff4da8eb9230e0475dd7e",
+              "png": "38928bec42f99c86b1bedde45ea8ea212c55bbc9bed0e301d006670bd3e99097"
+            },
+            "11": {
+              "json": "f1f209c015aaeee0744913cd86899132f7300c176824edf4575d0d96148bfa06",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            },
+            "12": {
+              "json": "cfd758fde8b330950161edbaa163feadae09bb6c1946944a126800176e12f161",
+              "png": "4e614597230b0b367ba23173c0d5239e43093a9e36d404b1bdecc502fc929a7e"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-github-release-download-1",
+        "task": "github-release-download",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              2,
+              3,
+              7
+            ],
+            "note": "The repository release link leads to v1.63.0, visibly marked Latest on both release and release-list pages."
+          },
+          {
+            "met": true,
+            "observations": [
+              3,
+              7
+            ],
+            "note": "The reported v1.63.0 and September 4 2026 are supported by the release-list text 04 Sep 22:40 and the release page showing three weeks ago in this September 24 2026 run."
+          },
+          {
+            "met": true,
+            "observations": [
+              11,
+              13,
+              14
+            ],
+            "note": "The observed Source code ZIP link is downloaded successfully. The saved file is 42612768 bytes, begins with ZIP signature 504b0304 and matches SHA256 a5e93fab1a07523554337ee1e759681c9b3b5038ff184811edea59a61b4bde03. The recorded source is the v1.63.0 codeload archive, with a completed browser download event."
+          }
+        ],
+        "capturesViewed": [
+          3,
+          7,
+          8,
+          11
+        ],
+        "timing": {
+          "totalMs": 57945.363000000005,
+          "executionMs": 55926.2848,
+          "startupMs": 2019.0782000000036,
+          "commandMs": 6448.910200000035,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 9,
+        "actionErrors": 1,
+        "observations": 14,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 701711,
+            "inputTokens": 700854,
+            "cachedInputTokens": 607104,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 857,
+            "reasoningOutputTokens": 167
+          },
+          "usageUpdates": 14,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 13,
+            "batchCommandsRequested": 16,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "cd8b963d97cf23b4dd903b0057f62d46963b59452061e3b5d1c6e8ebf4db6b77",
+          "commands": "aecf7227baa317e3162191b441cd2e4ee98fb0eced7f45941e6506822559ebe9",
+          "observations": {
+            "1": {
+              "json": "b944c196155321f69781703b1c57207d09a58d49dd837d507c556fcf029e46aa",
+              "png": "67b69e104eb530cd37a5db99c2466d9772205db492eeae6d316fb80424b381e8"
+            },
+            "2": {
+              "json": "e2b297a025b62137382385e47c5628420589f09a261c6ec41ff90eafeac1b62e",
+              "png": "9dc636a1dda1558177de78c99efe8ef75fadb41edef490f0a37b68751fd41640"
+            },
+            "3": {
+              "json": "759fc6c2346395c24ad4a55efd7d58ab5c91510d8902eb4cb2fcab9f3614ba39",
+              "png": "b1e3d876712c3a32c3e64c1cfbdba070543b85cd65f8ba16f3dfe9783addc414"
+            },
+            "4": {
+              "json": "d4b3b56d8959b1d86f05dc69c6c2a69c9bc5e822777bd256178789da745f2806",
+              "png": "b1e3d876712c3a32c3e64c1cfbdba070543b85cd65f8ba16f3dfe9783addc414"
+            },
+            "5": {
+              "json": "c76a6fe85e5e2eb86af19efe106f3e50527fb8858518019937507bb95365534b",
+              "png": "b1e3d876712c3a32c3e64c1cfbdba070543b85cd65f8ba16f3dfe9783addc414"
+            },
+            "6": {
+              "json": "d1098c334cbf4d1ed1a334839f2b485b7a6daa2ae1c3239420f335fb727c34d3",
+              "png": "b1e3d876712c3a32c3e64c1cfbdba070543b85cd65f8ba16f3dfe9783addc414"
+            },
+            "7": {
+              "json": "934b59fd3b99b49955a56ffef1965db8321bbed1980d5589ff438be053650151",
+              "png": "79c5857dd90ada02738f60b4fa2f60738de6f7a2e2d495b9ad72c7d7ac8f7089"
+            },
+            "8": {
+              "json": "75bc8394ac3941473c33dd0eebfbaf6d142b0c56409e239956b7214e8f48dd6f",
+              "png": "379a89d821f1003493ddb627322d478cf791998e36938824c7fccf5e676ec6d2"
+            },
+            "9": {
+              "json": "a3f374dc6a50a9482a1c4f600e070df4783592c51da0913706dea8f85d428faa",
+              "png": "b1e3d876712c3a32c3e64c1cfbdba070543b85cd65f8ba16f3dfe9783addc414"
+            },
+            "10": {
+              "json": "47244898706f73aade38463743f0da484d5e06a09ca13f825fc5aeebce4c360f",
+              "png": "b94825911a0c3347b547c2170f8f843b4c1360adde7429638a97b652250dfbf3"
+            },
+            "11": {
+              "json": "f8aabe04b88b63bc722ae45a8cb5159eb22e554b4e37a40e9490048565a376b7",
+              "png": "f42e663fb15997de12ee33148f240e3980972027a40dcefbd02cf151d1c050ac"
+            },
+            "12": {
+              "json": "e33172be7bca843e6f136d6d3128d1115ac2f4b2e337063369e52d8de2c0fe11",
+              "png": "f42e663fb15997de12ee33148f240e3980972027a40dcefbd02cf151d1c050ac"
+            },
+            "13": {
+              "json": "cabd7b5805fb9abf07e7f582709248b277b7afe4844d4979cf6af3c807fafb83",
+              "png": "eacc71145e781a188d5ccb347414b0345d14ec082fc6ec46f3778640ced95254"
+            },
+            "14": {
+              "json": "805c4c4c4b03fc907828c21c381cc65b08187c49981900f2248a80ccbd6e347e",
+              "png": "eacc71145e781a188d5ccb347414b0345d14ec082fc6ec46f3778640ced95254"
+            }
+          },
+          "download": "a5e93fab1a07523554337ee1e759681c9b3b5038ff184811edea59a61b4bde03"
+        }
+      },
+      {
+        "id": "agent-browser-vision-google-maps-walking-1",
+        "task": "google-maps-walking",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              7,
+              9
+            ],
+            "note": "The route uses Gare de Lyon, Place Louis Armand, Paris and Musee d Orsay, Paris.",
+            "met": true
+          },
+          {
+            "observations": [
+              7
+            ],
+            "note": "Walking is visibly selected and the route via Voie Georges Pompidou is displayed.",
+            "met": true
+          },
+          {
+            "observations": [
+              9
+            ],
+            "note": "The reported 1 hour and 4.4 km match the selected route. The turn-by-turn detail list is opened and retained beside the route map.",
+            "met": true
+          }
+        ],
+        "capturesViewed": [
+          7,
+          9
+        ],
+        "timing": {
+          "totalMs": 38370.59699999998,
+          "executionMs": 37280.22889999999,
+          "startupMs": 1090.3680999999924,
+          "commandMs": 1037.2970999999816,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 7,
+        "actionErrors": 0,
+        "observations": 9,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 179581,
+            "inputTokens": 179064,
+            "cachedInputTokens": 140160,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 517,
+            "reasoningOutputTokens": 88
+          },
+          "usageUpdates": 9,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 8,
+            "batchCommandsRequested": 11,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "720b6c29879ea5992f85f08d5b909167f0f71e66d0f0e6bdc181319b770ce633",
+          "commands": "2807e86dcfcbdbfcd04edcfc99b3fd058f351d033e8a7cfcbc9844cad9c99df8",
+          "observations": {
+            "1": {
+              "json": "7a04ed29d43eea9bb9a31130d0e94553c20f4096988343b684fd03d14179f1f7",
+              "png": "ed5a3228857f2a1306e9ee77dd7c823ac610c231fde64057e54aee4314e20b12"
+            },
+            "2": {
+              "json": "bd5e5c729b6baa5aec0008eee4cb82cd7af04a235a10b7cd13f81bfca7db2c46",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "3": {
+              "json": "333817e027bae27320a2be262c89eeb7e04afc1dbf6e371752804f128ac33a4b",
+              "png": "01a59b697f5b907a3c164bbaf20d208e90a243a44624104659ddd06da165e619"
+            },
+            "4": {
+              "json": "f43424e95c7e1a5969805a2b1698dd7cffb49c30223e286ccd46e00f551ae971",
+              "png": "d2afb5d9cdbe774ee8c3a823a097779d4e0b74a54afbee2c7121a8b300f6f9d8"
+            },
+            "5": {
+              "json": "fb882c6a51f496264fa0f26a8d145dcf5f4f9b38f1ceec4d7be19332c6d5c654",
+              "png": "faf5b6e9c5657e215fc38ab799eb8f657c04cfee95c17ddb2b04799b89294d78"
+            },
+            "6": {
+              "json": "081948b2a0e3afb65467e8c11d0f5d4e82f348bd13605cc1d9ec0fc7ed1cf49a",
+              "png": "a3dbf3d5114c70b2f97de937540d46945d2fbb03707c8f34d575a28ad9a919ee"
+            },
+            "7": {
+              "json": "abfbface07e8c69161a2824dad9c6131337ea6585fe539f911779dc1321c9ccb",
+              "png": "20c63eb4763668c73d3bc434a82d3d9a51bcbf487cb38e88dc23df78b95830bc"
+            },
+            "8": {
+              "json": "37a2bb9a7e73f5d9a0a6adb321ce57c93f873862ec1e317be2ea57c1ad8123cf",
+              "png": "ee937f96931933253492d8ed40abf2708f36e728401ec2965908c3fdb9326b90"
+            },
+            "9": {
+              "json": "2f33251c21ace0095079fd3c60d90a0a736ff06ea4a7bc5fdac70728e09572ce",
+              "png": "ee937f96931933253492d8ed40abf2708f36e728401ec2965908c3fdb9326b90"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-amazon-product-comparison-1",
+        "task": "amazon-product-comparison",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              4,
+              10
+            ],
+            "note": "Amazon search results locate the requested MX Master 3S and Lift models.",
+            "met": true
+          },
+          {
+            "observations": [
+              12,
+              14,
+              15
+            ],
+            "note": "Both matching product pages remain open in separate tabs.",
+            "met": true
+          },
+          {
+            "observations": [
+              6,
+              12,
+              14
+            ],
+            "note": "The reported exact titles match the product headings and subtitles. The selected MX Master 3S Graphite offer is EUR 86.64 sold by onlinehandel_fuhrmann and shipped by Amazon; Lift Gris is EUR 49.99 with Amazon as seller and shipper. Both are supported by product-page text and distinct new-offer seller sections.",
+            "met": true
+          }
+        ],
+        "capturesViewed": [
+          6,
+          12,
+          14
+        ],
+        "timing": {
+          "totalMs": 83930.73559999999,
+          "executionMs": 82703.92929999999,
+          "startupMs": 1226.8062999999966,
+          "commandMs": 4286.528100000083,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 9,
+        "actionErrors": 0,
+        "observations": 15,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1194185,
+            "inputTokens": 1192064,
+            "cachedInputTokens": 1032320,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 2121,
+            "reasoningOutputTokens": 448
+          },
+          "usageUpdates": 15,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 14,
+            "batchCommandsRequested": 19,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "8def9b1aa3071a177ef4e4c416eeb55aa84a8f9e920606bcf05483a62be2635b",
+          "commands": "2b5bc260e5f13b82eb7056c3a5baf4171afab2395070b9f3fcfa30293fbf59ab",
+          "observations": {
+            "1": {
+              "json": "bf64975bd364d833274225a5bfcdd936bda9148ac2baeb7b6292caefb733c310",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "eb7563fe6e0b022a28f2c43fa0c2c5c9564b83bd40f787b583ddf3f86e0a5a7b",
+              "png": "76c8626bafde00ba88b56cb7a975c9338478dd1fbba0302bdcff807457388cbc"
+            },
+            "3": {
+              "json": "3c277666e3fafff1b3926711b366197e9c6bd79767c37bc587fdef073802c673",
+              "png": "191006f8a74c6a0bde7bc26302a34170b26d55306e834cdbc2e6f318ca460ff0"
+            },
+            "4": {
+              "json": "5a9f7f913d95d07e17ed541dedc554a843d77948d625eb97d5550e0321494875",
+              "png": "2c1e1bb0408133ec7662181bf9a126ca673464479a393888458acc53da4e35a6"
+            },
+            "5": {
+              "json": "18f48f01210bfd26244c3152e4e4be2f10a9bc2002c35ff23cc2b4ec50a648ce",
+              "png": "3570ba836f73e42c5acead13cdd77b969146be778f97d15733d5b20c1bad1e5a"
+            },
+            "6": {
+              "json": "b71a60965ec27d89bbe69afa55638e054ea33fb0bfc2492b057fab0812d9b9dc",
+              "png": "3294106490df761fa518d58f89e2790a501dac8a97aee8a021f5ecd53407ca70"
+            },
+            "7": {
+              "json": "b8aaef89af13f76cc3d19f92f347fae9b2bfe400e7366fda0e9ed08fcea533b2",
+              "png": "2c012120c16b3c77d1ccbe3e69c7c2687e1d31878072a05ff69f129bd199f6e1"
+            },
+            "8": {
+              "json": "4faba9ec7d6471e536f0c74717a9c61e82000287b97fcc017a4dd6705871144b",
+              "png": "eb4bab808192aa6c68f626a92c64ab08ed83ce98f9ac0ec5c3dd56cfb3e1d5b6"
+            },
+            "9": {
+              "json": "cd50c6f99570bd2a248882d8055d27f173807be6f55ff0db1f36f52c747a29ff",
+              "png": "90d9b41cee1b01ece338fce8ea4c2ff02030f7f45020743b7beca215c856e1aa"
+            },
+            "10": {
+              "json": "1332ccd9165b9b467a060f473d206b2b37b39f2dc6bf7634b49cd14c7034f0e7",
+              "png": "ac3da01a3cc80a47faa178e72b4d81cd063b7fdf1b14892a9288083fdd8c405e"
+            },
+            "11": {
+              "json": "675a76329df7ae968e7b98fef667df7af3957dbc8b69f39a637a5abc9a6e70c3",
+              "png": "69db178493a2c348b9c7647989cec1bf1652b0a940e270e28384cd7cd68ef0f4"
+            },
+            "12": {
+              "json": "0270879ca119308c2d98f3e63a619c4eee08912e091bb07777fba48dc091168d",
+              "png": "e1e7d627e078caa7ac124f8443b1f3221a58526b1095e463cdef16243af41bf7"
+            },
+            "13": {
+              "json": "ab49ef432ca645080e04c9f25c4291dee5f25ce5446647bf734e5721ef11703a",
+              "png": "e1e7d627e078caa7ac124f8443b1f3221a58526b1095e463cdef16243af41bf7"
+            },
+            "14": {
+              "json": "6d3068d3b38d0560234e77d67cd1d7c102a472e9e5e2845293a5833055b7bf55",
+              "png": "564fdb250097a969c70906760305f142fa670086beb0570fe8c1dd099fdc161b"
+            },
+            "15": {
+              "json": "65449a91bc6cde0c34740a0ed4894fb83f61a0f094371e711671ef598a493402",
+              "png": "564fdb250097a969c70906760305f142fa670086beb0570fe8c1dd099fdc161b"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-booking-hotel-filters-1",
+        "task": "booking-hotel-filters",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": false,
+        "category": "interaction",
+        "excluded": null,
+        "criteria": [
+          {
+            "observations": [
+              6,
+              9,
+              13,
+              18,
+              27
+            ],
+            "note": "The requested Paris dates and occupancy are repeatedly entered, but Search returns either a blank default search page or the generic Paris city page. The final restored form is not confirmation of dated results.",
+            "met": false
+          },
+          {
+            "observations": [
+              6,
+              27
+            ],
+            "note": "The city page retains Our top picks, with Lowest price first merely available. No selected four-star filter and lowest-price result order are confirmed.",
+            "met": false
+          },
+          {
+            "observations": [
+              27
+            ],
+            "note": "The final answer explicitly declines to report unverified city-page prices. No three matching properties with total three-night stay prices are extracted.",
+            "met": false
+          }
+        ],
+        "capturesViewed": [
+          6,
+          9,
+          20,
+          27
+        ],
+        "timing": {
+          "totalMs": 134044.0516,
+          "executionMs": 132833.6729,
+          "startupMs": 1210.3787000000011,
+          "commandMs": 14762.222499999858,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 39,
+        "actionErrors": 1,
+        "observations": 27,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 3108232,
+            "inputTokens": 3106164,
+            "cachedInputTokens": 2871680,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 2068,
+            "reasoningOutputTokens": 675
+          },
+          "usageUpdates": 27,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 26,
+            "batchCommandsRequested": 47,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "c6a65304b73163447aa614a2185564a299e16d9b8623fcb42665f1c4c650d5d3",
+          "commands": "41338ccfa64a114010b06731cc7ead0b1d918c9b7a9bd523ca625fb5791cd0b5",
+          "observations": {
+            "1": {
+              "json": "806bd367c43643b582c20fa61e05d4feac4b74a1298fa9f2a434f8966bf666d6",
+              "png": "58a62f70ac37b65a84ecae4d444779089c537266bf9ba713b8118e0d6f85ce78"
+            },
+            "2": {
+              "json": "003c4eeeb5f53207c6a11508332599b1b8a4a0f327e3ee2374ccae77bbf89e33",
+              "png": "63013c04557e1049939f0e8b4ef744e3ddda9921bd23f7523905f3a380425cf0"
+            },
+            "3": {
+              "json": "842373c5c5a21073e9948d78ba5469cc8d4aa0f00374dc5676a889bd83e574e4",
+              "png": "ab69d4a1d65e2bd9f71e99bc501bc58d401e7b2843aa5e5d01e16baad2dc13f7"
+            },
+            "4": {
+              "json": "814270f17a0a91b1f2bafced0f359331684d683838337b407a9605bb5a719f6c",
+              "png": "6fbedb72fa9de18d71b7a448ef2dc8ef8f11ce09f4c19f19999374bdae5edad0"
+            },
+            "5": {
+              "json": "1e5fa419eb674c7404f0f2d80b75b6bdd3bf1b5ed036aa2131977509e5c9729a",
+              "png": "0aa9ba3c9f49cab12f03d22d45309b13331bfff5bc372350eddad9658645ff24"
+            },
+            "6": {
+              "json": "44617374fc221a2ed9eeb7fc01a363f96e3c37ce98d7776a6b5a86a44290ce02",
+              "png": "149e78ee3cf466f184273fe4a39ee460b02c3beac95956e8eb8948b3b4c0c32a"
+            },
+            "7": {
+              "json": "a1cc92fa62faf646002a050cca79a6d03d830b7d65535342d3121f24b2314113",
+              "png": "0aa9ba3c9f49cab12f03d22d45309b13331bfff5bc372350eddad9658645ff24"
+            },
+            "8": {
+              "json": "3a96cc14d88021779897698a5e15caf568f7a1fe99a848da290faf1d43aae862",
+              "png": "4024dc687190dfc583805e554c154693fd79a5d151bcf1c6585d36aedb9392d1"
+            },
+            "9": {
+              "json": "3663958353a7bccce1d091497f6a7739de94a1c8e00acda3dfb019616afe854b",
+              "png": "4024dc687190dfc583805e554c154693fd79a5d151bcf1c6585d36aedb9392d1"
+            },
+            "10": {
+              "json": "0381f051bd808c418d17f2c95c7a7658de968839eb5133b93034c0ff993debeb",
+              "png": "3c4d1db80c33c42c0de36fca88c18fb6cbffb150b7886516c18258bdd0016aa6"
+            },
+            "11": {
+              "json": "b5b432262170bc301326b4f5a592098bc018af33869feec46ff5a6e681b5cf79",
+              "png": "c1bd9bffc28328ec01aa25a4c5e8a477ef9e397dd2b1ed72843dea62fb1d8dce"
+            },
+            "12": {
+              "json": "decdb41592dd9566872bede28f157921ff874277081825d34ab9c1f93caafc21",
+              "png": "0a36c29d6d3a5ac870b6a6a2ab9a7f986df1fcf97737a428b670d46d26ab069e"
+            },
+            "13": {
+              "json": "b1e7d87ad1ddaf01435aeda0f61509294be5279240167e45aeb17ddd32bec5d9",
+              "png": "4a1b0eddc013ff5e9e87db959ad4e81c2fb8fc289747d61a52f25566f46d069f"
+            },
+            "14": {
+              "json": "1ee2a1a6f0161c22e3414f40364871e1bafd333ad95b290501160f5d1eb0d754",
+              "png": "0aa9ba3c9f49cab12f03d22d45309b13331bfff5bc372350eddad9658645ff24"
+            },
+            "15": {
+              "json": "433b6b2f2cfa0c88b6e5c69a6afbc583e888283ebcc5c57f3e9414dc87fab79c",
+              "png": "0aa9ba3c9f49cab12f03d22d45309b13331bfff5bc372350eddad9658645ff24"
+            },
+            "16": {
+              "json": "3c85dfe96307d912d83694103dc04c5ca8aba06111ad3d54006bd0346efe5281",
+              "png": "d11a635f6ec2bf6c9163979c47f999275b63c8db663bbd3d17c1d49f8f51f464"
+            },
+            "17": {
+              "json": "b080f7145844305a90f62a3add2487387bb3e8a113be9a865065d9966be9990f",
+              "png": "f1d21841260598d599e14845550ad1e397ba96ded800a17f59a8cff4ea548782"
+            },
+            "18": {
+              "json": "f05226748ea93bf3baa900296e14c3226ac201f73e7a4a679b05dfc0968c70ca",
+              "png": "cc495088fe4c62155fb91808e2f4653d7b76e5121ea363d359a3955e05144267"
+            },
+            "19": {
+              "json": "9bb2b4daea47a4367dfc7220ba7297126bb683ca08adf9a1e4129d577e3e056e",
+              "png": "0aa9ba3c9f49cab12f03d22d45309b13331bfff5bc372350eddad9658645ff24"
+            },
+            "20": {
+              "json": "fe9227cae75d3422fe9375cb7b2798b041fa7f966d883196eb885e04b0bac06c",
+              "png": "974dcedf16d7d2d4c3c9ed61e241a5c5d2681d9f4f2212230de281ff41d58a8f"
+            },
+            "21": {
+              "json": "b406f7bdf43999ab3a3bdc0b846c9e07e8d320a5b0aed4ff6a554dd0ec18ec59",
+              "png": "7b110a5c76d78359f586f077c71ef664e9489bc169d38e1417d6634708cd8148"
+            },
+            "22": {
+              "json": "6da1a184ff667c487d50d585101a0d55cfab75ea935c8979d08332fa0f226419",
+              "png": "88a8e78e39b7d6279b39fa184b91626a49c097ceb096c25b41903bde7be309bf"
+            },
+            "23": {
+              "json": "35e5ef9828ebd6d1d3688714fe6554e2599cfe5e8e7f091fbba62e556ee566a1",
+              "png": "423771a62093e60491f3c2aea0ce5f774a666c054553945ab528045c10b425ff"
+            },
+            "24": {
+              "json": "7fd4d11a7a65eb646c6acb52803c1664770883b60f7eb62ba60ad64b8377b244",
+              "png": "7b110a5c76d78359f586f077c71ef664e9489bc169d38e1417d6634708cd8148"
+            },
+            "25": {
+              "json": "a8bde1fabfd315c7adf32957c240c3ef1a66bca7faaec93dc98516d8016712b5",
+              "png": "7b110a5c76d78359f586f077c71ef664e9489bc169d38e1417d6634708cd8148"
+            },
+            "26": {
+              "json": "45ef640d887fcd2bdfb7b312610efa810016bddc37298523247008e12a32faea",
+              "png": "88a8e78e39b7d6279b39fa184b91626a49c097ceb096c25b41903bde7be309bf"
+            },
+            "27": {
+              "json": "2c42e48b7cba1b41b6e3f3520a39840099a2d105127dff527017c3c12b2f8282",
+              "png": "88a8e78e39b7d6279b39fa184b91626a49c097ceb096c25b41903bde7be309bf"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-youtube-search-filters-1",
+        "task": "youtube-search-filters",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "note": "The Blender geometry nodes tutorial query is visible and both Videos and Over 20 minutes show active removal controls in the filter dialog.",
+            "observations": [
+              13,
+              14
+            ]
+          },
+          {
+            "met": true,
+            "note": "The first matching organic result after an advertisement is Ryan King Art. Its reported title matches, and the answer correctly distinguishes player duration 1:30:05 from thumbnail duration 1:30:06.",
+            "observations": [
+              14,
+              19
+            ]
+          },
+          {
+            "met": true,
+            "note": "The description is expanded and contains the reported sentence about teaching geometry nodes basics to beginners. The retained watch page is muted, with Activer le son in the snapshot and a crossed speaker control.",
+            "observations": [
+              17,
+              19,
+              21
+            ]
+          }
+        ],
+        "capturesViewed": [
+          13,
+          14,
+          19,
+          21
+        ],
+        "timing": {
+          "totalMs": 114337.98779999994,
+          "executionMs": 112508.74459999998,
+          "startupMs": 1829.243199999968,
+          "commandMs": 3353.6242000000784,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 16,
+        "actionErrors": 2,
+        "observations": 21,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1446439,
+            "inputTokens": 1445267,
+            "cachedInputTokens": 1283840,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 1172,
+            "reasoningOutputTokens": 189
+          },
+          "usageUpdates": 21,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 20,
+            "batchCommandsRequested": 31,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "b5c51ead1f9810c9f8080a8cdc5e2f7aae1a3cb250fb30a54026bcf54905ac5a",
+          "commands": "fb3e37151ec97b8535f244895b86ac7dda477695bcecf8e98fc4b0573ba9908b",
+          "observations": {
+            "1": {
+              "json": "4607d48a097490dfda521e7779545cce1e024dc2ab879e4dc623f28e8007063e",
+              "png": "e71940772036791f2a476a9825726283d19bb7067d4f3a6aed7cd412e6a308b9"
+            },
+            "2": {
+              "json": "41cf2a60d5935c0ba153108088f9cf008b3e18673007a5415d28bf435b2f40cd",
+              "png": "c5e49bcaf2eeff7a717bbdf541b954d350aedc9725f6972b38233eaeb6d210c2"
+            },
+            "3": {
+              "json": "7c23d783b40655a2e447831e16cc4fb699199cff0d6f8f57c74e44814428e17a",
+              "png": "386fb00931408fe633fe22d8398a4f90c06ce639254628cd33fdd3997d36628e"
+            },
+            "4": {
+              "json": "8caa5dedf68dae3e5aedf9497cc03098e738ac3c982187d64f66b0a943c7e4f4",
+              "png": "b1ff31a40d7f849b5722f6c1a02774d2686fb874c35ae710880c5d92ec4e6d7b"
+            },
+            "5": {
+              "json": "ba1b75d1b613ede74cc565cdd06a6ef8c72dfdbd8cbbfdf6f3a47238d26b7e9d",
+              "png": "7cfa9a8469ee168c4fc6de61e274b0d42682bea0ae85a4b54e33d3792a81e4b5"
+            },
+            "6": {
+              "json": "c49c8f405a38f4785d2b7b6db89b45ab197ce331b84a86b2e1946da35bcf107e",
+              "png": "8578692bc733aa89197d58808b3428f08fe9f56852fe80d8711a2c3008e7d573"
+            },
+            "7": {
+              "json": "529861710d239399e994667fb1dbcb0665a414687eeee2e38a5564fec14e49fa",
+              "png": "54144092bde0d4fe4781b180a971702f4dfa072dbe5fca250390a5e79c2464ad"
+            },
+            "8": {
+              "json": "25b4ad30baac9d1170df58b41bf9489d266df078cab08e97c39bf01e7f801916",
+              "png": "54144092bde0d4fe4781b180a971702f4dfa072dbe5fca250390a5e79c2464ad"
+            },
+            "9": {
+              "json": "3ac2b16dc3b03e95cba1aeb656509afc03054b9f87c22e0757b50d321a60a07c",
+              "png": "54144092bde0d4fe4781b180a971702f4dfa072dbe5fca250390a5e79c2464ad"
+            },
+            "10": {
+              "json": "401ae4a6f6f176f6ecd2a99dc3fc0774a2d0300cfc2a491b1a12563c7b44b697",
+              "png": "67fe83e6dfecd334b0977c834cbd848895776c408366ab1a9ea293b520adf820"
+            },
+            "11": {
+              "json": "c5e870e56507278837ac9d3b826007bdade352d5412764bfb91fe0aa0323d57a",
+              "png": "8925bdd32aad7fe2ef944ccb65fcf672d1206b9a61210929fd6a7cc803581f1b"
+            },
+            "12": {
+              "json": "352b1037a580874a37ac7fd5c21e7bb61e8bd6fa732ff9d3378d856378bc6731",
+              "png": "e157d8c4257c73cc034a979d6eeeedcf7530dc90f2381cbf793d4d46197622b8"
+            },
+            "13": {
+              "json": "b904075a5110876d5233779a874f2d858bc91729c6306aee474211d0e18ae4ae",
+              "png": "56117da8c1cbac4694537d50624b7aab44acd76ca5973b9ea829d00f47203498"
+            },
+            "14": {
+              "json": "d0ef0754d44ecccce4ef46e31e7d1d2877a5bd97dff5a0ee0b305e17e3f86271",
+              "png": "1200994df71c72832b12e5e14a7b55aad55f3cd7f36dc2936e130d05a5b09042"
+            },
+            "15": {
+              "json": "470735295cfc76300cc096991d7835a95fc8a07f96aa6e0b55ddd34be226bacd",
+              "png": "c625e2ee7b7abe2510ae912386bd549a64c38461cd0642aa3f8d502610830e94"
+            },
+            "16": {
+              "json": "3482320cca603c7a0b5df822f6024abac061aedbe6a1fac1ff6750b6062a6967",
+              "png": "5e1343d6ca16dca818b394f738f19c927fca15e1c66f70ba4d0a116f1bcd3bf5"
+            },
+            "17": {
+              "json": "aec35c422306394b483218cbd8ae7fdce9e52e029d513a6ffb209f8d7ebb733f",
+              "png": "deee28f1d0b3abaa7c830ecf6452425ee4630b9c2ec2493e96308233a9197d96"
+            },
+            "18": {
+              "json": "ef7a231ad04ca987106f2906a4ff80f7e4c551c403a184fc05c98bf2ec5a0b3a",
+              "png": "cf9d5812b56fc3e0e945e5dd02bfe2cc626d83a50bf57281f914c9c91bee7df0"
+            },
+            "19": {
+              "json": "aaf2ada5d0a180b386e3a44bdc808a51afe5df2a181cc5241151fd95d15f537b",
+              "png": "e67c49fb326e955b5b5873092d660fe9d2dd636a9b4ee399f135250a72c1183b"
+            },
+            "20": {
+              "json": "f479f2ff7a6129ef7bf92a8e7257807ee153614acab8a53f42d0ca5f6d1587f3",
+              "png": "fe9a325fd1cc745411443add1802ed64349ce7243e729f2d300ab33ae3c4c065"
+            },
+            "21": {
+              "json": "25d14d784c2cc01a64e9b44b1fece5a73c1aed8bcdd3bc51d96c2ea7e91a5e86",
+              "png": "88075fd11401dcb1546e5fd47d0193ca92be2433a1284b5bf3864be07da65e71"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-wikipedia-language-history-source-1",
+        "task": "wikipedia-language-history-source",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              3,
+              5,
+              6
+            ],
+            "note": "Apollo 11 is located through Wikipedia search, and French is selected through the language menu."
+          },
+          {
+            "met": true,
+            "observations": [
+              7,
+              11
+            ],
+            "note": "The French history remains in a separate second tab; its latest visible revision of 12 September 2026 at 17:02 is correctly reported."
+          },
+          {
+            "met": true,
+            "observations": [
+              9,
+              10,
+              11
+            ],
+            "note": "The observed NASA Apollo 11 mission reference opens in a third tab and redirects to Apollo 11 Mission Overview. The reported page title and destination URL match, with all three tabs retained."
+          }
+        ],
+        "capturesViewed": [
+          5,
+          6,
+          7,
+          10
+        ],
+        "timing": {
+          "totalMs": 53142.58289999992,
+          "executionMs": 52062.94699999993,
+          "startupMs": 1079.6358999999939,
+          "commandMs": 7437.532599999395,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 7,
+        "actionErrors": 0,
+        "observations": 11,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 555220,
+            "inputTokens": 554556,
+            "cachedInputTokens": 446464,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 664,
+            "reasoningOutputTokens": 90
+          },
+          "usageUpdates": 11,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 10,
+            "batchCommandsRequested": 12,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "f36d78077d0d3a65a6c68d7f8e96003cd750fc373c78d5c27c1056c07ce6c13a",
+          "commands": "16cd0586af67d2ad465c74684a60138892b4efe88002c557a8d87eb1d2be4d86",
+          "observations": {
+            "1": {
+              "json": "087011cb4465be17ef775a68b6d7d3691dad086bfc3a21c9e4e64716d542611b",
+              "png": "7ac58c4eb18900195595bba3cf5137bc3f54e90b2a577b6f79280b3fff70d833"
+            },
+            "2": {
+              "json": "efd0829bf90b73274232fc01e065f3dce855286bf7ea3d720b798d789de430b8",
+              "png": "b8350a54ecdf0830c5513131bd72ec54e574cea433723bd45ac8c1a8c813b543"
+            },
+            "3": {
+              "json": "c5c2554e4367d5173a1e574bccaa811c335e05bf691190b181b6556a310b4206",
+              "png": "f335951bb8e866d25e4452024c96e3f05ded1014fea9b14e9894d0c92d16ba3d"
+            },
+            "4": {
+              "json": "ff01243843d4aff820aa555cecf70c34e347fc90d3d7e06674e2a2e305022baf",
+              "png": "dc93991e00458b3f0f7b476ca1af710cff1ce1996ffea2368d4e2b26287a08aa"
+            },
+            "5": {
+              "json": "8dbadadb9b79bc15a81e321f6773071a7f5b948228e937f6b8efdd21e3e74b3a",
+              "png": "fcad411426a4111f092d0ecae297ec5c2fdbd3637bbfdb4cf78cd2fbe05c3d7f"
+            },
+            "6": {
+              "json": "6d7699ccea45e829083622ee57b304b6559beebff6609032ab387ae85a265f0c",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "7": {
+              "json": "a218c67356d769bebd417a432baaaa70ae055263b8de6c48b4c784f8692fe947",
+              "png": "ad24d12811adac09339ddf98f5b8d9acc6cb25b114e0379b495bbc7262a17ecc"
+            },
+            "8": {
+              "json": "a389a8cee0811187000e24e7ffc556b0ad66972fa679ce8624ef8b24e5e09647",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "9": {
+              "json": "ffdf348a55152dcdba2af21012d35ae86591ad6c805d855c151415561f257e55",
+              "png": "10ac6bc38e4e5050026df1be62b0a84eebefd2597cb452a4eef42bda5d5266f0"
+            },
+            "10": {
+              "json": "c7003794faf006e900f3ae8a0c468c7402b260d290724aa5f4879af9f7cf147c",
+              "png": "05c2efb762626570650a6e12e0e08780af85e01154e9c8a778ef1cdc52bc3f5d"
+            },
+            "11": {
+              "json": "7e50f0e8f83e6ea677741a22933c5244ce2a04f17cd7f963b1a2cc09ac9bcc83",
+              "png": "05c2efb762626570650a6e12e0e08780af85e01154e9c8a778ef1cdc52bc3f5d"
+            }
+          },
+          "download": null
+        }
+      },
+      {
+        "id": "agent-browser-vision-google-flights-roundtrip-1",
+        "task": "google-flights-roundtrip",
+        "mode": "agent-browser-vision",
+        "run": 1,
+        "verified": true,
+        "category": "complete",
+        "excluded": null,
+        "criteria": [
+          {
+            "met": true,
+            "observations": [
+              14,
+              18,
+              25,
+              26
+            ],
+            "note": "The results and selected itinerary confirm Paris-Lisbon round trip, October 12-15 2026, economy and two adults."
+          },
+          {
+            "met": true,
+            "observations": [
+              17,
+              18,
+              22,
+              25
+            ],
+            "note": "The non-stop-only radio is selected and the filter persists; the outbound and return Transavia flights are both selected."
+          },
+          {
+            "met": true,
+            "observations": [
+              25,
+              26
+            ],
+            "note": "The itinerary matches the reported Transavia departure at 21:15 from ORY to LIS and return at 06:30 from LIS to ORY, total EUR 360 for two adults. It remains on Google Flights before the booking provider."
+          }
+        ],
+        "capturesViewed": [
+          17,
+          18,
+          22,
+          25
+        ],
+        "timing": {
+          "totalMs": 96860.24600000004,
+          "executionMs": 95717.20010000002,
+          "startupMs": 1143.0459000000264,
+          "commandMs": 3041.3608000001404,
+          "timedOut": false,
+          "durationSource": "startup-plus-execution"
+        },
+        "actions": 21,
+        "actionErrors": 3,
+        "observations": 26,
+        "observationErrors": 0,
+        "model": {
+          "config": {
+            "model": "gpt-6-astra",
+            "provider": "openai",
+            "effort": "max",
+            "serviceTier": "priority"
+          },
+          "configAcknowledged": true,
+          "usage": {
+            "totalTokens": 1998181,
+            "inputTokens": 1997048,
+            "cachedInputTokens": 1839616,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 1133,
+            "reasoningOutputTokens": 81
+          },
+          "usageUpdates": 26,
+          "usageBasis": "final cumulative thread usage",
+          "tools": {
+            "calls": 25,
+            "batchCommandsRequested": 29,
+            "unexpectedTypes": []
+          }
+        },
+        "engine": {
+          "kind": "agent-browser",
+          "agentBrowserVersion": "0.38.1",
+          "playwrightVersion": null,
+          "directCapture": "CDP Page.captureScreenshot on the exact selected target; no font-readiness wait.",
+          "captureFallback": null,
+          "downloadCorrection": "Native observed-ref click with pinTab:true, root CDP allowAndName, ordinary resolved destination parent, active-frame and GUID matching, verified file copy. Windows extended-path cancellation workaround; pinTab retains the web target when Edge creates its downloads hub. 30 second bound. No native download command or Playwright attachment."
+        },
+        "processesAfter": 0,
+        "evidenceHashes": {
+          "result": "8cfc604d312272ae7fa20d7e5d1f97356c43f2c3892260ce2ada1045001a3da6",
+          "commands": "988f33e6f0bed185c85c91bd84802cbffd926e8e229c818f95f171da0c71ef2b",
+          "observations": {
+            "1": {
+              "json": "cef3b850d1050f1412156e89a2bb52169d5c163389bc3ebdffe721007905a2ed",
+              "png": "0a98f5fc379aedf416c3d3429eb72a9c24d2a0a32b14e8ac6bf96816e75a90ea"
+            },
+            "2": {
+              "json": "874d1efd6943a9514863096de5bf0928f7960d167a56d1ec667dcb679bd6a167",
+              "png": "4fbaadf3cce96f3f9f59f5c0391d767a502b9ba8d82d5d75bd3f1d41e4fed7c5"
+            },
+            "3": {
+              "json": "235105971df957ee22414851677649e80d0947d27db0ac968e2ba5ecee41f256",
+              "png": "c0264e391bd58102adf099c248e8930df13380683ccbd1f36c24285ccc0b7374"
+            },
+            "4": {
+              "json": "c2ed2e6e9eb9aed42498c7efd94debfdba3a4b1cb7b368d7112d65f99684bb1e",
+              "png": "a89bec4a26533c25e1548b086e69acb7ec59a2a75af0d8705ce2b3b3bc25be77"
+            },
+            "5": {
+              "json": "14e6e43b19c2f759c950feb56b6cc141ecfb1c9fd4101c779908316ce5a1845b",
+              "png": "1a0916e152858d897daeb62137854331907ea89f11e5f716f2f9414fb7edd829"
+            },
+            "6": {
+              "json": "b25ff9208dcebb0f33629c92799bde9702d77f126884d4f8c8204aff97783a23",
+              "png": "5b586ad806126e1ac728e4c6ef79f9b48cbdbcc10bb9ca168ac6eeb6c5499767"
+            },
+            "7": {
+              "json": "d239c8a8846fef948ab0544d88929f8bf8a7fe27cbf5c8326680f6c9c176ad25",
+              "png": "39f243ea5c8ea4c8f25f654dea679e8996757565c7f7fdbf541d28529ab2b1fd"
+            },
+            "8": {
+              "json": "849963ce86de9c673b34c0686545d6c06737ab051fdf1186edcd799c61875585",
+              "png": "95c250c06b87757acdda790cb1698230bae083d412a6b9a67556d18c2821586e"
+            },
+            "9": {
+              "json": "17d017c9f3599aee88021ee5f2360c3f07e194927fb8157b1ff70b5b9b23b594",
+              "png": "7bad326afb132b11c8abce0ecff185b0ddc788ba67ba50f8e5813618d8ebbba3"
+            },
+            "10": {
+              "json": "57fbd1719080df5cd0102c8c8429006d3789cca5a9ac63ac151f9945d10a7d30",
+              "png": "68b68c69944cd0a9f135d3918c4917552883041b446307bfd3e900cd3b484969"
+            },
+            "11": {
+              "json": "3ab2a659f12b37c1233198debe886633fb94c72ed80fcf46f433979d94bca0f6",
+              "png": "01ea9aac84357b9537a0d1212f84bee74e9fa79ae3adbbd015fec79ee7232937"
+            },
+            "12": {
+              "json": "b6df990f8848f378277a069ffb24bac6d8ab5cf34ec6ee65d4dfd5c5c1fed74f",
+              "png": "cfb64b9dbfa2fdafb86d480e468eb610f1a0f97e71d2c556d7f6d04d86cfc70b"
+            },
+            "13": {
+              "json": "6cfb4c0b0ea371f4427a7f53b43ea5e8b2b65cc005123d6e40c2f62a3327ecb6",
+              "png": "a4746a37c41b6cc573fdfb27eb0f59a7aca32b1ec0fd93b5f54f301c5ec7c775"
+            },
+            "14": {
+              "json": "fc83595df4684bcf3d2c92c4d5f54807fa8a533c1aa870874a66daf3a45f4c1d",
+              "png": "ed2775fb759ffb3eabd25e5a6a19ea7f390e6e8b1795f722b239cf291181a4e9"
+            },
+            "15": {
+              "json": "72dcf71acd70ecce62e97874402962d7400f1fac36e336f1a832051b2c176d2b",
+              "png": "b69dec6e3517b16daf5468a28688e6dcc33a7c97b9a6583eaf373e6c4cbc683a"
+            },
+            "16": {
+              "json": "42c9f8e5ce000e3debbaaced4e6c9f928d7f7ac98cca1a8be62b8e882f1ed948",
+              "png": "0d4cadcb08565f86a19d5c00c5a85d28cc89e8590db81939628b4fdc7bb94879"
+            },
+            "17": {
+              "json": "566f5dfbb2c28b8ff501297e7d968f8ef4aac8185727d38fcd0fef73be386152",
+              "png": "7227fd561056f635e5f4cc1a5656d599eeebce30a62c874c69dc8574f9880054"
+            },
+            "18": {
+              "json": "1048f58267edec493be7967f13dd1da775dded41178096f20f3410c6f5c5223c",
+              "png": "6efc9422abee369097cf6c00b96da72c6610c6647a2348b1312c84a1e3f4df0a"
+            },
+            "19": {
+              "json": "c06a4ae83a44b815b87a6c6f3c53e400e078636f3c97b810627e7e0d48663a23",
+              "png": "c6d5ec29c7cd0ba97cf98dba562abe762240e2e699ed95aa0d272b3e6deb9533"
+            },
+            "20": {
+              "json": "801c45d9b07b5a7b001b7186092bf246da9111f002f3f0a9b26ae7349fafb078",
+              "png": "09e50b89e8fee2f2b27d752b55a5f98273ef4cee488eb4a153c334b64466c69c"
+            },
+            "21": {
+              "json": "0764ebdfdebff4c47a23a9d65010c595d387f659d6cbebb5092361e5395d022b",
+              "png": "addb662227733389ee428e10df9b681965ff8a1b97bf75e5384b636bfda9eeac"
+            },
+            "22": {
+              "json": "61efaf1c8e3d460cf7ca17cb19050c7a4a5a824d8b03178d60c07905c7cced2b",
+              "png": "651e6d14ceac0644bfbce0db4a01bb17f80f3e037e2b2fb093d2f00e7813cecb"
+            },
+            "23": {
+              "json": "0cbde6d4beec7b5e3be18cd2f71e1c766fdbb760a1be2c70f4673f35208c55d5",
+              "png": "c263e2397da645c3a6eb7927416f53c9c9d1250996754d975a6c9bcd9d2d636a"
+            },
+            "24": {
+              "json": "cbe88043064c03282ef0394740abb7ce434b813c873775c3e15c6b8caf3cb5df",
+              "png": "434f0049f1158a8b2224e65bb9276d27a815cfddb77f76927a6016e324db42e9"
+            },
+            "25": {
+              "json": "bbf49dddfbd21d22591a6f8051df005354589eab7c813e4bec4889e2af36dc12",
+              "png": "993ed65c858218da7565c8296f5b3621965561181f6569cbe876a73af2315a6d"
+            },
+            "26": {
+              "json": "11ed43e368125e10c1de827bbf18cba992ea8a6c975dd44585d272f980e153a3",
+              "png": "993ed65c858218da7565c8296f5b3621965561181f6569cbe876a73af2315a6d"
+            }
+          },
+          "download": null
+        }
+      }
+    ]
+  }
+}

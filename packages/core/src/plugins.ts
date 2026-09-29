@@ -174,7 +174,14 @@ export class PluginStore {
   private directory(id: string): string {
     const root = this.root();
     const dir = resolve(root, id);
-    for (const path of [root, dir]) if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
+    for (const path of [root, dir]) {
+      try {
+        if (lstatSync(path).isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
+      } catch (error) {
+        // Install cleanup can remove the directory while callers read its state.
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+      }
+    }
     return dir;
   }
 
@@ -256,6 +263,7 @@ export class PluginStore {
       platform: platformKey(),
       commands: running ? commandsOf(running) : [],
       pools: running ? poolsOf(running) : [],
+      ...(running?.provides.browser ? { browser: running.provides.browser } : {}),
       rejected: disk.kind === 'rejected' ? disk.rejected : null,
     };
   }
@@ -284,7 +292,7 @@ export class PluginStore {
   }
 
   private busy(id: string): boolean {
-    return this.jobs.has(id) || [...this.running.values()].includes(id) || this.action?.id === id || this.listings.has(id);
+    return this.jobs.has(id) || [...this.running.values()].includes(id) || this.action?.id === id || this.listings.has(id) || this.core.browser?.busyPlugin(id) === true;
   }
 
   /** Installs a recommended plugin, or reinstalls a URL one from the manifest it recorded. */
@@ -505,6 +513,7 @@ export class PluginStore {
   /** Deletes the plugin's directory, the whole of what its install wrote. */
   async uninstall(id: string): Promise<PluginState> {
     this.known(id);
+    if (this.core.browser.busyPlugin(id)) throw refused('Cancel this plugin\'s browser tasks before uninstalling.');
     if (this.busy(id)) throw refused('Wait for the current plugin operation before uninstalling.');
     await removeTree(this.directory(id));
     this.pending.delete(id);
@@ -523,6 +532,13 @@ export class PluginStore {
     if (disk.kind !== 'installed') throw refused(`Install ${id} first.`);
     if (this.jobs.has(id)) throw refused(`Wait for ${id} installation to finish.`);
     return disk.installed;
+  }
+
+  browserBinary(id: string): string {
+    this.known(id);
+    const installed = this.usable(id);
+    if (installed.manifest.provides.browser?.protocol !== 'agent-browser-0.37' || !/^0\.37\./.test(installed.version)) throw refused(`${id} must provide the agent-browser-0.37 protocol at version 0.37.x.`);
+    return installed.binary;
   }
 
   private async run(id: string, installed: Installed, args: string[]): Promise<string> {

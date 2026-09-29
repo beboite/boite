@@ -61,9 +61,11 @@ import { FakeWorkflows } from './workflows';
 import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
-export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
+export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `browser.${string}` | `agents.${string}` | `workflows.${string}`>]: (params: RpcParams<M>) => Promise<RpcResult<M>> };
 
 export interface FakeClientOptions {
+  /** An installed browser plugin with a running task, for rendered UI checks. */
+  browserTask?: boolean;
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
   /**
@@ -205,6 +207,7 @@ export class FakeContext {
       protocol: providerId => this.providers.find(p => p.id === providerId)?.protocol,
     });
     this.plugins = new FakePlugins({
+      requireThread: id => this.thread(id),
       emit: (event, payload) => this.emit(event, payload),
       now: () => this.now(),
       nextId: () => ++this.seq,

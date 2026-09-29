@@ -144,6 +144,31 @@ projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners.
+
+On 2026-09-29, fresh `bun run build:core` builds measured 811,714 bytes for
+`dist/main.js` at the merged main commit `5bef4f7` and 821,602 bytes with the
+browser plugin, an increase of 9,888 bytes (1.22%). Its task loop now loads
+only when a browser task starts; request validation remains synchronous.
+Following static imports from the entry bundle measured 878,554 bytes,
+10,417 fewer than before separating validation from the loop. This measures
+code size, not elapsed startup time. Provider SDKs remain lazy. The core
+budget moved to 903,800 bytes, about 10% above that fresh measurement.
+
+The same day's CI merge included newer main commit `ddfb04a`. Fresh
+`bun run build:ui` builds measured 3,382,279 bytes for that main UI and
+3,389,414 bytes for the CI merge `f8077af`, an increase of 7,135 bytes
+(0.211%). Main alone left only 421 bytes below the previous UI total limit.
+The total UI budget moved to 3,728,400 bytes, about 10% above the measured
+merge. Both builds emitted a 516,684-byte entry chunk.
+
+A later CI merge included main `c26a03a`. Fresh paired builds of that main
+and the CI merge `bbca511` both emitted a 524,773-byte entry chunk, above the
+previous 520,000-byte limit. The entry budget moved to 577,300 bytes, about
+10% above that measurement. Their UI totals were 3,393,503 and 3,400,642
+bytes respectively, an increase of 7,139 bytes (0.210%) for the browser
+plugin and no increase in entry bytes. The total UI and core limits stayed
+unchanged.
+
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.

@@ -34,6 +34,12 @@ export function fakePlugins(): PluginState[] {
       commands: poolCommands('kebacc'), pools: ['claude', 'codex', 'antigravity']
     },
     {
+      ...base, id: 'jev-browser', name: 'Jev Browser', origin: 'recommended', version: null, availableVersion: '0.37.1', status: 'not-installed', source: null,
+      description: 'Delegate bounded browser tasks to Jev using the agent-browser native engine.', homepage: 'https://github.com/vercel-labs/agent-browser',
+      artifact: { url: 'https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-win32-x64.exe', sha256: '29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde' },
+      commands: ['agent-browser (native daemon, Jev browser tasks)'], pools: [], browser: { protocol: 'agent-browser-0.37' }
+    },
+    {
       ...base, id: 'seat-pool', name: 'Seat pool', origin: 'url',
       description: 'Keeps several OpenCode logins and switches the active one.',
       homepage: 'https://github.com/example/seat-pool', version: '1.4.0', availableVersion: '1.4.0', status: 'installed',

@@ -2,16 +2,16 @@
 
 A plugin is one native executable. Boite downloads it over https, checks it
 against the SHA-256 its manifest publishes, and runs it for the features the
-manifest names. There is one feature today: account pools, which save and
-switch the default login of an agent CLI.
+manifest names. Account pools save and switch CLI logins. Browser plugins
+execute [bounded Jev tasks](browser-automation.md).
 
 Settings > Plugins has three sections:
 
 - Installed: every plugin on this core, with its version, the commit it came
   from, its pools and its errors.
 - Recommended: the plugins Boite ships a manifest for and that are not
-  installed yet. Today that is
-  [kebacc-switcher](https://github.com/kebab1337420/kebacc-switch).
+  installed yet: [kebacc-switcher](https://github.com/kebab1337420/kebacc-switch)
+  and Jev Browser, which uses the official agent-browser binary.
 - Add from a git URL: any repository with a `boite-plugin.json` at its root.
 
 Plugins are administration of the machine that hosts the core, so every
@@ -60,7 +60,7 @@ Put `boite-plugin.json` at the root of the repository:
 | `homepage` | An https URL with a host and no user or password, at most 2048 characters. The page links to it as the source code. |
 | `executable` | The file name Boite saves the download as: a letter or digit, then letters, digits, `_` and `-`, 64 characters at most, no extension. Boite adds `.exe` on Windows. |
 | `artifacts` | An object keyed by platform, at least one of `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`. Each value is `{ "url", "sha256" }`: an https URL as for `homepage`, and the file's SHA-256 as 64 lowercase hexadecimal characters. |
-| `provides` | An object naming at least one feature. The only feature is `accountPools`, `{ "providers": [...] }`: a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. |
+| `provides` | At least one of `accountPools` or `browser`. Account pools use `{ "providers": [...] }`, a non-empty list of distinct provider ids among `antigravity`, `antigravity-cli`, `claude`, `codex`, `grok`, `muse`, `opencode` and `pi`. Browser uses `{ "protocol": "agent-browser-0.37" }`. |
 
 The platform key is `process.platform` and `process.arch` of the machine that
 runs the core, joined by a hyphen. A core on a Linux server downloads the

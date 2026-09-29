@@ -1,0 +1,3855 @@
+{
+  "schemaVersion": 1,
+  "expected": 2,
+  "reviewed": 2,
+  "completeMatrix": true,
+  "protocol": {
+    "date": "2026-09-29T20:14:34.463Z",
+    "tasks": [
+      {
+        "id": "google-maps-walking",
+        "url": "https://www.google.com/maps",
+        "hosts": [
+          "google.com",
+          "google.fr",
+          "gstatic.com"
+        ],
+        "goal": "Find walking directions from Gare de Lyon, Paris, to Musee d Orsay, Paris. Select walking rather than driving or transit, inspect the route details, and report the duration and distance displayed. Keep the selected walking route visible. Decline optional cookies and location access; do not use current location.",
+        "rubric": [
+          "Correct Paris origin and destination populated.",
+          "Walking mode selected with an actual route displayed.",
+          "Reported duration and distance match visible selected route, with route details inspected."
+        ]
+      }
+    ],
+    "modes": [
+      "candidate-model",
+      "candidate-julia"
+    ],
+    "repetitions": 1,
+    "timeoutMs": 180000,
+    "maxActions": 60,
+    "maxDecisions": 80,
+    "trialOrder": [
+      {
+        "task": "google-maps-walking",
+        "taskOffset": 2,
+        "modes": [
+          "candidate-model",
+          "candidate-julia"
+        ]
+      }
+    ],
+    "armOrder": "Configured order on even frozen-task offsets; reversed on odd offsets, including task subsets.",
+    "recorded": false,
+    "recordingTiming": "Unrecorded timing run.",
+    "initialNavigationRecovery": "No retry. After an initial navigate error, save actual URL/readiness/title/full body text and capture. Continue only at the exact requested URL, interactive/complete readiness, body text longer than 50 characters and no browser-error title.",
+    "planner": {
+      "model": "gpt-6-luna",
+      "effort": "max",
+      "tier": "priority",
+      "tools": [
+        "choose_action"
+      ],
+      "conversation": "One fresh ephemeral task thread per trial, kept throughout the task. Same candidate generation prompt and preferredIndex field in both arms."
+    },
+    "selector": {
+      "modelArm": "Planner preferredIndex",
+      "juliaArm": "Julia-1 /predict choice index, no fallback. Planner provides subgoal and 2 to 12 grounded candidates; this is not autonomous Julia.",
+      "permutation": "Fisher-Yates with deterministic FNV-1a seeded Mulberry32; seed task.id + colon + step, identical across arms, independent of preferredIndex. Preferred and selected indices remapped."
+    },
+    "proposalRecovery": "Invalid candidate proposals execute no action. Return the validation error and unchanged observation for at most two consecutive corrections. Corrections consume the same deadline and decision budget in both arms. Selector errors remain fatal, with no fallback.",
+    "grounding": "Refs and tabs must be current. Exact URLs from any observation delivered during this trial remain available; task domains and HTTPS are enforced. Raw hidden evidence never extends this URL inventory.",
+    "context": "Identical planner observation and full conversation policy for both arms; replacement memory limited to 6000 characters. Selector state uses all candidate target snapshot lines plus one neighbor on each side, up to 7000 characters with overflow rejection; up to 1000 characters of other snapshot lines, 1600 page-text characters and 1600 dialog characters. Tabs retained, links restricted to candidate URLs. Every omission counted. Both arms prepare and log identical policy; raw evidence retained.",
+    "julia": {
+      "backend": "onnx",
+      "maxLength": 8192,
+      "screenshot": false,
+      "input": "Task goal, full subgoal/memory and current scoped LabPage text state. The question repeats the planner immediate subgoal explicitly. Neutral candidate descriptions have at most 140 characters. No preferredIndex or command objects."
+    },
+    "independentReviewRequired": true,
+    "grading": "No model claim or finish flag is scored as success. Saved observations, screenshots, action log, download artifact and task rubric require independent review.",
+    "directCapture": true,
+    "nativeDownloadCorrection": true,
+    "engine": "agent-browser",
+    "isolatedContext": true,
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "colorScheme": "light",
+    "binaryHash": "70bd758b2a5a72b18055f60ff877d2297d036c4104e3bc94af6f7c1ceb941408",
+    "browserBinaryHash": "f530bafcdb7e529bd21dd8be46e20c82b5c70fa0ffd770fe4c45a5c2c054c211",
+    "codexBinaryHash": "0e2a4cd6ac1b329e64ec74745e38b71a3d4fa701102c86f49cf605d23a02c4df",
+    "sourceHashes": {
+      "browser-lab-julia.ts": "f641c35f93f14f5ed7e9a6fa0ea84092cf358ca9199f949d484312e44a5073d9",
+      "browser-lab-julia-choice.ts": "49662b6c70c95ae0f7e0d784bc7801f9a684692dad2051cf8f62bff82ccb2356",
+      "browser-lab-julia-choice.test.ts": "6464cdb8ba35b693bb05b28c9ea1734631b12196a7db91041a003e45c5525fff",
+      "browser-lab-page.ts": "9592e561086c1347471ec6155948b06c72c22a08445fdc76575591d1a1b2fb38",
+      "browser-lab-tasks.ts": "e9935442b42c6d78d33b11ee1f6403d938d9f266247b0180fd72eed0c0a8e79b",
+      "browser-lab-codex.ts": "d0cd742c2ac06a2bf3a20904e0d7a99d1281432140e4568d20fb064f1ae335cb",
+      "browser-lab-engine.ts": "2b7c40f5f4d7b93d26a993a206f73c184a05023371bf676540e7674258f987db",
+      "browser-lab-native.ts": "83a2afab5ae65521eabc40f2b98cc3a058ca2f62b6540cab7a460b4c446ae5c6",
+      "browser-lab-isolation.ts": "b799eae338bdced7741a68b0db441ab46d1f75fe308964989a4296cbfe6e6272",
+      "browser-lab-model.ts": "8af88765f8d67d941530821e6c87ea64fd0c2a8b3ef0750572f1609513af8525",
+      "browser-lab-capture.ts": "b13ba4e29def0e58ad273fee46c597fd586d3390705bd61082fc189ba664ecc7",
+      "browser-lab-download.ts": "f12eae9b7f0f20163f3d6c6c7288a952f6948e2f3c447ef18086122532756496",
+      "browser-lab-recording.ts": "f7625f7d2bc9e00d666d29741347c72444dc6b2d62ecf36f386e843628a2ed44"
+    }
+  },
+  "runtime": {
+    "model": "SupersonicLabs/Julia-1",
+    "revision": "a85b127321d580d65176c89ced8273f305745d85",
+    "weightHash": "df853bf7fe424420011f3d0c47a05d7341aa9eefa7fb9f203ea4aada4ad95b72",
+    "weightBytes": 577189056,
+    "torch": "2.14.0+cpu",
+    "transformers": "5.0.0",
+    "python": "3.12.3",
+    "cpuThreads": 2,
+    "interopThreads": 1,
+    "loadMs": 10343.18256599363,
+    "markerOnlyHead": true,
+    "maxLength": 8192,
+    "strictEncoding": true
+  },
+  "interpretation": "The same planner supplies subgoals, memory and finite grounded candidates in both arms. The model arm selects preferredIndex; the Julia arm selects among those candidates. This experiment measures that workflow, not autonomous Julia browser planning.",
+  "metricDefinitions": {
+    "completed": "validateReview(review,raw,directory,[\"choose_action\"]) plus acknowledged planner configuration and no unexpected tools. True rubric criteria are reported separately.",
+    "median": "Conventional median: for even sample counts, mean of the two central sorted durations. Total timing includes every protocol attempt per arm, including failures.",
+    "tokens": "Measured final cumulative thread tokens, summed across trials. Missing model/token events remain unmeasured, not zero. No monetary cost is inferred.",
+    "requestBodyHash": "SHA-256 of UTF-8 JSON.stringify(saved selector payload); source driver uses the same serialization. Wire bytes were not captured independently. Model-arm inputs were saved but not sent to Julia.",
+    "reviewHash": "SHA-256 of UTF-8 JSON.stringify(the original review object). Full review-file bytes are hashed separately.",
+    "commandHash": "SHA-256 of UTF-8 JSON.stringify(the original command), before incidental session-query redaction."
+  },
+  "summaries": [
+    {
+      "mode": "candidate-model",
+      "attempted": 1,
+      "completed": 1,
+      "completedDenominator": 1,
+      "criteriaMet": 3,
+      "criteriaDenominator": 3,
+      "allCriteriaMet": 1,
+      "finished": 1,
+      "totalTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 118209.20679999999,
+        "minMs": 118209.20679999999,
+        "maxMs": 118209.20679999999
+      },
+      "startupTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 7730.2255000000005,
+        "minMs": 7730.2255000000005,
+        "maxMs": 7730.2255000000005
+      },
+      "executionTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 110478.31829999998,
+        "minMs": 110478.31829999998,
+        "maxMs": 110478.31829999998
+      },
+      "selectorDisagreements": 0,
+      "selectedDecisions": 11,
+      "trialsWithErrors": 0,
+      "timedOutTrials": 0,
+      "decisionErrors": 0,
+      "inferenceErrors": 0,
+      "cumulativeTokens": {
+        "totalTokens": 344914,
+        "inputTokens": 338374,
+        "cachedInputTokens": 279808,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 6540,
+        "reasoningOutputTokens": 3734
+      },
+      "trialsWithMeasuredTokenUsage": 1,
+      "trialsWithoutMeasuredTokenUsage": 0,
+      "categories": {
+        "complete": 1
+      }
+    },
+    {
+      "mode": "candidate-julia",
+      "attempted": 1,
+      "completed": 0,
+      "completedDenominator": 1,
+      "criteriaMet": 3,
+      "criteriaDenominator": 3,
+      "allCriteriaMet": 1,
+      "finished": 0,
+      "totalTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 183752.86270000003,
+        "minMs": 183752.86270000003,
+        "maxMs": 183752.86270000003
+      },
+      "startupTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 3748.589000000007,
+        "minMs": 3748.589000000007,
+        "maxMs": 3748.589000000007
+      },
+      "executionTimingAllAttempts": {
+        "n": 1,
+        "medianMs": 180004.26940000002,
+        "minMs": 180004.26940000002,
+        "maxMs": 180004.26940000002
+      },
+      "selectorDisagreements": 11,
+      "selectedDecisions": 17,
+      "trialsWithErrors": 0,
+      "timedOutTrials": 1,
+      "decisionErrors": 0,
+      "inferenceErrors": 0,
+      "cumulativeTokens": {
+        "totalTokens": 609440,
+        "inputTokens": 601266,
+        "cachedInputTokens": 529280,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 8174,
+        "reasoningOutputTokens": 4376
+      },
+      "trialsWithMeasuredTokenUsage": 1,
+      "trialsWithoutMeasuredTokenUsage": 0,
+      "categories": {
+        "complete": 1
+      }
+    }
+  ],
+  "cleanup": {
+    "completedTrials": 2,
+    "modelGroupCount": 1,
+    "browserGroupCount": 2,
+    "modelGroupsRemaining": [
+      0
+    ],
+    "browserGroupsRemaining": [
+      0,
+      0
+    ],
+    "allGroupsZero": true
+  },
+  "evidenceHashes": {
+    "protocolSha256": "2320bf154eab84c215db2bd78900bd16863f3b9468626201a89ac34f6b8625bb",
+    "reviewsFileSha256": "a696895c88eabceea3672bbbaebe504d1400811a7fbd7b6c95466f750a9945fe",
+    "summarySha256": "d1293927adae432a3196ff6cb100322c6bdce82070fc068cb9a1229f97b6f381",
+    "cleanupSha256": "c46a937820e0f1bdc11146a2b6642b8c6d891695cf2cdea97c07b25ff05532f9",
+    "runtimeSha256": "d5bf6b2b6151b52d20b9772275f8d8fb1c8a30a59eae2198c2d8f35d56855b01",
+    "reviewValidatorSourceSha256": "bdf14f24eb72316388054b0a92c5ba9bff40b2506971472e9dd61ce1799f858a",
+    "toolAuditSourceSha256": "bec0d4bf8b1cb889370f6ecbb8453783b346010002a5155fc33ab2bbdec6bd30"
+  },
+  "attempts": [
+    {
+      "id": "candidate-model-google-maps-walking-1",
+      "task": "google-maps-walking",
+      "mode": "candidate-model",
+      "run": 1,
+      "startedAt": "2026-09-29T20:15:14.449Z",
+      "criteria": [
+        {
+          "index": 0,
+          "rubric": "Correct Paris origin and destination populated.",
+          "met": true,
+          "observations": [
+            9,
+            11,
+            12
+          ],
+          "note": "Accepted Paris endpoints are Gare de Lyon, 75012 Paris and Musee d'Orsay, Esplanade Valery Giscard d'Estaing, 75007 Paris, corroborated by resolved fields and route URL.",
+          "evidence": [
+            {
+              "id": 9,
+              "observationSha256": "ca09bc7c20c85900846e9067f07c05a602aa26235078ae9a75f22fcfd129b80d",
+              "captureSha256": "83a0d15b66d96ee3b64fff898ab178639de6143a13b625b89fa2ff2ebefaecde",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 11,
+              "observationSha256": "afe852d8e404ed08081c740c50392cabf7796a8a3e8ce259126317691835ab1d",
+              "captureSha256": "e8133f7e2d59e9d3acdd445945b8fcba530fb15888921f99dc273c0be520e02b",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 12,
+              "observationSha256": "ecfcec368b7d272d2df30272c462773bf39d64f14c71952ef2e29328833c28c1",
+              "captureSha256": "ff2a74085a5c7e1185242cdc4eb6122e8023afb652d64ffc6728ec9fff76c7b2",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "rubric": "Walking mode selected with an actual route displayed.",
+          "met": true,
+          "observations": [
+            10,
+            11,
+            12
+          ],
+          "note": "Walking radio checked; selected walking route is drawn between the requested endpoints.",
+          "evidence": [
+            {
+              "id": 10,
+              "observationSha256": "9cd5311b3088d6b6bdaf9dbd70d36c070bbecf71eef8400eb761dc428e48911f",
+              "captureSha256": "11d86dbd6a713ae15a2749776f8f65db1aa30097f06f172b4504f64b406e3da5",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 11,
+              "observationSha256": "afe852d8e404ed08081c740c50392cabf7796a8a3e8ce259126317691835ab1d",
+              "captureSha256": "e8133f7e2d59e9d3acdd445945b8fcba530fb15888921f99dc273c0be520e02b",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 12,
+              "observationSha256": "ecfcec368b7d272d2df30272c462773bf39d64f14c71952ef2e29328833c28c1",
+              "captureSha256": "ff2a74085a5c7e1185242cdc4eb6122e8023afb652d64ffc6728ec9fff76c7b2",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "rubric": "Reported duration and distance match visible selected route, with route details inspected.",
+          "met": true,
+          "observations": [
+            11,
+            12
+          ],
+          "note": "Details is opened with turn-by-turn walking instructions. Heading displays 1 h 1 min (4.4 km) via Voie Georges Pompidou, matching the grounded answer and visible selected route.",
+          "evidence": [
+            {
+              "id": 11,
+              "observationSha256": "afe852d8e404ed08081c740c50392cabf7796a8a3e8ce259126317691835ab1d",
+              "captureSha256": "e8133f7e2d59e9d3acdd445945b8fcba530fb15888921f99dc273c0be520e02b",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 12,
+              "observationSha256": "ecfcec368b7d272d2df30272c462773bf39d64f14c71952ef2e29328833c28c1",
+              "captureSha256": "ff2a74085a5c7e1185242cdc4eb6122e8023afb652d64ffc6728ec9fff76c7b2",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        }
+      ],
+      "criteriaMet": 3,
+      "allCriteriaMet": true,
+      "completed": true,
+      "category": "complete",
+      "capturesViewed": [
+        {
+          "id": 11,
+          "observationSha256": "afe852d8e404ed08081c740c50392cabf7796a8a3e8ce259126317691835ab1d",
+          "captureSha256": "e8133f7e2d59e9d3acdd445945b8fcba530fb15888921f99dc273c0be520e02b",
+          "captureAvailable": true,
+          "evidenceErrors": [],
+          "captureError": null
+        },
+        {
+          "id": 12,
+          "observationSha256": "ecfcec368b7d272d2df30272c462773bf39d64f14c71952ef2e29328833c28c1",
+          "captureSha256": "ff2a74085a5c7e1185242cdc4eb6122e8023afb652d64ffc6728ec9fff76c7b2",
+          "captureAvailable": true,
+          "evidenceErrors": [],
+          "captureError": null
+        }
+      ],
+      "finished": true,
+      "stopReason": null,
+      "error": null,
+      "initialNavigationError": null,
+      "cleanupError": null,
+      "timing": {
+        "totalMs": 118209.20679999999,
+        "durationSource": "totalMs",
+        "elapsedBeforeCleanupMs": 118209.20980000001,
+        "startupMs": 7730.2255000000005,
+        "executionMs": 110478.31829999998,
+        "promptPreparationMs": 0.04389999999693828
+      },
+      "counts": {
+        "actions": 9,
+        "actionErrors": 0,
+        "observations": 12,
+        "missingCaptures": 0,
+        "observationErrors": 0,
+        "decisions": 11,
+        "selectedDecisions": 11,
+        "selectorDisagreements": 0,
+        "decisionErrors": 0,
+        "inferenceErrors": 0,
+        "proposalCorrections": 0
+      },
+      "model": {
+        "resultAvailable": true,
+        "config": {
+          "model": "gpt-6-luna",
+          "effort": "max",
+          "serviceTier": "priority",
+          "provider": "openai"
+        },
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "usageAvailable": true,
+        "cumulativeTokens": {
+          "totalTokens": 344914,
+          "inputTokens": 338374,
+          "cachedInputTokens": 279808,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 6540,
+          "reasoningOutputTokens": 3734
+        },
+        "usageUpdates": 12,
+        "usageBasis": "final cumulative thread usage",
+        "lastSumMatchesTotal": true,
+        "tools": {
+          "calls": 11,
+          "batchCommandsRequested": 0,
+          "unexpectedTypes": []
+        }
+      },
+      "processesAfter": 0,
+      "decisions": [
+        {
+          "step": 1,
+          "currentObservationId": 1,
+          "subgoal": "Decline optional cookies and reach Google Maps without using current location.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Decline optional Google cookies to continue to Maps.",
+              "command": {
+                "action": "click",
+                "selector": "@e10"
+              },
+              "originalCommandSha256": "b449448881880e10fe5a3edbb6451ab1fe8a938ba4bd620ce6512c3cc9d3e983"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the cookie choice text before proceeding.",
+              "command": {
+                "action": "observe",
+                "query": "Tout refuser"
+              },
+              "originalCommandSha256": "6028b57543221c62ced5ae07e87c90da0dceaba153d39f6a36004466ce21f560"
+            }
+          ],
+          "preferredIndex": 0,
+          "chosenIndex": 0,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:1",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 2,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 7687.016899999995,
+            "selectionMs": 0.004000000000814907,
+            "actionAndObservationMs": 1150.8378000000012,
+            "handlerMs": 1155.4844000000012
+          },
+          "lengths": {
+            "state": 4983,
+            "observation": 5872,
+            "preparedObservation": 4172,
+            "taskGoal": 312,
+            "subgoal": 78,
+            "memory": 366,
+            "question": 165,
+            "options": [
+              52,
+              49
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 2293,
+              "snapshotPreparedCharacters": 1205,
+              "snapshotOmittedCharacters": 1088,
+              "snapshotOriginalLines": 39,
+              "snapshotPreparedLines": 33,
+              "snapshotCandidateContextLines": 6,
+              "pageTextOriginalCharacters": 1859,
+              "pageTextOmittedCharacters": 259,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 5,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "91f7c25d8946ed540c122e5df034a18ab1be079b562964176167799ee696fbaa",
+            "requestBodySha256": "2c9a343e314e4fd1b3762f103c30c0ba1e543dcd87aab5e943ba298159f489b5",
+            "preparedStateSha256": "61387ff4ced4928b2cbe0c2883333bc2a5fc173ce9751f68141d770734e84284",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "ed47d68a63ada37505dca2bff9bd43ae291294a6a1ecdbc88cec117ebe2fdbd9"
+        },
+        {
+          "step": 2,
+          "currentObservationId": 2,
+          "subgoal": "Open directions so the origin and destination can be entered without using current location.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the visible directions control.",
+              "command": {
+                "action": "observe",
+                "query": "Itin\u00e9raire"
+              },
+              "originalCommandSha256": "ae51ec721a9aec2005c63fa1b97491c7817021d6bf306288ebdd311daa70c788"
+            },
+            {
+              "index": 1,
+              "description": "Open the directions panel.",
+              "command": {
+                "action": "click",
+                "selector": "@e17"
+              },
+              "originalCommandSha256": "1c7d7f8c8a349f3e903e4ad762f244861ae3b839290fc28de092704182e5db32"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:2",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 2,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6478.042699999991,
+            "selectionMs": 0.001799999998183921,
+            "actionAndObservationMs": 326.14109999999346,
+            "handlerMs": 328.6753000000026
+          },
+          "lengths": {
+            "state": 2896,
+            "observation": 2139,
+            "preparedObservation": 2055,
+            "taskGoal": 312,
+            "subgoal": 92,
+            "memory": 382,
+            "question": 179,
+            "options": [
+              39,
+              26
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 940,
+              "snapshotPreparedCharacters": 940,
+              "snapshotOmittedCharacters": 0,
+              "snapshotOriginalLines": 27,
+              "snapshotPreparedLines": 27,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 59,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 0,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "3cc065c756ef15aad9407e28cce40862b01ca349cb00496e7ec21cab6b6d4772",
+            "requestBodySha256": "f896f9933700de27ba36e2e9b789edac11abd626d9fc29d092e9acb5d347d6ee",
+            "preparedStateSha256": "ae6f1c40e6d297602be86b7388a805ee88566a383bf7ae1acdc3a149afd56176",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "bed09d06526db068b0064002d5611f9f543cc097f588f0ad0ad4cd5c10411297"
+        },
+        {
+          "step": 3,
+          "currentObservationId": 3,
+          "subgoal": "Focus the start-point field and enter Gare de Lyon, Paris rather than the current-location suggestion.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Focus the visible destination field.",
+              "command": {
+                "action": "click_xy",
+                "x": 263,
+                "y": 163
+              },
+              "originalCommandSha256": "8a965a56082c50e845f2429026e452b03c1c9c61af4f46bdd0770f0eb899d9c4"
+            },
+            {
+              "index": 1,
+              "description": "Focus the visible start-point field instead of using the current location.",
+              "command": {
+                "action": "click_xy",
+                "x": 274,
+                "y": 113
+              },
+              "originalCommandSha256": "b38cccf1b949fbf43171913b6e727e6fc3694cbb803fab371afd9467fd112d18"
+            },
+            {
+              "index": 2,
+              "description": "Inspect the current-location suggestion without selecting it.",
+              "command": {
+                "action": "observe",
+                "query": "Votre position"
+              },
+              "originalCommandSha256": "d8527666672cdecb8a60640272c6fc0728664f4dc98f6fabf145cbf56f3e6513"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            0,
+            2
+          ],
+          "permutationSeed": "google-maps-walking:3",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 8823.409700000004,
+            "selectionMs": 0.0026999999972758815,
+            "actionAndObservationMs": 823.9133999999904,
+            "handlerMs": 838.6661999999924
+          },
+          "lengths": {
+            "state": 3523,
+            "observation": 3880,
+            "preparedObservation": 2626,
+            "taskGoal": 312,
+            "subgoal": 102,
+            "memory": 428,
+            "question": 189,
+            "options": [
+              36,
+              74,
+              61
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 1999,
+              "snapshotPreparedCharacters": 1132,
+              "snapshotOmittedCharacters": 867,
+              "snapshotOriginalLines": 53,
+              "snapshotPreparedLines": 31,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 263,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "b1abcd9abee3c0ade69acaf059dbcf495b0dc84f0f4568f9d89de637f4cd4254",
+            "requestBodySha256": "8d99191e5c4bcbd80c7779bf6214ab18125146f066a16e045b5df2ac9783c5e1",
+            "preparedStateSha256": "e7478ecef8cbddf0808a7514ce0191d42d04620103f404e0bbf78d7bdd400775",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "ce29746cf6640fbd1926ee777d13c24e40d08b0b7f06e8a026d42bca7b78aeac"
+        },
+        {
+          "step": 4,
+          "currentObservationId": 4,
+          "subgoal": "Enter Gare de Lyon, Paris as the origin while leaving the current-location suggestion unused.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the destination field before entering route endpoints.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            },
+            {
+              "index": 1,
+              "description": "Select the walking travel mode.",
+              "command": {
+                "action": "click",
+                "selector": "@e44"
+              },
+              "originalCommandSha256": "ae327cca52111ad328ba7a1de72ef523dfab444367a5ccce17be841e97d6f7f1"
+            },
+            {
+              "index": 2,
+              "description": "Set the start point to Gare de Lyon, Paris.",
+              "command": {
+                "action": "fill",
+                "selector": "@e51",
+                "value": "Gare de Lyon, Paris"
+              },
+              "originalCommandSha256": "8b24ad69cfc50663d11ceeaf99ff17ef8bd56780354131290faf84238e6e1f1a"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:4",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6230.948599999989,
+            "selectionMs": 0.003500000006170012,
+            "actionAndObservationMs": 777.5319000000018,
+            "handlerMs": 791.8427999999985
+          },
+          "lengths": {
+            "state": 3931,
+            "observation": 5773,
+            "preparedObservation": 3134,
+            "taskGoal": 312,
+            "subgoal": 93,
+            "memory": 337,
+            "question": 180,
+            "options": [
+              62,
+              31,
+              43
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3644,
+              "snapshotPreparedCharacters": 1469,
+              "snapshotOmittedCharacters": 2175,
+              "snapshotOriginalLines": 89,
+              "snapshotPreparedLines": 34,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 381,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "a191a53c09a7488e6c6cbd8f40cbd3ae159a68c64934f465691a66bf2c4308d9",
+            "requestBodySha256": "7e9e6e06e17f4e5e8340c3c0e81f897d44dc50d818f779d27f02def82e9596f2",
+            "preparedStateSha256": "897c0171c9749713899b834c0801f0bbb2e293e687e02da8a3e499ec5ffea303",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "487b88ffb50f29a6c5a29622865991828617a7f3d0bbfe0e174f665ea9151efe"
+        },
+        {
+          "step": 5,
+          "currentObservationId": 5,
+          "subgoal": "Confirm Gare de Lyon, Paris from the displayed autocomplete results.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the exact Gare de Lyon autocomplete result.",
+              "command": {
+                "action": "observe",
+                "query": "Gare de Lyon Paris"
+              },
+              "originalCommandSha256": "95d319551f3a2da99850a8685d8598cc41817b3c55f5902246e58f4891349844"
+            },
+            {
+              "index": 1,
+              "description": "Choose the Gare de Lyon, Paris autocomplete result.",
+              "command": {
+                "action": "click",
+                "selector": "@e69"
+              },
+              "originalCommandSha256": "af77ff9d04fcea2ee9f33cf43dcce04fd2c03794ad84e14e43ae4319bd8b8f34"
+            },
+            {
+              "index": 2,
+              "description": "Choose the Gare de Lyon result with Place Louis Armand address.",
+              "command": {
+                "action": "click",
+                "selector": "@e68"
+              },
+              "originalCommandSha256": "fba44f79b2dc80ffd4431b514a59bdaf22255f6025f6860e3f307ac3d7ee2b99"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:5",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 10217.5236,
+            "selectionMs": 0.001600000003236346,
+            "actionAndObservationMs": 113.28290000000561,
+            "handlerMs": 115.13800000000629
+          },
+          "lengths": {
+            "state": 4776,
+            "observation": 7367,
+            "preparedObservation": 3992,
+            "taskGoal": 312,
+            "subgoal": 68,
+            "memory": 349,
+            "question": 155,
+            "options": [
+              51,
+              51,
+              63
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 4956,
+              "snapshotPreparedCharacters": 2075,
+              "snapshotOmittedCharacters": 2881,
+              "snapshotOriginalLines": 110,
+              "snapshotPreparedLines": 42,
+              "snapshotCandidateContextLines": 19,
+              "pageTextOriginalCharacters": 602,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "1684dcf0eb6f36272219398dd0f93a7087a902ac415098da45e007151835197f",
+            "requestBodySha256": "681c42d916eff01e7da379a1af8d7c203c9e309e9df7a2924c77f7eb73bd49b2",
+            "preparedStateSha256": "9275ff1d9bd8b047860e5f00aedc61ab47e4dedeccbd6dbd120ef7bb1a05dd1d",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "1650139d1b5b13f9e59eb4e65c629c43dac3aa40789d2954096d937d807ff532"
+        },
+        {
+          "step": 6,
+          "currentObservationId": 6,
+          "subgoal": "Enter the requested destination Musee d Orsay, Paris.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Select the walking travel mode.",
+              "command": {
+                "action": "click",
+                "selector": "@e44"
+              },
+              "originalCommandSha256": "ae327cca52111ad328ba7a1de72ef523dfab444367a5ccce17be841e97d6f7f1"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the route panel status before completing the destination.",
+              "command": {
+                "action": "observe",
+                "query": "Perturbations"
+              },
+              "originalCommandSha256": "aaa4babc75c3d3a7fa9f698166989f95a17441276f75dc0ee1370af7fcb3756a"
+            },
+            {
+              "index": 2,
+              "description": "Enter Musee d Orsay, Paris as the destination.",
+              "command": {
+                "action": "fill",
+                "selector": "@e52",
+                "value": "Musee d Orsay, Paris"
+              },
+              "originalCommandSha256": "7404a8a185b47d02da4f243d50d0bbd0038a72795e620a8a19558bab0da1e95d"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            2,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:6",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5287.281099999993,
+            "selectionMs": 0.003799999991315417,
+            "actionAndObservationMs": 1017.9418999999907,
+            "handlerMs": 1028.8485000000073
+          },
+          "lengths": {
+            "state": 3814,
+            "observation": 5450,
+            "preparedObservation": 3081,
+            "taskGoal": 312,
+            "subgoal": 53,
+            "memory": 313,
+            "question": 140,
+            "options": [
+              31,
+              65,
+              46
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3362,
+              "snapshotPreparedCharacters": 1436,
+              "snapshotOmittedCharacters": 1926,
+              "snapshotOriginalLines": 83,
+              "snapshotPreparedLines": 34,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 362,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "e4bf7ce1a2152515fa3336fd5e109f4913c3c79c707dc1fbff14100444bca4c5",
+            "requestBodySha256": "2d877d2eb20b5f451b570ee955e142d0ca016aca7fa6c56f8da41d15f53da7a3",
+            "preparedStateSha256": "e2a4026c3cc05619af6a471e9cb08aa0fda141b92816be303c7a2b091a938ba3",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "4c40efdc97e7ef0f1add7dd831d280ff06ab4e899e4c41c851090727f4fa4cb9"
+        },
+        {
+          "step": 7,
+          "currentObservationId": 7,
+          "subgoal": "Confirm the Mus\u00e9e d'Orsay, Paris destination from Maps autocomplete.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Select the walking travel mode.",
+              "command": {
+                "action": "click",
+                "selector": "@e44"
+              },
+              "originalCommandSha256": "ae327cca52111ad328ba7a1de72ef523dfab444367a5ccce17be841e97d6f7f1"
+            },
+            {
+              "index": 1,
+              "description": "Choose the transit-labeled Mus\u00e9e d'Orsay, Paris result.",
+              "command": {
+                "action": "click",
+                "selector": "@e81"
+              },
+              "originalCommandSha256": "9414d4ffa9455494ce1c7417d20416c5b064c81e12bef152332b51eae1dcfae9"
+            },
+            {
+              "index": 2,
+              "description": "Choose the Mus\u00e9e d'Orsay, Paris destination result.",
+              "command": {
+                "action": "click",
+                "selector": "@e80"
+              },
+              "originalCommandSha256": "1f4c4df41a850654a423260c31654afa6c68b2f5be8456b6405c6ba46a545bdb"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:7",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6172.6900999999925,
+            "selectionMs": 0.0039000000106170774,
+            "actionAndObservationMs": 1609.744200000001,
+            "handlerMs": 1727.4789000000019
+          },
+          "lengths": {
+            "state": 4297,
+            "observation": 7213,
+            "preparedObservation": 3496,
+            "taskGoal": 312,
+            "subgoal": 68,
+            "memory": 366,
+            "question": 155,
+            "options": [
+              31,
+              55,
+              51
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 4482,
+              "snapshotPreparedCharacters": 1416,
+              "snapshotOmittedCharacters": 3066,
+              "snapshotOriginalLines": 103,
+              "snapshotPreparedLines": 34,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 533,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "28ba50900692652d0a956e9d8e9f6dc690e2b55c3ca091ebc1f84541e991d970",
+            "requestBodySha256": "31375ac5a295ef75cf4afc0c429252bc3e9f117ae62c4adca6ceeb38f47e7595",
+            "preparedStateSha256": "3b865e4f2226c0ffe12cb2b9138ebd1c26ad97c94fba2df0ad4888a6cbb88ba5",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "a1192bd7007cff00701719cb8a6b552cc1c4d0a7067b5c56d921a4881d4c2b8e"
+        },
+        {
+          "step": 8,
+          "currentObservationId": 8,
+          "subgoal": "Select walking so the route and its walking time and distance are displayed.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect route options without using current location.",
+              "command": {
+                "action": "click",
+                "selector": "@e86"
+              },
+              "originalCommandSha256": "27d88c048978a538fff1b3869d77472f3736bda4d779793d2a1750886363456d"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the walking-time estimate displayed above the route choices.",
+              "command": {
+                "action": "observe",
+                "query": "1 h 1"
+              },
+              "originalCommandSha256": "b948e21a571c64bb28d6a29036674e9d5b009cbd35ca45bdcd40b627184f0e7d"
+            },
+            {
+              "index": 2,
+              "description": "Switch the displayed route from driving to walking.",
+              "command": {
+                "action": "click",
+                "selector": "@e44"
+              },
+              "originalCommandSha256": "ae327cca52111ad328ba7a1de72ef523dfab444367a5ccce17be841e97d6f7f1"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:8",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 7037.012099999993,
+            "selectionMs": 0.003599999996367842,
+            "actionAndObservationMs": 363.09599999999045,
+            "handlerMs": 380.428700000004
+          },
+          "lengths": {
+            "state": 4515,
+            "observation": 6276,
+            "preparedObservation": 3668,
+            "taskGoal": 312,
+            "subgoal": 76,
+            "memory": 404,
+            "question": 163,
+            "options": [
+              53,
+              68,
+              51
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3645,
+              "snapshotPreparedCharacters": 1627,
+              "snapshotOmittedCharacters": 2018,
+              "snapshotOriginalLines": 88,
+              "snapshotPreparedLines": 38,
+              "snapshotCandidateContextLines": 12,
+              "pageTextOriginalCharacters": 274,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "a3c89aada86c743c6177b456cf24c3d51828fb675f741afee4a17c6ecade6c7f",
+            "requestBodySha256": "f58baf62858d35459650691039b972e483b877a6d2d3f10bddcb3bc6d7aa3561",
+            "preparedStateSha256": "ef6ff2bd74c8b7c0b98cde20b4c7bcdc0a8a6225c1a5c25ae510fe1c0dadf99c",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "a1c920731b3477118da5d5dd9b46fc6961781980a3e135e4224b28ab4b35c3a4"
+        },
+        {
+          "step": 9,
+          "currentObservationId": 9,
+          "subgoal": "Wait for the selected walking route details to populate so the displayed duration and distance can be recorded.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Check whether the displayed route summary has updated.",
+              "command": {
+                "action": "observe",
+                "query": "Mus\u00e9e d'Orsay 23 min"
+              },
+              "originalCommandSha256": "373c6e554a0222c316bbf882e6dd13de121427723742a5490c5b2a985e7788f2"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the current Maps route panel after selecting walking.",
+              "command": {
+                "action": "observe"
+              },
+              "originalCommandSha256": "7410c92950816befe609ec0aff8aea16b38d798a91c5b8ec434da69b736a09a4"
+            },
+            {
+              "index": 2,
+              "description": "Inspect lower route details in the directions panel.",
+              "command": {
+                "action": "scroll",
+                "selector": "@e53",
+                "direction": "down",
+                "amount": 400
+              },
+              "originalCommandSha256": "ca5b28554637f0b863060a536a5d0e4f4378b73baa969082db742fb5e3c12ba1"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            0,
+            2
+          ],
+          "permutationSeed": "google-maps-walking:9",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 18000.660899999988,
+            "selectionMs": 0.0021000000124331564,
+            "actionAndObservationMs": 107.91790000000037,
+            "handlerMs": 116.49420000001555
+          },
+          "lengths": {
+            "state": 4509,
+            "observation": 7950,
+            "preparedObservation": 3588,
+            "taskGoal": 312,
+            "subgoal": 111,
+            "memory": 443,
+            "question": 198,
+            "options": [
+              54,
+              61,
+              52
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 4731,
+              "snapshotPreparedCharacters": 1237,
+              "snapshotOmittedCharacters": 3494,
+              "snapshotOriginalLines": 107,
+              "snapshotPreparedLines": 29,
+              "snapshotCandidateContextLines": 6,
+              "pageTextOriginalCharacters": 398,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "c7247099719bab005103fc08db0a2d5e214601ab24803171862dfa55640c102b",
+            "requestBodySha256": "6e77c3f17f21a128609c41d5bb1d06e2898b67086250b4749c232fa23ebb6ee1",
+            "preparedStateSha256": "09aeeb0775aaa177471a62f8ee2e593a1590e2a2d7a4a33791509b9906dfe122",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "485ef799fcd5637a460e1fe3c3b86b0dfcafb9b20f041426a9f0d0f4bef33cdc"
+        },
+        {
+          "step": 10,
+          "currentObservationId": 10,
+          "subgoal": "Inspect turn-by-turn details for the selected walking route while keeping its map path visible.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Open details for the displayed walking route via Voie Georges Pompidou.",
+              "command": {
+                "action": "click",
+                "selector": "@e110"
+              },
+              "originalCommandSha256": "44b2d651d922bf34425182a914efb34e9666d1acc028fe37022c719e1b8eb0b0"
+            },
+            {
+              "index": 1,
+              "description": "Select the alternate walking route via Quai Saint-Bernard.",
+              "command": {
+                "action": "click",
+                "selector": "@e102"
+              },
+              "originalCommandSha256": "3ad85701d9cc41f1ca808871858077b174fe1dda2b3a6a9985f809d99a0e37be"
+            },
+            {
+              "index": 2,
+              "description": "Check the displayed walking estimate and distance.",
+              "command": {
+                "action": "observe",
+                "query": "1 h 1 min"
+              },
+              "originalCommandSha256": "18ce45cb1a06e0adc2531f3c07d65dddf3b064756f8875a06cacfdbc646f1813"
+            }
+          ],
+          "preferredIndex": 0,
+          "chosenIndex": 0,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            0,
+            2,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:10",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 8831.720000000001,
+            "selectionMs": 0.001799999998183921,
+            "actionAndObservationMs": 541.8189999999886,
+            "handlerMs": 544.0530000000144
+          },
+          "lengths": {
+            "state": 5961,
+            "observation": 9561,
+            "preparedObservation": 4985,
+            "taskGoal": 312,
+            "subgoal": 95,
+            "memory": 514,
+            "question": 182,
+            "options": [
+              71,
+              58,
+              50
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 6143,
+              "snapshotPreparedCharacters": 2097,
+              "snapshotOmittedCharacters": 4046,
+              "snapshotOriginalLines": 132,
+              "snapshotPreparedLines": 42,
+              "snapshotCandidateContextLines": 21,
+              "pageTextOriginalCharacters": 808,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "0c17630d11cad2b2b6f4b54334d5d79e98dd31b0a09202e1898f85d0c7397074",
+            "requestBodySha256": "cacd98c4856501ea1f525a2ad9eba50a7a94478143af0c6c8ffdf4e8eaf47db9",
+            "preparedStateSha256": "a441184a73501825e30317777a79a93d47c72b272938dd18b0a77b83a675efe2",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "bd9ef8eb5963b118b295adac30a797d989a8ca5bde0c562483e2050827bd5ed2"
+        },
+        {
+          "step": 11,
+          "currentObservationId": 11,
+          "subgoal": "Finish after recording the visible selected walking route's duration and distance.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Verify the duration and distance shown in route details.",
+              "command": {
+                "action": "observe",
+                "query": "1 h 1 min (4,4 km)"
+              },
+              "originalCommandSha256": "d45afc083eec938e8d4537ec28d9ab94a2524e136974401b7586fb7d4557928f"
+            },
+            {
+              "index": 1,
+              "description": "Return to the route list while keeping walking selected.",
+              "command": {
+                "action": "click",
+                "selector": "@e112"
+              },
+              "originalCommandSha256": "64bfaa639a2497b3ff3c043d8a074daa05e9ff7921cc77f4d1905e675cb5d967"
+            },
+            {
+              "index": 2,
+              "description": "Report the inspected walking route and its displayed duration and distance.",
+              "command": {
+                "action": "finish",
+                "answer": "Walking directions are selected from Gare de Lyon, 75012 Paris to Mus\u00e9e d'Orsay, Esplanade Val\u00e9ry Giscard d'Estaing, 75007 Paris. The selected route is via Voie Georges Pompidou; Google Maps displays 1 h 1 min and 4.4 km (shown as 4,4 km). I opened D\u00e9tails and the walking route remains visible on the map. Optional cookies were declined; no current location was used. No unmet requirements."
+              },
+              "originalCommandSha256": "e0d98978ef7cb3c8d66b0d799eaa18cd6c33725bd9315ae64de0f5437495d0c1"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:11",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 14566.818300000014,
+            "selectionMs": 0.0016999999934341758,
+            "actionAndObservationMs": 248.3232999999891,
+            "handlerMs": 251.62220000001253
+          },
+          "lengths": {
+            "state": 4834,
+            "observation": 12528,
+            "preparedObservation": 3975,
+            "taskGoal": 312,
+            "subgoal": 82,
+            "memory": 410,
+            "question": 169,
+            "options": [
+              56,
+              56,
+              75
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 8763,
+              "snapshotPreparedCharacters": 1238,
+              "snapshotOmittedCharacters": 7525,
+              "snapshotOriginalLines": 184,
+              "snapshotPreparedLines": 30,
+              "snapshotCandidateContextLines": 6,
+              "pageTextOriginalCharacters": 718,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "1ecd4379256cd088c5e117e0e2545c2d62c6346204375dbb17b866099ab4b76b",
+            "requestBodySha256": "953691923df5cc4940f53cb9c51a7957d6c4bec7f15125b71cddc2d69032dbb2",
+            "preparedStateSha256": "6975027b975343f8a55fc401709db554b333ccb63ef805953c0b98007da48f52",
+            "inferenceArm": false,
+            "inferenceResultAvailable": false
+          },
+          "inference": null,
+          "decisionEvidenceSha256": "a3220ed06d68d2f141df0daff5301d179e3c1926b93dda3f82c71da128e5737b"
+        }
+      ],
+      "download": null,
+      "evidenceHashes": {
+        "resultSha256": "f4d52710c3d09fda9db1ab80ce5385d5154a06e28a3f72a1da38be0739936a5e",
+        "commandsSha256": "8501ff83de37da95d4436c2847c32e86a5f46a34881c7f77a49d65560c869038",
+        "reviewSha256": "2652f48fbcf573800f4d42c58fc12fd17370696a8d87d3c2b0b71a4a9d06264c",
+        "observations": [
+          {
+            "id": 1,
+            "observationSha256": "4ddeb3d3db05e780aa109108fb605a41cd62004a67bd2ddf773566c8d2a75e3b",
+            "captureSha256": "ed5a3228857f2a1306e9ee77dd7c823ac610c231fde64057e54aee4314e20b12",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 2,
+            "observationSha256": "8cea0cde9278a3d82a4b1f818218f2d045d94db27e61c6ee3fa4b760dbe33d22",
+            "captureSha256": "dac65bd1d05ae603abc08e486192580c606e00d25fc8b559339072c2fea38e04",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 3,
+            "observationSha256": "9757ae84ec699b53e37fe6ff2cca45bccd257d032a98bed62c57d9afb2d5a3a9",
+            "captureSha256": "95c1f52fa6645d78aa722e96564f3285b271ddef84ba35f193873d6500d5c2ae",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 4,
+            "observationSha256": "6d04c3b1dc75755db66781a956cdc91a8cb606dad9ada891d542992fd0700c4c",
+            "captureSha256": "7c76582fb0f28a610a04b4ef4a70ff7f9d4de1cd6da8aa3d77bd1505fc620e84",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 5,
+            "observationSha256": "00e0a0a8b163c5ccde16f74691f8d483f1cc800474795aa0060c8e23591d3c02",
+            "captureSha256": "8d00b85a4b3725a7c751da29c783a9a788be1d703205b627830abe138c5e1e7d",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 6,
+            "observationSha256": "564819b5c511716289771bfa79280c280ac55143a91a23b03d8941c4b32bf966",
+            "captureSha256": "76442b49d792786707f9f2984efb0b2c06f8399f347f8137bd3ff835d4cf1012",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 7,
+            "observationSha256": "a0c410402c8f6a1f8aa81fd4fda285cb0848cb40581b0af976dc23655006a852",
+            "captureSha256": "9c8a7c7713e503ba0efe53ab2375213d9fbd87605f33e2c04deabeddc2ec1dfc",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 8,
+            "observationSha256": "a7a730c1d3f16555508ed555a0d4fb82ace08117e115691263ded3c193ceb91a",
+            "captureSha256": "d5c374f17ad5027674b15362aaf55bb8edd041551b998805f3c631971e60c96f",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 9,
+            "observationSha256": "ca09bc7c20c85900846e9067f07c05a602aa26235078ae9a75f22fcfd129b80d",
+            "captureSha256": "83a0d15b66d96ee3b64fff898ab178639de6143a13b625b89fa2ff2ebefaecde",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 10,
+            "observationSha256": "9cd5311b3088d6b6bdaf9dbd70d36c070bbecf71eef8400eb761dc428e48911f",
+            "captureSha256": "11d86dbd6a713ae15a2749776f8f65db1aa30097f06f172b4504f64b406e3da5",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 11,
+            "observationSha256": "afe852d8e404ed08081c740c50392cabf7796a8a3e8ce259126317691835ab1d",
+            "captureSha256": "e8133f7e2d59e9d3acdd445945b8fcba530fb15888921f99dc273c0be520e02b",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 12,
+            "observationSha256": "ecfcec368b7d272d2df30272c462773bf39d64f14c71952ef2e29328833c28c1",
+            "captureSha256": "ff2a74085a5c7e1185242cdc4eb6122e8023afb652d64ffc6728ec9fff76c7b2",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "candidate-julia-google-maps-walking-1",
+      "task": "google-maps-walking",
+      "mode": "candidate-julia",
+      "run": 1,
+      "startedAt": "2026-09-29T20:17:13.301Z",
+      "criteria": [
+        {
+          "index": 0,
+          "rubric": "Correct Paris origin and destination populated.",
+          "met": true,
+          "observations": [
+            16,
+            17
+          ],
+          "note": "Resolved fields and route URL confirm Gare de Lyon, Place Louis Armand, Paris to Musee d'Orsay, Esplanade Valery Giscard d'Estaing, Paris.",
+          "evidence": [
+            {
+              "id": 16,
+              "observationSha256": "8642b6443a9fdf54572f87616b7b1b45ebdf5320e8f613a9f55436d8783c0d93",
+              "captureSha256": "88b8491cef532fd6df76afc862c5f220c01284ad196730403309db62fd1c6bfe",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 17,
+              "observationSha256": "6459a4d70556412c0388bfeedcb86dad1816b149d146bac0b8a46743f8ebac71",
+              "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "rubric": "Walking mode selected with an actual route displayed.",
+          "met": true,
+          "observations": [
+            16,
+            17
+          ],
+          "note": "Walking is selected and the actual walking route is visible between the requested endpoints.",
+          "evidence": [
+            {
+              "id": 16,
+              "observationSha256": "8642b6443a9fdf54572f87616b7b1b45ebdf5320e8f613a9f55436d8783c0d93",
+              "captureSha256": "88b8491cef532fd6df76afc862c5f220c01284ad196730403309db62fd1c6bfe",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 17,
+              "observationSha256": "6459a4d70556412c0388bfeedcb86dad1816b149d146bac0b8a46743f8ebac71",
+              "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "rubric": "Reported duration and distance match visible selected route, with route details inspected.",
+          "met": true,
+          "observations": [
+            17,
+            18
+          ],
+          "note": "Details and turn-by-turn walking instructions are open. Selected route heading 1 h (4.4 km), via Voie Georges Pompidou, matches explicit planner-memory extraction while route remains visible.",
+          "evidence": [
+            {
+              "id": 17,
+              "observationSha256": "6459a4d70556412c0388bfeedcb86dad1816b149d146bac0b8a46743f8ebac71",
+              "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            },
+            {
+              "id": 18,
+              "observationSha256": "516c902e1a311f2d1aa69d396dd759b37b6a09a03afaab11c4a54d887a2306be",
+              "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+              "captureAvailable": true,
+              "evidenceErrors": [],
+              "captureError": null
+            }
+          ]
+        }
+      ],
+      "criteriaMet": 3,
+      "allCriteriaMet": true,
+      "completed": false,
+      "category": "complete",
+      "capturesViewed": [
+        {
+          "id": 16,
+          "observationSha256": "8642b6443a9fdf54572f87616b7b1b45ebdf5320e8f613a9f55436d8783c0d93",
+          "captureSha256": "88b8491cef532fd6df76afc862c5f220c01284ad196730403309db62fd1c6bfe",
+          "captureAvailable": true,
+          "evidenceErrors": [],
+          "captureError": null
+        },
+        {
+          "id": 17,
+          "observationSha256": "6459a4d70556412c0388bfeedcb86dad1816b149d146bac0b8a46743f8ebac71",
+          "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+          "captureAvailable": true,
+          "evidenceErrors": [],
+          "captureError": null
+        },
+        {
+          "id": 18,
+          "observationSha256": "516c902e1a311f2d1aa69d396dd759b37b6a09a03afaab11c4a54d887a2306be",
+          "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+          "captureAvailable": true,
+          "evidenceErrors": [],
+          "captureError": null
+        }
+      ],
+      "finished": false,
+      "stopReason": "deadline",
+      "error": null,
+      "initialNavigationError": null,
+      "cleanupError": null,
+      "timing": {
+        "totalMs": 183752.86270000003,
+        "durationSource": "totalMs",
+        "elapsedBeforeCleanupMs": 183752.87000000002,
+        "startupMs": 3748.589000000007,
+        "executionMs": 180004.26940000002,
+        "promptPreparationMs": 0.053299999999580905
+      },
+      "counts": {
+        "actions": 13,
+        "actionErrors": 0,
+        "observations": 18,
+        "missingCaptures": 0,
+        "observationErrors": 0,
+        "decisions": 18,
+        "selectedDecisions": 17,
+        "selectorDisagreements": 11,
+        "decisionErrors": 0,
+        "inferenceErrors": 0,
+        "proposalCorrections": 1
+      },
+      "model": {
+        "resultAvailable": true,
+        "config": {
+          "model": "gpt-6-luna",
+          "effort": "max",
+          "serviceTier": "priority",
+          "provider": "openai"
+        },
+        "configAcknowledged": true,
+        "turnStatus": null,
+        "timedOut": true,
+        "usageAvailable": true,
+        "cumulativeTokens": {
+          "totalTokens": 609440,
+          "inputTokens": 601266,
+          "cachedInputTokens": 529280,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 8174,
+          "reasoningOutputTokens": 4376
+        },
+        "usageUpdates": 18,
+        "usageBasis": "final cumulative thread usage",
+        "lastSumMatchesTotal": true,
+        "tools": {
+          "calls": 18,
+          "batchCommandsRequested": 0,
+          "unexpectedTypes": []
+        }
+      },
+      "processesAfter": 0,
+      "decisions": [
+        {
+          "step": 1,
+          "currentObservationId": 1,
+          "subgoal": "Decline optional cookies and open Google Maps.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Decline optional cookies and continue to Maps.",
+              "command": {
+                "action": "click",
+                "selector": "@e10"
+              },
+              "originalCommandSha256": "b449448881880e10fe5a3edbb6451ab1fe8a938ba4bd620ce6512c3cc9d3e983"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the cookie-choice area before continuing.",
+              "command": {
+                "action": "observe",
+                "query": "Tout refuser"
+              },
+              "originalCommandSha256": "6028b57543221c62ced5ae07e87c90da0dceaba153d39f6a36004466ce21f560"
+            },
+            {
+              "index": 2,
+              "description": "Review cookie settings before making the refusal choice.",
+              "command": {
+                "action": "click",
+                "selector": "@e5"
+              },
+              "originalCommandSha256": "438b60f423b7b0547e810316835d8e7153d3a8f01851ed5fcc85eca1a4d7d1d3"
+            }
+          ],
+          "preferredIndex": 0,
+          "chosenIndex": 0,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            0,
+            1,
+            2
+          ],
+          "permutationSeed": "google-maps-walking:1",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6390.0320000000065,
+            "selectionMs": 2485.3816000000224,
+            "actionAndObservationMs": 1108.8092999999935,
+            "handlerMs": 3595.826299999986
+          },
+          "lengths": {
+            "state": 4952,
+            "observation": 5871,
+            "preparedObservation": 4371,
+            "taskGoal": 312,
+            "subgoal": 46,
+            "memory": 168,
+            "question": 133,
+            "options": [
+              46,
+              49,
+              56
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 2293,
+              "snapshotPreparedCharacters": 1398,
+              "snapshotOmittedCharacters": 895,
+              "snapshotOriginalLines": 39,
+              "snapshotPreparedLines": 37,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 1859,
+              "pageTextOmittedCharacters": 259,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 5,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "ac8be5dda851168ae1a4f9893779d5aad4f56ed03cbd65098d748ca81b82a9a2",
+            "requestBodySha256": "c2d2e43929cf4f9ebff5f76446f5c49d2843e831523e64bbeae458935e7c8c13",
+            "preparedStateSha256": "c1a11e413503880ace68aaf4ceba7c65b27fc0ce4029ec1e0b26e13dde57ba45",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 0,
+            "inputTokens": 1484,
+            "elapsedMs": 2480.068653996568,
+            "requestMs": 2485.139599999995,
+            "probabilities": [
+              0.7015015437258986,
+              0.006245463272380399,
+              0.29225299300172114
+            ],
+            "logits": [
+              -0.7361918091773987,
+              -5.457559585571289,
+              -1.6117950677871704
+            ]
+          },
+          "decisionEvidenceSha256": "321c79edf60a49843cc9607c3f0e4c8bb288af7ee58e15cbaf0ddfb8345577b6"
+        },
+        {
+          "step": 2,
+          "currentObservationId": 2,
+          "subgoal": "Open the directions panel to enter the requested Paris start and destination.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Search for the requested starting station.",
+              "command": {
+                "action": "fill",
+                "selector": "@e15",
+                "value": "Gare de Lyon, Paris"
+              },
+              "originalCommandSha256": "914fd53b442e77eb4ad0d04174f9e643ae6f8f2af39349e3e7d798b8a3d885a0"
+            },
+            {
+              "index": 1,
+              "description": "Inspect the visible route-planning control.",
+              "command": {
+                "action": "observe",
+                "query": "Itin\u00e9raire"
+              },
+              "originalCommandSha256": "ae51ec721a9aec2005c63fa1b97491c7817021d6bf306288ebdd311daa70c788"
+            },
+            {
+              "index": 2,
+              "description": "Open route planning in Google Maps.",
+              "command": {
+                "action": "click",
+                "selector": "@e17"
+              },
+              "originalCommandSha256": "1c7d7f8c8a349f3e903e4ad762f244861ae3b839290fc28de092704182e5db32"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:2",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5691.240300000005,
+            "selectionMs": 1374.6416000000027,
+            "actionAndObservationMs": 83.90529999998398,
+            "handlerMs": 1460.0901000000013
+          },
+          "lengths": {
+            "state": 2699,
+            "observation": 2165,
+            "preparedObservation": 2082,
+            "taskGoal": 312,
+            "subgoal": 77,
+            "memory": 173,
+            "question": 164,
+            "options": [
+              42,
+              43,
+              35
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 940,
+              "snapshotPreparedCharacters": 940,
+              "snapshotOmittedCharacters": 0,
+              "snapshotOriginalLines": 27,
+              "snapshotPreparedLines": 27,
+              "snapshotCandidateContextLines": 5,
+              "pageTextOriginalCharacters": 86,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 0,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "3624fb8ebd151803bf922fa0e46f4621220960afa60a58cc15171e75727807af",
+            "requestBodySha256": "b44c21afcb78c14ff9370297ff68533d0e38001b10077e1a73a9c7a200fdfd1b",
+            "preparedStateSha256": "b24b57ab710e3d320d6e50ec5c2365cd8dd461107843e0b32d6366fef334dcb5",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1021,
+            "elapsedMs": 1361.66079697432,
+            "requestMs": 1374.6131999999925,
+            "probabilities": [
+              0.23254941931910988,
+              0.548074194699594,
+              0.21937638598129613
+            ],
+            "logits": [
+              -5.1045660972595215,
+              -4.247258186340332,
+              -5.162879943847656
+            ]
+          },
+          "decisionEvidenceSha256": "a115bca9fdb44e2bda7d078e0983652154e9de1d9280418b3f5113daf731ab65"
+        },
+        {
+          "step": 3,
+          "currentObservationId": 3,
+          "subgoal": null,
+          "candidates": [],
+          "preferredIndex": null,
+          "chosenIndex": null,
+          "originalPreferredIndex": null,
+          "originalChosenIndex": null,
+          "originalIndices": null,
+          "permutationSeed": null,
+          "disagreement": null,
+          "correctionRequested": true,
+          "consecutiveProposalErrors": 1,
+          "submittedCandidateCount": 3,
+          "validationError": "Error: candidates[1].command.selector: expected a ref in the current observation.",
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 4804.92359999998,
+            "selectionMs": null,
+            "actionAndObservationMs": null,
+            "handlerMs": 5.500900000013644
+          },
+          "lengths": null,
+          "input": null,
+          "inference": null,
+          "decisionEvidenceSha256": "ef2ae6444eaa22d3f734c1e7e1235199ac14aed735019d45013a4a96cca6da72"
+        },
+        {
+          "step": 4,
+          "currentObservationId": 3,
+          "subgoal": "Open the route planner.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Check the visible directions control.",
+              "command": {
+                "action": "observe",
+                "query": "Itin\u00e9raire"
+              },
+              "originalCommandSha256": "ae51ec721a9aec2005c63fa1b97491c7817021d6bf306288ebdd311daa70c788"
+            },
+            {
+              "index": 1,
+              "description": "Open directions using the visible arrow control.",
+              "command": {
+                "action": "click_xy",
+                "x": 437,
+                "y": 37
+              },
+              "originalCommandSha256": "25de1da94c08212f9d876744f4dd5340e595a96299b5e364c56479d02d0e143b"
+            },
+            {
+              "index": 2,
+              "description": "Open the Maps directions planner.",
+              "command": {
+                "action": "click",
+                "selector": "@e17"
+              },
+              "originalCommandSha256": "1c7d7f8c8a349f3e903e4ad762f244861ae3b839290fc28de092704182e5db32"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:4",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6570.655700000003,
+            "selectionMs": 778.8255000000063,
+            "actionAndObservationMs": 830.8617000000086,
+            "handlerMs": 1619.6055000000051
+          },
+          "lengths": {
+            "state": 1758,
+            "observation": 843,
+            "preparedObservation": 1195,
+            "taskGoal": 312,
+            "subgoal": 23,
+            "memory": 173,
+            "question": 110,
+            "options": [
+              37,
+              48,
+              33
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 43,
+              "snapshotPreparedCharacters": 43,
+              "snapshotOmittedCharacters": 0,
+              "snapshotOriginalLines": 1,
+              "snapshotPreparedLines": 1,
+              "snapshotCandidateContextLines": 1,
+              "pageTextOriginalCharacters": 0,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 0,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": true
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "70aa1883ca6cd07d2011c486c6eebf8cd6c7129c5589d785c7a4df058464b7c5",
+            "requestBodySha256": "78d54f061195902e43f519839f0b9fa905fad4c4a31b4a2733b69bbf6d6982dc",
+            "preparedStateSha256": "3ac390a8d73a52382b7c4af677bfaad6a25014f786e01a7aaf0f14ca370f3c05",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 600,
+            "elapsedMs": 706.4204060006887,
+            "requestMs": 778.6688999999897,
+            "probabilities": [
+              0.00002294244438635873,
+              0.9960203130591463,
+              0.0039567444964673845
+            ],
+            "logits": [
+              -8.562063217163086,
+              2.1164710521698,
+              -3.411875009536743
+            ]
+          },
+          "decisionEvidenceSha256": "4b6c5a3ed5365d75bafa53409f4498f16dc5820faa3d775dfdbb2952e23d5950"
+        },
+        {
+          "step": 5,
+          "currentObservationId": 4,
+          "subgoal": "Focus the visible origin field in the directions panel so the requested starting location can be entered.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the visible destination input.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            },
+            {
+              "index": 1,
+              "description": "Focus the visible start-point field.",
+              "command": {
+                "action": "click_xy",
+                "x": 262,
+                "y": 114
+              },
+              "originalCommandSha256": "6cb09ca4e096584d4b321c015537d883ed5c8db2e0cf3f383737d6f5dfda735d"
+            },
+            {
+              "index": 2,
+              "description": "Focus the visible destination field.",
+              "command": {
+                "action": "click_xy",
+                "x": 268,
+                "y": 163
+              },
+              "originalCommandSha256": "d4ac6121ac23ead52459fbf468a6c90445b6623a32cda9402c9d6ce03d057f00"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:5",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 8578.636599999998,
+            "selectionMs": 1890.5829999999842,
+            "actionAndObservationMs": 121.35860000000685,
+            "handlerMs": 2016.6928999999946
+          },
+          "lengths": {
+            "state": 3260,
+            "observation": 3857,
+            "preparedObservation": 2455,
+            "taskGoal": 312,
+            "subgoal": 105,
+            "memory": 333,
+            "question": 192,
+            "options": [
+              38,
+              36,
+              36
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 1998,
+              "snapshotPreparedCharacters": 998,
+              "snapshotOmittedCharacters": 1000,
+              "snapshotOriginalLines": 53,
+              "snapshotPreparedLines": 28,
+              "snapshotCandidateContextLines": 0,
+              "pageTextOriginalCharacters": 228,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "0ab877e84637db9bcba9112923b9ab7383178cfc10945c31cb5067d04df14134",
+            "requestBodySha256": "cf82871c6cf78d475ad309732af016b691e5693ef5518795cd5ccc57eb5aa0b6",
+            "preparedStateSha256": "0bf87dbb3967e2f6d07d4112493513dabb1895c2ade9c9cc79dacf3f102d63c1",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1266,
+            "elapsedMs": 1874.3859640089795,
+            "requestMs": 1890.555399999983,
+            "probabilities": [
+              0.0006586675881133022,
+              0.8404580215306326,
+              0.158883310881254
+            ],
+            "logits": [
+              -9.587703704833984,
+              -2.436220407485962,
+              -4.101997375488281
+            ]
+          },
+          "decisionEvidenceSha256": "2f9d05ff4b2589a35dc45484843ef59a86ea19a89e953125c8f93dc33f029d28"
+        },
+        {
+          "step": 6,
+          "currentObservationId": 5,
+          "subgoal": "Enter Gare de Lyon, Paris as the route origin.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Enter the requested museum destination.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 1,
+              "description": "Select walking mode for the route.",
+              "command": {
+                "action": "click",
+                "selector": "@e58"
+              },
+              "originalCommandSha256": "13fb192354c533f1e47f28779f1790149b20aa8b68d5253a867ab3db0ed72689"
+            },
+            {
+              "index": 2,
+              "description": "Enter Gare de Lyon, Paris as the starting point.",
+              "command": {
+                "action": "fill",
+                "selector": "@e65",
+                "value": "Gare de Lyon, Paris"
+              },
+              "originalCommandSha256": "c02b54fc372bf0aaa6fd07ee653824622c98a355a4f7329c89c5cdbdb3204888"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 2,
+          "originalIndices": [
+            1,
+            2,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:6",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5412.419900000008,
+            "selectionMs": 2787.771399999998,
+            "actionAndObservationMs": 296.91419999999925,
+            "handlerMs": 3090.9553000000014
+          },
+          "lengths": {
+            "state": 3813,
+            "observation": 5793,
+            "preparedObservation": 3154,
+            "taskGoal": 312,
+            "subgoal": 46,
+            "memory": 246,
+            "question": 133,
+            "options": [
+              39,
+              34,
+              48
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3643,
+              "snapshotPreparedCharacters": 1469,
+              "snapshotOmittedCharacters": 2174,
+              "snapshotOriginalLines": 89,
+              "snapshotPreparedLines": 34,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 401,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "fb6ea204a6c72e720e4f2593f655faf7459de1d64385ae42acba90768afe922b",
+            "requestBodySha256": "ecc382e43c8af24656e491b119525816fb653db57eec755ffac80634034ba7be",
+            "preparedStateSha256": "c5d9184d6c009ac5d08d41fe365cc858de3ee4b7271fdd72c34037ed8e846d57",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1600,
+            "elapsedMs": 2767.067559005227,
+            "requestMs": 2787.737300000008,
+            "probabilities": [
+              0.04560696936248968,
+              0.9532779177191056,
+              0.0011151129184045878
+            ],
+            "logits": [
+              -2.634446144104004,
+              0.40539979934692383,
+              -6.345551013946533
+            ]
+          },
+          "decisionEvidenceSha256": "2ac670fa8d02ebb301902ee280d45b2129e5a8ded07e4c617cca98d7bdd61c96"
+        },
+        {
+          "step": 7,
+          "currentObservationId": 6,
+          "subgoal": "Enter Gare de Lyon, Paris into the origin box.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Recheck the blank origin box.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez un point de d\u00e9part"
+              },
+              "originalCommandSha256": "344dfca917674dd3360fa971894b23c588303ee12a2785106f33ff0345c4da67"
+            },
+            {
+              "index": 1,
+              "description": "Set the destination to Mus\u00e9e d'Orsay, Paris.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 2,
+              "description": "Set the origin to Gare de Lyon, Paris.",
+              "command": {
+                "action": "fill",
+                "selector": "@e65",
+                "value": "Gare de Lyon, Paris"
+              },
+              "originalCommandSha256": "c02b54fc372bf0aaa6fd07ee653824622c98a355a4f7329c89c5cdbdb3204888"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:7",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5299.795899999997,
+            "selectionMs": 2731.2606999999844,
+            "actionAndObservationMs": 145.14650000000256,
+            "handlerMs": 2880.389999999985
+          },
+          "lengths": {
+            "state": 3668,
+            "observation": 5701,
+            "preparedObservation": 3036,
+            "taskGoal": 312,
+            "subgoal": 46,
+            "memory": 219,
+            "question": 133,
+            "options": [
+              29,
+              44,
+              38
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3538,
+              "snapshotPreparedCharacters": 1327,
+              "snapshotOmittedCharacters": 2211,
+              "snapshotOriginalLines": 86,
+              "snapshotPreparedLines": 29,
+              "snapshotCandidateContextLines": 6,
+              "pageTextOriginalCharacters": 433,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "bee1c6e07a7514e8838b4bc47ede5101c39808ad2762334adee7e1ecf7efa17d",
+            "requestBodySha256": "e0592a890a4ee5ed003cad606c20791dd668ace699605f6b5ad8b37655fd204e",
+            "preparedStateSha256": "a7657d085232eda2587a68782b20b1ec5e77831c5237a0e2c80f895cde6c6838",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 1513,
+            "elapsedMs": 2703.3716079895385,
+            "requestMs": 2731.2097000000067,
+            "probabilities": [
+              0.00008665258896686345,
+              0.00003571100796665651,
+              0.9998776364030664
+            ],
+            "logits": [
+              -4.90904426574707,
+              -5.795492172241211,
+              4.444437026977539
+            ]
+          },
+          "decisionEvidenceSha256": "d87b3769904ce25343e812b89e400603e4334e1a694fc05a2c7d62695de080ca"
+        },
+        {
+          "step": 8,
+          "currentObservationId": 7,
+          "subgoal": "Choose the exact Gare de Lyon, Paris suggestion as the origin.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Enter the destination while leaving origin suggestions open.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 1,
+              "description": "Choose the Gare de Lyon Place Louis Armand result.",
+              "command": {
+                "action": "click_xy",
+                "x": 256,
+                "y": 228
+              },
+              "originalCommandSha256": "a6118efe36c5afff3951e3d9a2bbafee8ff5f2bc086414539eeb973714d2d90d"
+            },
+            {
+              "index": 2,
+              "description": "Choose the autocomplete result labeled Gare de Lyon Paris.",
+              "command": {
+                "action": "click_xy",
+                "x": 220,
+                "y": 270
+              },
+              "originalCommandSha256": "d15f5a4bfe551fca0bbe562cb47a7188b51cf91e31247488b18ff92e58dbd9cd"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:8",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 8810.580299999972,
+            "selectionMs": 2319.672500000015,
+            "actionAndObservationMs": 289.0877999999793,
+            "handlerMs": 2610.2019000000146
+          },
+          "lengths": {
+            "state": 3459,
+            "observation": 5730,
+            "preparedObservation": 2770,
+            "taskGoal": 312,
+            "subgoal": 62,
+            "memory": 260,
+            "question": 149,
+            "options": [
+              60,
+              50,
+              58
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3621,
+              "snapshotPreparedCharacters": 1173,
+              "snapshotOmittedCharacters": 2448,
+              "snapshotOriginalLines": 87,
+              "snapshotPreparedLines": 26,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 298,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "003593fd9f42ed1799320db5114292d8d65835c0271a26cc4f8525ce1d5332a7",
+            "requestBodySha256": "9dba507f86a057b2b70a408214b8f4b837ade1780fa27285f7e4518128ddb5fb",
+            "preparedStateSha256": "31167504e16c430116c195310a133b7e2d658fa3971a77e29b75028c4e328dcd",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1431,
+            "elapsedMs": 2313.778651005123,
+            "requestMs": 2319.5458999999973,
+            "probabilities": [
+              0.001415520473423687,
+              0.9983790370746386,
+              0.00020544245193777425
+            ],
+            "logits": [
+              -5.0096516609191895,
+              1.5489840507507324,
+              -6.9397382736206055
+            ]
+          },
+          "decisionEvidenceSha256": "e0d9e8c17233afeb4456fa443fe4e1798e0629da710876abea4964ee4d593db3"
+        },
+        {
+          "step": 9,
+          "currentObservationId": 8,
+          "subgoal": "Enter Mus\u00e9e d'Orsay, Paris as the destination.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Check the resolved Gare de Lyon origin.",
+              "command": {
+                "action": "observe",
+                "query": "Point de d\u00e9part Gare de Lyon"
+              },
+              "originalCommandSha256": "210ba0b648e0caf2abd59e6cbcf6262087d024f57f4e722eaf3cfd912747e5d2"
+            },
+            {
+              "index": 1,
+              "description": "Enter Mus\u00e9e d'Orsay, Paris as the destination.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 2,
+              "description": "Confirm walking mode remains selected.",
+              "command": {
+                "action": "click",
+                "selector": "@e58"
+              },
+              "originalCommandSha256": "13fb192354c533f1e47f28779f1790149b20aa8b68d5253a867ab3db0ed72689"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 2,
+          "originalIndices": [
+            1,
+            0,
+            2
+          ],
+          "permutationSeed": "google-maps-walking:9",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6419.491800000018,
+            "selectionMs": 2670.064400000003,
+            "actionAndObservationMs": 94.76310000001104,
+            "handlerMs": 2766.369299999991
+          },
+          "lengths": {
+            "state": 3809,
+            "observation": 5383,
+            "preparedObservation": 3151,
+            "taskGoal": 312,
+            "subgoal": 46,
+            "memory": 245,
+            "question": 133,
+            "options": [
+              39,
+              46,
+              38
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3318,
+              "snapshotPreparedCharacters": 1559,
+              "snapshotOmittedCharacters": 1759,
+              "snapshotOriginalLines": 81,
+              "snapshotPreparedLines": 34,
+              "snapshotCandidateContextLines": 9,
+              "pageTextOriginalCharacters": 281,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "575687b8a979873c54a66d8569dab0b002d8e6635013fbde0d5bb36cea00cc1f",
+            "requestBodySha256": "2b07236a03be489b7cd1f09b5e920dc312808a84653787619f10077b46d0f2a6",
+            "preparedStateSha256": "90ce6abf4286e18e10c5b6ced3c8bca1235d4e8bf9e828e54a1df41b881d384f",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 1596,
+            "elapsedMs": 2665.0625679758377,
+            "requestMs": 2670.036199999973,
+            "probabilities": [
+              0.4484649190412788,
+              0.0002406623786337317,
+              0.5512944185800875
+            ],
+            "logits": [
+              2.589775800704956,
+              -4.940414905548096,
+              2.7962143421173096
+            ]
+          },
+          "decisionEvidenceSha256": "25aac827e69dae84d72a4d4526386aea8a1dc2ae2b2626e5690e09ddb4a5d6ef"
+        },
+        {
+          "step": 10,
+          "currentObservationId": 9,
+          "subgoal": "Set the destination to Mus\u00e9e d'Orsay, Paris.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Enter Mus\u00e9e d'Orsay, Paris in the destination field.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 1,
+              "description": "Verify the walking mode label and selection.",
+              "command": {
+                "action": "observe",
+                "query": "\u00c0 pied"
+              },
+              "originalCommandSha256": "f0a31254bbaf033ee807f5e1447ed0cc8806ecf7b91532e4c8f2677c1606e11a"
+            },
+            {
+              "index": 2,
+              "description": "Focus the blank destination field.",
+              "command": {
+                "action": "click",
+                "selector": "@e66"
+              },
+              "originalCommandSha256": "f72f50abaf888637e77e143543d9d552ed9b080480da5afb04564cbf666492d3"
+            }
+          ],
+          "preferredIndex": 0,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 2,
+          "originalIndices": [
+            0,
+            2,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:10",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 7398.263199999987,
+            "selectionMs": 3071.126099999994,
+            "actionAndObservationMs": 164.1128000000026,
+            "handlerMs": 3236.5971000000136
+          },
+          "lengths": {
+            "state": 3778,
+            "observation": 5810,
+            "preparedObservation": 3172,
+            "taskGoal": 312,
+            "subgoal": 44,
+            "memory": 195,
+            "question": 131,
+            "options": [
+              52,
+              44,
+              34
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3379,
+              "snapshotPreparedCharacters": 1360,
+              "snapshotOmittedCharacters": 2019,
+              "snapshotOriginalLines": 82,
+              "snapshotPreparedLines": 32,
+              "snapshotCandidateContextLines": 7,
+              "pageTextOriginalCharacters": 246,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "24c5ed37236df6d4545a17334ba8c0c72d75c421ea402c6c51100ea021691bbb",
+            "requestBodySha256": "e3574738294f3a410cb60cc94d605ff8352dc28eb73e15f22211d1097eff89ed",
+            "preparedStateSha256": "1f315319c866059abc55e6b3c2db1f620fa08e4b4007cf04cf34a9d5449ff784",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1717,
+            "elapsedMs": 3065.9457240253687,
+            "requestMs": 3071.089100000012,
+            "probabilities": [
+              0.0012940603735120393,
+              0.998648945707265,
+              0.0000569939192228832
+            ],
+            "logits": [
+              -3.0739905834198,
+              3.5746278762817383,
+              -6.1965861320495605
+            ]
+          },
+          "decisionEvidenceSha256": "8ee23d175153c038c3f95d83788977ffcfbac41cdec5494f8ade694f6d5bcc89"
+        },
+        {
+          "step": 11,
+          "currentObservationId": 10,
+          "subgoal": "Expose the destination textbox in the current directions panel before entry.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Review the displayed origin location.",
+              "command": {
+                "action": "observe",
+                "query": "Gare de Lyon"
+              },
+              "originalCommandSha256": "c5e85564265699d3b6d444a3d98d63686ae4974ad77fbd9e6f67187181cdf13d"
+            },
+            {
+              "index": 1,
+              "description": "Focus the visible destination box.",
+              "command": {
+                "action": "click_xy",
+                "x": 260,
+                "y": 163
+              },
+              "originalCommandSha256": "96671abf51356f33994271cec3fe27578f290e5a8c5fe19a971356c5584ec225"
+            },
+            {
+              "index": 2,
+              "description": "Inspect the blank destination field in the route form.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:11",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6723.227999999974,
+            "selectionMs": 1166.0363999999827,
+            "actionAndObservationMs": 182.81020000000717,
+            "handlerMs": 1350.0716000000248
+          },
+          "lengths": {
+            "state": 2226,
+            "observation": 1203,
+            "preparedObservation": 1555,
+            "taskGoal": 312,
+            "subgoal": 76,
+            "memory": 228,
+            "question": 163,
+            "options": [
+              37,
+              34,
+              54
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 87,
+              "snapshotPreparedCharacters": 87,
+              "snapshotOmittedCharacters": 0,
+              "snapshotOriginalLines": 2,
+              "snapshotPreparedLines": 2,
+              "snapshotCandidateContextLines": 0,
+              "pageTextOriginalCharacters": 6,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 0,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": true
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "440276e6c7d6b13e3e4f62b7e5d22294eeda4fb246e9fc3cd585a4cc5de29643",
+            "requestBodySha256": "596e02ac1c8cba23145cb46e025ca30581766398bc0336b941392a68ca4f618b",
+            "preparedStateSha256": "6da92dd2b29b75981a28b798dc6551482113d4823c45c6b9fd5ef3ce2878d28c",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 894,
+            "elapsedMs": 1125.524219009094,
+            "requestMs": 1166.008600000001,
+            "probabilities": [
+              0.016649881749075116,
+              0.934936683937115,
+              0.048413434313809976
+            ],
+            "logits": [
+              -9.507407188415527,
+              -5.4793314933776855,
+              -8.440032958984375
+            ]
+          },
+          "decisionEvidenceSha256": "7b7e952ccede2e65e6ff3f9231a9e71829e9151c25dc0ff1d9ee1b1410b94e27"
+        },
+        {
+          "step": 12,
+          "currentObservationId": 11,
+          "subgoal": "Fill the focused destination textbox with Mus\u00e9e d'Orsay, Paris.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Recheck the empty destination placeholder.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            },
+            {
+              "index": 1,
+              "description": "Enter the requested Mus\u00e9e d'Orsay destination.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            },
+            {
+              "index": 2,
+              "description": "Focus the destination textbox.",
+              "command": {
+                "action": "click",
+                "selector": "@e66"
+              },
+              "originalCommandSha256": "f72f50abaf888637e77e143543d9d552ed9b080480da5afb04564cbf666492d3"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:12",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5129.005999999994,
+            "selectionMs": 2781.6548000000184,
+            "actionAndObservationMs": 375.15099999995437,
+            "handlerMs": 3158.4771000000183
+          },
+          "lengths": {
+            "state": 3683,
+            "observation": 5870,
+            "preparedObservation": 3024,
+            "taskGoal": 312,
+            "subgoal": 63,
+            "memory": 229,
+            "question": 150,
+            "options": [
+              42,
+              46,
+              30
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3379,
+              "snapshotPreparedCharacters": 1173,
+              "snapshotOmittedCharacters": 2206,
+              "snapshotOriginalLines": 82,
+              "snapshotPreparedLines": 26,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 293,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "9540e0716f65bc327c78e7edfb07083db24d1cdfe51663ad8636b748777ec4a5",
+            "requestBodySha256": "16d6d83a69ba7a60c0ec567529720f378c066d15c9926a9ab70a697acd552a86",
+            "preparedStateSha256": "d40278329aed1efdd509fb41e746d005560774d470e9aad4110f87fdd63238a6",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 1612,
+            "elapsedMs": 2773.0757210520096,
+            "requestMs": 2781.630899999989,
+            "probabilities": [
+              0.002169595949527048,
+              0.000031556648781475043,
+              0.9977988474016916
+            ],
+            "logits": [
+              -0.068128801882267,
+              -4.298640727996826,
+              6.062881946563721
+            ]
+          },
+          "decisionEvidenceSha256": "8e294edc75b2564400ebfca678cbdba62db08ab595cdaa0783329aa1f2ad972b"
+        },
+        {
+          "step": 13,
+          "currentObservationId": 12,
+          "subgoal": "Type Mus\u00e9e d'Orsay, Paris into the destination field.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the still-blank destination prompt.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            },
+            {
+              "index": 1,
+              "description": "Keep focus in the visible destination input.",
+              "command": {
+                "action": "click_xy",
+                "x": 266,
+                "y": 163
+              },
+              "originalCommandSha256": "9f74b0b4a7b40c180e2c2bb414ca1f12e69ed20e51f2874075e66b022d850941"
+            },
+            {
+              "index": 2,
+              "description": "Type the requested destination into the route form.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:13",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 6954.906900000002,
+            "selectionMs": 3509.112300000037,
+            "actionAndObservationMs": 499.46650000003865,
+            "handlerMs": 4011.864799999981
+          },
+          "lengths": {
+            "state": 3638,
+            "observation": 6291,
+            "preparedObservation": 3033,
+            "taskGoal": 312,
+            "subgoal": 53,
+            "memory": 185,
+            "question": 140,
+            "options": [
+              43,
+              44,
+              51
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3784,
+              "snapshotPreparedCharacters": 1165,
+              "snapshotOmittedCharacters": 2619,
+              "snapshotOriginalLines": 89,
+              "snapshotPreparedLines": 26,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 310,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "b0ce00b9a33f8bfc8c4932f8a1d841e0a5bd3c4d062811deab2892a707da22f7",
+            "requestBodySha256": "2ca4367fcc254c60ee172efa8859b10b9028b2f9877edb41ed5b2d9435c8da2a",
+            "preparedStateSha256": "c042d74447f312b383927e09128c0f3cb55ce559080fb5113f6efcb1cfcd8878",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1609,
+            "elapsedMs": 3056.4129980048165,
+            "requestMs": 3509.0730999999796,
+            "probabilities": [
+              0.00002527616766552267,
+              0.6744488464336573,
+              0.3255258773986771
+            ],
+            "logits": [
+              -5.904314041137695,
+              4.287475109100342,
+              3.559021234512329
+            ]
+          },
+          "decisionEvidenceSha256": "dbfbd7b1acfc2233aa5223dda0d6a8b81da7b08abaea9345d9080b2b8b22f932"
+        },
+        {
+          "step": 14,
+          "currentObservationId": 13,
+          "subgoal": "Enter the requested Mus\u00e9e d'Orsay destination.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Check the blank destination prompt again.",
+              "command": {
+                "action": "observe",
+                "query": "Choisissez une destination"
+              },
+              "originalCommandSha256": "5c08264c6e9e8fd04bef249fdff96d3211e6c3792d2134b678a045bc42ae70f2"
+            },
+            {
+              "index": 1,
+              "description": "Enter Mus\u00e9e d'Orsay, Paris as the destination.",
+              "command": {
+                "action": "fill",
+                "selector": "@e66",
+                "value": "Mus\u00e9e d'Orsay, Paris"
+              },
+              "originalCommandSha256": "9d7ecb8708fa00552299af755e4cb8206b62119be94bd27eeec60cb44272b503"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 1,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:14",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 2,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 5104.363899999997,
+            "selectionMs": 2911.344999999972,
+            "actionAndObservationMs": 258.9173000000301,
+            "handlerMs": 3181.9277
+          },
+          "lengths": {
+            "state": 3574,
+            "observation": 6252,
+            "preparedObservation": 2981,
+            "taskGoal": 312,
+            "subgoal": 46,
+            "memory": 180,
+            "question": 133,
+            "options": [
+              41,
+              46
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3784,
+              "snapshotPreparedCharacters": 1165,
+              "snapshotOmittedCharacters": 2619,
+              "snapshotOriginalLines": 89,
+              "snapshotPreparedLines": 26,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 258,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "b83b0f37cce905b40f79341ffa8c1f20d8dfef39a297d5d2dc6dba198802bd76",
+            "requestBodySha256": "92cc9a914014009defd9858569758d5d3f3adf84e8da134df1b45dec9d6d6dd0",
+            "preparedStateSha256": "a65fb45d41f200fad991c73a4a7d138ce34695f70e1864fcfa95b0a307f99da4",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 1,
+            "inputTokens": 1586,
+            "elapsedMs": 2877.23763496615,
+            "requestMs": 2911.321799999976,
+            "probabilities": [
+              0.002220518514168731,
+              0.9977794814858314
+            ],
+            "logits": [
+              -6.323393821716309,
+              -0.21560226380825043
+            ]
+          },
+          "decisionEvidenceSha256": "4df521e0579af055ab16a93d325967e8d5e127f4e0a9c22f2d45b209b2f05d3c"
+        },
+        {
+          "step": 15,
+          "currentObservationId": 14,
+          "subgoal": "Select the exact Mus\u00e9e d'Orsay Paris place suggestion to calculate the walking route.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Choose the Mus\u00e9e d'Orsay result marked with a transit icon.",
+              "command": {
+                "action": "click_xy",
+                "x": 220,
+                "y": 270
+              },
+              "originalCommandSha256": "d15f5a4bfe551fca0bbe562cb47a7188b51cf91e31247488b18ff92e58dbd9cd"
+            },
+            {
+              "index": 1,
+              "description": "Accept the current destination suggestion from the field.",
+              "command": {
+                "action": "press",
+                "selector": "@e66",
+                "key": "ENTER"
+              },
+              "originalCommandSha256": "d684074bab0ecc1c8b9912161774fa53734c2a15b15987cfd5ad63551a665ea7"
+            },
+            {
+              "index": 2,
+              "description": "Choose the exact Mus\u00e9e d'Orsay Paris place result.",
+              "command": {
+                "action": "click_xy",
+                "x": 217,
+                "y": 228
+              },
+              "originalCommandSha256": "0da9aa8468a0af26964eb288835e542fe1cdbc29ed76a349e614ac15149a7196"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            2,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:15",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 7743.756600000022,
+            "selectionMs": 2987.1877000000095,
+            "actionAndObservationMs": 332.0207999999984,
+            "handlerMs": 3468.330399999977
+          },
+          "lengths": {
+            "state": 3766,
+            "observation": 6225,
+            "preparedObservation": 3017,
+            "taskGoal": 312,
+            "subgoal": 85,
+            "memory": 297,
+            "question": 172,
+            "options": [
+              59,
+              57,
+              50
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3738,
+              "snapshotPreparedCharacters": 1199,
+              "snapshotOmittedCharacters": 2539,
+              "snapshotOriginalLines": 89,
+              "snapshotPreparedLines": 26,
+              "snapshotCandidateContextLines": 3,
+              "pageTextOriginalCharacters": 258,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "89dbff0886b766e1211dcc0d29b0028c3a6371eeceffb5780087e3447956a240",
+            "requestBodySha256": "7e77bb536bac7dad55baea95fe5f34f388ed4d8bc822786983f927f334a12b0d",
+            "preparedStateSha256": "d7fe08b8b00334f4f5dfceb69f8c2e575eff1290eb6788c42a0c8583b64ccfb3",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 1660,
+            "elapsedMs": 2846.4226120267995,
+            "requestMs": 2987.145900000003,
+            "probabilities": [
+              0.00005645414918324434,
+              0.00016708321953789763,
+              0.9997764626312788
+            ],
+            "logits": [
+              -3.7103283405303955,
+              -2.625265121459961,
+              6.071529865264893
+            ]
+          },
+          "decisionEvidenceSha256": "2f225d7b718aee8fc872d3e664c7e4ee369bb872833245b75ba30736b22154df"
+        },
+        {
+          "step": 16,
+          "currentObservationId": 15,
+          "subgoal": "Inspect whether Google Maps has finished loading walking directions for the entered places.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect route details controls while directions load.",
+              "command": {
+                "action": "observe",
+                "query": "Options"
+              },
+              "originalCommandSha256": "c52f88c2f05c3d66279999e7c5cad9cc2a110c3001ffe4b3fcf403d08e2568ae"
+            },
+            {
+              "index": 1,
+              "description": "Check the destination and route results after the loading state.",
+              "command": {
+                "action": "observe",
+                "query": "Mus\u00e9e d'Orsay"
+              },
+              "originalCommandSha256": "c20b43e0129cee999233981ad8c595777094e98d2d900e8254049923b9ce6d14"
+            },
+            {
+              "index": 2,
+              "description": "Submit the destination field using its Rechercher button.",
+              "command": {
+                "action": "click",
+                "selector": "@e62"
+              },
+              "originalCommandSha256": "42b0e1641434d067af3ef728d52c8a2f8135f4d5ec7e22907adcc5fe6c879727"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 0,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 2,
+          "originalIndices": [
+            2,
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:16",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 9296.562900000019,
+            "selectionMs": 3044.738399999973,
+            "actionAndObservationMs": 113.41399999998976,
+            "handlerMs": 3159.6315999999642
+          },
+          "lengths": {
+            "state": 3899,
+            "observation": 6162,
+            "preparedObservation": 3215,
+            "taskGoal": 312,
+            "subgoal": 91,
+            "memory": 226,
+            "question": 178,
+            "options": [
+              53,
+              64,
+              57
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 3680,
+              "snapshotPreparedCharacters": 1374,
+              "snapshotOmittedCharacters": 2306,
+              "snapshotOriginalLines": 88,
+              "snapshotPreparedLines": 30,
+              "snapshotCandidateContextLines": 7,
+              "pageTextOriginalCharacters": 273,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "f08fd0b47699027c077abf70e3b9d56bef9755effe0e3cc9440bebef4917ca6c",
+            "requestBodySha256": "bc420f156ee5306208b46852ae0f10fc451df1ce47d7ac9ef0a881f42c334500",
+            "preparedStateSha256": "34c4b1caf579d6cec38b57918ce5d2f8741bbcfebcfc86f2e85d30721d58b30b",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 0,
+            "inputTokens": 1707,
+            "elapsedMs": 3039.7772349533625,
+            "requestMs": 3044.7221000000136,
+            "probabilities": [
+              0.5855984882936922,
+              0.4048830190434739,
+              0.009518492662833899
+            ],
+            "logits": [
+              -2.4965603351593018,
+              -2.8655965328216553,
+              -6.615958213806152
+            ]
+          },
+          "decisionEvidenceSha256": "4d92107ac320407fd15d43ec5684f8969d301f12d47411c2e68c0486403b438a"
+        },
+        {
+          "step": 17,
+          "currentObservationId": 16,
+          "subgoal": "Open details for the selected first walking route to inspect its itinerary.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Inspect the displayed walking route distances.",
+              "command": {
+                "action": "observe",
+                "query": "4,4 km"
+              },
+              "originalCommandSha256": "256ed9eb8f0bffb99f0057b69231d7a72642195ca238c52a31ef0692c419dbe3"
+            },
+            {
+              "index": 1,
+              "description": "Keep the first walking route selected for detail review.",
+              "command": {
+                "action": "click_xy",
+                "x": 225,
+                "y": 379
+              },
+              "originalCommandSha256": "6df5a3109b6a5a8371199c8c4b25c014f2a1ac5001602f88f4c829014cea87d4"
+            },
+            {
+              "index": 2,
+              "description": "Open detailed steps for the selected walking route.",
+              "command": {
+                "action": "click_xy",
+                "x": 169,
+                "y": 418
+              },
+              "originalCommandSha256": "04234f16501d49d93a73bb04ea4f03e53a8b72e75de52d4663ead84f1efe1826"
+            }
+          ],
+          "preferredIndex": 2,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 0,
+          "originalIndices": [
+            1,
+            2,
+            0
+          ],
+          "permutationSeed": "google-maps-walking:17",
+          "disagreement": false,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 10017.92339999997,
+            "selectionMs": 2310.2037000000128,
+            "actionAndObservationMs": 329.18640000000596,
+            "handlerMs": 2641.0831999999937
+          },
+          "lengths": {
+            "state": 2807,
+            "observation": 1686,
+            "preparedObservation": 2040,
+            "taskGoal": 312,
+            "subgoal": 75,
+            "memory": 325,
+            "question": 162,
+            "options": [
+              46,
+              56,
+              51
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 132,
+              "snapshotPreparedCharacters": 132,
+              "snapshotOmittedCharacters": 0,
+              "snapshotOriginalLines": 2,
+              "snapshotPreparedLines": 2,
+              "snapshotCandidateContextLines": 0,
+              "pageTextOriginalCharacters": 7,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 0,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": true
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "42dd76e85e90eb0977c3a16be53572c93bc29b8c5d1256ddf58db5b261cde452",
+            "requestBodySha256": "94b61c15f2b105f627fc87a62b14f5000914c7b731673f6ddba400d1702d8d75",
+            "preparedStateSha256": "ec74f25cd6cbe79eaec0f03a78c3769f36c9861c665e7f68fd7fb3434c83acab",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 1266,
+            "elapsedMs": 2302.8123999829404,
+            "requestMs": 2310.175799999968,
+            "probabilities": [
+              0.00012719309607198243,
+              0.02066538404521881,
+              0.9792074228587092
+            ],
+            "logits": [
+              -8.300973892211914,
+              -3.2104649543762207,
+              0.6478185057640076
+            ]
+          },
+          "decisionEvidenceSha256": "94e161ab9e81736dae107aa3c5f91fe76de2a0c9cab21351e08e985f9fb7bc60"
+        },
+        {
+          "step": 18,
+          "currentObservationId": 17,
+          "subgoal": "Finish with the observed selected walking-route details while leaving the route visible.",
+          "candidates": [
+            {
+              "index": 0,
+              "description": "Recheck the selected route name in the open details.",
+              "command": {
+                "action": "observe",
+                "query": "via Voie Georges Pompidou"
+              },
+              "originalCommandSha256": "e93bda0b28b79277822131cde40612c8738a95893dc1aa7df055b08969ea09d2"
+            },
+            {
+              "index": 1,
+              "description": "Report the selected walking route's displayed duration and distance.",
+              "command": {
+                "action": "finish",
+                "answer": "Google Maps is showing the selected walking route from Gare de Lyon to Mus\u00e9e d'Orsay with its details pane open and route visible. The selected route via Voie Georges Pompidou is displayed as 1 h (4,4 km). Walking (\u00c0 pied) is selected; optional cookies were declined and current location was not used. No requirements remain unmet."
+              },
+              "originalCommandSha256": "8bef4ce5f349088dab49bfbaa71dcdf48e9579a7642cc1d6640e33c31217e79d"
+            },
+            {
+              "index": 2,
+              "description": "Recheck the duration and distance heading in the open route details.",
+              "command": {
+                "action": "observe",
+                "query": "1 h (4,4 km)"
+              },
+              "originalCommandSha256": "2beb864259c8e81cc3b308e18651dd3a16c5c9f9cef32fdf77d7a439e71eddc2"
+            }
+          ],
+          "preferredIndex": 1,
+          "chosenIndex": 2,
+          "originalPreferredIndex": 0,
+          "originalChosenIndex": 1,
+          "originalIndices": [
+            2,
+            0,
+            1
+          ],
+          "permutationSeed": "google-maps-walking:18",
+          "disagreement": true,
+          "correctionRequested": false,
+          "consecutiveProposalErrors": null,
+          "submittedCandidateCount": 3,
+          "validationError": null,
+          "error": null,
+          "inferenceError": null,
+          "inputOverflow": false,
+          "timing": {
+            "candidateGenerationMs": 12177.374100000015,
+            "selectionMs": 4893.569500000041,
+            "actionAndObservationMs": 150.63399999996182,
+            "handlerMs": 5046.844999999972
+          },
+          "lengths": {
+            "state": 4986,
+            "observation": 12801,
+            "preparedObservation": 4069,
+            "taskGoal": 312,
+            "subgoal": 88,
+            "memory": 462,
+            "question": 175,
+            "options": [
+              52,
+              68,
+              68
+            ],
+            "omissions": {
+              "snapshotOriginalCharacters": 9010,
+              "snapshotPreparedCharacters": 1339,
+              "snapshotOmittedCharacters": 7671,
+              "snapshotOriginalLines": 189,
+              "snapshotPreparedLines": 31,
+              "snapshotCandidateContextLines": 7,
+              "pageTextOriginalCharacters": 699,
+              "pageTextOmittedCharacters": 0,
+              "dialogsOriginalCharacters": 2,
+              "dialogsOmittedCharacters": 0,
+              "linksOriginalCount": 2,
+              "linksPreparedCount": 0,
+              "upstreamSnapshotTruncated": false
+            }
+          },
+          "input": {
+            "savedPayloadSha256": "98221723a4e4402005a1984b2f4c7e2e2959708a18b19e377ea18ac56566fa5d",
+            "requestBodySha256": "6611b7f2b6daee108864c43cf3b23b3900b677026b5564662f5674baf263b21f",
+            "preparedStateSha256": "c58a7117c637222dcb2fa0f81c040df89918a05ab659fe61f226f2041e841e81",
+            "inferenceArm": true,
+            "inferenceResultAvailable": true
+          },
+          "inference": {
+            "backend": "onnx",
+            "index": 2,
+            "inputTokens": 2261,
+            "elapsedMs": 4889.064465998672,
+            "requestMs": 4893.548499999975,
+            "probabilities": [
+              0.0005196055096345829,
+              0.013236344726283149,
+              0.9862440497640822
+            ],
+            "logits": [
+              -8.88720989227295,
+              -5.649558067321777,
+              -1.338620662689209
+            ]
+          },
+          "decisionEvidenceSha256": "a140d878f9fcf0b6df7df1ef5ce0cf263690bbcaa48ef8d6f113c166e15f74ee"
+        }
+      ],
+      "download": null,
+      "evidenceHashes": {
+        "resultSha256": "17d7c7db8e0a598e5b5fa269a461a9999b394dbe74a65a8e070a7c219a45dbe5",
+        "commandsSha256": "aab9c56953c5a8992b3739df6259aa2b0d9e7db2ebb9b341e96f70ea860e36ff",
+        "reviewSha256": "e8628099d911a28f927897f5fce4d26cfbe0bc0a6560e26cda63d67896ba672e",
+        "observations": [
+          {
+            "id": 1,
+            "observationSha256": "c028c04b6f766f1e4ad8fb8300d59ccd538dc270f3bcaf69abc1ff7ff47b554c",
+            "captureSha256": "ed5a3228857f2a1306e9ee77dd7c823ac610c231fde64057e54aee4314e20b12",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 2,
+            "observationSha256": "a279d487238f592a138a77afea5559266c390e3be41bacdc6be0f126de2751c1",
+            "captureSha256": "6cd6717d521e8d6f135b8ba3ea72418c5f784da062238d3161f313890e155c56",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 3,
+            "observationSha256": "74828f71b22286810a278b88453b2de19bddbab05ae2ac909d90267547e01029",
+            "captureSha256": "ebb0f1c2c04a1b7802fa50137820045ba621d1e15dec6d0a2790c13d8d266a16",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 4,
+            "observationSha256": "f661ccbe8a3a81ebe8e3b1ba37726879039a96301ea781391a51200499403b26",
+            "captureSha256": "4a1fd80fbdfb905b282b674d8fc807954bf11841800359be835a8d2e6763761e",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 5,
+            "observationSha256": "7a34ddd2ecdcc27fda612ae904bc84726c524707d8a16ae01442d29b4c1a4296",
+            "captureSha256": "154804b5445886b22efb2d8817f20c34bc9b00f65f68219f2241037713bc2f72",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 6,
+            "observationSha256": "f697a3f9439d21c1387886650e07ee91a58bbd40128331469347d5a5ebb420fe",
+            "captureSha256": "d0333d08647e577c1c8ff7502ff248de4385d4a577aa6f521c03213bed6467a5",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 7,
+            "observationSha256": "8d865abe545ffa656138de626fef607a4b592a5e943f32d020da080ed7cb6986",
+            "captureSha256": "db6ec5f52f6270e4092d6a9fb6df8fcf1aea7660a0dd223c2487df9295e65744",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 8,
+            "observationSha256": "bf9023ea0eee3ebd9d3e2825564a10830940421418c4468088ef9ad0f0322a0a",
+            "captureSha256": "a586c234def691197b0fbcc84d87a62ed4ec2e6d04f9fdc1ff03df912fa79bc8",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 9,
+            "observationSha256": "f4d702a004e1fdbea2359fa6a3470041930a7c473b62e621e9706b168aab58ee",
+            "captureSha256": "6a7a262cff9170d4278eb8086bba13015fc38aa218a4b093c2806c8c8e7bb51d",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 10,
+            "observationSha256": "a04476d031b108f63fa8d3fe6b9920495be6e1477821b1b7fc41e04f1288f470",
+            "captureSha256": "4026dc95e77af0a9d2133b3cd406c3fe6b11c93f8f63c809e4aa9959855bd1cb",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 11,
+            "observationSha256": "68a31d87bbb97864405ba7ae6404b6ef52d1b31195076716f45d3341764caa49",
+            "captureSha256": "d00e8607af39bc3ade244d2a266e155e1c63cd271d7daebf9710f8b4948fd5f8",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 12,
+            "observationSha256": "9b965b9263a102b77a02d962960b0e6b9a8588f7bf7ce3bcb4ec4b69192e3496",
+            "captureSha256": "a153f90be45876b43217170f6dce4e3120bfe10f9c682d5f3292f8520c615f0c",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 13,
+            "observationSha256": "a5bd77baab826d6f25a8c747d8b433815a1edd6b8a05564d1bd2fac2de48fe97",
+            "captureSha256": "52a6e31db3472b826a6d97ff7bb5e9d9fe29f91d14c7ebfe82e475289c2391f6",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 14,
+            "observationSha256": "0644e055d240486d5e757118d5d22c33639170edc80d58371890b9c2739c6ead",
+            "captureSha256": "b8b59c8ccb68be9a00b22e81feba7a75bfbbf1a6563afdd06ecded9857745752",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 15,
+            "observationSha256": "6abdcbcf435c9a718e917f8ec4ba0aa4f5f6a217f78eee96df041320b9c09434",
+            "captureSha256": "b207972d451162269ef5f1ec2bee78f524a51ac6c2f04ff1e80c937a335e03f1",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 16,
+            "observationSha256": "8642b6443a9fdf54572f87616b7b1b45ebdf5320e8f613a9f55436d8783c0d93",
+            "captureSha256": "88b8491cef532fd6df76afc862c5f220c01284ad196730403309db62fd1c6bfe",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 17,
+            "observationSha256": "6459a4d70556412c0388bfeedcb86dad1816b149d146bac0b8a46743f8ebac71",
+            "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          },
+          {
+            "id": 18,
+            "observationSha256": "516c902e1a311f2d1aa69d396dd759b37b6a09a03afaab11c4a54d887a2306be",
+            "captureSha256": "cb5eea35ed655d33bd6ea629d4e3ba269f11062647887524d72a4dce2583df08",
+            "captureAvailable": true,
+            "evidenceErrors": [],
+            "captureError": null
+          }
+        ]
+      }
+    }
+  ]
+}

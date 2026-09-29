@@ -55,6 +55,7 @@ export class FakeClient implements ObservableClient {
     this.#methods = this.#answer(ctx);
     registerCore(ctx);
     seed(ctx);
+    if (options.browserTask) ctx.plugins.seedBrowserTask();
     if (options.delegationDemo) seedDelegationDemo(ctx);
     if (options.uninstalled) {
       ctx.providers = ctx.providers.filter(provider => provider.id !== 'echo').map(provider => ({

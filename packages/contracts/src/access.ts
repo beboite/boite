@@ -115,6 +115,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
 
 /** The server also checks the thread or project scope of these agent events. */
 export const AGENT_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
+  'browser.updated', // Progress for the agent's own owner-enabled browser tasks.
   // The server restricts this invalidation to the agent's own subscribed thread.
   'delegation.changed',
   'thread.activity', 'todos.updated', 'collaboration.changed',

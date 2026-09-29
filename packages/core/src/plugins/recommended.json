@@ -34,7 +34,49 @@
       }
     },
     "provides": {
-      "accountPools": { "providers": ["claude", "codex", "antigravity"] }
+      "accountPools": {
+        "providers": [
+          "claude",
+          "codex",
+          "antigravity"
+        ]
+      }
     }
+  },
+  {
+    "version": "0.37.1",
+    "description": "Delegate bounded browser tasks to Jev using the agent-browser native engine. Runs in a separate, hidden browser with a fresh profile.",
+    "schema": 1,
+    "name": "Jev Browser",
+    "executable": "agent-browser",
+    "artifacts": {
+      "win32-x64": {
+        "sha256": "29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-win32-x64.exe"
+      },
+      "linux-x64": {
+        "sha256": "f8e5f9294bd0da70dda61854f12004fd61c668cd682bfb600cdf6d0df73dea69",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-linux-x64"
+      },
+      "linux-arm64": {
+        "sha256": "d54d3e1262dc1aa0906e0677adc6d0cbb40d1274631f4cf77136bf23a0bc20e9",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-linux-arm64"
+      },
+      "darwin-x64": {
+        "sha256": "c79d1e0525c0bf79df9eec355269ae40bcda9c4a3fce3f242c24faecaaaeef84",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-darwin-x64"
+      },
+      "darwin-arm64": {
+        "sha256": "e52f06476ea0f1d14357c1924ce1d7f1bf08279f2642d74ccfa7ee935c46aea1",
+        "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-darwin-arm64"
+      }
+    },
+    "id": "jev-browser",
+    "provides": {
+      "browser": {
+        "protocol": "agent-browser-0.37"
+      }
+    },
+    "homepage": "https://github.com/vercel-labs/agent-browser"
   }
 ]

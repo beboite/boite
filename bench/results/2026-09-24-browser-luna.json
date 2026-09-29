@@ -1,0 +1,6785 @@
+{
+  "schema": 1,
+  "campaignDate": "2026-09-24T12:10:37.252Z",
+  "complete": true,
+  "totals": {
+    "expected": 120,
+    "completed": 120,
+    "pending": 0,
+    "successful": 86,
+    "toolCalls": 439,
+    "batchCommandsRequested": 515,
+    "batchCommandsExecuted": 418,
+    "actions": 360
+  },
+  "modes": {
+    "luna": {
+      "expected": 60,
+      "completed": 60,
+      "pending": 0,
+      "successful": 43,
+      "successfulTimingMs": {
+        "medianMs": 33966.24239999987,
+        "minMs": 10867.269799999893,
+        "maxMs": 91582.19799999986
+      },
+      "allTimingMs": {
+        "n": 60,
+        "medianMs": 35249.87360000027,
+        "p90Ms": 67441.62080000003,
+        "minMs": 10867.269799999893,
+        "maxMs": 122618.1614000001
+      },
+      "failedTimingMs": {
+        "n": 17,
+        "medianMs": 48841.03480000002,
+        "p90Ms": 122473.31649999996,
+        "minMs": 20475.720900000015,
+        "maxMs": 122618.1614000001
+      },
+      "fallback": 0,
+      "fallbackSuccessful": 0,
+      "jevOnly": 0,
+      "jevOnlySuccessful": 0
+    },
+    "hybrid": {
+      "expected": 60,
+      "completed": 60,
+      "pending": 0,
+      "successful": 43,
+      "successfulTimingMs": {
+        "medianMs": 3924.086999999825,
+        "minMs": 1740.9020999999484,
+        "maxMs": 103634.55810000002
+      },
+      "allTimingMs": {
+        "n": 59,
+        "medianMs": 22890.982699999993,
+        "p90Ms": 95464.35019999999,
+        "minMs": 1740.9020999999484,
+        "maxMs": 121754.91460000025
+      },
+      "failedTimingMs": {
+        "n": 16,
+        "medianMs": 45314.0873500001,
+        "p90Ms": 121495.38049999974,
+        "minMs": 26346.709399999934,
+        "maxMs": 121754.91460000025
+      },
+      "fallback": 33,
+      "fallbackSuccessful": 16,
+      "jevOnly": 27,
+      "jevOnlySuccessful": 27
+    }
+  },
+  "paired": {
+    "expected": 60,
+    "completed": 60,
+    "pending": 0,
+    "directSuccessful": 43,
+    "hybridSuccessful": 43,
+    "bothSuccessful": 41,
+    "bothSuccessfulTimingMs": {
+      "direct": {
+        "medianMs": 32858.00590000022,
+        "minMs": 10867.269799999893,
+        "maxMs": 86398.14699999988
+      },
+      "hybrid": {
+        "medianMs": 4088.9477999999945,
+        "minMs": 1740.9020999999484,
+        "maxMs": 103634.55810000002
+      }
+    }
+  },
+  "modelAudit": {
+    "expectedOnCompletedTrials": 93,
+    "recordedLegs": 92,
+    "missingRecords": 1,
+    "acknowledged": 92,
+    "turnStatuses": {
+      "completed": 85,
+      "missing": 7
+    },
+    "unexpectedToolCount": 0,
+    "tokenUsage": {
+      "totalTokens": 16943455,
+      "inputTokens": 16820531,
+      "cachedInputTokens": 14818304,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 122924,
+      "reasoningOutputTokens": 103203
+    },
+    "uncachedInputTokens": 2002227,
+    "inconsistentUsageTrials": 0
+  },
+  "cleanup": {
+    "browserZero": 120,
+    "browserNonzeroOrMissing": 0,
+    "codexProcessesAfter": 0
+  },
+  "possibleCriterionAlias": [
+    {
+      "task": "python-json-french",
+      "mode": "luna",
+      "run": 1,
+      "finalUrl": "https://docs.python.org/fr/3.14/library/json.html#basic-usage",
+      "graderChecks": [
+        false,
+        true
+      ]
+    },
+    {
+      "task": "python-json-french",
+      "mode": "hybrid",
+      "run": 1,
+      "finalUrl": "https://docs.python.org/fr/3.14/library/json.html",
+      "graderChecks": [
+        false,
+        true
+      ]
+    },
+    {
+      "task": "python-json-french",
+      "mode": "luna",
+      "run": 2,
+      "finalUrl": "https://docs.python.org/fr/3.14/library/json.html#basic-usage",
+      "graderChecks": [
+        false,
+        true
+      ]
+    },
+    {
+      "task": "python-json-french",
+      "mode": "hybrid",
+      "run": 2,
+      "finalUrl": "https://docs.python.org/fr/3.14/library/json.html",
+      "graderChecks": [
+        false,
+        true
+      ]
+    }
+  ],
+  "protocol": {
+    "tasks": 30,
+    "repetitions": 2,
+    "modes": [
+      "luna",
+      "hybrid"
+    ],
+    "recorded": false,
+    "model": "gpt-6-luna",
+    "effort": "max",
+    "serviceTier": "priority",
+    "browserDriver": {
+      "name": "agent-browser",
+      "version": "0.37.1",
+      "transport": "native daemon JSONL"
+    },
+    "modelCatalogue": {
+      "model": "gpt-6-luna",
+      "supportsMax": true,
+      "supportsPriority": true
+    },
+    "policy": {
+      "direct": "Luna controls a fresh browser for the whole task.",
+      "hybrid": "Jev runs for at most 10 steps or 15 seconds; Luna resumes the same browser after handoff or error.",
+      "sharedActionLimit": 30,
+      "sharedExecutionLimitMs": 120000,
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "graderTriggersFallback": false,
+      "lunaReceivesRenderedFieldMetadata": true
+    },
+    "hashes": {
+      "browserBinary": "29a003139ff4eb96fa4d1ed341830b26eb3e082843bf776b4e88ad3443bb8fde",
+      "runner": "4ce27aa5e7b61bde2e60817fde458f0ecadcdf13198837dc3bcebc35ce8bf06b",
+      "codexTransport": "5d890c7880208e0f812d8c99599154e0a4b5b8802db781a11fdfb3aebfb3187b",
+      "pageAdapter": "86296a8705b895ab13b91ffc0324e39809303169ad47f6fb4c11e8a04462b84b",
+      "taskManifest": "3601c3f774d8cce219297a2a45bab63440dde7fe7febb2f061be3edd27cfe46e",
+      "grader": "91eb29e5636fe1bcc5df876de4a282da61083e66d2830fa20c70b0f4c6d0181c",
+      "jevLoop": "45f273f000b16933737083675126e39203cdf127a830198bd4c72f67d2151ba4"
+    }
+  },
+  "pending": [],
+  "attempts": [
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1312.3709000000001,
+        "execution": 39803.8568,
+        "total": 41116.2277,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 198502,
+          "inputTokens": 197613,
+          "cachedInputTokens": 149248,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 889,
+          "reasoningOutputTokens": 647
+        },
+        "uncachedInputTokens": 48365,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper#COBOL",
+        "urlQueryRedacted": false,
+        "title": "Grace Hopper - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1376.7108999999982,
+        "execution": 1922.0564000000013,
+        "total": 3298.7672999999995,
+        "jev": 1922.0209000000032
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+        "urlQueryRedacted": false,
+        "title": "Grace Hopper - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1225.7067999998108,
+        "execution": 31632.29910000041,
+        "total": 32858.00590000022,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 159604,
+          "inputTokens": 158672,
+          "cachedInputTokens": 131840,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 932,
+          "reasoningOutputTokens": 741
+        },
+        "uncachedInputTokens": 26832,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+        "urlQueryRedacted": false,
+        "title": "Grace Hopper - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-hopper",
+      "site": "Wikipedia",
+      "category": "search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1833.24189999979,
+        "execution": 1728.4049000004306,
+        "total": 3561.6468000002205,
+        "jev": 1728.3423999994993
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/wiki/Grace_Hopper",
+        "urlQueryRedacted": false,
+        "title": "Grace Hopper - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1430.3251999999993,
+        "execution": 32872.1972,
+        "total": 34302.5224,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 60291,
+          "inputTokens": 59956,
+          "cachedInputTokens": 43520,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 335,
+          "reasoningOutputTokens": 269
+        },
+        "uncachedInputTokens": 16436,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+        "urlQueryRedacted": false,
+        "title": "Alan Turing: Revision history - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1511.3183999999892,
+        "execution": 21379.664300000004,
+        "total": 22890.982699999993,
+        "jev": 703.8647000000055
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 60466,
+          "inputTokens": 60092,
+          "cachedInputTokens": 25344,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 374,
+          "reasoningOutputTokens": 301
+        },
+        "uncachedInputTokens": 34748,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+        "urlQueryRedacted": false,
+        "title": "Alan Turing: Revision history - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1110.9142999998294,
+        "execution": 22079.711899999995,
+        "total": 23190.626199999824,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 60675,
+          "inputTokens": 60019,
+          "cachedInputTokens": 50688,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 656,
+          "reasoningOutputTokens": 580
+        },
+        "uncachedInputTokens": 9331,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+        "urlQueryRedacted": false,
+        "title": "Alan Turing: Revision history - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "wikipedia-history",
+      "site": "Wikipedia",
+      "category": "history-navigation",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1294.2501999996603,
+        "execution": 15140.275700000115,
+        "total": 16434.525899999775,
+        "jev": 714.9671000000089
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 1,
+        "batchCommandsRequested": 2,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 60629,
+          "inputTokens": 60080,
+          "cachedInputTokens": 43520,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 549,
+          "reasoningOutputTokens": 480
+        },
+        "uncachedInputTokens": 16560,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://en.wikipedia.org/w/index.php?title=Alan_Turing&action=history",
+        "urlQueryRedacted": false,
+        "title": "Alan Turing: Revision history - Wikipedia",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1277.0241999999998,
+        "execution": 25062.661699999997,
+        "total": 26339.685899999997,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 136187,
+          "inputTokens": 135300,
+          "cachedInputTokens": 119552,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 887,
+          "reasoningOutputTokens": 712
+        },
+        "uncachedInputTokens": 15748,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+        "urlQueryRedacted": false,
+        "title": "Array.prototype.toSorted() - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1310.4979999999923,
+        "execution": 2778.449800000002,
+        "total": 4088.9477999999945,
+        "jev": 2778.3908999999985
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+        "urlQueryRedacted": false,
+        "title": "Array.prototype.toSorted() - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1096.1381999999285,
+        "execution": 31525.95930000022,
+        "total": 32622.09750000015,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 100081,
+          "inputTokens": 99206,
+          "cachedInputTokens": 88064,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 875,
+          "reasoningOutputTokens": 731
+        },
+        "uncachedInputTokens": 11142,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+        "urlQueryRedacted": false,
+        "title": "Array.prototype.toSorted() - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-tosorted",
+      "site": "MDN",
+      "category": "documentation-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1445.7667999998666,
+        "execution": 2799.311600000132,
+        "total": 4245.0783999999985,
+        "jev": 2799.2748000002466
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
+        "urlQueryRedacted": false,
+        "title": "Array.prototype.toSorted() - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1360.6680000000051,
+        "execution": 33290.31580000001,
+        "total": 34650.983800000016,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 171265,
+          "inputTokens": 170565,
+          "cachedInputTokens": 151040,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 700,
+          "reasoningOutputTokens": 479
+        },
+        "uncachedInputTokens": 19525,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+        "urlQueryRedacted": false,
+        "title": "Array - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1388.4556999999913,
+        "execution": 2386.0983000000124,
+        "total": 3774.5540000000037,
+        "jev": 2386.0593999999983
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 2,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+        "urlQueryRedacted": false,
+        "title": "Array - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1343.493499999866,
+        "execution": 19919.591899999883,
+        "total": 21263.08539999975,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 134359,
+          "inputTokens": 134008,
+          "cachedInputTokens": 108544,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 351,
+          "reasoningOutputTokens": 227
+        },
+        "uncachedInputTokens": 25464,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+        "urlQueryRedacted": false,
+        "title": "Array - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "mdn-array-french",
+      "site": "MDN",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1036.1921999999322,
+        "execution": 2682.1393999997526,
+        "total": 3718.331599999685,
+        "jev": 2682.0748000000603
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 2,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://developer.mozilla.org/fr/docs/Web/JavaScript/Reference/Global_Objects/Array",
+        "urlQueryRedacted": false,
+        "title": "Array - JavaScript | MDN",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1244.247399999993,
+        "execution": 42189.96180000002,
+        "total": 43434.20920000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 7,
+        "batchCommandsRequested": 9,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 289117,
+          "inputTokens": 287536,
+          "cachedInputTokens": 237824,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1581,
+          "reasoningOutputTokens": 1268
+        },
+        "uncachedInputTokens": 49712,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+        "urlQueryRedacted": false,
+        "title": "pathlib  -  Object-oriented filesystem paths  -  Python 3.14.7 documentation",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1245.1916000000201,
+        "execution": 2363.3852999999945,
+        "total": 3608.5769000000146,
+        "jev": 2363.3195000000123
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 6,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+        "urlQueryRedacted": false,
+        "title": "pathlib  -  Object-oriented filesystem paths  -  Python 3.14.7 documentation",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 986.2918000002392,
+        "execution": 55782.086999999825,
+        "total": 56768.378800000064,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 194450,
+          "inputTokens": 193235,
+          "cachedInputTokens": 163328,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1215,
+          "reasoningOutputTokens": 988
+        },
+        "uncachedInputTokens": 29907,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/3/library/pathlib.html#pure-paths",
+        "urlQueryRedacted": false,
+        "title": "pathlib  -  Object-oriented filesystem paths  -  Python 3.14.7 documentation",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-pathlib",
+      "site": "Python documentation",
+      "category": "documentation-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1180.1356000001542,
+        "execution": 2333.3889999999665,
+        "total": 3513.5246000001207,
+        "jev": 2333.3564999997616
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 6,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/3/library/pathlib.html",
+        "urlQueryRedacted": false,
+        "title": "pathlib  -  Object-oriented filesystem paths  -  Python 3.14.7 documentation",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1250.3791999999958,
+        "execution": 43390.12229999999,
+        "total": 44640.501499999984,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 153579,
+          "inputTokens": 151617,
+          "cachedInputTokens": 117760,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1962,
+          "reasoningOutputTokens": 1778
+        },
+        "uncachedInputTokens": 33857,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/fr/3.14/library/json.html#basic-usage",
+        "urlQueryRedacted": false,
+        "title": "json --- JSON encoder and decoder  -  Documentation Python 3.14.7",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1275.478999999992,
+        "execution": 94188.8712,
+        "total": 95464.35019999999,
+        "jev": 434.2795000000042
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 1,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 285890,
+          "inputTokens": 280465,
+          "cachedInputTokens": 227840,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5425,
+          "reasoningOutputTokens": 5149
+        },
+        "uncachedInputTokens": 52625,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/fr/3.14/library/json.html",
+        "urlQueryRedacted": false,
+        "title": "json --- JSON encoder and decoder  -  Documentation Python 3.14.7",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1065.0337999998592,
+        "execution": 49121.39080000017,
+        "total": 50186.42460000003,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 2
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 132332,
+          "inputTokens": 130132,
+          "cachedInputTokens": 110592,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2200,
+          "reasoningOutputTokens": 2026
+        },
+        "uncachedInputTokens": 19540,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/fr/3.14/library/json.html#basic-usage",
+        "urlQueryRedacted": false,
+        "title": "json --- JSON encoder and decoder  -  Documentation Python 3.14.7",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "python-json-french",
+      "site": "Python documentation",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1321.042000000365,
+        "execution": 120008.94959999993,
+        "total": 121329.9916000003,
+        "jev": 482.3236000002362
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 1,
+        "toolCalls": 9,
+        "batchCommandsRequested": 9,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 355074,
+          "inputTokens": 349130,
+          "cachedInputTokens": 303872,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5944,
+          "reasoningOutputTokens": 5556
+        },
+        "uncachedInputTokens": 45258,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://docs.python.org/fr/3.14/library/json.html",
+        "urlQueryRedacted": false,
+        "title": "json --- JSON encoder and decoder  -  Documentation Python 3.14.7",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1248.2376999999979,
+        "execution": 35712.70299999998,
+        "total": 36960.94069999998,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 210001,
+          "inputTokens": 209046,
+          "cachedInputTokens": 183552,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 955,
+          "reasoningOutputTokens": 684
+        },
+        "uncachedInputTokens": 25494,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html#mutable-references",
+        "urlQueryRedacted": true,
+        "title": "References and Borrowing - The Rust Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1257.0548999999883,
+        "execution": 483.84719999996014,
+        "total": 1740.9020999999484,
+        "jev": 483.81809999997495
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+        "urlQueryRedacted": false,
+        "title": "References and Borrowing - The Rust Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1015.1691999998875,
+        "execution": 16648.813000000082,
+        "total": 17663.98219999997,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 49435,
+          "inputTokens": 48908,
+          "cachedInputTokens": 40448,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 527,
+          "reasoningOutputTokens": 464
+        },
+        "uncachedInputTokens": 8460,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+        "urlQueryRedacted": false,
+        "title": "References and Borrowing - The Rust Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "rust-borrowing",
+      "site": "The Rust Book",
+      "category": "documentation-navigation",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1266.1540000000969,
+        "execution": 587.5645000003278,
+        "total": 1853.7185000004247,
+        "jev": 587.5348999998532
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+        "urlQueryRedacted": false,
+        "title": "References and Borrowing - The Rust Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1859.428099999961,
+        "execution": 29936.3958,
+        "total": 31795.82389999996,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 155382,
+          "inputTokens": 154806,
+          "cachedInputTokens": 130816,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 576,
+          "reasoningOutputTokens": 412
+        },
+        "uncachedInputTokens": 23990,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://go.dev/doc/effective_go#maps",
+        "urlQueryRedacted": false,
+        "title": "Effective Go - The Go Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1671.7756999999983,
+        "execution": 35782.163,
+        "total": 37453.9387,
+        "jev": 1243.7408000000287
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 3,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 249874,
+          "inputTokens": 248813,
+          "cachedInputTokens": 217344,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1061,
+          "reasoningOutputTokens": 831
+        },
+        "uncachedInputTokens": 31469,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://go.dev/doc/effective_go#maps",
+        "urlQueryRedacted": false,
+        "title": "Effective Go - The Go Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2087.975500000175,
+        "execution": 32493.701799999923,
+        "total": 34581.6773000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 222738,
+          "inputTokens": 221923,
+          "cachedInputTokens": 194816,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 815,
+          "reasoningOutputTokens": 581
+        },
+        "uncachedInputTokens": 27107,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://go.dev/doc/effective_go#maps",
+        "urlQueryRedacted": false,
+        "title": "Effective Go - The Go Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "go-effective-maps",
+      "site": "Go documentation",
+      "category": "section-navigation",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 2027.3525999998674,
+        "execution": 36100.26929999981,
+        "total": 38127.62189999968,
+        "jev": 1331.5093999998644
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 3,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 255943,
+          "inputTokens": 255097,
+          "cachedInputTokens": 222464,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 846,
+          "reasoningOutputTokens": 617
+        },
+        "uncachedInputTokens": 32633,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://go.dev/doc/effective_go#maps",
+        "urlQueryRedacted": false,
+        "title": "Effective Go - The Go Programming Language",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1648.8182999999844,
+        "execution": 18826.90260000003,
+        "total": 20475.720900000015,
+        "jev": null
+      },
+      "counts": {
+        "actions": 0,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 40003,
+          "inputTokens": 39300,
+          "cachedInputTokens": 37376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 703,
+          "reasoningOutputTokens": 640
+        },
+        "uncachedInputTokens": 1924,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.npmjs.com/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1644.2123000000138,
+        "execution": 29599.30249999999,
+        "total": 31243.514800000004,
+        "jev": 4358.331000000006
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 10,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 40340,
+          "inputTokens": 39356,
+          "cachedInputTokens": 37376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 984,
+          "reasoningOutputTokens": 913
+        },
+        "uncachedInputTokens": 1980,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.npmjs.com/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2662.3340000002645,
+        "execution": 63573.19380000001,
+        "total": 66235.52780000027,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 8,
+        "batchCommandsRequested": 8,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 191706,
+          "inputTokens": 190016,
+          "cachedInputTokens": 180992,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1690,
+          "reasoningOutputTokens": 1393
+        },
+        "uncachedInputTokens": 9024,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.npmjs.com/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "npm-zod",
+      "site": "npm",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 2267.1784000000916,
+        "execution": 40466.35850000009,
+        "total": 42733.53690000018,
+        "jev": 2341.591500000097
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 6,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 102703,
+          "inputTokens": 101568,
+          "cachedInputTokens": 96000,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1135,
+          "reasoningOutputTokens": 959
+        },
+        "uncachedInputTokens": 5568,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.npmjs.com/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1481.7522999999928,
+        "execution": 63446.22470000002,
+        "total": 64927.97700000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 9,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 275708,
+          "inputTokens": 274061,
+          "cachedInputTokens": 253440,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1647,
+          "reasoningOutputTokens": 1254
+        },
+        "uncachedInputTokens": 20621,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://crates.io/crates/serde",
+        "urlQueryRedacted": false,
+        "title": "serde - crates.io: Rust Package Registry",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1426.1350000000093,
+        "execution": 2278.6337999999523,
+        "total": 3704.7687999999616,
+        "jev": 2278.6101999999955
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 6,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://crates.io/crates/serde",
+        "urlQueryRedacted": false,
+        "title": "serde - crates.io: Rust Package Registry",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1277.254300000146,
+        "execution": 62253.69609999983,
+        "total": 63530.95039999997,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 7,
+        "batchCommandsRequested": 8,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 222878,
+          "inputTokens": 222036,
+          "cachedInputTokens": 200704,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 842,
+          "reasoningOutputTokens": 548
+        },
+        "uncachedInputTokens": 21332,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://crates.io/crates/serde",
+        "urlQueryRedacted": false,
+        "title": "serde - crates.io: Rust Package Registry",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "crates-serde",
+      "site": "crates.io",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1239.9349000002258,
+        "execution": 2281.4449000000022,
+        "total": 3521.379800000228,
+        "jev": 2281.4158999999054
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 6,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://crates.io/crates/serde",
+        "urlQueryRedacted": false,
+        "title": "serde - crates.io: Rust Package Registry",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1205.2767000000458,
+        "execution": 66236.34409999999,
+        "total": 67441.62080000003,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 7,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 195671,
+          "inputTokens": 194121,
+          "cachedInputTokens": 182272,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1550,
+          "reasoningOutputTokens": 1251
+        },
+        "uncachedInputTokens": 11849,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://pypi.org/search/",
+        "urlQueryRedacted": true,
+        "title": "Client Challenge",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1293.139700000058,
+        "execution": 46601.49809999997,
+        "total": 47894.637800000026,
+        "jev": 1228.294399999897
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 102397,
+          "inputTokens": 100514,
+          "cachedInputTokens": 94976,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1883,
+          "reasoningOutputTokens": 1710
+        },
+        "uncachedInputTokens": 5538,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://pypi.org/search/",
+        "urlQueryRedacted": true,
+        "title": "Client Challenge",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1289.8347000000067,
+        "execution": 28898.385799999814,
+        "total": 30188.22049999982,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 2,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 64301,
+          "inputTokens": 63437,
+          "cachedInputTokens": 58624,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 864,
+          "reasoningOutputTokens": 739
+        },
+        "uncachedInputTokens": 4813,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://pypi.org/search/",
+        "urlQueryRedacted": true,
+        "title": "Client Challenge",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "pypi-httpx",
+      "site": "PyPI",
+      "category": "package-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1133.719000000041,
+        "execution": 27983.022400000133,
+        "total": 29116.741400000174,
+        "jev": 1245.5381999998353
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 40218,
+          "inputTokens": 39259,
+          "cachedInputTokens": 37376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 959,
+          "reasoningOutputTokens": 897
+        },
+        "uncachedInputTokens": 1883,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://pypi.org/search/",
+        "urlQueryRedacted": true,
+        "title": "Client Challenge",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1807.7230999999447,
+        "execution": 14944.339500000002,
+        "total": 16752.062599999947,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 46113,
+          "inputTokens": 45794,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 319,
+          "reasoningOutputTokens": 249
+        },
+        "uncachedInputTokens": 6370,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+        "urlQueryRedacted": false,
+        "title": "Pride and Prejudice by Jane Austen | Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1800.2226999999257,
+        "execution": 1296.0087000000058,
+        "total": 3096.2313999999315,
+        "jev": 1295.9849000000395
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+        "urlQueryRedacted": false,
+        "title": "Pride and Prejudice by Jane Austen | Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1633.2014999999665,
+        "execution": 19527.100299999584,
+        "total": 21160.30179999955,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 46094,
+          "inputTokens": 45774,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 320,
+          "reasoningOutputTokens": 250
+        },
+        "uncachedInputTokens": 6350,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+        "urlQueryRedacted": false,
+        "title": "Pride and Prejudice by Jane Austen | Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-pride",
+      "site": "Project Gutenberg",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1627.1525999996811,
+        "execution": 1241.5757999997586,
+        "total": 2868.7283999994397,
+        "jev": 1241.5310999997891
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/1342",
+        "urlQueryRedacted": false,
+        "title": "Pride and Prejudice by Jane Austen | Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1891.092500000028,
+        "execution": 24480.557900000014,
+        "total": 26371.650400000042,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 124929,
+          "inputTokens": 124320,
+          "cachedInputTokens": 111616,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 609,
+          "reasoningOutputTokens": 453
+        },
+        "uncachedInputTokens": 12704,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/search/?query=Jane+Austen&start_index=26",
+        "urlQueryRedacted": false,
+        "title": "Books: Jane Austen - Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1864.1977999999654,
+        "execution": 28694.98609999998,
+        "total": 30559.183899999945,
+        "jev": 2153.692800000077
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 5,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 199205,
+          "inputTokens": 198502,
+          "cachedInputTokens": 166656,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 703,
+          "reasoningOutputTokens": 526
+        },
+        "uncachedInputTokens": 31846,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/search/?query=Jane+Austen&start_index=26",
+        "urlQueryRedacted": false,
+        "title": "Books: Jane Austen - Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1506.6461999998428,
+        "execution": 22627.695400000084,
+        "total": 24134.341599999927,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 125205,
+          "inputTokens": 124498,
+          "cachedInputTokens": 105472,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 707,
+          "reasoningOutputTokens": 566
+        },
+        "uncachedInputTokens": 19026,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/search/?query=Jane+Austen&start_index=26",
+        "urlQueryRedacted": false,
+        "title": "Books: Jane Austen - Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "gutenberg-austen-page-two",
+      "site": "Project Gutenberg",
+      "category": "search-pagination",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1554.502400000114,
+        "execution": 30611.160900000017,
+        "total": 32165.66330000013,
+        "jev": 2193.190799999982
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 5,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 139639,
+          "inputTokens": 138923,
+          "cachedInputTokens": 115712,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 716,
+          "reasoningOutputTokens": 566
+        },
+        "uncachedInputTokens": 23211,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.gutenberg.org/ebooks/search/?query=Jane+Austen&start_index=26",
+        "urlQueryRedacted": false,
+        "title": "Books: Jane Austen - Project Gutenberg",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1800.3827000000747,
+        "execution": 50575.04229999997,
+        "total": 52375.42500000005,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 8,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 250802,
+          "inputTokens": 249392,
+          "cachedInputTokens": 227072,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1410,
+          "reasoningOutputTokens": 1063
+        },
+        "uncachedInputTokens": 22320,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+        "urlQueryRedacted": false,
+        "title": "Frankenstein, by Mary Shelley - Free ebook download - Standard Ebooks: Free and liberated ebooks, carefully produced for",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1693.5204000000376,
+        "execution": 1189.2569000000367,
+        "total": 2882.7773000000743,
+        "jev": 1189.2290999999968
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+        "urlQueryRedacted": false,
+        "title": "Frankenstein, by Mary Shelley - Free ebook download - Standard Ebooks: Free and liberated ebooks, carefully produced for",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1271.31380000012,
+        "execution": 22096.542800000403,
+        "total": 23367.856600000523,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 105555,
+          "inputTokens": 105023,
+          "cachedInputTokens": 91136,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 532,
+          "reasoningOutputTokens": 382
+        },
+        "uncachedInputTokens": 13887,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+        "urlQueryRedacted": false,
+        "title": "Frankenstein, by Mary Shelley - Free ebook download - Standard Ebooks: Free and liberated ebooks, carefully produced for",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "standardebooks-frankenstein",
+      "site": "Standard Ebooks",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1513.3473999998532,
+        "execution": 1134.260500000324,
+        "total": 2647.6079000001773,
+        "jev": 1134.2047000001185
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://standardebooks.org/ebooks/mary-shelley/frankenstein",
+        "urlQueryRedacted": false,
+        "title": "Frankenstein, by Mary Shelley - Free ebook download - Standard Ebooks: Free and liberated ebooks, carefully produced for",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 3454.562900000019,
+        "execution": 40076.1017,
+        "total": 43530.66460000002,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 133374,
+          "inputTokens": 132365,
+          "cachedInputTokens": 115456,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1009,
+          "reasoningOutputTokens": 813
+        },
+        "uncachedInputTokens": 16909,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+        "urlQueryRedacted": false,
+        "title": "The Hobbit - recherche",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 2969.801899999962,
+        "execution": 2294.6771999999182,
+        "total": 5264.47909999988,
+        "jev": 2294.6340999999084
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+        "urlQueryRedacted": false,
+        "title": "search | Open Library",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2221.460099999793,
+        "execution": 31744.78230000008,
+        "total": 33966.24239999987,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 133276,
+          "inputTokens": 132446,
+          "cachedInputTokens": 115456,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 830,
+          "reasoningOutputTokens": 637
+        },
+        "uncachedInputTokens": 16990,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+        "urlQueryRedacted": false,
+        "title": "The Hobbit - recherche",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "openlibrary-hobbit",
+      "site": "Open Library",
+      "category": "catalog-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1821.8656000001356,
+        "execution": 31675.402699999977,
+        "total": 33497.26830000011,
+        "jev": 4121.846899999771
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 3,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 136136,
+          "inputTokens": 135282,
+          "cachedInputTokens": 116480,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 854,
+          "reasoningOutputTokens": 674
+        },
+        "uncachedInputTokens": 18802,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://openlibrary.org/search?q=The+Hobbit",
+        "urlQueryRedacted": false,
+        "title": "The Hobbit - recherche",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2133.537299999967,
+        "execution": 25842.675099999993,
+        "total": 27976.21239999996,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 116979,
+          "inputTokens": 116318,
+          "cachedInputTokens": 104192,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 661,
+          "reasoningOutputTokens": 491
+        },
+        "uncachedInputTokens": 12126,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://archive.org/search?query=Voynich+manuscript",
+        "urlQueryRedacted": true,
+        "title": "Internet Archive: Digital Library of Free & Borrowable Texts, Movies, Music & Wayback Machine",
+        "graderChecks": [
+          true,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1673.2121000000043,
+        "execution": 24673.49729999993,
+        "total": 26346.709399999934,
+        "jev": 558.3433000000659
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 1,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 90435,
+          "inputTokens": 89610,
+          "cachedInputTokens": 79872,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 825,
+          "reasoningOutputTokens": 688
+        },
+        "uncachedInputTokens": 9738,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://archive.org/search?query=Voynich+manuscript",
+        "urlQueryRedacted": true,
+        "title": "Internet Archive: Digital Library of Free & Borrowable Texts, Movies, Music & Wayback Machine",
+        "graderChecks": [
+          true,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1407.7313999999315,
+        "execution": 26709.324099999852,
+        "total": 28117.055499999784,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 89190,
+          "inputTokens": 88360,
+          "cachedInputTokens": 77824,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 830,
+          "reasoningOutputTokens": 693
+        },
+        "uncachedInputTokens": 10536,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://archive.org/search?query=Voynich+manuscript",
+        "urlQueryRedacted": true,
+        "title": "Internet Archive: Digital Library of Free & Borrowable Texts, Movies, Music & Wayback Machine",
+        "graderChecks": [
+          true,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "archive-voynich",
+      "site": "Internet Archive",
+      "category": "media-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1798.904099999927,
+        "execution": 35936.824500000104,
+        "total": 37735.72860000003,
+        "jev": 491.8632000000216
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 1,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 90834,
+          "inputTokens": 89783,
+          "cachedInputTokens": 79872,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1051,
+          "reasoningOutputTokens": 903
+        },
+        "uncachedInputTokens": 9911,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://archive.org/search?query=Voynich+manuscript",
+        "urlQueryRedacted": true,
+        "title": "Internet Archive: Digital Library of Free & Borrowable Texts, Movies, Music & Wayback Machine",
+        "graderChecks": [
+          true,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1613.7687999999616,
+        "execution": 47419.5551,
+        "total": 49033.32389999996,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 249029,
+          "inputTokens": 248075,
+          "cachedInputTokens": 221440,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 954,
+          "reasoningOutputTokens": 690
+        },
+        "uncachedInputTokens": 26635,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch",
+        "urlQueryRedacted": true,
+        "title": "Search media - Wikimedia Commons",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1471.0250000000233,
+        "execution": 2626.195399999968,
+        "total": 4097.220399999991,
+        "jev": 2626.106899999897
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch",
+        "urlQueryRedacted": true,
+        "title": "Search media - Wikimedia Commons",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1745.8079000003636,
+        "execution": 37819.24940000009,
+        "total": 39565.05730000045,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 183368,
+          "inputTokens": 182316,
+          "cachedInputTokens": 160256,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1052,
+          "reasoningOutputTokens": 819
+        },
+        "uncachedInputTokens": 22060,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch",
+        "urlQueryRedacted": true,
+        "title": "Search media - Wikimedia Commons",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "commons-lunar-images",
+      "site": "Wikimedia Commons",
+      "category": "media-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1627.498099999968,
+        "execution": 3784.0121999997646,
+        "total": 5411.5102999997325,
+        "jev": 3783.9843999999575
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://commons.wikimedia.org/w/index.php?search=Lunar+eclipse&title=Special%3AMediaSearch",
+        "urlQueryRedacted": true,
+        "title": "Search media - Wikimedia Commons",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1368.6995999999344,
+        "execution": 29847.809400000027,
+        "total": 31216.50899999996,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 139187,
+          "inputTokens": 138607,
+          "cachedInputTokens": 118528,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 580,
+          "reasoningOutputTokens": 400
+        },
+        "uncachedInputTokens": 20079,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nasa.gov/?search=Euclid",
+        "urlQueryRedacted": false,
+        "title": "208 Search Results for \"Euclid\"",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1478.8978999999817,
+        "execution": 30760.48609999998,
+        "total": 32239.38399999996,
+        "jev": 306.953199999989
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 1,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 167270,
+          "inputTokens": 166516,
+          "cachedInputTokens": 150016,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 754,
+          "reasoningOutputTokens": 528
+        },
+        "uncachedInputTokens": 16500,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nasa.gov/?search=Euclid",
+        "urlQueryRedacted": false,
+        "title": "208 Search Results for \"Euclid\"",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2122.0767999999225,
+        "execution": 41372.187700000126,
+        "total": 43494.26450000005,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 8,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 195295,
+          "inputTokens": 194277,
+          "cachedInputTokens": 174336,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1018,
+          "reasoningOutputTokens": 716
+        },
+        "uncachedInputTokens": 19941,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nasa.gov/?search=Euclid",
+        "urlQueryRedacted": false,
+        "title": "208 Search Results for \"Euclid\"",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nasa-euclid-search",
+      "site": "NASA",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 3871.029800000135,
+        "execution": 54720.90560000017,
+        "total": 58591.93540000031,
+        "jev": 520.2905000001192
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 1,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 199897,
+          "inputTokens": 198847,
+          "cachedInputTokens": 175360,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1050,
+          "reasoningOutputTokens": 790
+        },
+        "uncachedInputTokens": 23487,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nasa.gov/?search=Euclid",
+        "urlQueryRedacted": false,
+        "title": "208 Search Results for \"Euclid\"",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1503.4961000001058,
+        "execution": 39913.07290000003,
+        "total": 41416.569000000134,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 178308,
+          "inputTokens": 177438,
+          "cachedInputTokens": 157184,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 870,
+          "reasoningOutputTokens": 651
+        },
+        "uncachedInputTokens": 20254,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+        "urlQueryRedacted": false,
+        "title": "ESA - Euclid",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1477.409500000067,
+        "execution": 1801.9436999999452,
+        "total": 3279.3532000000123,
+        "jev": 1801.9235000000335
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+        "urlQueryRedacted": false,
+        "title": "ESA - Euclid",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1657.8688000002876,
+        "execution": 34190.89460000023,
+        "total": 35848.76340000052,
+        "jev": null
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 188866,
+          "inputTokens": 188069,
+          "cachedInputTokens": 164352,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 797,
+          "reasoningOutputTokens": 574
+        },
+        "uncachedInputTokens": 23717,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+        "urlQueryRedacted": false,
+        "title": "ESA - Euclid",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "esa-euclid",
+      "site": "European Space Agency",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1240.221700000111,
+        "execution": 2270.5440999995917,
+        "total": 3510.7657999997027,
+        "jev": 2270.5197999998927
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.esa.int/Science_Exploration/Space_Science/Euclid",
+        "urlQueryRedacted": false,
+        "title": "ESA - Euclid",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1252.7871000000741,
+        "execution": 40048.91819999996,
+        "total": 41301.70530000003,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 174516,
+          "inputTokens": 173197,
+          "cachedInputTokens": 158976,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1319,
+          "reasoningOutputTokens": 1063
+        },
+        "uncachedInputTokens": 14221,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+        "urlQueryRedacted": false,
+        "title": "Hay fever - NHS",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1297.1721000000834,
+        "execution": 1274.0141000000294,
+        "total": 2571.186200000113,
+        "jev": 1273.9967000000179
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+        "urlQueryRedacted": false,
+        "title": "Hay fever - NHS",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2542.846599999815,
+        "execution": 52545.02190000005,
+        "total": 55087.868499999866,
+        "jev": null
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 0,
+        "toolCalls": 9,
+        "batchCommandsRequested": 9,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 275455,
+          "inputTokens": 273848,
+          "cachedInputTokens": 252416,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1607,
+          "reasoningOutputTokens": 1248
+        },
+        "uncachedInputTokens": 21432,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+        "urlQueryRedacted": false,
+        "title": "Hay fever - NHS",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "nhs-hay-fever",
+      "site": "NHS",
+      "category": "site-search",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1525.4270999999717,
+        "execution": 1859.5600000000559,
+        "total": 3384.9871000000276,
+        "jev": 1859.5365999997593
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.nhs.uk/conditions/hay-fever/",
+        "urlQueryRedacted": false,
+        "title": "Hay fever - NHS",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1906.840899999952,
+        "execution": 12811.331300000194,
+        "total": 14718.172200000146,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 44341,
+          "inputTokens": 44134,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 207,
+          "reasoningOutputTokens": 145
+        },
+        "uncachedInputTokens": 4710,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+        "urlQueryRedacted": false,
+        "title": "Activité physique",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1882.124700000044,
+        "execution": 24242.07380000013,
+        "total": 26124.198500000173,
+        "jev": 430.343899999978
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 41935,
+          "inputTokens": 41579,
+          "cachedInputTokens": 36352,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 356,
+          "reasoningOutputTokens": 294
+        },
+        "uncachedInputTokens": 5227,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+        "urlQueryRedacted": false,
+        "title": "Activité physique",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 3072.286700000055,
+        "execution": 16048.696099999826,
+        "total": 19120.98279999988,
+        "jev": null
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 46019,
+          "inputTokens": 45798,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 221,
+          "reasoningOutputTokens": 150
+        },
+        "uncachedInputTokens": 6374,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+        "urlQueryRedacted": false,
+        "title": "Activité physique",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "who-physical-activity-french",
+      "site": "World Health Organization",
+      "category": "language",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 2271.917600000277,
+        "execution": 19232.553000000305,
+        "total": 21504.470600000583,
+        "jev": 2412.992199999746
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 2,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 45170,
+          "inputTokens": 44895,
+          "cachedInputTokens": 38400,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 275,
+          "reasoningOutputTokens": 221
+        },
+        "uncachedInputTokens": 6495,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.who.int/fr/news-room/fact-sheets/detail/physical-activity",
+        "urlQueryRedacted": false,
+        "title": "Activité physique",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1594.6661000000313,
+        "execution": 25319.084399999818,
+        "total": 26913.75049999985,
+        "jev": null
+      },
+      "counts": {
+        "actions": 0,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 40227,
+          "inputTokens": 39111,
+          "cachedInputTokens": 37376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1116,
+          "reasoningOutputTokens": 1077
+        },
+        "uncachedInputTokens": 1735,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/date/duration.html",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1866.6080000000075,
+        "execution": 57451.6706999999,
+        "total": 59318.27869999991,
+        "jev": 283.3792000000831
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 1,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 145128,
+          "inputTokens": 143294,
+          "cachedInputTokens": 136448,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1834,
+          "reasoningOutputTokens": 1612
+        },
+        "uncachedInputTokens": 6846,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/date/duration.html",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 3087.9536000001244,
+        "execution": 47296.020299999975,
+        "total": 50383.9739000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 122587,
+          "inputTokens": 121377,
+          "cachedInputTokens": 115200,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1210,
+          "reasoningOutputTokens": 1013
+        },
+        "uncachedInputTokens": 6177,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/date/duration.html",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-leap-duration",
+      "site": "timeanddate",
+      "category": "date-calculator",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 3312.5690999999642,
+        "execution": 24653.82449999964,
+        "total": 27966.393599999603,
+        "jev": 246.84269999992102
+      },
+      "counts": {
+        "actions": 0,
+        "jevDecisions": 1,
+        "toolCalls": 1,
+        "batchCommandsRequested": 1,
+        "batchCommandsExecuted": 1
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 40207,
+          "inputTokens": 39106,
+          "cachedInputTokens": 37376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1101,
+          "reasoningOutputTokens": 1062
+        },
+        "uncachedInputTokens": 1730,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/date/duration.html",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1683.1969999999274,
+        "execution": 44292.351999999955,
+        "total": 45975.54899999988,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 8,
+        "batchCommandsRequested": 8,
+        "batchCommandsExecuted": 8
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 185101,
+          "inputTokens": 184062,
+          "cachedInputTokens": 174848,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1039,
+          "reasoningOutputTokens": 745
+        },
+        "uncachedInputTokens": 9214,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/calendar/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1569.3022000000346,
+        "execution": 30201.841099999845,
+        "total": 31771.14329999988,
+        "jev": 621.8055999998469
+      },
+      "counts": {
+        "actions": 1,
+        "jevDecisions": 1,
+        "toolCalls": 4,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 101094,
+          "inputTokens": 100262,
+          "cachedInputTokens": 96000,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 832,
+          "reasoningOutputTokens": 646
+        },
+        "uncachedInputTokens": 4262,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/calendar/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 6190.842200000305,
+        "execution": 42650.19259999972,
+        "total": 48841.03480000002,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 6,
+        "batchCommandsRequested": 6,
+        "batchCommandsExecuted": 6
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 142827,
+          "inputTokens": 141911,
+          "cachedInputTokens": 134400,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 916,
+          "reasoningOutputTokens": 671
+        },
+        "uncachedInputTokens": 7511,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/calendar/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "timeanddate-calendar",
+      "site": "timeanddate",
+      "category": "calendar-options",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 3114.8957000002265,
+        "execution": 39466.24130000034,
+        "total": 42581.13700000057,
+        "jev": 320.95060000009835
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 1,
+        "toolCalls": 7,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 164714,
+          "inputTokens": 163638,
+          "cachedInputTokens": 155648,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1076,
+          "reasoningOutputTokens": 813
+        },
+        "uncachedInputTokens": 7990,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.timeanddate.com/calendar/",
+        "urlQueryRedacted": false,
+        "title": "Un instant...",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1513.9621999999508,
+        "execution": 29620.693599999882,
+        "total": 31134.655799999833,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 109649,
+          "inputTokens": 108769,
+          "cachedInputTokens": 96256,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 880,
+          "reasoningOutputTokens": 744
+        },
+        "uncachedInputTokens": 12513,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1331.065500000026,
+        "execution": 21597.343200000003,
+        "total": 22928.40870000003,
+        "jev": 2168.6410000000615
+      },
+      "counts": {
+        "actions": 8,
+        "jevDecisions": 6,
+        "toolCalls": 3,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 109675,
+          "inputTokens": 109189,
+          "cachedInputTokens": 93184,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 486,
+          "reasoningOutputTokens": 350
+        },
+        "uncachedInputTokens": 16005,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1280.3799999998882,
+        "execution": 30174.922799999826,
+        "total": 31455.302799999714,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 2,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 77206,
+          "inputTokens": 76603,
+          "cachedInputTokens": 64768,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 603,
+          "reasoningOutputTokens": 498
+        },
+        "uncachedInputTokens": 11835,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-bmi",
+      "site": "Calculator.net",
+      "category": "calculator-tabs",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1261.3174000000581,
+        "execution": 24289.540499999654,
+        "total": 25550.85789999971,
+        "jev": 2281.1533000003546
+      },
+      "counts": {
+        "actions": 9,
+        "jevDecisions": 6,
+        "toolCalls": 3,
+        "batchCommandsRequested": 5,
+        "batchCommandsExecuted": 5
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 110009,
+          "inputTokens": 109330,
+          "cachedInputTokens": 93184,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 679,
+          "reasoningOutputTokens": 504
+        },
+        "uncachedInputTokens": 16146,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/bmi-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "BMI Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cage": [
+            {
+              "value": "35",
+              "checked": false
+            }
+          ],
+          "#cheightmeter": [
+            {
+              "value": "180",
+              "checked": false
+            }
+          ],
+          "#ckg": [
+            {
+              "value": "75",
+              "checked": false
+            }
+          ],
+          "#csex1": [
+            {
+              "value": "m",
+              "checked": true
+            }
+          ],
+          "#ctype": [
+            {
+              "value": "metric",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1173.4655000001658,
+        "execution": 15984.529300000053,
+        "total": 17157.99480000022,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 48610,
+          "inputTokens": 48178,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 432,
+          "reasoningOutputTokens": 325
+        },
+        "uncachedInputTokens": 8754,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/percent-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cpar1": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "#cpar2": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1305.4131000000052,
+        "execution": 32369.5728000002,
+        "total": 33674.9859000002,
+        "jev": 1234.496099999873
+      },
+      "counts": {
+        "actions": 6,
+        "jevDecisions": 4,
+        "toolCalls": 2,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 78756,
+          "inputTokens": 78027,
+          "cachedInputTokens": 65792,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 729,
+          "reasoningOutputTokens": 618
+        },
+        "uncachedInputTokens": 12235,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/percent-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cpar1": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "#cpar2": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1319.7434000000358,
+        "execution": 9547.526399999857,
+        "total": 10867.269799999893,
+        "jev": null
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 48409,
+          "inputTokens": 48133,
+          "cachedInputTokens": 39424,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 276,
+          "reasoningOutputTokens": 199
+        },
+        "uncachedInputTokens": 8709,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/percent-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cpar1": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "#cpar2": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatornet-percent",
+      "site": "Calculator.net",
+      "category": "calculator",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1672.0159999998286,
+        "execution": 24888.704200000037,
+        "total": 26560.720199999865,
+        "jev": 1386.3078000000678
+      },
+      "counts": {
+        "actions": 6,
+        "jevDecisions": 4,
+        "toolCalls": 2,
+        "batchCommandsRequested": 4,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 78642,
+          "inputTokens": 77850,
+          "cachedInputTokens": 65792,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 792,
+          "reasoningOutputTokens": 657
+        },
+        "uncachedInputTokens": 12058,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculator.net/percent-calculator.html",
+        "urlQueryRedacted": true,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#cpar1": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "#cpar2": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1987.7850999999791,
+        "execution": 63055.07990000001,
+        "total": 65042.86499999999,
+        "jev": null
+      },
+      "counts": {
+        "actions": null,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 172235,
+          "inputTokens": 170823,
+          "cachedInputTokens": 154112,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1412,
+          "reasoningOutputTokens": 1153
+        },
+        "uncachedInputTokens": 16711,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": null,
+        "urlQueryRedacted": false,
+        "title": null,
+        "graderChecks": [],
+        "graderPassed": false,
+        "controls": {
+          "input[name=\"P1\"]": [],
+          "input[name=\"X1\"]": []
+        },
+        "errorCategory": "connection",
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1759.5120999999344,
+        "execution": 1235.3605000001844,
+        "total": 2994.872600000119,
+        "jev": 1235.3353999999817
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 3,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+        "urlQueryRedacted": false,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "input[name=\"P1\"]": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "input[name=\"X1\"]": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2238.38049999997,
+        "execution": 45467.97729999991,
+        "total": 47706.35779999988,
+        "jev": null
+      },
+      "counts": {
+        "actions": null,
+        "jevDecisions": 0,
+        "toolCalls": 5,
+        "batchCommandsRequested": 7,
+        "batchCommandsExecuted": 4
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 168141,
+          "inputTokens": 166951,
+          "cachedInputTokens": 151040,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1190,
+          "reasoningOutputTokens": 936
+        },
+        "uncachedInputTokens": 15911,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": null,
+        "urlQueryRedacted": false,
+        "title": null,
+        "graderChecks": [],
+        "graderPassed": false,
+        "controls": {
+          "input[name=\"P1\"]": [],
+          "input[name=\"X1\"]": []
+        },
+        "errorCategory": "connection",
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "calculatorsoup-percent",
+      "site": "CalculatorSoup",
+      "category": "calculator",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 2150.7648999998346,
+        "execution": 1773.3220999999903,
+        "total": 3924.086999999825,
+        "jev": 1773.2992999996059
+      },
+      "counts": {
+        "actions": 3,
+        "jevDecisions": 4,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.calculatorsoup.com/calculators/math/percentage.php",
+        "urlQueryRedacted": false,
+        "title": "Percentage Calculator",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "input[name=\"P1\"]": [
+            {
+              "value": "17",
+              "checked": false
+            }
+          ],
+          "input[name=\"X1\"]": [
+            {
+              "value": "240",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1523.7007999999914,
+        "execution": 23685.34729999979,
+        "total": 25209.04809999978,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 3,
+        "batchCommandsRequested": 3,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 119739,
+          "inputTokens": 119203,
+          "cachedInputTokens": 99328,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 536,
+          "reasoningOutputTokens": 409
+        },
+        "uncachedInputTokens": 19875,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+        "urlQueryRedacted": false,
+        "title": "Convert meters to feet",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#ucfrom": [
+            {
+              "value": "7.25",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1181.6528000000399,
+        "execution": 756.5105000000913,
+        "total": 1938.1633000001311,
+        "jev": 756.4883999999147
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 2,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+        "urlQueryRedacted": false,
+        "title": "Convert meters to feet",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#ucfrom": [
+            {
+              "value": "7.25",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1358.2987000001594,
+        "execution": 21299.086099999957,
+        "total": 22657.384800000116,
+        "jev": null
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 0,
+        "toolCalls": 1,
+        "batchCommandsRequested": 2,
+        "batchCommandsExecuted": 2
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 51749,
+          "inputTokens": 51025,
+          "cachedInputTokens": 40448,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 724,
+          "reasoningOutputTokens": 648
+        },
+        "uncachedInputTokens": 10577,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+        "urlQueryRedacted": false,
+        "title": "Convert meters to feet",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#ucfrom": [
+            {
+              "value": "7.25",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "unitconverters-length",
+      "site": "UnitConverters.net",
+      "category": "client-calculator",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": "succeeded",
+      "timingMs": {
+        "startup": 1358.9459999999963,
+        "execution": 766.3865000000224,
+        "total": 2125.3325000000186,
+        "jev": 766.3621000000276
+      },
+      "counts": {
+        "actions": 2,
+        "jevDecisions": 2,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.unitconverters.net/length/meters-to-feet.htm",
+        "urlQueryRedacted": false,
+        "title": "Convert meters to feet",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#ucfrom": [
+            {
+              "value": "7.25",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1274.7524999999441,
+        "execution": 120002.51090000011,
+        "total": 121277.26340000005,
+        "jev": null
+      },
+      "counts": {
+        "actions": 10,
+        "jevDecisions": 0,
+        "toolCalls": 13,
+        "batchCommandsRequested": 19,
+        "batchCommandsExecuted": 13
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 705278,
+          "inputTokens": 701269,
+          "cachedInputTokens": 621312,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 4009,
+          "reasoningOutputTokens": 3436
+        },
+        "uncachedInputTokens": 79957,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+        "urlQueryRedacted": false,
+        "title": "HTML Color Picker",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {
+          "#html5colorpicker": [
+            {
+              "value": "#000000",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1492.5722999998834,
+        "execution": 120002.80819999985,
+        "total": 121495.38049999974,
+        "jev": 1380.748499999987
+      },
+      "counts": {
+        "actions": 7,
+        "jevDecisions": 3,
+        "toolCalls": 10,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 8
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 513037,
+          "inputTokens": 508853,
+          "cachedInputTokens": 442880,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 4184,
+          "reasoningOutputTokens": 3797
+        },
+        "uncachedInputTokens": 65973,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+        "urlQueryRedacted": false,
+        "title": "HTML Color Picker",
+        "graderChecks": [
+          false,
+          false
+        ],
+        "graderPassed": false,
+        "controls": {
+          "#html5colorpicker": [
+            {
+              "value": "#000000",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1480.6895000003278,
+        "execution": 69460.89850000013,
+        "total": 70941.58800000045,
+        "jev": null
+      },
+      "counts": {
+        "actions": 7,
+        "jevDecisions": 0,
+        "toolCalls": 9,
+        "batchCommandsRequested": 11,
+        "batchCommandsExecuted": 9
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 499236,
+          "inputTokens": 496920,
+          "cachedInputTokens": 397056,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 2316,
+          "reasoningOutputTokens": 1918
+        },
+        "uncachedInputTokens": 99864,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/colors/colors_picker.asp",
+        "urlQueryRedacted": false,
+        "title": "HTML Color Picker",
+        "graderChecks": [
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {
+          "#html5colorpicker": [
+            {
+              "value": "#336699",
+              "checked": false
+            }
+          ]
+        },
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-color",
+      "site": "W3Schools",
+      "category": "client-state",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1387.1253999997862,
+        "execution": 68836.42639999976,
+        "total": 70223.55179999955,
+        "jev": 1506.0455999998376
+      },
+      "counts": {
+        "actions": null,
+        "jevDecisions": 3,
+        "toolCalls": 8,
+        "batchCommandsRequested": 8,
+        "batchCommandsExecuted": 3
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 298246,
+          "inputTokens": 296387,
+          "cachedInputTokens": 272128,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 1859,
+          "reasoningOutputTokens": 1511
+        },
+        "uncachedInputTokens": 24259,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": null,
+        "urlQueryRedacted": false,
+        "title": null,
+        "graderChecks": [],
+        "graderPassed": false,
+        "controls": {
+          "#html5colorpicker": []
+        },
+        "errorCategory": "connection",
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "mode": "luna",
+      "run": 1,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2472.9177999999374,
+        "execution": 120000.39870000002,
+        "total": 122473.31649999996,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 13,
+        "batchCommandsRequested": 13,
+        "batchCommandsExecuted": 10
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 504371,
+          "inputTokens": 500804,
+          "cachedInputTokens": 453376,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3567,
+          "reasoningOutputTokens": 3103
+        },
+        "uncachedInputTokens": 47428,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+        "urlQueryRedacted": false,
+        "title": "Python String Methods",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1215.5973999998532,
+        "execution": 120000.30050000013,
+        "total": 121215.89789999998,
+        "jev": 818.1155000000726
+      },
+      "counts": {
+        "actions": 14,
+        "jevDecisions": 2,
+        "toolCalls": 18,
+        "batchCommandsRequested": 26,
+        "batchCommandsExecuted": 20
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 927781,
+          "inputTokens": 923203,
+          "cachedInputTokens": 847360,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 4578,
+          "reasoningOutputTokens": 3834
+        },
+        "uncachedInputTokens": 75843,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+        "urlQueryRedacted": true,
+        "title": "Python String Methods",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "mode": "luna",
+      "run": 2,
+      "verified": false,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2616.779600000009,
+        "execution": 120001.38180000009,
+        "total": 122618.1614000001,
+        "jev": null
+      },
+      "counts": {
+        "actions": 11,
+        "jevDecisions": 0,
+        "toolCalls": 16,
+        "batchCommandsRequested": 26,
+        "batchCommandsExecuted": 20
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 726906,
+          "inputTokens": 722947,
+          "cachedInputTokens": 663552,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3959,
+          "reasoningOutputTokens": 3272
+        },
+        "uncachedInputTokens": 59395,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+        "urlQueryRedacted": false,
+        "title": "Python String Methods",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3schools-startswith",
+      "site": "W3Schools",
+      "category": "reference-navigation",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1754.0723999999464,
+        "execution": 120000.8422000003,
+        "total": 121754.91460000025,
+        "jev": 1394.282399999909
+      },
+      "counts": {
+        "actions": 12,
+        "jevDecisions": 3,
+        "toolCalls": 14,
+        "batchCommandsRequested": 20,
+        "batchCommandsExecuted": 14
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "missing",
+        "timedOut": true,
+        "tokenUsage": {
+          "totalTokens": 679217,
+          "inputTokens": 673432,
+          "cachedInputTokens": 608768,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5785,
+          "reasoningOutputTokens": 5202
+        },
+        "uncachedInputTokens": 64664,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3schools.com/python/python_ref_string.asp",
+        "urlQueryRedacted": false,
+        "title": "Python String Methods",
+        "graderChecks": [
+          false,
+          true
+        ],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "luna",
+      "run": 1,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 1379.780899999896,
+        "execution": 85018.36609999998,
+        "total": 86398.14699999988,
+        "jev": null
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 0,
+        "toolCalls": 8,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 8
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 353172,
+          "inputTokens": 349486,
+          "cachedInputTokens": 307968,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3686,
+          "reasoningOutputTokens": 3313
+        },
+        "uncachedInputTokens": 41518,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3.org/TR/css-color-3/",
+        "urlQueryRedacted": false,
+        "title": "CSS Color Module Level 3",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "hybrid",
+      "run": 1,
+      "verified": true,
+      "fallback": true,
+      "jevOutcome": "needs-agent",
+      "timingMs": {
+        "startup": 1484.4975000000559,
+        "execution": 102150.06059999997,
+        "total": 103634.55810000002,
+        "jev": 14310.098500000313
+      },
+      "counts": {
+        "actions": 5,
+        "jevDecisions": 10,
+        "toolCalls": 8,
+        "batchCommandsRequested": 10,
+        "batchCommandsExecuted": 8
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 343347,
+          "inputTokens": 339687,
+          "cachedInputTokens": 295680,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3660,
+          "reasoningOutputTokens": 3318
+        },
+        "uncachedInputTokens": 44007,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3.org/TR/css-color-3/",
+        "urlQueryRedacted": false,
+        "title": "CSS Color Module Level 3",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "luna",
+      "run": 2,
+      "verified": true,
+      "fallback": false,
+      "jevOutcome": null,
+      "timingMs": {
+        "startup": 2019.1258000005037,
+        "execution": 89563.07219999935,
+        "total": 91582.19799999986,
+        "jev": null
+      },
+      "counts": {
+        "actions": 4,
+        "jevDecisions": 0,
+        "toolCalls": 8,
+        "batchCommandsRequested": 9,
+        "batchCommandsExecuted": 7
+      },
+      "model": {
+        "configAcknowledged": true,
+        "turnStatus": "completed",
+        "timedOut": false,
+        "tokenUsage": {
+          "totalTokens": 349938,
+          "inputTokens": 346828,
+          "cachedInputTokens": 304896,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 3110,
+          "reasoningOutputTokens": 2751
+        },
+        "uncachedInputTokens": 41932,
+        "lastSumMatchesTotal": true,
+        "unexpectedToolCount": 0
+      },
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": "https://www.w3.org/TR/css-color-3/",
+        "urlQueryRedacted": false,
+        "title": "CSS Color Module Level 3",
+        "graderChecks": [
+          true,
+          true,
+          true
+        ],
+        "graderPassed": true,
+        "controls": {},
+        "errorCategory": null,
+        "recordingErrorCategory": null
+      }
+    },
+    {
+      "task": "w3c-css-recommendation",
+      "site": "W3C",
+      "category": "filters-and-accordion",
+      "mode": "hybrid",
+      "run": 2,
+      "verified": false,
+      "fallback": true,
+      "jevOutcome": "error",
+      "timingMs": {
+        "startup": 1579.6264999997802,
+        "execution": null,
+        "total": null,
+        "jev": 3039.581499999389
+      },
+      "counts": {
+        "actions": null,
+        "jevDecisions": 2,
+        "toolCalls": 0,
+        "batchCommandsRequested": 0,
+        "batchCommandsExecuted": 0
+      },
+      "model": null,
+      "cleanup": {
+        "browserProcessesAfter": 0,
+        "errorCategory": null
+      },
+      "outcome": {
+        "finalUrl": null,
+        "urlQueryRedacted": false,
+        "title": null,
+        "graderChecks": [],
+        "graderPassed": false,
+        "controls": {},
+        "errorCategory": "connection",
+        "recordingErrorCategory": null
+      }
+    }
+  ]
+}
