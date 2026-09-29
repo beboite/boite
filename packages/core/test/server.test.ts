@@ -57,6 +57,35 @@ function opened(socket: WebSocket): Promise<void> {
 }
 
 describe('server', () => {
+  test('an RPC burst lets another client read before the burst ends', async () => {
+    const sender = await harness.connect();
+    const reader = await harness.connect();
+    let processed = 0, observed = -1, healthObserved = -1;
+    let health: Promise<void> | undefined;
+    harness.core.router.register('projects.list', () => {
+      const deadline = performance.now() + 3;
+      while (performance.now() < deadline) { /* bounded synchronous work */ }
+      processed++;
+      if (processed === 1) health = fetch(`${harness.server.url}/health`).then(response => {
+        healthObserved = processed;
+        expect(response.ok).toBe(true);
+      });
+      return [];
+    });
+    harness.core.router.register('settings.get', () => {
+      observed = processed;
+      return harness.core.settings.get();
+    });
+    const burst = Promise.all(Array.from({ length: 64 }, () => sender.call('projects.list', {})));
+    void burst.catch(() => undefined);
+    await reader.call('settings.get', {});
+    await burst;
+    await health;
+    expect(processed).toBe(64);
+    expect(observed).toBeLessThan(processed);
+    expect(healthObserved).toBeLessThan(processed);
+  });
+
   test('drain sends the journal including deltas still inside the coalescing window', () => {
     const journal = harness.core.journal;
     journal.putMessage({ id: 'msg_drain', threadId: 'thr_drain', turnId: 'turn_drain', role: 'assistant',

@@ -28,6 +28,17 @@ phone captures. `BOITE_STRESS_ARTIFACTS` selects the capture directory.
 The smaller six-process regression runs in the normal core suite and starts a
 fresh core so earlier tests cannot hide a race in first-use imports.
 
+Authenticated RPC requests rotate between connections in four-millisecond
+slices. At most eight handlers per connection and 64 overall can wait on
+asynchronous work. The queue retains at most 4,096 frames or 64 MiB of text,
+including active requests; overflow closes the requesting connection with a
+reconnect reason. Disconnect and shutdown discard work that has not started.
+The prompt and its queued status commit together before its driver starts.
+
+Scheduler notifications publish the newest snapshot in each 16-millisecond
+window. Turn, message and permission events keep their immediate delivery.
+`scheduler.get` always reads the current state.
+
 On Windows with Bun 1.4.2, 2026-09-29:
 
 | Scenario | Observed result |
@@ -36,16 +47,21 @@ On Windows with Bun 1.4.2, 2026-09-29:
 | 1,000 echo threads, one observer, initial baseline | Both streaming bursts completed with exact answers; all 1,000 turns cancelled and recovered after a crash |
 | Same baseline, core memory at 64 concurrent turns | 115.8 MiB; this excludes real agent processes |
 | Same baseline, scheduler payloads | 163.3 MiB of decoded scheduler JSON on one connection during the 64-turn burst |
-| 1,000 threads and 12 additional readers, independent health observer | Three HTTP requests timed out after ten seconds each; turn-start requests exceeded thirty seconds |
-| Production UI, 1,000 threads and a 256-turn burst | Scheduler RPC timed out after ten seconds; desktop and phone failure captures were produced; browser teardown also exceeded its exit deadline |
+| 1,000 threads and 12 additional readers before request pacing | Three HTTP requests timed out after ten seconds each; turn-start requests exceeded thirty seconds |
+| Same load after bounded dispatch and snapshot coalescing | Both bursts passed with exact streams; six concurrent turns took 60.0 s and 64 took 59.4 s |
+| Same run, independent health | No timeouts; p95 217/660 ms and maximum 1.81/3.51 s at six/64 concurrent turns |
+| Same run, scheduler payloads at 64 concurrent turns | 7.0 MiB of decoded JSON on the owner connection |
+| Same run, mass cancellation and crash recovery | All 1,000 turns cancelled in 19.5 s; 64 running and 936 queued turns recovered after an 8.1 s restart |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.99 s, typing in 3.7 ms and maximum timer lag 36 ms; desktop and phone checked |
 
-The load failure remains open. Scheduler updates send the whole queue on each
-change, so a burst grows both the number and size of snapshots; this is a
-candidate for profiling, not a confirmed explanation for every stall.
 Background machine load was not controlled. These single runs establish
 failures and reproducible checks. They do not
 establish a supported agent count or measure real provider quotas, agent RAM,
 the native shell, Linux or macOS under this load.
+The UI test gives background RPCs the benchmark's 30-second deadline, while
+the application uses 120 seconds. Visible replies keep a 30-second deadline;
+typing and individual browser tasks must stay below five seconds. Foreground
+timing excludes the separate wait for the background batch to be accepted.
 
 ## Naming a long conversation
 

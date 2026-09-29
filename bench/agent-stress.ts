@@ -1,6 +1,6 @@
 /** Offline load test over real RPC, persistence and streaming. No provider login is used. */
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Message, ThreadSummary, Turn } from '../packages/contracts/src/index.ts';
 import { connect, type CoreClient } from '../packages/core/src/client.ts';
@@ -18,6 +18,11 @@ function argument(name: string, fallback: number, minimum = 1): number {
 const count = argument('threads', 1_000);
 const cap = argument('concurrency', 64);
 const readers = argument('clients', 12, 0);
+const coreIndex = process.argv.indexOf('--core');
+const coreEntry = coreIndex < 0 ? null : process.argv[coreIndex + 1];
+assert(coreIndex < 0 || (coreEntry && !coreEntry.startsWith('--') && existsSync(coreEntry) && statSync(coreEntry).isFile()),
+  '--core must name an existing core entry file');
+const coreOptions = coreEntry ? { command: [process.execPath, 'run', resolve(coreEntry)] } : {};
 const outputIndex = process.argv.indexOf('--output');
 const output = resolve(outputIndex < 0 ? 'bench/results/agent-stress.json' : process.argv[outputIndex + 1]!);
 const report: Record<string, unknown> = {
@@ -85,7 +90,7 @@ function observe(client: CoreClient) {
 }
 
 try {
-  core = await startCore();
+  core = await startCore(coreOptions);
   const owner = await connect(core.url, core.token, { requestTimeoutMs: 30_000 });
   clients.push(owner);
   await owner.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
@@ -139,6 +144,7 @@ try {
     const start = performance.now();
     try {
       const turns = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt })));
+      const acceptMs = performance.now() - start;
       await until(() => turns.every(t => watchers[0]!.finished.has(t.id)), 'all turns finish');
       await until(() => watchers.slice(1).every(w => turns.slice(0, watched.length).every(t => w.finished.has(t.id))), 'reader finishes');
       const wallMs = performance.now() - start;
@@ -162,7 +168,7 @@ try {
       assert.deepEqual(violations, []);
       const settled = await owner.call('scheduler.get', {});
       assert.equal(settled.running.length + settled.queued.length, 0);
-      record({ scenario: 'streaming burst', concurrency, completed: turns.length, wallMs, maxRunning, maxQueued,
+      record({ scenario: 'streaming burst', concurrency, completed: turns.length, acceptMs, wallMs, maxRunning, maxQueued,
         healthSamples: healthMs.length, healthP95Ms: healthMs.toSorted((a,b) => a-b)[Math.floor(healthMs.length * .95)],
         healthMaxMs: Math.max(...healthMs), coreBytes: workingSet(core.pid), schedulerPayloadBytesOnOneConnection: schedulerBytes });
     } catch (error) {
@@ -201,7 +207,7 @@ try {
   record({ scenario: 'reader reconnect', uninterruptedTurns: reconnectTurns.length, incrementalSnapshot: catchUp.messagesFrom === firstDelta.messageId });
 
   await owner.call('settings.set', { maxConcurrentTurns: cap, perAccountConcurrency: cap });
-  const interrupted = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:60000] must be stopped' })));
+  const interrupted = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] must be stopped' })));
   const busy = await owner.call('scheduler.get', {});
   assert.equal(busy.running.length, Math.min(cap, count));
   assert.equal(busy.queued.length, Math.max(0, count - cap));
@@ -212,7 +218,7 @@ try {
   assert.equal((await owner.call('scheduler.get', {})).queued.length, 0);
   record({ scenario: 'mass cancellation', stopped: interrupted.length, wallMs: performance.now() - stopStart });
 
-  const lost = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:60000] interrupted by crash' })));
+  const lost = await Promise.all(created.map(t => owner.call('turns.start', { threadId: t.id, prompt: '[sleep:3600000] interrupted by crash' })));
   const beforeCrash = await owner.call('scheduler.get', {});
   assert.equal(beforeCrash.running.length + beforeCrash.queued.length, count);
   const dataDir = core.dataDir;
@@ -220,7 +226,7 @@ try {
   for (const client of clients.splice(0)) client.close();
   await core.stop({ keepDataDir: true });
   const restartStart = performance.now();
-  core = await startCore({ dataDir });
+  core = await startCore({ ...coreOptions, dataDir });
   const recovered = await connect(core.url, core.token);
   clients.push(recovered);
   const restartMs = performance.now() - restartStart;

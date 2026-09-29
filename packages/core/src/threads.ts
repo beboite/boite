@@ -586,19 +586,22 @@ export class ThreadStore {
       createdAt: now,
     };
 
-    this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
-      this.core.delegation.reserveTurn(threadId, operation);
-      this.core.journal.putTurn(turn);
-      this.core.journal.putMessage(message);
-      if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
-      if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
-    });
-    // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
-    if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
-    if (!activity && !operation) this.core.activity.userPrompt(threadId);
-    this.core.bus.emit('message.started', message);
-    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
-    this.setStatus(threadId, 'queued');
+    // Accept the prompt and its queued status in one commit before starting the driver.
+    this.core.journal.db.transaction(() => {
+      this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
+        this.core.delegation.reserveTurn(threadId, operation);
+        this.core.journal.putTurn(turn);
+        this.core.journal.putMessage(message);
+        if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
+        if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
+      });
+      // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
+      if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
+      if (!activity && !operation) this.core.activity.userPrompt(threadId);
+      this.core.bus.emit('message.started', message);
+      this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+      this.setStatus(threadId, 'queued');
+    })();
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
   }
@@ -665,11 +668,13 @@ export class ThreadStore {
     const turn = this.core.journal.getTurn(turnId);
     if (turn === null) return;
     const next: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
-    this.core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
-      this.core.journal.putTurn(next);
-    });
-    this.core.bus.emit('turn.finished', next);
-    this.setStatus(turn.threadId, 'idle');
+    this.core.journal.db.transaction(() => {
+      this.core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
+        this.core.journal.putTurn(next);
+      });
+      this.core.bus.emit('turn.finished', next);
+      this.setStatus(turn.threadId, 'idle');
+    })();
     if (turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
   }
 

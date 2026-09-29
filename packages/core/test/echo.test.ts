@@ -555,19 +555,26 @@ describe('echo driver', () => {
     await client.call('threads.subscribe', { threadId });
 
     const started: RpcEvents['process.started'][] = [];
+    let rootPid: number | undefined;
     client.on('process.started', (record) => {
-      if (record.threadId === threadId) started.push(record);
+      if (record.threadId === threadId) {
+        started.push(record);
+        if (record.commandLine?.includes('echo hello')) rootPid = record.pid;
+      }
     });
-    const exited = client.next('process.exited', (record) => record.threadId === threadId, 10000);
+    const exited = client.next('process.exited', (record) => record.threadId === threadId && record.pid === rootPid, 10000);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
 
     await client.call('turns.start', { threadId, prompt: '[spawn:echo hello]' });
     const done = await finished;
     expect(done.status).toBe('done');
 
-    expect(started).toHaveLength(1);
-    expect(started[0]?.commandLine).toContain('echo hello');
+    // Windows also traces the console process; match the command we spawned by PID.
+    const roots = started.filter(record => record.commandLine?.includes('echo hello'));
+    expect(roots).toHaveLength(1);
+    const root = roots[0]!;
     const exitEvent = await exited;
+    expect(exitEvent.pid).toBe(root.pid);
     expect(exitEvent.exitCode).toBe(0);
 
     const thread = await client.call('threads.get', { threadId });
@@ -576,17 +583,18 @@ describe('echo driver', () => {
     expect(text).toContain('hello');
 
     const trace = await client.call('trace.get', { threadId });
-    expect(trace).toHaveLength(1);
-    expect(trace[0]?.exitCode).toBe(0);
+    const traced = trace.filter(record => record.pid === root.pid);
+    expect(traced).toHaveLength(1);
+    expect(traced[0]?.exitCode).toBe(0);
     // The child wrote `hello` into a pipe, so WriteTransferCount is above zero
     // wherever Job Objects read the counters. Elsewhere the poll path measures
     // nothing and the field stays null.
     if (process.platform === 'win32') {
-      expect(trace[0]?.ioBytes).toBeGreaterThan(0);
+      expect(traced[0]?.ioBytes).toBeGreaterThan(0);
     } else {
-      expect(trace[0]?.ioBytes).toBeNull();
+      expect(traced[0]?.ioBytes).toBeNull();
     }
-    expect(exitEvent.ioBytes).toBe(trace[0]?.ioBytes ?? null);
+    expect(exitEvent.ioBytes).toBe(traced[0]?.ioBytes ?? null);
   });
 
   test('an error directive fails the turn loudly', async () => {

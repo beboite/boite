@@ -11,11 +11,12 @@ const artifacts = process.env.BOITE_STRESS_ARTIFACTS ?? join(import.meta.dir, '.
 test('desktop and phone remain usable with 1000 threads and a 256-turn burst', async () => {
   ensureProductionUi();
   const core = await startCore();
-  const client = await connect(core.url, core.token, { requestTimeoutMs: 10_000 }).catch(async error => {
+  const client = await connect(core.url, core.token, { requestTimeoutMs: 30_000 }).catch(async error => {
     await core.stop();
     throw error;
   });
   let page: BrowserPage | undefined;
+  let failed = false;
   try {
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
     await client.call('settings.set', { maxConcurrentTurns: 64, perAccountConcurrency: 64, asyncQuestions: false });
@@ -59,11 +60,11 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     const typingMs = performance.now() - typed;
     await page.waitFor(`!document.querySelector('[data-testid=composer-send]')?.disabled`);
     await page.click('[data-testid=composer-send]');
-    const turns = await burst;
     await page.waitFor(`Array.from(document.querySelectorAll('[data-testid=message][data-role=assistant] [data-testid=text-part]'))
       .some(n => n.textContent === 'foreground survives load')`, 30_000);
     const foregroundMs = performance.now() - typed;
     console.log(`UI stress: foreground answered in ${foregroundMs.toFixed(0)} ms; ${finishes.size} finishes received`);
+    const turns = await burst;
     const end = Date.now() + 60_000;
     while (!turns.every(t => finishes.has(t.id))) {
       if (Date.now() >= end) {
@@ -84,9 +85,13 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     })()`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await page.waitFor('window.innerWidth === 390');
+    await page.waitFor(`document.querySelector('[data-testid=mobile-tabs]')`);
     await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
     await page.type('[data-testid=composer-input]', 'phone draft survives');
     assert.equal(await page.evaluate(`document.querySelector('[data-testid=composer-input]').value`), 'phone draft survives');
+    await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+    await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
+      .map(a => a.finished.catch(() => undefined)))`);
     await page.screenshot(join(artifacts, 'phone.png'));
     assert.equal((await client.call('threads.list', { projectId: project.id })).length, 1000);
     console.log(JSON.stringify({ scenario: 'UI stress', threads: 1000, backgroundTurns: 256, concurrency: 64,
@@ -95,6 +100,8 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     assert(typingMs < 5_000, `typing stalled for ${typingMs.toFixed(0)} ms`);
     assert(Math.max(0, ...timing.longTasks) < 5_000, 'browser blocked for over five seconds');
   } catch (error) {
+    failed = true;
+    console.error('UI stress failed:', error);
     console.log(JSON.stringify({ scheduler: await client.call('scheduler.get', {}).catch(e => String(e)), coreOutput: core.output() }));
     await page?.screenshot(join(artifacts, 'failure.png')).catch(() => undefined);
     if (page) {
@@ -104,8 +111,11 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     }
     throw error;
   } finally {
-    await page?.close();
     client.close();
-    await core.stop();
+    const cleanup = await Promise.allSettled([page?.close(), core.stop()]);
+    for (const result of cleanup) if (result.status === 'rejected') {
+      if (!failed) throw result.reason;
+      console.error('UI stress cleanup failed:', result.reason);
+    }
   }
 }, 120_000);

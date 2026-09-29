@@ -639,7 +639,7 @@ it came from, and rerun before quoting an old one.
 
 Core tests default to 15 seconds per case because scripted driver tests start
 several traced child processes. Their explicit protocol and shutdown deadlines
-still apply. The parallel runner uses at most eight worker processes and eight
+still apply. The parallel runner uses at most four worker processes and four
 concurrent cases per worker, instead of deriving its worker count from all host
 CPUs. Override the default with `bun run --cwd packages/core test --timeout 5000`
 when reproducing a timing failure. A slow assertion still fails; this timeout
