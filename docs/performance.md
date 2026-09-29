@@ -33,17 +33,26 @@ fresh core so earlier tests cannot hide a race in first-use imports.
 
 Authenticated RPC requests rotate between connections in four-millisecond
 slices. At most eight handlers per connection and 64 overall can wait on
-asynchronous work. The queue retains at most 4,096 frames or 64 MiB of text,
-including active requests; overflow closes the requesting connection with a
-reconnect reason. Disconnect and shutdown discard work that has not started.
+asynchronous work. Each connection retains at most 1,024 frames or 32 MiB of
+text; the total stays below 4,096 frames or 64 MiB, including active requests.
+A sender exceeding its limit closes with a reconnect reason. At the shared
+limit, the largest queued contributor closes to leave room for other readers.
+Active work keeps its capacity until completion; when only active work fills
+the shared byte limit, a new request is refused. Disconnect and shutdown
+discard work that has not started.
 The prompt and its queued status commit together before its driver starts.
-Synchronous driver startup writes share a second transaction. The finished
+The running turn and thread status share a second transaction before driver
+startup. The finished
 turn and final thread state also commit together; awaited driver work and
-pending moves stay outside these transactions.
+pending moves stay outside these transactions. In-process listeners stay
+synchronous; network notifications wait for commit and are discarded on rollback.
 
 Scheduler notifications publish the newest snapshot in each 16-millisecond
-window. Turn, message and permission events keep their immediate delivery.
+window. Other events go out as soon as their storage writes commit.
 `scheduler.get` always reads the current state.
+Sidebar pull-request lookups share requests for the same thread and run four
+at a time per client. A manual refresh goes ahead of background lookups, so
+mounting or remounting thousands of rows cannot flood the RPC connection.
 
 Initial measurements on Windows with Bun 1.4.2, 2026-09-29, before scheduler
 launch limits were retired:
@@ -66,12 +75,12 @@ passed on 2026-09-29 after grouping synchronous startup and completion writes:
 
 | Scenario | Observed result |
 | --- | --- |
-| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 46.0/25.6 s |
-| Independent HTTP health | Zero timeouts; p95 57/164 ms and maximum 1.33/2.07 s at six/64 concurrent turns |
-| Scheduler payloads at 64 concurrent turns | 1.19 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
-| All 1,000 turns running together, cold then already used | Cancellation in 7.8/7.7 s with the 30-second RPC deadline unchanged |
-| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 17.0 s restart |
-| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.50 s, typing in 5.8 ms and maximum timer lag 57 ms; desktop and phone checked |
+| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 44.0/27.4 s |
+| Independent HTTP health | Zero timeouts; p95 81/207 ms and maximum 0.34/0.35 s at six/64 concurrent turns |
+| Scheduler payloads at 64 concurrent turns | 1.07 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
+| All 1,000 turns running together, cold then already used | Cancellation in 8.9/12.7 s with the 30-second RPC deadline unchanged |
+| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 5.2 s restart |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.64 s, typing in 4.1 ms and maximum timer lag 40 ms; desktop and phone checked |
 
 Background machine load was not controlled. These single runs establish
 failures and reproducible checks. They do not

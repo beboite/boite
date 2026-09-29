@@ -587,7 +587,7 @@ export class ThreadStore {
     };
 
     // Accept the prompt and its queued status in one commit before starting the driver.
-    this.core.journal.db.transaction(() => {
+    this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
         this.core.delegation.reserveTurn(threadId, operation);
         this.core.journal.putTurn(turn);
@@ -601,7 +601,7 @@ export class ThreadStore {
       this.core.bus.emit('message.started', message);
       this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
       this.setStatus(threadId, 'queued');
-    })();
+    })());
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
   }
@@ -668,13 +668,13 @@ export class ThreadStore {
     const turn = this.core.journal.getTurn(turnId);
     if (turn === null) return;
     const next: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
-    this.core.journal.db.transaction(() => {
+    this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.append({ type: 'turn.stopped', threadId: turn.threadId, version: 1, payload: next }, () => {
         this.core.journal.putTurn(next);
       });
       this.core.bus.emit('turn.finished', next);
       this.setStatus(turn.threadId, 'idle');
-    })();
+    })());
     if (turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
   }
 

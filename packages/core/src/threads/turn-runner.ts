@@ -55,31 +55,22 @@ export class TurnRunner {
     let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     let result: TurnResult;
     try {
-      // The queued prompt is already committed. Group the synchronous startup
-      // writes, including output a driver emits before its first await.
-      const started = this.core.journal.db.transaction(() => {
+      // Commit the running state before a driver can spawn or stream output.
+      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
         this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
           this.core.journal.putTurn(running);
         });
         this.core.bus.emit('turn.started', running);
         setThreadStatus(this.core, threadId, 'running');
-        try {
-          this.core.workforce.resident.assertThreadRoute(threadId, thread);
-          const provider = this.core.providers.require(thread.providerId);
-          const account = this.core.accounts.require(thread.accountId);
-          const driver = getDriver(provider.protocol);
-          this.stopRequested.delete(threadId);
-          // Keep consumed input so a retry on a fresh session sends it too.
-          const carried: CarriedInput = {};
-          const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
-          return { provider, account, driver, carried, handle };
-        } catch (error) {
-          // A refused driver still gets the durable started/finished history.
-          return { error };
-        }
-      })();
-      if ('error' in started) throw started.error;
-      const { provider, account, driver, carried, handle } = started;
+      })());
+      this.core.workforce.resident.assertThreadRoute(threadId, thread);
+      const provider = this.core.providers.require(thread.providerId);
+      const account = this.core.accounts.require(thread.accountId);
+      const driver = getDriver(provider.protocol);
+      this.stopRequested.delete(threadId);
+      // Keep consumed input so a retry on a fresh session sends it too.
+      const carried: CarriedInput = {};
+      const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
       this.handles.set(threadId, handle);
       const forced = Promise.withResolvers<TurnResult>();
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
@@ -126,7 +117,7 @@ export class TurnRunner {
       error: result.error ?? null,
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
-    const completion = this.core.journal.db.transaction(() => {
+    const completion = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
       this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
         this.core.journal.putTurn(finished);
       });
@@ -151,7 +142,7 @@ export class TurnRunner {
       };
       saveThread(this.core, next, 'thread.finished');
       return { next, sameSession };
-    })();
+    })());
     if (completion === null) return;
     const { next, sameSession } = completion;
     // A move the agent asked for during the turn happens now that no process

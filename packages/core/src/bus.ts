@@ -2,6 +2,7 @@ import type { RpcEventName, RpcEvents } from '@boite/contracts';
 
 export type EventPayload = RpcEvents[RpcEventName];
 export type BusListener = (name: RpcEventName, payload: EventPayload) => void;
+interface Notification { name: RpcEventName; payload: EventPayload }
 
 const DELTA_WINDOW_MS = 16;
 
@@ -19,6 +20,8 @@ interface PendingDelta {
  */
 export class Bus {
   private readonly listeners = new Set<BusListener>();
+  private readonly committedListeners = new Set<BusListener>();
+  private staged: Notification[] | null = null;
   private readonly pending = new Map<string, PendingDelta>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private reporting = false;
@@ -34,6 +37,35 @@ export class Bus {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  /** External observers see a write only after its synchronous transaction commits. */
+  onCommitted(listener: BusListener): () => void {
+    this.committedListeners.add(listener);
+    return () => { this.committedListeners.delete(listener); };
+  }
+
+  /** Buffer external notifications around a synchronous storage commit; discard on rollback. */
+  afterCommit<T>(write: () => T): T {
+    this.flush();
+    const parent = this.staged;
+    const notifications: Notification[] = [];
+    this.staged = notifications;
+    let result: T;
+    try {
+      result = write();
+      this.flush();
+    } catch (error) {
+      this.pending.clear();
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.timer = null;
+      throw error;
+    } finally {
+      this.staged = parent;
+    }
+    if (parent !== null) parent.push(...notifications);
+    else for (const { name, payload } of notifications) this.notify(this.committedListeners, name, payload);
+    return result;
   }
 
   emit<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
@@ -66,6 +98,7 @@ export class Bus {
   dispose(): void {
     this.flush();
     this.listeners.clear();
+    this.committedListeners.clear();
   }
 
   private queue(delta: RpcEvents['message.delta']): void {
@@ -82,7 +115,13 @@ export class Bus {
   }
 
   private dispatch(name: RpcEventName, payload: EventPayload): void {
-    for (const listener of this.listeners) {
+    this.notify(this.listeners, name, payload);
+    if (this.staged !== null) this.staged.push({ name, payload });
+    else this.notify(this.committedListeners, name, payload);
+  }
+
+  private notify(listeners: Set<BusListener>, name: RpcEventName, payload: EventPayload): void {
+    for (const listener of listeners) {
       try {
         listener(name, payload);
       } catch (error) {

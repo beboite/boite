@@ -55,7 +55,7 @@ test('an incoming flood closes its connection and never executes its abandoned r
     await Promise.all(pending);
     expect(closed).toHaveLength(1);
     expect(closed[0]?.code).toBe(1013);
-    expect(closed[0]?.reason).toContain('4096 frames');
+    expect(closed[0]?.reason).toContain('1024 frames');
     expect(calls).toBe(0);
   } finally { queue.close(); }
 });
@@ -76,5 +76,37 @@ test('large queued frames are bounded by bytes and shutdown releases accepted wo
     await accepted;
     await queue.enqueue(other, 'after shutdown');
     expect(calls).toBe(0);
+  } finally { queue.close(); }
+});
+
+test('a shared backlog evicts a flooding sender instead of an incoming reader', async () => {
+  const closed: number[] = [];
+  const senders = Array.from({ length: 4 }, (_, index) => ({ close: () => closed.push(index) }) as unknown as ServerConnection);
+  let readerClosed = false, reads = 0;
+  const reader = { close: () => { readerClosed = true; } } as unknown as ServerConnection;
+  const queue = new FrameQueue(async connection => { if (connection === reader) reads++; });
+  try {
+    const backlog = senders.flatMap(sender => Array.from({ length: 1024 }, () => queue.enqueue(sender, '{}')));
+    await queue.enqueue(reader, 'read');
+    await Promise.all(backlog);
+    expect(readerClosed).toBe(false);
+    expect(reads).toBe(1);
+    expect(closed).toHaveLength(1);
+  } finally { queue.close(); }
+});
+
+test('one sender cannot spend another connection\'s byte capacity', async () => {
+  let senderClosed = false, readerClosed = false, reads = 0;
+  const sender = { close: () => { senderClosed = true; } } as unknown as ServerConnection;
+  const reader = { close: () => { readerClosed = true; } } as unknown as ServerConnection;
+  const queue = new FrameQueue(async connection => { if (connection === reader) reads++; });
+  const raw = 'x'.repeat(16 * 1024 * 1024);
+  try {
+    const backlog = [queue.enqueue(sender, raw), queue.enqueue(sender, raw)];
+    await queue.enqueue(reader, 'read');
+    await Promise.all(backlog);
+    expect(senderClosed).toBe(true);
+    expect(readerClosed).toBe(false);
+    expect(reads).toBe(1);
   } finally { queue.close(); }
 });

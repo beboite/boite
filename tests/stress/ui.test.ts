@@ -30,14 +30,15 @@ test('desktop and phone remain usable with 1000 threads and a 256-turn burst', a
     const boot = performance.now();
     page = await BrowserPage.launch({ url: pairingUrlOf(core), windowSize: { width: 1440, height: 1000 } });
     await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.dataset.state === 'ready'`, 30_000);
-    await page.waitFor(`document.querySelectorAll('[data-testid=thread-row]').length === 1000`, 30_000);
+    await page.waitFor(`(() => {
+      const visible = new Set(Array.from(document.querySelectorAll('[data-testid=thread-row]')).map(row => row.dataset.threadId));
+      return ${JSON.stringify(threads.map(thread => thread.id))}.every(id => visible.has(id));
+    })()`, 30_000);
     const bootMs = performance.now() - boot;
-    await page.click('[data-testid=thread-row]');
-    await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.trim().startsWith('UI stress ')`);
+    const selected = threads.at(-1)!;
+    await page.click(`[data-testid=thread-row][data-thread-id="${selected.id}"]`);
+    await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.trim() === ${JSON.stringify(selected.title)}`);
     await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
-    const selectedTitle = await page.text('[data-testid=thread-title]');
-    const selected = threads.find(t => selectedTitle.trim() === t.title);
-    assert(selected, `selected thread not found: ${JSON.stringify(selectedTitle)}`);
     await page.evaluate(`(() => {
       window.__stressLongTasks = [];
       new PerformanceObserver(list => window.__stressLongTasks.push(...list.getEntries().map(e => e.duration)))

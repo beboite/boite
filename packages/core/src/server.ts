@@ -493,7 +493,7 @@ export function startServer(options: ServerOptions): RunningServer {
   };
   let pendingScheduler: RpcEvents['scheduler.updated'] | null = null;
   let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
-  const off = core.bus.onAny((name, payload) => {
+  const off = core.bus.onCommitted((name, payload) => {
     if (name !== 'scheduler.updated') {
       broadcast(name, payload);
       return;

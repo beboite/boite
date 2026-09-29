@@ -10,7 +10,7 @@ import { newToken } from '../src/ids.ts';
 import { pair, readPreviousRun } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
 import { lanAddress } from '../src/server/lan.ts';
-import { removeDir, startTestCore } from './harness.ts';
+import { echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const HELLO_TIMEOUT_MS = 200;
@@ -57,6 +57,25 @@ function opened(socket: WebSocket): Promise<void> {
 }
 
 describe('server', () => {
+  test('a rolled-back prompt sends no message or status notifications', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+    const seen: string[] = [];
+    client.on('message.started', event => { if (event.threadId === threadId) seen.push('message.started'); });
+    client.on('message.completed', event => { if (event.threadId === threadId) seen.push('message.completed'); });
+    client.on('thread.updated', event => { if (event.id === threadId) seen.push(event.status); });
+    harness.core.journal.db.exec(`CREATE TRIGGER refuse_queue BEFORE INSERT ON threads
+      WHEN NEW.status = 'queued' BEGIN SELECT RAISE(ABORT, 'forced queue rollback'); END;`);
+    await expect(client.call('turns.start', { threadId, prompt: 'must roll back' })).rejects.toBeInstanceOf(Error);
+    // The response to this read follows any premature notification on the same socket.
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread?.status).toBe('idle');
+    expect(harness.core.journal.listTurns(threadId)).toEqual([]);
+    expect(harness.core.journal.listMessages(threadId)).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
   test('an RPC burst lets another client read before the burst ends', async () => {
     const sender = await harness.connect();
     const reader = await harness.connect();

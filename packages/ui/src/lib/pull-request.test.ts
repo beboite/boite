@@ -43,3 +43,36 @@ test('only a refresh the user asked for tells the core to read the repository ag
   await lookupPullRequest(client,'one',true);
   expect(call.mock.calls.map(args => args[1])).toEqual([{threadId:'one'},{threadId:'one',refresh:true}]);
 });
+
+test('a thousand sidebar lookups share duplicates, leave RPC capacity and prioritize manual refresh', async () => {
+  const gates: (() => void)[] = [];
+  let active = 0, maximum = 0, released = false;
+  const call = vi.fn().mockResolvedValueOnce(null).mockImplementation(async () => {
+    active++; maximum = Math.max(maximum, active);
+    if (!released) await new Promise<void>(resolve => gates.push(resolve));
+    active--;
+    return null;
+  });
+  const client = { call } as unknown as Client;
+  await lookupPullRequest(client, 'probe');
+  const ids = Array.from({ length: 1000 }, (_, index) => `thread-${index}`);
+  const pending = [...ids, ...ids].map(id => lookupPullRequest(client, id));
+  let refresh: Promise<unknown> | undefined;
+  try {
+    await vi.waitFor(() => expect(active).toBeGreaterThan(1));
+    expect(maximum).toBeLessThanOrEqual(4);
+    const other = { call: vi.fn().mockResolvedValue(null) } as unknown as Client;
+    expect(await lookupPullRequest(other, 'independent')).toEqual({ supported: true, pullRequest: null });
+    refresh = lookupPullRequest(client, 'manual', true);
+    const before = call.mock.calls.length;
+    gates[0]!();
+    await vi.waitFor(() => expect(call.mock.calls.length).toBe(before + 1));
+    expect(call.mock.calls.at(-1)?.[1]).toEqual({ threadId: 'manual', refresh: true });
+  } finally {
+    released = true;
+    for (const resolve of gates) resolve();
+    await Promise.all([...pending, refresh]);
+  }
+  expect(call).toHaveBeenCalledTimes(1002);
+  expect(maximum).toBeLessThanOrEqual(4);
+});
