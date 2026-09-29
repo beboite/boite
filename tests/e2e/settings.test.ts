@@ -126,15 +126,19 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
 }, 30_000);
 
-test('the Agents page waits behind its experiment', async () => {
+test('the experiment exposes only a bottom-left launcher for the dedicated Agents interface', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await page.navigate(`${uiUrl}/?fake=1&open=recent`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   expect(await page.evaluate(`document.querySelector('${id('nav-agents')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-agents')}') === null`)).toBe(true);
+  await capture('agents-launcher-disabled-desktop.png');
   await page.click(id('nav-settings')); await page.click(id('settings-tab-experiments'));
   await page.click(id('experiment-resident-agents'));
   await page.click(id('settings-back'));
   await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
+  expect(await page.evaluate(`!!document.querySelector('.foot ${id('nav-agents')}')`)).toBe(true);
+  await capture('agents-launcher-enabled-desktop.png');
   await page.click(id('nav-agents'));
   await page.waitFor(`document.querySelector('${id('agents-page')}')`);
   // Switched off while it is open, the page closes with it.
@@ -144,6 +148,17 @@ test('the Agents page waits behind its experiment', async () => {
   await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', true))`);
   await page.waitFor(`document.querySelector('${id('nav-agents')}')`);
   expect(await page.evaluate(`document.querySelector('${id('agents-page')}') === null`)).toBe(true);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  expect(await page.evaluate(`document.querySelectorAll('${id('mobile-tabs')} > button').length`)).toBe(3);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-agents')}').closest('nav') === null`)).toBe(true);
+  expect(await page.evaluate(`(e => { const r = e.getBoundingClientRect(); return r.left < 32 && r.bottom > innerHeight - 32; })(document.querySelector('${id('mobile-agents')}'))`)).toBe(true);
+  await capture('agents-launcher-enabled-phone.png');
+  await page.click(id('mobile-agents'));
+  await page.waitFor(`document.querySelector('${id('agents-page')}')`);
+  await page.evaluate(`import('/src/lib/experiments.ts').then(({ setExperiment }) => setExperiment('resident-agents', false))`);
+  await page.waitFor(`!document.querySelector('${id('agents-page')}') && !document.querySelector('${id('mobile-agents')}')`);
+  await capture('agents-launcher-disabled-phone.png');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
 }, 30_000);
 
 test('the compact quota page shows limits and reset times', async () => {

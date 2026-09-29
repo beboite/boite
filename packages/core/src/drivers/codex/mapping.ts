@@ -1,4 +1,4 @@
-import type { ImageAttachment, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
+import type { ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
 import type { TurnContext } from '../types.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
@@ -83,9 +83,16 @@ function itemStatus(status: string | undefined): ToolStatus {
   }
 }
 
-/** The four `ThreadItem` variants that are a tool card. Everything else is dropped. */
+/** Native actions rendered as tool cards. Text and reasoning use their own streams. */
 export function toolViewOf(item: CodexItem, completed = false): ToolView | null {
   switch (item.type) {
+    case 'collabAgentToolCall':
+      return collaborationView(item);
+    case 'subAgentActivity':
+      return {
+        name: 'Agent', input: { action: item.kind, agent: item.agentPath }, output: null, status: 'done',
+        nativeAgents: item.agentThreadId ? [{ id: item.agentThreadId, name: item.agentPath, status: item.kind === 'completed' ? 'done' : item.kind === 'interrupted' ? 'stopped' : item.kind === 'started' ? 'running' : 'unknown' }] : [],
+      };
     // The agent waiting on purpose, for a background command or a timer: a
     // card, so the pause reads as a pause and not as a hang.
     case 'sleep':
@@ -126,6 +133,22 @@ export function toolViewOf(item: CodexItem, completed = false): ToolView | null 
     default:
       return null;
   }
+}
+
+function collaborationView(item: CodexItem): ToolView {
+  const states = item.agentsStates ?? {};
+  const ids = [...new Set([...(item.receiverThreadIds ?? []), ...Object.keys(states)])];
+  const nativeAgents = ids.map((id): NativeAgentUpdate => {
+    const state = states[id];
+    return {
+      id,
+      ...(item.tool === 'spawnAgent' && item.prompt ? { task: item.prompt.slice(0, 4000) } : {}),
+      ...(item.model ? { model: item.model } : {}),
+      status: state?.status === 'completed' ? 'done' : state?.status === 'errored' ? 'error' : ['shutdown', 'interrupted'].includes(state?.status ?? '') ? 'stopped' : ['running', 'pendingInit'].includes(state?.status ?? '') ? 'running' : 'unknown',
+      ...(state?.message ? { result: state.message.slice(0, 4000) } : {}),
+    };
+  });
+  return { name: 'Agent', input: { action: item.tool, agents: ids, prompt: item.prompt, model: item.model }, output: stringify(states), status: itemStatus(item.status), nativeAgents };
 }
 
 /**

@@ -927,6 +927,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
+      nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
       documents?: ToolDocument[];
       /** Stamped by the core when the card first shows up, for every driver. Absent on older rows. */
@@ -1845,10 +1847,26 @@ export interface DelegationView {
   rootThreadId: ThreadId;
   config: DelegationConfig;
   agents: DelegatedAgent[];
+  /** Native children reported by this conversation's provider, including earlier message pages. */
+  nativeAgents: NativeAgent[];
   messages: AgentLetter[];
   turnsUsed: number;
   usage: Usage;
 }
+
+export interface NativeAgentUpdate {
+  id: string;
+  name?: string;
+  task?: string;
+  model?: string;
+  status: 'running' | 'done' | 'error' | 'stopped' | 'unknown';
+  result?: string;
+}
+export interface NativeAgent extends NativeAgentUpdate {
+  toolId: string;
+  startedAt: Timestamp;
+}
+export { nativeAgentsOfTool, collectNativeAgents } from './native-agents.ts';
 
 /** A brain lives on the core's machine. Detected plugins are not installed by Boite. */
 export interface BrainConfig {

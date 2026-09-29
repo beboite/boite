@@ -505,6 +505,8 @@ export class CodexSession {
 
   private onNotification(method: string, raw: unknown): void {
     const params = (raw ?? {}) as Record<string, unknown>;
+    // Child threads may share this app-server. Their text, tools and turn endings belong to them.
+    if (typeof params['threadId'] === 'string' && this.threadId !== null && params['threadId'] !== this.threadId) return;
     if (method === 'thread/tokenUsage/updated') {
       this.reportUsage(params);
       return;

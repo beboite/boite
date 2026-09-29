@@ -100,6 +100,12 @@ workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
 when a failure needs a quiet run.
 
+Process-wide kernel handle assertions run in a dedicated child through
+`procs.spawn`: a reused test worker can retain handles from earlier files.
+The child still checks the real handle count and Job Object cleanup.
+Mobile history tests wait for `popstate` before issuing the next Back; a fixed
+delay can finish before the traversal it was meant to await.
+
 Where the time goes, from `gh run view` on the 23 finished `ci` runs before
 2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows
 desktop job sets that length (12.8 minutes): 5.8 for the end-to-end suite, 3.5
