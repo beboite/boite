@@ -90,7 +90,30 @@ test('native results survive message pagination and restart without using delega
   await waitFor(() => runs.has(threadId));
   const run = runs.get(threadId)!;
   const changed = owner.next('delegation.changed', event => event.threadId === threadId);
+  const unrelatedId = 'native-unrelated-stream';
+  h.core.journal.putMessage({ id: unrelatedId, threadId: 'unrelated-thread', turnId: 'unrelated-turn', role: 'assistant', state: 'streaming', createdAt: Date.now(), parts: [] });
+  h.core.journal.appendDelta('unrelated-thread', unrelatedId, 0, 'Unrelated streamed text');
   const id = run.ctx.emit.startMessage('assistant');
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
+  const rawParts = (messageId: string) => (h.core.journal.db.query('SELECT parts FROM messages WHERE id = ?').get(messageId) as { parts: string }).parts;
+  // A Team read must show live tools without persisting this or other streams.
+  expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', status: 'running' });
+  expect(rawParts(id)).toBe('[]');
+  expect(rawParts(unrelatedId)).toBe('[]');
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
+  expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', result: 'Checked', status: 'done' });
+  expect(rawParts(id)).toBe('[]');
+  expect(rawParts(unrelatedId)).toBe('[]');
+  h.core.journal.persistMessages();
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(JSON.parse(rawParts(unrelatedId))).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
+  // A stale persisted tool cannot override its newer live update in the merge.
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
+  const live = h.core.delegation.get(threadId).nativeAgents;
+  expect(live).toHaveLength(1);
+  expect(live[0]).toMatchObject({ status: 'running' });
+  expect(live[0]?.result).toBeUndefined();
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
   run.ctx.emit.complete(id, 'complete');
   await changed;

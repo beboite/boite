@@ -424,6 +424,11 @@ export class Journal {
     return row === null ? null : toMessage(row);
   }
 
+  /** Held parts for a selected live message, without reading or writing its stored JSON. */
+  streamingMessage(messageId: string): Message | undefined {
+    return this.stream.openCopy(messageId);
+  }
+
   listMessages(threadId: string): Message[] {
     this.flushDeltas();
     const rows = this.db
