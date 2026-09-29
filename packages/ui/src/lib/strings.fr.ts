@@ -399,6 +399,13 @@ export const fr: Translation = {
   },
 
   sidebar: {
+    allProjects: 'Tous les projets',
+    filterProject: 'Filtrer par projet',
+    recentOrder: 'Activité récente',
+    customOrder: 'Ordre personnel',
+    toggleOrder: 'Cliquer à nouveau pour changer le tri des projets',
+    moveProjectUp: 'Monter le projet',
+    moveProjectDown: 'Descendre le projet',
     search: 'Rechercher une conversation',
     newThread: 'Nouvelle conversation',
     newThreadIn: 'Nouvelle conversation dans {project}',
