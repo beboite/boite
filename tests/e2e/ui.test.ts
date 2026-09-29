@@ -135,10 +135,17 @@ test(
     expect(assistant).toContain('browser thread');
     expect(assistant).toContain('allowed');
 
-    // The context meter the echo agent reported at the end of the turn: the
-    // prompt's characters over a floor of 100, on a window of 2000.
-    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '6'`);
-    expect((await page.text(testid('context-meter'))).trim()).toBe('6%');
+    // Session guidance contributes to context too; compare the UI with the core's report.
+    const client = await connect(core.url, core.token);
+    let percent: number;
+    try {
+      const [thread] = await client.call('threads.list', {});
+      expect(thread?.context?.tokens).toBeGreaterThan(0);
+      expect(thread?.context?.window).toBeGreaterThan(0);
+      percent = Math.round(thread!.context!.tokens / thread!.context!.window! * 100);
+    } finally { client.close(); }
+    await page.waitFor(`document.querySelector('${testid('context-meter')}')?.dataset.percent === '${percent}'`);
+    expect((await page.text(testid('context-meter'))).trim()).toBe(`${percent}%`);
 
     await page.screenshot(SCREENSHOT);
     expect(existsSync(SCREENSHOT)).toBe(true);
