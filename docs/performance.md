@@ -244,3 +244,9 @@ sidecar that moved spawn to `/health` from a median of 249 ms to 244 ms over 7
 runs on the same day. The compiled core also carries bytecode, which saves
 parsing where no signature check dominates the start; on Windows the compiled
 core stayed at about 790 ms either way.
+
+The account connection changes measured on Windows CI on 2026-09-29 use
+525,128 bytes for the UI entry chunk, 3,396,864 bytes for the UI distribution
+and 821,226 bytes for the core bundle. Account editing and device-login UI
+add client code; native authentication checks add core code. The size budgets
+in `scripts/ci/budgets.json` retain about 10% headroom above those measurements.

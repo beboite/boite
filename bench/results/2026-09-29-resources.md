@@ -270,10 +270,12 @@ bun scripts/ci/budgets.ts
 | Whole UI, excluding compressed copies | 3,395,116 bytes | 3,359,837 bytes | -35,279 bytes |
 | Core main bundle | 818,586 bytes | 818,586 bytes | 0 bytes |
 
-The UI passes its unchanged 520,000-byte entry and 3,382,700-byte total limits.
-The local core exceeds its former limit by 987 bytes; CI measured 818,547
-bytes, or 947 above that limit. The new 820,000-byte limit adds 2,400 bytes,
-or 0.29%, preserving readable function names in errors.
+These measurements pass the former 520,000-byte entry and 3,382,700-byte
+UI limits. The local core exceeded its former limit by 987 bytes; CI measured
+818,547 bytes, or 947 above that limit. A subsequent base integration retains
+the 578,000-byte entry, 3,737,000-byte UI and 904,000-byte core limits already
+set by `db13ed65`; this audit does not increase those limits. Core function
+names remain readable in errors.
 These are emitted-file measurements, not CPU or resident-memory savings.
 The deferred-import cancellation extension failed without its post-import
 stop check, then passed after restoration; the original slow-read protection
