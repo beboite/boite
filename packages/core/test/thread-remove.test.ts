@@ -9,15 +9,25 @@ import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts'
 
 let harness: TestCore;
 let client: CoreClient;
-beforeEach(async () => { harness = await startTestCore({ settings: { focusGuard: false, muteAgents: false } }); client = await harness.connect(); });
-afterEach(async () => { await harness.stop(); });
+let processOutput: Promise<unknown>[];
+beforeEach(async () => { processOutput = []; harness = await startTestCore({ settings: { focusGuard: false, muteAgents: false } }); client = await harness.connect(); });
+afterEach(async () => {
+  await harness.stop();
+  await Promise.all(processOutput);
+});
 
 test('removal stops the family and clears its stored history while keeping project files', async () => {
   const { threadId } = await echoThread(harness, client);
   const { threadId: keptId } = await echoThread(harness, client, 'keep');
   // Real owned processes keep the native tracker active and verify cancellation,
   // rather than testing only echo's in-process turn and idle warm-up workers.
-  const startProcess = (id: string) => harness.core.procs.spawn(id, process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+  const startProcess = (id: string) => {
+    const child = harness.core.procs.spawn(id, process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+    // Drain the test-owned pipes, including the unrelated process stopped by
+    // teardown: an exited Bun subprocess can still own unread native handles.
+    processOutput.push(new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text());
+    return child;
+  };
   const parentProcess = startProcess(threadId);
   const keptProcess = startProcess(keptId);
   const parent = harness.core.threads.require(threadId);
