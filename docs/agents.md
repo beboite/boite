@@ -81,9 +81,10 @@ sandbox: provider permissions govern filesystem and network actions.
 ## Execution and recovery
 
 The core owns the durable queue. Defaults are one run per agent and two
-background runs globally. Existing scheduler, account and plugin quota limits
-apply. Background work leaves one global slot for interactive turns when the
-scheduler has more than one slot and does not add work ahead of its queue.
+background runs globally, controlled by the background concurrency setting.
+Account login checks and plugin holds still apply. Background work does not
+add work ahead of queued turns. Interactive turns have no global or per-account
+scheduler ceiling.
 
 Mission turn limits count started runs and accepted reservations. The time
 limit sums execution durations across agents and retries, excluding human wait

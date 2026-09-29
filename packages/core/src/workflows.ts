@@ -569,8 +569,11 @@ export class Workflows {
 
   /** A held summary goes again once the owner enables or resumes the team. */
   private redeliver(rootId: string): void {
-    const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0 AND json_extract(data, '$.deliveryError') IS NOT NULL", rootId);
-    if (held.length) this.later(() => { for (const run of held) this.deliver(run.id); });
+    const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0", rootId)
+      .filter(run => run.status === 'paused'
+        ? run.nodes.every(node => node.status === 'done' || node.status === 'skipped')
+        : run.deliveryError != null);
+    if (held.length) this.later(() => { for (const run of held) this.settle(run.id); });
   }
 
   // -- control -----------------------------------------------------------------

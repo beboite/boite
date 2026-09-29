@@ -353,8 +353,10 @@ test('a paused run lets its running steps end, and is done once every step is', 
   await waitFor(() => h.core.workflows.get(threadId, two.id).nodes[0]!.status === 'done');
   const paused = h.core.workflows.get(threadId, two.id);
   expect([paused.status, paused.nodes[1]!.status]).toEqual(['paused', 'waiting']);
+  await owner.call('delegation.configure', { threadId, config: h.core.delegation.config(threadId) });
   await Bun.sleep(20);
   expect(held.size).toBe(0);
+  expect(h.core.workflows.get(threadId, two.id).status).toBe('paused');
   await owner.call('workflows.control', { threadId, runId: two.id, action: 'stop' });
 
   const one = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
@@ -376,11 +378,13 @@ test('completed steps keep their summary while the team is paused and deliver on
   expect([held.status, held.delivered]).toEqual(['paused', false]);
   expect(held.error).toContain('Delegation is paused');
   await owner.call('delegation.configure', { threadId, config });
-  await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
   await settled(h, threadId, run.id);
   await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
   expect(h.core.workflows.get(threadId, run.id).deliveryError).toBeNull();
   await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.includes('Boite workflow done')));
+  await owner.call('delegation.configure', { threadId, config });
+  await Bun.sleep(20);
+  expect(prompts.filter(p => p.threadId === threadId && p.prompt.includes('Boite workflow done'))).toHaveLength(1);
 });
 
 test('an agent saves new templates but never replaces a saved one', async () => {

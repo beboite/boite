@@ -195,93 +195,86 @@ export interface EchoRun {
 export async function echoTurns(clientConcurrency: number, threads = 50, promptWords = 300): Promise<EchoRun> {
   const opened = await openCore();
   const { client, pid } = opened;
-  // Workload concurrency belongs to the benchmark client.
-  const project = await benchProject(client);
-  const account = await echoAccount(client);
+  let directory: string | undefined;
+  let sampler: RssSampler | undefined;
+  const subscriptions: (() => void)[] = [];
+  try {
+    // Workload concurrency belongs to the benchmark client.
+    const project = await benchProject(client);
+    directory = project.directory;
+    const account = await echoAccount(client);
 
-  const created: ThreadSummary[] = [];
-  for (let index = 0; index < threads; index += 1) {
-    const thread = await client.call('threads.create', {
-      projectId: project.projectId,
-      providerId: 'echo',
-      accountId: account.id,
-      title: `turn ${index}`,
-    });
-    await client.call('threads.subscribe', { threadId: thread.id });
-    created.push(thread);
-  }
-
-  const startedAt = new Map<string, number>();
-  const firstDelta = new Map<string, number>();
-  const queuedTimeline: { at: number; queued: number }[] = [];
-  const offDelta = client.on('message.delta', (event) => {
-    if (!firstDelta.has(event.threadId)) firstDelta.set(event.threadId, performance.now());
-  });
-  const offScheduler = client.on('scheduler.updated', (state) => {
-    queuedTimeline.push({ at: Date.now(), queued: state.queued.length });
-  });
-
-  let finished = 0;
-  const allDone = new Promise<void>((resolve) => {
-    const offFinished = client.on('turn.finished', () => {
-      finished += 1;
-      if (finished >= threads) {
-        offFinished();
-        resolve();
-      }
-    });
-  });
-
-  const prompt = words(promptWords);
-  const sampler = RssSampler.start(pid);
-  await Bun.sleep(400);
-
-  const wallStart = performance.now();
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(clientConcurrency, threads) }, async () => {
-    for (;;) {
-      const thread = created[next++];
-      if (!thread) return;
-      const done = client.next('turn.finished', turn => turn.threadId === thread.id, 120_000);
-      startedAt.set(thread.id, performance.now());
-      await client.call('turns.start', { threadId: thread.id, prompt });
-      await done;
+    const created: ThreadSummary[] = [];
+    for (let index = 0; index < threads; index += 1) {
+      const thread = await client.call('threads.create', {
+        projectId: project.projectId,
+        providerId: 'echo',
+        accountId: account.id,
+        title: `turn ${index}`,
+      });
+      await client.call('threads.subscribe', { threadId: thread.id });
+      created.push(thread);
     }
-  }));
-  await allDone;
-  const wallMs = performance.now() - wallStart;
 
-  const samples = await sampler.stop();
-  offDelta();
-  offScheduler();
+    const startedAt = new Map<string, number>();
+    const firstDelta = new Map<string, number>();
+    const queuedTimeline: { at: number; queued: number }[] = [];
+    subscriptions.push(client.on('message.delta', (event) => {
+      if (!firstDelta.has(event.threadId)) firstDelta.set(event.threadId, performance.now());
+    }));
+    subscriptions.push(client.on('scheduler.updated', (state) => {
+      queuedTimeline.push({ at: Date.now(), queued: state.queued.length });
+    }));
 
-  const peak = peakOf(samples);
-  let queuedAtPeak = 0;
-  for (const entry of queuedTimeline) {
-    if (entry.at <= peak.at) queuedAtPeak = entry.queued;
+    const prompt = words(promptWords);
+    sampler = RssSampler.start(pid);
+    await Bun.sleep(400);
+
+    const wallStart = performance.now();
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(clientConcurrency, threads) }, async () => {
+      for (;;) {
+        const thread = created[next++];
+        if (!thread) return;
+        const done = client.next('turn.finished', turn => turn.threadId === thread.id, 120_000);
+        // Observe a timeout even if the start RPC rejects before we await completion.
+        void done.catch(() => undefined);
+        startedAt.set(thread.id, performance.now());
+        await client.call('turns.start', { threadId: thread.id, prompt });
+        await done;
+      }
+    }));
+    const wallMs = performance.now() - wallStart;
+
+    const completedSampler = sampler;
+    sampler = undefined;
+    const samples = await completedSampler.stop();
+    const peak = peakOf(samples);
+    let queuedAtPeak = 0;
+    for (const entry of queuedTimeline) {
+      if (entry.at <= peak.at) queuedAtPeak = entry.queued;
+    }
+    const maxQueued = queuedTimeline.reduce((most, entry) => Math.max(most, entry.queued), 0);
+
+    const firstDeltaMs: number[] = [];
+    for (const thread of created) {
+      const begin = startedAt.get(thread.id);
+      const seen = firstDelta.get(thread.id);
+      if (begin !== undefined && seen !== undefined) firstDeltaMs.push(seen - begin);
+    }
+
+    return {
+      clientConcurrency, threads, wallMs, firstDeltaMs, peakBytes: peak.bytes,
+      queuedAtPeak, maxQueued, samples: samples.length, cadenceMs: cadenceMs(samples),
+    };
+  } finally {
+    for (const off of subscriptions) off();
+    try { await sampler?.stop(); }
+    finally {
+      try { await closeCore(opened); }
+      finally { if (directory) await removeDirectory(directory); }
+    }
   }
-  const maxQueued = queuedTimeline.reduce((most, entry) => Math.max(most, entry.queued), 0);
-
-  const firstDeltaMs: number[] = [];
-  for (const thread of created) {
-    const begin = startedAt.get(thread.id);
-    const seen = firstDelta.get(thread.id);
-    if (begin !== undefined && seen !== undefined) firstDeltaMs.push(seen - begin);
-  }
-
-  await closeCore(opened);
-  await removeDirectory(project.directory);
-  return {
-    clientConcurrency,
-    threads,
-    wallMs,
-    firstDeltaMs,
-    peakBytes: peak.bytes,
-    queuedAtPeak,
-    maxQueued,
-    samples: samples.length,
-    cadenceMs: cadenceMs(samples),
-  };
 }
 
 export interface ShellRun {
