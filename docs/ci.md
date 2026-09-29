@@ -92,13 +92,19 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
-Core test files run in parallel worker processes, one per CPU core by default
+Core test files run in parallel worker processes on Linux and macOS, one per CPU core by default
 (`bun test --parallel`). Each file gets a fresh global object, and the test
 harness gives every core its own temporary data directory and port, so files
 stay isolated. The whole core suite took 189 s serially and 35 s with 16
 workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
 `bun run --cwd packages/core test:serial` runs the files one after another
-when a failure needs a quiet run.
+when a failure needs a quiet run. Windows CI uses that serial command for the
+complete suite: on 2026-09-29, Bun 1.4.2 parallel workers crashed in the titles
+tests and a subsequent removal-test worker stayed alive for 802 seconds until
+the 15-minute job deadline. Serial execution avoids those worker lifetimes
+without dropping tests or assertions.
+The Job Object leak check waits up to five seconds for the process handle
+count to settle, then applies its original handle-growth threshold.
 
 Process-wide kernel handle assertions run in a dedicated child through
 `procs.spawn`: a reused test worker can retain handles from earlier files.

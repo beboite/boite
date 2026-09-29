@@ -88,7 +88,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      - run: bun run --cwd packages/core test
+      # Windows parallel workers have crashed or hung beyond the test timeout.
+      # Keep the complete suite on one runtime there; other platforms stay parallel.
+      - run: bun run --cwd packages/core ${{ runner.os == 'Windows' && 'test:serial' || 'test' }}
 
   web:
     needs: changes

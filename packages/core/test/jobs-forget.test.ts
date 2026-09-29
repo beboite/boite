@@ -88,6 +88,8 @@ describeWindows('thread jobs of forgotten threads', () => {
 
     await waitFor(() => threadJobCount() === jobsBefore, 5000);
     // The kernel's own count, the way the leak was measured: one handle per id.
+    // Other process handles can close after the Job Object bookkeeping settles.
+    await waitFor(() => handleCount() - handlesBefore < SPAWNS / 2, 5000);
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
 
