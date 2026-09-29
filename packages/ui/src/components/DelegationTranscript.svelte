@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Message } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
+  import { permissionSentence } from '../lib/tool-summary';
   import Prose from './Prose.svelte';
 
   let { messages }: { messages: Message[] } = $props();
@@ -20,9 +21,11 @@
           {:else if part.type === 'tool'}
             <p class="tool">{part.name} · {strings.chat.toolStatus[part.status]}</p>
           {:else if part.type === 'permission'}
-            <p class="card">{strings.chat.permissionHeading} {part.toolName}</p>
+            <p class="card">{permissionSentence(part.toolName, undefined)}</p>
           {:else if part.type === 'question'}
             <p class="card">{part.text}</p>
+          {:else if part.type === 'hook'}
+            <p class="card" data-testid="delegation-hook">{part.message.trim() ? fill(strings.chat.hookSays, { label: part.outcome === 'blocked' ? strings.chat.hookBlocked : strings.chat.hookStopped, message: part.message.trim() }) : part.outcome === 'blocked' ? strings.chat.hookBlocked : strings.chat.hookStopped}</p>
           {/if}
         {/each}
         {#if message.state === 'streaming'}<span class="caret" aria-label={strings.chat.streaming}></span>{/if}
@@ -43,4 +46,8 @@
   .caret { display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: text-bottom; background: var(--color-foreground); animation: blink 1s steps(1) infinite; }
   .empty { margin: auto; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   @keyframes blink { 50% { opacity: 0; } }
+
+  /* An endless loop stops under reduced motion; the static mark keeps its colour. */
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+  :global(html[data-motion='reduced']) .caret { animation: none; }
 </style>

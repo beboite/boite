@@ -2,6 +2,7 @@ import { expect, mock, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as cdp from '../tests/e2e/lib/cdp.ts';
 
 test('an abandoned session expires under the busy guard and shutdown removes its private control file', async () => {
   const output = mkdtempSync(join(tmpdir(), 'boite-session-test-'));
@@ -24,7 +25,7 @@ test('an abandoned session expires under the busy guard and shutdown removes its
   };
   mock.module('../packages/core/test/harness.ts', () => ({ startTestCore: async () => ({ core: { procs: { liveCount: () => 0 } }, stop: async () => { stopped = true; } }) }));
   mock.module('../packages/core/src/browser/daemon.ts', () => ({ BrowserDaemon: { launch: async () => daemon } }));
-  mock.module('../tests/e2e/lib/cdp.ts', () => ({ findBrowser: () => 'test-browser' }));
+  const browser = spyOn(cdp, 'findBrowser').mockReturnValue('test-browser');
   mock.module('./browser-real.ts', () => ({ tasks: [{ id: 'wikipedia', url: 'https://example.test/', goal: 'Wait for completion', values: {}, completion: { url: 'https://example.test/done', text: 'Done' } }] }));
   const clock = spyOn(performance, 'now').mockImplementation(() => now);
   const originalInterval = globalThis.setInterval;
@@ -78,7 +79,7 @@ test('an abandoned session expires under the busy guard and shutdown removes its
   } finally {
     releaseClose();
     if (control && !stopped) { await call('shutdown').catch(() => {}); await Bun.sleep(150); }
-    clock.mockRestore(); interval.mockRestore(); exit.mockRestore();
+    clock.mockRestore(); interval.mockRestore(); exit.mockRestore(); browser.mockRestore();
     if (previousOutput === undefined) delete process.env.BOITE_BENCH_SESSION_OUTPUT; else process.env.BOITE_BENCH_SESSION_OUTPUT = previousOutput;
     if (previousBinary === undefined) delete process.env.BOITE_BROWSER_TEST_BINARY; else process.env.BOITE_BROWSER_TEST_BINARY = previousBinary;
     rmSync(output, { recursive: true, force: true });

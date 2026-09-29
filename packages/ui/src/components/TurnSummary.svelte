@@ -4,13 +4,20 @@
   import { clockTime, elapsed } from '../lib/format';
   import { formatTokens } from '../lib/tokens';
   import { fill, strings } from '../lib/strings';
-  let { turn, waiting = false, background = [], stop }: {
+  import { formatLocale } from '../lib/i18n.svelte';
+  import { backgroundLabel } from '../lib/background';
+  import type { Snippet } from 'svelte';
+  let { turn, waiting = false, activeTool = false, background = [], stop, actions }: {
     turn: Turn;
     waiting?: boolean;
+    /** The message already shows the running tool's activity row. */
+    activeTool?: boolean;
     /** What the agent still runs in the background; only the thread's last turn is handed it. */
     background?: BackgroundTask[];
     /** Ends the agent process and its background work. */
     stop?: () => void;
+    /** The turn's own buttons (copy, retry, fork), at the end of the line. */
+    actions?: Snippet;
   } = $props();
   let hidden = $state(document.hidden);
   let now = $state(Date.now());
@@ -24,7 +31,7 @@
     fill(strings.chat.outputTokens, { count: formatTokens(usage.outputTokens) }),
     fill(strings.chat.cacheTokens, { read: formatTokens(usage.cacheReadTokens), write: formatTokens(usage.cacheWriteTokens) }),
   ].join('\n'));
-  const still = $derived(backgroundLabel(background));
+  const still = $derived(backgroundLabel(background.map((task) => task.kind)));
 
   // The clock only ticks while the turn runs and the page is on screen.
   $effect(() => {
@@ -33,19 +40,10 @@
     const timer = setInterval(() => { now = Date.now(); }, 1000);
     return () => clearInterval(timer);
   });
-
-  /** `1 shell still running`, `2 shells and 1 agent still running`. */
-  function backgroundLabel(tasks: BackgroundTask[]): string {
-    if (tasks.length === 0) return '';
-    const counts = new Map<BackgroundTask['kind'], number>();
-    for (const task of tasks) counts.set(task.kind, (counts.get(task.kind) ?? 0) + 1);
-    const pieces = [...counts].map(([kind, count]) => fill(count === 1 ? strings.chat.backgroundOne[kind] : strings.chat.backgroundMany[kind], { count: String(count) }));
-    return fill(strings.chat.backgroundRunning, { what: pieces.join(strings.chat.backgroundJoin) });
-  }
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
-{#if turn.status !== 'queued'}
+{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0)}
   <div class="summary" class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
@@ -53,7 +51,7 @@
     {/if}
     {#if turn.finishedAt !== null}
       <span class="dot" aria-hidden="true">·</span>
-      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString()}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
+      <span data-testid="turn-finished-at" title={new Date(turn.finishedAt).toLocaleString(formatLocale())}>{fill(strings.chat.finishedAt, { time: clockTime(turn.finishedAt) })}</span>
     {/if}
     {#if total > 0}
       <span class="dot" aria-hidden="true">·</span>
@@ -70,6 +68,7 @@
         </button>
       {/if}
     {/if}
+    {#if actions && !running}{@render actions()}{/if}
   </div>
 {/if}
 

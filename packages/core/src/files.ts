@@ -1,7 +1,7 @@
 /*
  * The files of a project, for the composer's `@` mentions. One walk per
  * project every few seconds at most, held in memory, then a ranking of the
- * query against it. No git process: `.git` and `node_modules` are always
+ * query against it. No git process: `.git`, `.boite` and `node_modules` are always
  * skipped, and the root `.gitignore` adds the directories and files it names by
  * plain name (`dist`, `target/`, `/coverage`); globs and negations are not
  * read, so an ignored tree named through one still shows up. The walk stops at
@@ -19,7 +19,7 @@ export const WALK_TTL_MS = 5_000;
 export const FILES_LIMIT = 50;
 export const FILES_LIMIT_MAX = 200;
 
-const ALWAYS_SKIPPED = new Set(['.git', 'node_modules']);
+const ALWAYS_SKIPPED = new Set(['.git', '.boite', 'node_modules']);
 
 export interface FileWalk {
   files: string[];
@@ -56,7 +56,7 @@ export async function walkFiles(root: string, cap = FILE_CAP): Promise<FileWalk>
     const extra = ignoredNames(await readFile(join(root, '.gitignore'), 'utf8'));
     if (extra.size > 0) skipped = new Set([...ALWAYS_SKIPPED, ...extra]);
   } catch {
-    // No .gitignore, or one that cannot be read: the two fixed names still apply.
+    // No .gitignore, or one that cannot be read: the fixed names still apply.
   }
 
   const files: string[] = [];

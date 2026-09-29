@@ -45,7 +45,7 @@ test('removing a project archives every thread before waiting for each browser c
   const owner = await harness.connect();
   const first = await echoThread(harness, owner);
   const second = await echoThread(harness, owner);
-  const projectId = harness.core.threads.require(first.threadId).projectId;
+  const projectId = harness.core.threads.require(first.threadId).projectId!;
   const releases = new Map<string, () => void>();
   const pending = new Map([first.threadId, second.threadId].map(id => [id,
     new Promise<void>(resolve => { releases.set(id, resolve); }),

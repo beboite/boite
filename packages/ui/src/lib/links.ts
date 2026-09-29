@@ -23,6 +23,29 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
+ * Shows a file in the system file manager, selected. Only the shell on its own
+ * core can: the path is on this computer, and the opener plugin allows this
+ * one command. Nothing is opened or run, so a file an agent wrote cannot
+ * execute through here.
+ */
+export async function revealFile(path: string): Promise<void> {
+  if (!insideTauri()) throw new Error('showing a file in its folder needs the desktop app');
+  const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+  await revealItemInDir(path);
+}
+
+/**
+ * Opens a file Boite itself owns, the keybindings file, in the app the system
+ * gives its type. The shell's capability only lets a file with that name
+ * through, so an agent's file cannot be run from here.
+ */
+export async function openOwnFile(path: string): Promise<void> {
+  if (!insideTauri()) throw new Error('opening a file needs the desktop app');
+  const { openPath } = await import('@tauri-apps/plugin-opener');
+  await openPath(path);
+}
+
+/**
  * One capture-phase listener on the app root for every `http(s)` link the UI
  * shows, the markdown answers and the account login link included. A modified
  * click (ctrl, shift, meta or the middle button) is left to the browser, and so

@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { SchedulerState } from '@boite/contracts';
-import { startTestCore, waitFor } from './harness.ts';
+import { RpcErrorCode, type SchedulerState } from '@boite/contracts';
+import { holdAccountTurns, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
 
 let harness: TestCore;
 
-async function threeThreads(client: CoreClient): Promise<string[]> {
+async function threeThreads(client: CoreClient, count = 3): Promise<string[]> {
   const project = await client.call('projects.add', { path: harness.dataDir, name: 'scheduler' });
   const accounts = await client.call('accounts.list', {});
   const account = accounts.find((entry) => entry.providerId === 'echo');
   if (account === undefined) throw new Error('no echo account');
   const ids: string[] = [];
-  for (const title of ['one', 'two', 'three']) {
+  for (let index = 0; index < count; index++) {
     const thread = await client.call('threads.create', {
       projectId: project.id,
       providerId: 'echo',
       accountId: account.id,
-      title,
+      title: `thread ${index + 1}`,
     });
     ids.push(thread.id);
   }
@@ -25,7 +25,7 @@ async function threeThreads(client: CoreClient): Promise<string[]> {
 }
 
 beforeEach(async () => {
-  harness = await startTestCore({ settings: { maxConcurrentTurns: 2, perAccountConcurrency: 2 } });
+  harness = await startTestCore();
 });
 
 afterEach(async () => {
@@ -33,6 +33,17 @@ afterEach(async () => {
 });
 
 describe('scheduler', () => {
+  test('thirty user turns on one account start despite stored legacy concurrency limits', async () => {
+    const client = await harness.connect();
+    const threads = await threeThreads(client, 30);
+    harness.core.journal.setSetting('settings', { maxConcurrentTurns: 1, perAccountConcurrency: 1 });
+    for (const threadId of threads) await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
+    const state = await client.call('scheduler.get', {});
+    expect(state.running).toHaveLength(30);
+    expect(state.queued).toEqual([]);
+    expect(state.running.map(entry => entry.threadId)).toEqual(threads);
+  });
+
   test('shutdown refuses new turns before they reach the journal', async () => {
     const client = await harness.connect();
     const [threadId = ''] = await threeThreads(client);
@@ -56,14 +67,19 @@ describe('scheduler', () => {
     const [threadId = ''] = await threeThreads(client);
     await client.call('turns.start', { threadId, prompt: '[sleep:60000] first' });
     await expect(client.call('turns.start', { threadId, prompt: 'must not land' })).rejects.toThrow('in-flight');
+    // The refusal says the prompt is early, not wrong, and carries the row a
+    // client that had not seen this turn yet needs to wait for it.
+    await expect(client.call('turns.start', { threadId, prompt: 'must not land' })).rejects.toMatchObject({
+      rpc: { code: RpcErrorCode.Refused, data: { threadId, reason: 'turn-in-flight', thread: { id: threadId, status: 'running' } } },
+    });
     expect(harness.core.threads.get(threadId).turns).toHaveLength(1);
   });
 
   test('archiving a queued thread stops its turn and refuses new turns', async () => {
     const client = await harness.connect();
-    await client.call('settings.set', { maxConcurrentTurns: 1 });
     const [running = '', queued = ''] = await threeThreads(client);
     await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    holdAccountTurns(harness);
     await client.call('turns.start', { threadId: queued, prompt: 'must not run' });
     harness.core.threads.archive(queued, true);
     expect(harness.core.scheduler.state().queued).toHaveLength(0);
@@ -74,9 +90,9 @@ describe('scheduler', () => {
 
   test('clean shutdown marks queued turns stopped', async () => {
     const client = await harness.connect();
-    await client.call('settings.set', { maxConcurrentTurns: 1 });
     const [running = '', queued = ''] = await threeThreads(client);
     await client.call('turns.start', { threadId: running, prompt: '[sleep:60000]' });
+    holdAccountTurns(harness);
     await client.call('turns.start', { threadId: queued, prompt: 'wait' });
     await harness.core.scheduler.drain();
     expect(harness.core.threads.get(queued).turns[0]?.status).toBe('stopped');
@@ -131,27 +147,29 @@ describe('scheduler', () => {
     expect(harness.core.journal.isClosed()).toBe(true);
   });
 
-  test('concurrency caps require positive integers', () => {
-    for (const key of ['maxConcurrentTurns', 'perAccountConcurrency'] as const) {
-      for (const value of [0, 0.5, 1.5]) {
-        expect(() => harness.core.settings.set({ [key]: value })).toThrow('positive integer');
-      }
+  test('legacy concurrency settings are omitted from RPC responses', async () => {
+    const client = await harness.connect();
+    harness.core.journal.setSetting('settings', { maxConcurrentTurns: 1, perAccountConcurrency: 1 });
+    const settings = await client.call('settings.get', {});
+    const scheduler = await client.call('scheduler.get', {});
+    for (const key of ['maxConcurrentTurns', 'perAccountConcurrency']) {
+      expect(settings).not.toHaveProperty(key);
+      expect(scheduler).not.toHaveProperty(key);
     }
   });
 
-  test('a third turn waits its turn and runs when a slot frees', async () => {
+  test('a turn queued during an account login runs when the hold ends', async () => {
     const client = await harness.connect();
     const threads = await threeThreads(client);
 
     const states: SchedulerState[] = [];
     client.on('scheduler.updated', (state) => states.push(state));
 
-    for (const threadId of threads) {
-      await client.call('turns.start', { threadId, prompt: '[sleep:300]' });
-    }
+    for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:300]' });
+    const release = holdAccountTurns(harness);
+    await client.call('turns.start', { threadId: threads[2] ?? '', prompt: '[sleep:300]' });
 
     const queued = await client.call('scheduler.get', {});
-    expect(queued.maxConcurrentTurns).toBe(2);
     expect(queued.running).toHaveLength(2);
     expect(queued.queued).toHaveLength(1);
     expect(queued.queued[0]?.threadId).toBe(threads[2] ?? '');
@@ -162,7 +180,9 @@ describe('scheduler', () => {
 
     await waitFor(() => states.some((state) => state.queued.length === 1), 3000);
 
-    await client.next('turn.finished', (turn) => turn.threadId === threads[2], 15000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threads[2], 15000);
+    release();
+    await finished;
     const settled = await client.call('scheduler.get', {});
     expect(settled.running).toHaveLength(0);
     expect(settled.queued).toHaveLength(0);
@@ -171,9 +191,9 @@ describe('scheduler', () => {
   test('turns.stop removes a queued turn', async () => {
     const client = await harness.connect();
     const threads = await threeThreads(client);
-    for (const threadId of threads) {
-      await client.call('turns.start', { threadId, prompt: '[sleep:400]' });
-    }
+    for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:400]' });
+    holdAccountTurns(harness);
+    await client.call('turns.start', { threadId: threads[2] ?? '', prompt: '[sleep:400]' });
 
     const target = threads[2] ?? '';
     expect((await client.call('scheduler.get', {})).queued.map((entry) => entry.threadId)).toEqual([target]);
@@ -203,15 +223,18 @@ describe('scheduler', () => {
     expect(done.status).toBe('stopped');
   });
 
-  test('perAccountConcurrency caps one account below the global cap', async () => {
+  test('releasing an account login hold starts all its queued turns together', async () => {
     const client = await harness.connect();
-    await client.call('settings.set', { maxConcurrentTurns: 6, perAccountConcurrency: 1 });
     const threads = await threeThreads(client);
+    const release = holdAccountTurns(harness);
     for (const threadId of threads) {
-      await client.call('turns.start', { threadId, prompt: '[sleep:300]' });
+      await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
     }
     const state = await client.call('scheduler.get', {});
-    expect(state.running).toHaveLength(1);
-    expect(state.queued).toHaveLength(2);
+    expect(state.running).toHaveLength(0);
+    expect(state.queued).toHaveLength(3);
+    release();
+    expect(harness.core.scheduler.state().running).toHaveLength(3);
+    expect(harness.core.scheduler.state().queued).toHaveLength(0);
   });
 });

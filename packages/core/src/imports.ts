@@ -3,8 +3,9 @@
  * keeps transcripts Boite can read today: every account on the `claude-sdk`
  * protocol has a config directory (its isolation directory, or the user's own
  * `~/.claude`), and `projects/<folder>` under it holds one `.jsonl` per
- * session of that working directory. A listing parses each file's first
- * prompt and its title records; an import reads it whole and writes one finished turn per prompt, then sets
+ * session of that working directory. A listing reads each file's first
+ * prompt and its last title record, and reuses them while the file is
+ * unchanged; an import reads it whole and writes one finished turn per prompt, then sets
  * the session id so the next turn resumes where the CLI left off.
  */
 
@@ -13,7 +14,8 @@ import { join } from 'node:path';
 import type { Account, AccountId, ImportableSession, Project, ProjectId, ThreadSummary } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { notFound, refused } from './errors.ts';
-import { claudeProjectFolder, readTranscript } from './imports/claude.ts';
+import { claudeProjectFolder, listTranscript, readTranscript } from './imports/claude.ts';
+import type { TranscriptListing } from './imports/claude.ts';
 import { currentOs } from './paths.ts';
 import { titleFromPrompt } from './titles.ts';
 
@@ -36,6 +38,13 @@ export class ImportStore {
    * is still being read.
    */
   private readonly running = new Set<string>();
+  /**
+   * What each transcript folder listed, by file name, kept while a file's size
+   * and modification time stay the same: reopening the list reads nothing new.
+   */
+  private readonly listed = new Map<string, Map<string, { size: number; mtimeMs: number; listing: TranscriptListing | null }>>();
+  /** A listing under way, which a second client or a quick reopen shares. */
+  private readonly listing = new Map<ProjectId, Promise<ImportableSession[]>>();
 
   constructor(private readonly core: Core) {}
 
@@ -55,7 +64,15 @@ export class ImportStore {
     return join(dir, 'projects', claudeProjectFolder(project.path), `${sessionId}.jsonl`);
   }
 
-  async list(projectId: ProjectId): Promise<ImportableSession[]> {
+  list(projectId: ProjectId): Promise<ImportableSession[]> {
+    const running = this.listing.get(projectId);
+    if (running !== undefined) return running;
+    const scan = this.scan(projectId).finally(() => this.listing.delete(projectId));
+    this.listing.set(projectId, scan);
+    return scan;
+  }
+
+  private async scan(projectId: ProjectId): Promise<ImportableSession[]> {
     const project = this.core.projects.require(projectId);
     const known = new Map<string, string>();
     for (const thread of this.core.journal.listThreads()) {
@@ -64,16 +81,23 @@ export class ImportStore {
     const out: ImportableSession[] = [];
     for (const { account, dir } of this.roots()) {
       const folder = join(dir, 'projects', claudeProjectFolder(project.path));
-      if (!existsSync(folder)) continue;
+      if (!existsSync(folder)) {
+        this.listed.delete(folder);
+        continue;
+      }
+      const before = this.listed.get(folder);
+      const now = new Map<string, { size: number; mtimeMs: number; listing: TranscriptListing | null }>();
       for (const name of readdirSync(folder)) {
         if (!name.endsWith('.jsonl')) continue;
         const sessionId = name.slice(0, -'.jsonl'.length);
         const file = join(folder, name);
         const stat = statSync(file);
         if (!stat.isFile()) continue;
-        const head = await readTranscript(file, true);
-        const first = head.turns[0];
-        if (first === undefined) continue;
+        const kept = before?.get(name);
+        const head =
+          kept !== undefined && kept.size === stat.size && kept.mtimeMs === stat.mtimeMs ? kept.listing : await listTranscript(file);
+        now.set(name, { size: stat.size, mtimeMs: stat.mtimeMs, listing: head });
+        if (head === null) continue;
         if (head.cwd !== null && !sameFolder(head.cwd, project.path)) {
           this.core.log('warn', `import: ${file} was recorded in ${head.cwd}, not ${project.path}; skipped`);
           continue;
@@ -83,13 +107,14 @@ export class ImportStore {
           accountId: account.id,
           sessionId,
           file,
-          title: head.agentTitle ?? titleFromPrompt(first.prompt),
-          startedAt: first.promptAt,
+          title: head.agentTitle ?? titleFromPrompt(head.prompt),
+          startedAt: head.promptAt,
           updatedAt: stat.mtimeMs,
           bytes: stat.size,
           threadId: known.get(sessionId) ?? null,
         });
       }
+      this.listed.set(folder, now);
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }

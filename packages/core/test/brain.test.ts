@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scanBrain } from '../src/brain.ts';
 import { BrainStore } from '../src/brain.ts';
 import { connect } from '../src/client.ts';
+import { setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
 let root: string;
-beforeEach(async () => { h = await startTestCore(); root = join(h.dataDir, 'brain'); mkdirSync(root); root = realpathSync(root); });
+beforeEach(async () => { h = await startTestCore({ boiteGuide: true }); root = join(h.dataDir, 'brain'); mkdirSync(root); root = realpathSync(root); });
 afterEach(async () => { await h.stop(); });
 function file(path: string, text: string) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); }
 async function git(cwd: string, args: string[]) {
@@ -211,6 +213,127 @@ test('normal turns receive current instructions and skill paths without changing
   expect(h.core.brain.instructions()).not.toContain('Skill body stays on disk');
   file(join(root, 'AGENTS.md'), 'Shared convention two');
   expect(h.core.brain.instructions()).toContain('Shared convention two');
+});
+
+test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reaches the first session turn with a %s brain', async state => {
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  file(join(root, 'AGENTS.md'), 'Shared convention');
+  if (state !== 'disconnected') await owner.call('brain.configure', { path: root, enabled: state === 'connected' });
+  const files = readdirSync(root);
+  const run = async (prompt: string) => {
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return JSON.stringify(h.core.journal.listMessages(threadId).filter(m => m.turnId === turn.id && m.role === 'assistant'));
+  };
+  const first = await run('Hello');
+  expect(first).toContain('boite where');
+  if (state === 'connected') {
+    expect(first).toContain('Shared convention');
+    expect(first.indexOf('Shared convention')).toBeLessThan(first.indexOf('boite where'));
+  }
+  else expect(first).not.toContain('Shared convention');
+  expect(first).not.toContain('boite agents send');
+  expect(first).not.toContain('boite delegate spawn');
+  expect(first.indexOf('boite where')).toBeLessThan(first.indexOf('Hello'));
+  expect(readdirSync(root)).toEqual(files);
+  expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe('Shared convention');
+  expect(h.core.journal.listMessages(threadId).filter(m => m.role === 'user')[0]?.parts).toEqual([{ type: 'text', text: 'Hello' }]);
+  const second = await run('Again');
+  if (state === 'connected') expect(second).toContain('Shared convention');
+  expect(second).not.toContain('boite where');
+});
+
+test('the Boite guide switch persists, and echo never receives the ask command', async () => {
+  const owner = await h.connect();
+  file(join(root, 'AGENTS.md'), 'Shared convention');
+  await owner.call('brain.configure', { path: root, enabled: true });
+  const brain = h.core.brain;
+  const run = async () => {
+    let prompt = '';
+    const restore = setDriver('echo', { ...echoDriver, startTurn(ctx) {
+      prompt = ctx.prompt;
+      // Inspect the prompt without triggering echo's keyword-based question fixture.
+      return echoDriver.startTurn({ ...ctx, prompt: 'Hello' });
+    } });
+    try {
+      const { threadId } = await echoThread(h, owner);
+      const turn = await owner.call('turns.start', { threadId, prompt: 'Hello' });
+      await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+      return prompt;
+    } finally { restore(); }
+  };
+  expect(brain.instructions()).not.toContain('boite where');
+  expect(await run()).not.toContain('boite ask');
+  h.core.settings.set({ asyncQuestions: true });
+  expect(await run()).not.toContain('boite ask');
+  const off = await owner.call('brain.configure', { path: root, enabled: true, boiteGuide: false });
+  expect(off.config.boiteGuide).toBe(false);
+  expect(await run()).not.toContain('boite where');
+  // Leaving the field out keeps the switch where it was.
+  expect((await owner.call('brain.configure', { path: root, enabled: true })).config.boiteGuide).toBe(false);
+  await expect(owner.call('brain.configure', { path: root, enabled: true, boiteGuide: 'yes' as never })).rejects.toThrow('boiteGuide');
+});
+
+test('echo with the default guide and asynchronous questions finishes without asking', async () => {
+  h.core.settings.set({ asyncQuestions: true });
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner);
+  const turn = await owner.call('turns.start', { threadId, prompt: 'container persistence check' });
+  await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done', 1000);
+  const parts = h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
+  expect(parts.some(p => p.type === 'question')).toBe(false);
+  expect(JSON.stringify(parts)).toContain('boite where');
+});
+
+test('an absolute path receives the guide while a native command stays untouched', async () => {
+  const owner = await h.connect();
+  const run = async (prompt: string) => {
+    const { threadId } = await echoThread(h, owner);
+    const turn = await owner.call('turns.start', { threadId, prompt });
+    await waitFor(() => h.core.journal.listTurns(threadId).find(t => t.id === turn.id)?.status === 'done');
+    return h.core.journal.listMessages(threadId).filter(m => m.role === 'assistant').flatMap(m => m.parts);
+  };
+  expect(JSON.stringify(await run('/tmp/report: inspect this file'))).toContain('boite where');
+  expect(await run('/shout raw command')).toEqual([{ type: 'text', text: 'RAW COMMAND' }]);
+});
+
+/** Moves every time under `dir` an hour back, as a brain nobody edited today looks. */
+function age(dir: string, offsetMs = 3_600_000) {
+  const then = new Date(Date.now() - offsetMs);
+  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    utimesSync(join(entry.parentPath, entry.name), then, then);
+  }
+  utimesSync(dir, then, then);
+}
+
+test('an unchanged brain is scanned once across turns, and an edit or a new skill is read on the next one', async () => {
+  file(join(root, 'AGENTS.md'), 'Convention one');
+  file(join(root, 'skills/review/SKILL.md'), '---\nname: review\ndescription: Review changes.\n---\nbody');
+  await h.core.brain.configure({ path: root, enabled: true });
+  const brain = h.core.brain;
+  age(root);
+  const scans = brain.scans;
+  const first = brain.instructions();
+  expect(brain.instructions()).toBe(first);
+  expect(brain.instructions('claude')).toBe(first);
+  expect(brain.scans - scans).toBe(1);
+
+  // Same size, same folder: only the file's own stamp tells.
+  file(join(root, 'AGENTS.md'), 'Convention two');
+  expect(brain.instructions()).toContain('Convention two');
+  age(root);
+  brain.instructions();
+  const settled = brain.scans;
+  expect(brain.instructions()).toContain('Convention two');
+  expect(brain.scans).toBe(settled);
+
+  file(join(root, 'skills/deploy/SKILL.md'), '---\nname: deploy\ndescription: Ship it.\n---\nbody');
+  expect(brain.instructions()).toContain('deploy: Ship it.');
+  age(root);
+  brain.instructions();
+  unlinkSync(join(root, 'skills/deploy/SKILL.md'));
+  expect(brain.instructions()).not.toContain('deploy: Ship it.');
 });
 
 test('configuration persists across store instances; missing folders and oversized instructions are reported', async () => {

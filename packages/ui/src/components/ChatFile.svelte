@@ -6,6 +6,7 @@
   import { experimentOn } from '../lib/experiments.svelte';
   import { strings } from '../lib/strings';
   import { bytes } from '../lib/format';
+  import { localFileDirectory, openLocalFile } from '../lib/local-files';
 
   let { file, store, threadId, path, line, onclose }: {
     file?: Extract<MessagePart, { type: 'file' }>; store?: Store; threadId?: string;
@@ -18,12 +19,23 @@
   let error = $state('');
   let loading = $state(false);
   let expanded = $state(false);
+  let opening = $state(false);
+  const directory = $derived(!file && path ? localFileDirectory(store, threadId) : null);
   const name = $derived(file?.name ?? path?.split('/').at(-1) ?? strings.composer.attachAlt);
   const rich = $derived(experimentOn('chat-artifacts'));
   const image = $derived(/^image\/(png|jpeg|gif|webp|avif|bmp)$/.test(mime));
   const pdf = $derived(mime === 'application/pdf');
   const audio = $derived(mime.startsWith('audio/'));
   const video = $derived(mime.startsWith('video/'));
+  const previewable = $derived(text !== null || image || (pdf && !!file) || audio || video);
+
+  async function open(): Promise<void> {
+    if (!directory || !path || opening) return;
+    opening = true;
+    try { await openLocalFile(directory, path); }
+    catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
+    finally { opening = false; }
+  }
 
   onMount(() => {
     let disposed = false;
@@ -65,8 +77,9 @@
   <div class="file-row">
     <FileText size={22} />
     <span class="identity"><span>{name}</span>{#if !error}<small>{loading ? strings.artifacts.loading : bytes(size)}</small>{/if}</span>
+    {#if directory}<button class="ghost small" type="button" onclick={open} disabled={opening} data-testid="artifact-open">{strings.artifacts.open}</button>{/if}
     {#if url}
-      {#if rich}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
+      {#if rich && previewable}<button class="ghost small" type="button" onclick={() => expanded = !expanded} aria-expanded={expanded} data-testid="artifact-preview">{strings.artifacts.preview}</button>{/if}
       <a class="ghost small download" href={url} download={name} data-testid="artifact-download" aria-label={strings.artifacts.download}><Download size={16} /></a>
     {/if}
     {#if onclose}<button class="ghost small icon" type="button" onclick={onclose} aria-label={strings.artifacts.close}><X size={16} /></button>{/if}
@@ -81,7 +94,7 @@
         <iframe title={name} src={url} referrerpolicy="no-referrer"></iframe>
       {:else if video}<video src={url} controls preload="metadata"><track kind="captions" /></video>
       {:else if audio}<audio src={url} controls preload="metadata"></audio>
-      {:else}<p>{strings.artifacts.unavailable}</p>{/if}
+      {:else}<p>{directory ? strings.artifacts.openLocal : strings.artifacts.unavailable}</p>{/if}
     </div>
   {/if}
 </section>

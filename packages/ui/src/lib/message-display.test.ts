@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import { claudeKeywords, promptSegments, sliceSegments, visibleAnswer, visibleUserText } from './message-display';
+import type { Message } from '@boite/contracts';
+import { claudeKeywords, lastAnswer, promptSegments, sliceSegments, visibleAnswer, visibleUserText } from './message-display';
 
 test('the keywords count only for a Claude model run by Claude Code', () => {
   expect(claudeKeywords('claude-sdk', 'claude-opus-5-5')).toBe(true);
@@ -95,4 +96,18 @@ test('sliceSegments cuts a range out of the whole prompt, keywords split at the 
   expect(sliceSegments(segments, 1, 8)).toEqual([{ text: 'o ', kind: 'plain' }, { text: 'ultra', kind: 'ultrathink' }]);
   expect(sliceSegments(segments, 13, 17)).toEqual([{ text: ' now', kind: 'plain' }]);
   expect(sliceSegments(segments, 17, 20)).toEqual([]);
+});
+
+test('the last answer is the newest turn that said something, its text parts joined, tool cards left out', () => {
+  const said = (id: string, turnId: string | null, role: Message['role'], parts: Message['parts']) =>
+    ({ id, threadId: 't-1', turnId, role, parts, createdAt: 0 }) as Message;
+  const messages = [
+    said('m-1', 'u-1', 'user', [{ type: 'text', text: 'first' }]),
+    said('m-2', 'u-1', 'assistant', [{ type: 'text', text: 'Answer one.' }]),
+    said('m-3', 'u-1', 'assistant', [{ type: 'text', text: 'And more. [BOITE_GOAL_COMPLETE]' }]),
+    said('m-4', 'u-2', 'user', [{ type: 'text', text: 'second' }]),
+    said('m-5', 'u-2', 'assistant', [{ type: 'tool', toolId: 'k-1', name: 'Read', input: {}, status: 'running' } as never])
+  ];
+  expect(lastAnswer(messages)).toBe('Answer one.\n\nAnd more. [BOITE_GOAL_COMPLETE]');
+  expect(lastAnswer(messages.slice(0, 1))).toBe('');
 });

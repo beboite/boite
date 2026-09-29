@@ -16,12 +16,20 @@ import { CORE_VERSION, Core } from './core.ts';
 import { messageOf } from './errors.ts';
 import { newToken } from './ids.ts';
 import { resolveDataDir } from './paths.ts';
-import { startServer } from './server.ts';
+import { processPlatform } from './platform/index.ts';
+import { startServerOnStickyPort } from './server.ts';
 
 const CHANNELS: readonly Channel[] = ['stable', 'dev'];
 
 /** How long a graceful shutdown may take before the process leaves anyway. */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+/**
+ * How much later than the lock's own time a holder may have started and still
+ * be the core that wrote it. The core starts before it writes the lock, so this
+ * only absorbs the clocks: procfs gives the boot time in whole seconds.
+ */
+const LOCK_CLOCK_MARGIN_MS = 2000;
 
 interface CoreFile {
   port: number;
@@ -35,6 +43,8 @@ interface CoreFile {
 export interface Flags {
   publicUrl?: string;
   port: number;
+  /** True once `--port` named one: then no other port is tried. */
+  portExplicit: boolean;
   host: string;
   /** True once `--host` or `--lan` named an address, so the setting no longer decides. */
   hostExplicit: boolean;
@@ -46,6 +56,7 @@ export interface Flags {
 export function parseFlags(argv: string[]): Flags {
   const flags: Flags = {
     port: 0,
+    portExplicit: false,
     host: '127.0.0.1',
     hostExplicit: false,
     dataDir: undefined,
@@ -66,6 +77,7 @@ export function parseFlags(argv: string[]): Flags {
           throw new Error(`--port expects an integer between 0 and 65535, got ${value ?? '(nothing)'}`);
         }
         flags.port = port;
+        flags.portExplicit = true;
         index += 1;
         break;
       }
@@ -100,13 +112,20 @@ export function parseFlags(argv: string[]): Flags {
   return flags;
 }
 
-function readToken(file: string): string | null {
-  if (!existsSync(file)) return null;
+/**
+ * What the previous run of this data directory left in `core.json`: the owner
+ * token, kept so `boite-core pair` and the CLI survive a restart, and the port,
+ * kept so a paired phone does.
+ */
+export function readPreviousRun(file: string): { token: string | null; port: number | null } {
+  if (!existsSync(file)) return { token: null, port: null };
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<CoreFile>;
-    return typeof parsed.token === 'string' && parsed.token.length > 0 ? parsed.token : null;
+    const token = typeof parsed.token === 'string' && parsed.token.length > 0 ? parsed.token : null;
+    const port = Number.isInteger(parsed.port) && parsed.port! > 0 && parsed.port! <= 65535 ? parsed.port! : null;
+    return { token, port };
   } catch {
-    return null;
+    return { token: null, port: null };
   }
 }
 
@@ -121,6 +140,13 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Did the process wearing `pid` start after the lock that names it was written? */
+function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: number) => number | null): boolean {
+  if (lockedAt === null) return false;
+  const started = startedAt(pid);
+  return started !== null && started > lockedAt + LOCK_CLOCK_MARGIN_MS;
+}
+
 /**
  * One core per data directory, taken before the journal is opened.
  *
@@ -131,8 +157,17 @@ function alive(pid: number): boolean {
  * its threads and its `core.json` and the user watched his answer turn into an
  * error. A lock whose holder is gone is taken over, so a core killed hard does
  * not leave the directory unusable.
+ *
+ * Gone includes a pid worn by someone else. A core that died without releasing
+ * the lock, in a reboot say, leaves its pid to whatever asks next: a browser
+ * tab held the pid of a dead core and kept every later core from starting. A
+ * holder that started after the lock was written is not the core that wrote it.
+ * Where `startedAt` cannot say (macOS), a live pid still holds the lock.
  */
-export function lockDataDir(dataDir: string): () => void {
+export function lockDataDir(
+  dataDir: string,
+  startedAt: (pid: number) => number | null = processPlatform.startedAt,
+): () => void {
   const file = join(dataDir, 'core.lock');
   const release = (): void => {
     try {
@@ -150,13 +185,15 @@ export function lockDataDir(dataDir: string): () => void {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       let holder: number | null = null;
+      let lockedAt: number | null = null;
       try {
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number }>;
+        const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<{ pid: number; startedAt: number }>;
         holder = typeof parsed.pid === 'number' ? parsed.pid : null;
+        lockedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : null;
       } catch {
         holder = null;
       }
-      if (holder !== null && holder !== process.pid && alive(holder)) {
+      if (holder !== null && holder !== process.pid && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
         throw new Error(
           `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
         );
@@ -219,6 +256,16 @@ export async function pair(argv: string[]): Promise<PairingGrant> {
   }
 }
 
+/**
+ * Why the core will not start, on one line, then out. A throw left to Bun
+ * printed lines of the minified bundle around it, and the shell shows the user
+ * everything the core wrote before it died.
+ */
+function refuseToStart(error: unknown): never {
+  process.stderr.write(`boite-core: ${messageOf(error)}\n`);
+  process.exit(1);
+}
+
 export function main(argv: string[]): void {
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
@@ -252,20 +299,34 @@ export function main(argv: string[]): void {
     return;
   }
 
-  const flags = parseFlags(argv);
-  const dataDir = resolveDataDir(flags.dataDir, flags.channel);
-  mkdirSync(dataDir, { recursive: true });
-
-  // Before the journal is opened, because opening it is already a write.
-  const unlock = lockDataDir(dataDir);
+  let flags: Flags;
+  let dataDir: string;
+  let unlock: () => void;
+  try {
+    flags = parseFlags(argv);
+    dataDir = resolveDataDir(flags.dataDir, flags.channel);
+    mkdirSync(dataDir, { recursive: true });
+    // Before the journal is opened, because opening it is already a write.
+    unlock = lockDataDir(dataDir);
+  } catch (error) {
+    refuseToStart(error);
+  }
   const coreFile = join(dataDir, 'core.json');
-  const token = readToken(coreFile) ?? newToken();
-  const core = new Core({ dataDir, token, channel: flags.channel });
+  const previous = readPreviousRun(coreFile);
+  const token = previous.token ?? newToken();
+  let core: Core;
+  try {
+    core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+  } catch (error) {
+    // A journal from a newer release, among others: say why and leave the data as it is.
+    unlock();
+    refuseToStart(error);
+  }
   const publicUrl = flags.publicUrl ?? process.env.BOITE_PUBLIC_URL;
   if (publicUrl !== undefined) core.settings.set({ publicUrl });
   const settings = core.settings.get();
   const host = resolveHost(flags, settings);
-  const server = startServer({ core, host, port: flags.port });
+  const server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
   core.updates.start();
   if (core.cliDir === null) {
     console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
@@ -323,11 +384,31 @@ export function main(argv: string[]): void {
       .finally(() => {
         clearTimeout(deadline);
         unlock();
-        process.exit(0);
+        process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
       });
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // The last line of defence: Bun exits on either anyway. This leaves a log
+  // line, stops the turns and releases the lock on the way out; the process
+  // never carries on after an error nobody expected.
+  const fatal = (kind: string) => (error: unknown): void => {
+    core.log('error', `${kind}: ${messageOf(error)}`);
+    process.stderr.write(`boite-core ${kind}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
+    process.exitCode = 1;
+    shutdown();
+  };
+  process.on('uncaughtException', fatal('uncaught exception'));
+  process.on('unhandledRejection', fatal('unhandled rejection'));
+
+  // The terminal a core was started from closed. Off Windows each child leads a
+  // session of its own and gets no hang-up of its own any more, so without this
+  // the core died on the default action and left every group running. A hang-up
+  // can arrive twice (from the kernel and from `bun run` passing it on) and is
+  // never the operator asking to hurry, so a repeat does not cut the shutdown short.
+  process.on('SIGHUP', () => {
+    if (!stopping) shutdown();
+  });
 }
 
 if (import.meta.main) main(process.argv.slice(2));

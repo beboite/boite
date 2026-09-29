@@ -12,7 +12,7 @@ export interface FakeFinishedTurn {
   at: number;
   threadId: ThreadId;
   title: string;
-  projectId: string;
+  projectId: string | null;
   providerId: string;
   model: string | null;
   usage: Usage;
@@ -135,7 +135,7 @@ interface Group {
   at: number;
   threadId: ThreadId;
   title: string;
-  projectId: string;
+  projectId: string | null;
   providerId: string;
   model: string | null;
   turns: number;

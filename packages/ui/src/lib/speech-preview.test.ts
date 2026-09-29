@@ -23,6 +23,18 @@ test('slow previews skip ticks, preserve the recording revision and publish only
   expect(onerror).not.toHaveBeenCalled();
 });
 
+test('previews are marked as such, and the language the first one heard goes with the next', async () => {
+  const call = vi.fn(async () => ({ text: 'bonjour', language: 'french' }));
+  const preview = new SpeechPreview({ call } as unknown as Client, 'revision', vi.fn(), vi.fn());
+  preview.update(snapshot); await tick();
+  expect(call).toHaveBeenLastCalledWith('speech.transcribe', expect.not.objectContaining({ language: expect.anything() }));
+  expect(call).toHaveBeenLastCalledWith('speech.transcribe', expect.objectContaining({ preview: true }));
+  expect(preview.language).toBe('french');
+  preview.update(snapshot); await tick();
+  expect(call).toHaveBeenLastCalledWith('speech.transcribe', expect.objectContaining({ preview: true, language: 'french' }));
+  await preview.stop();
+});
+
 test('stop cancels its own request and drains it before final transcription can start', async () => {
   let resolve!: (result: { text: string }) => void;
   const call = vi.fn((method: string) => method === 'speech.cancel' ? Promise.resolve({ ok: true }) : new Promise(done => { resolve = done; }));

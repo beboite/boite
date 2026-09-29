@@ -1,6 +1,9 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { strings } from '../lib/strings';
+
+  const uid = $props.id();
   let enabled = $state(false);
   let ready = $state(false);
   let error = $state('');
@@ -16,13 +19,12 @@
   onMount(() => { void update(); });
 </script>
 
-<section class="card" data-testid="shell-settings">
-  <label class="switch-row">
-    <span class="text">{strings.settings.closeToTray}<span class="hint">{strings.settings.closeToTrayHint}</span></span>
-    <input type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
-  </label>
-  {#if error}<p role="alert">{error}</p>{/if}
-</section>
+<!-- A row of General's App card, not a card of its own: one switch does not need a frame. -->
+<label for="{uid}-close-to-tray" class="switch-row" data-testid="shell-settings">
+  <span class="text"><span id="{uid}-close-to-tray-name">{strings.settings.closeToTray}</span><InfoTip topic={strings.settings.closeToTray} text={strings.settings.closeToTrayHint} /></span>
+  <input id="{uid}-close-to-tray" aria-labelledby="{uid}-close-to-tray-name" type="checkbox" role="switch" data-testid="close-to-tray" checked={enabled} disabled={!ready} onchange={(event) => void update(event.currentTarget.checked)} />
+</label>
+{#if error}<p class="error" role="alert">{error}</p>{/if}
 <style>
-  p { margin-top: 12px; color: var(--color-danger); }
+  .error { margin: 0 0 12px; color: var(--color-danger); font-size: var(--text-sm); }
 </style>

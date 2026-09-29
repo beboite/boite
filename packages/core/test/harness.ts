@@ -22,6 +22,17 @@ export interface TestCore {
 export interface TestCoreOptions {
   helloTimeoutMs?: number;
   settings?: Partial<Settings>;
+  boiteGuide?: boolean;
+}
+
+/** Hold admission as an account login would, without limiting unrelated work. */
+export function holdAccountTurns(harness: TestCore, accountId?: string): () => void {
+  const blocksAccount = harness.core.plugins.blocksAccount;
+  harness.core.plugins.blocksAccount = id => accountId === undefined || id === accountId || blocksAccount.call(harness.core.plugins, id);
+  return () => {
+    harness.core.plugins.blocksAccount = blocksAccount;
+    harness.core.scheduler.onSettingsChanged();
+  };
 }
 
 /** Scripted SDK tests need an available executable, never a real CLI install. */
@@ -35,8 +46,14 @@ export function scriptedClaude(harness: TestCore): void {
 export async function startTestCore(options: TestCoreOptions = {}): Promise<TestCore> {
   const dataDir = mkdtempSync(join(tmpdir(), 'boite-core-'));
   process.env.BOITE_DATA_DIR = dataDir;
+  // Drafts land in the test's own directory, never in the user's Documents.
+  process.env.BOITE_DRAFTS_DIR = join(dataDir, 'Documents', 'Boite');
   // The echo provider ships only when asked for; every test drives it.
   process.env.BOITE_ECHO = '1';
+  // No test runs the agents installed on this machine, unless an opt-in live
+  // test asked for them: a version check or a probe would start the user's CLIs.
+  const live = Object.keys(process.env).some((name) => /^BOITE_(E2E|BENCH)_/.test(name) && process.env[name] === '1');
+  process.env.BOITE_HOST_AGENTS = live ? '1' : '0';
   // A shell the tests open must not write what they type into the user's own
   // PowerShell or bash history: cmd and sh keep none.
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
@@ -46,6 +63,8 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, ...options.settings });
+  // Keep scripted replies limited to test input unless testing session context.
+  if (!options.boiteGuide) core.journal.setSetting('brain', { path: null, enabled: false, boiteGuide: false });
 
   const server = startServer({
     core,
@@ -72,6 +91,9 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
     async stop(): Promise<void> {
       if (stopped) return;
       stopped = true;
+      // Before anything closes: a wait still polling from here on belongs to a
+      // test that already ended, and it must stay silent rather than land in the next one.
+      stops += 1;
       for (const client of clients) client.close();
       await server.stop();
       await core.close();
@@ -104,11 +126,30 @@ export async function echoThread(
   return { threadId: thread.id, accountId: account.id };
 }
 
+/** How many test cores have stopped. A wait that outlives a stop was abandoned by its test. */
+let stops = 0;
+
+/**
+ * Polls until `predicate` holds. A predicate that throws rejects the wait. A wait
+ * whose test core stopped while it polled goes quiet instead: bun fails the
+ * running test on any late rejection, so a wait left behind by a failed test
+ * (its predicate now reading a closed journal) would otherwise fail the next test,
+ * whose own wait then fails the one after, down the whole file.
+ */
 export function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
+  const generation = stops;
   return new Promise<void>((resolve, reject) => {
     const tick = (): void => {
-      if (predicate()) {
+      if (stops !== generation) return;
+      let held: boolean;
+      try {
+        held = predicate();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      if (held) {
         resolve();
         return;
       }

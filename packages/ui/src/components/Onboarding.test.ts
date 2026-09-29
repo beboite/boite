@@ -1,12 +1,17 @@
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import Onboarding from './Onboarding.svelte';
 import { FakeClient } from '../lib/fake-client';
-import { LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
+import { loadLocale, LOCALE_STORAGE_KEY, setLocaleSetting } from '../lib/i18n.svelte';
 import { ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION, readOnboarding, steps } from '../lib/onboarding';
 import { closeTour, openTour, tourRequested, tourSeen } from '../lib/onboarding.svelte';
 import { Store } from '../lib/store.svelte';
 import { THEME_STORAGE_KEY } from '../lib/theme';
+import { PREFS_STORAGE_KEY } from '../lib/prefs';
+import { work, WORK_STORAGE_KEY } from '../lib/work-prefs.svelte';
+
+// French is its own chunk: loaded once, the tour's language buttons switch at once.
+beforeAll(() => loadLocale('fr'));
 
 /**
  * The tour: the screens it walks, the switches it carries, and the record it
@@ -19,6 +24,7 @@ let store: Store;
 
 beforeEach(async () => {
   window.localStorage.clear();
+  work.load();
   store = new Store();
   store.attach(new FakeClient({ delayMs: 0 }));
   await store.connect();
@@ -73,8 +79,8 @@ test('demo artwork speaks the language of the tour around it', async () => {
   expect(query('[data-testid=onboarding-animation]').textContent).toContain('Rends les boutons plus lisibles');
   expect(query('[data-testid=onboarding-animation]').textContent).not.toContain('Build my portfolio');
   await click('onboarding-animation-pause');
-  expect(query('[data-testid=onboarding-animation-pause]').textContent).toContain('Reprendre');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Rejouer');
+  expect(query('[data-testid=onboarding-animation-pause]').getAttribute('aria-label')).toBe('Reprendre');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Rejouer');
   expect(query('[data-testid=onboarding-next]').textContent).toContain('Suivant');
 });
 
@@ -174,7 +180,7 @@ test('usage and reach explain themselves without delayed account lists or exits'
   expect(switches.length).toBe(0);
   expect(document.body.textContent).toContain('24% used');
   expect(document.body.textContent).toContain('5-hour limit');
-  expect(document.body.textContent).toContain('beside the clock');
+  expect(document.body.textContent).toContain('Hover the Boite icon');
 
   await click('onboarding-dot-reach');
   expect(document.querySelector('[data-testid=onboarding-pair]')).toBeNull();
@@ -216,7 +222,7 @@ test('demo choices are labelled buttons and dictation keeps word spacing', async
   await click('onboarding-example-voice');
   expect(query('[data-testid=onboarding-scene]').textContent).toContain('Make the buttons easier to read');
   expect(query('[data-testid=onboarding-scene]').textContent).not.toContain('Illustration');
-  expect(query('[data-testid=onboarding-animation-replay]').textContent).toContain('Replay');
+  expect(query('[data-testid=onboarding-animation-replay]').getAttribute('aria-label')).toBe('Replay');
 });
 
 test('skipping at the first screen counts as seen, the same as finishing it', async () => {
@@ -243,7 +249,7 @@ test('losing owner access on the last screen keeps the step and count valid', as
   flushSync();
   await tick();
   expect(step()).toBe('quiet');
-  expect(document.querySelectorAll('.dots .dot')).toHaveLength(5);
+  expect(document.querySelectorAll('.dots .dot')).toHaveLength(6);
   // A guest's last screen has no consent to give: its button closes the tour.
   expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
 });
@@ -259,6 +265,17 @@ test('refusing the deal keeps basic counters, turns the row red and closes after
   expect(query<HTMLButtonElement>('[data-testid=onboarding-telemetry-enhanced]').disabled).toBe(true);
   // The refusal clip plays before the tour goes away.
   expect(document.querySelector('[data-testid=onboarding]')).not.toBeNull();
+});
+
+test('the note under the rows turns everything off in one click and closes the tour', async () => {
+  await open();
+  await click('onboarding-dot-privacy');
+  await new Promise(resolve => setTimeout(resolve, 0)); flushSync();
+  expect(query('[data-testid=onboarding-telemetry-basic]').textContent).toContain('basic counters');
+  await answer('onboarding-telemetry-off');
+  expect(await store.client!.call('telemetry.state', {})).toMatchObject({ mode: 'off' });
+  expect(document.querySelector('[data-testid=onboarding]')).toBeNull();
+  expect(tourSeen()).toBe(true);
 });
 
 test('under reduced motion refusing closes at once, and a replay keeps a saved opt-out', async () => {
@@ -364,4 +381,26 @@ test('focus stays in the dialog and navigation focuses its new heading', async (
   expect(document.activeElement).toBe(query('[data-testid=onboarding-skip]'));
   document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
   expect(document.activeElement).toBe(query('[data-testid=onboarding-next]'));
+});
+
+test('the second screen asks who is using Boite and writes the preset at once', async () => {
+  await open();
+  await click('onboarding-next');
+  expect(step()).toBe('profile');
+  expect(query('[data-testid=onboarding-profile-everyday]').textContent).toContain("I'm not a developer! Don't confuse me with code and commands!");
+  expect(query('[data-testid=onboarding-profile-developer]').textContent).toContain("I'm a developer, give me the works.");
+
+  store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
+  await click('onboarding-profile-everyday');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('true');
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'everyday', startIn: 'drafts', panel: 'files', hidden: ['header.terminal', 'panel.trace'] });
+  // The everyday answer asks before each action.
+  expect(JSON.parse(window.localStorage.getItem(PREFS_STORAGE_KEY) ?? 'null')).toMatchObject({ permissionMode: 'default' });
+
+  // Changing the answer rewrites the whole preset, and skipping keeps it.
+  await click('onboarding-profile-developer');
+  expect(query('[data-testid=onboarding-profile-everyday]').getAttribute('aria-pressed')).toBe('false');
+  await click('onboarding-skip');
+  await settle();
+  expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', startIn: 'project', panel: 'changes', hidden: [] });
 });

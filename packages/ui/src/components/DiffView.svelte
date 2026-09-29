@@ -1,11 +1,35 @@
 <script lang="ts">
-  import { diffCounts, diffRows } from '../lib/diff';
+  import { Columns2, Space } from '@lucide/svelte';
+  import { diffCounts, diffRows, splitRows, type DiffRow } from '../lib/diff';
+  import { diffPrefs, setDiffPref } from '../lib/diff-prefs.svelte';
   import { fill, strings } from '../lib/strings';
 
-  let { path, oldText, newText }: { path: string; oldText: string; newText: string } = $props();
+  let {
+    path,
+    oldText,
+    newText,
+    headless = false
+  }: {
+    path: string;
+    oldText: string;
+    newText: string;
+    /** Under a line that already names the file and counts the lines: no heading of its own. */
+    headless?: boolean;
+  } = $props();
 
-  let rows = $derived(diffRows(oldText, newText));
+  /** Rows drawn before the show-all button: the box shows about fourteen. */
+  const FIRST_ROWS = 300;
+  /** Under this width two columns of code are too narrow to read: one column, and no switch. */
+  const SPLIT_MIN_WIDTH = 560;
+
+  let width = $state(0);
+  let rows = $derived(diffRows(oldText, newText, { ignoreWhitespace: diffPrefs.ignoreWhitespace }));
   let counts = $derived(diffCounts(rows));
+  let expanded = $state(false);
+  let shown = $derived(expanded ? rows : rows.slice(0, FIRST_ROWS));
+  let splittable = $derived(width >= SPLIT_MIN_WIDTH);
+  let split = $derived(splittable && diffPrefs.split);
+  let pairs = $derived(split ? splitRows(shown) : []);
 
   /** The gutter of a row: what a patch puts in its first column. */
   function sign(kind: string): string {
@@ -15,34 +39,80 @@
   }
 </script>
 
-<div class="diff" data-testid="diff-view" data-path={path}>
-  <div class="head">
-    <span class="path mono" title={path}>{path}</span>
-    {#if counts.added > 0}
-      <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
-    {/if}
-    {#if counts.removed > 0}
-      <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
-    {/if}
-  </div>
-  <div class="rows mono">
-    {#each rows as row, index (index)}
-      {#if row.kind === 'gap'}
-        <div class="row gap" data-kind="gap">
-          <span class="num"></span>
-          <span class="gutter"></span>
-          <span class="text">... {fill(strings.chat.diffHidden, { count: String(row.hidden) })}</span>
-        </div>
-      {:else}
-        <div class="row {row.kind}" data-kind={row.kind} data-testid="diff-row">
-          <span class="num">{row.kind === 'remove' ? row.oldLine : row.newLine}</span>
-          <span class="gutter">{sign(row.kind)}</span>
-          <span class="text">{row.text}</span>
-        </div>
+<div class="diff" data-testid="diff-view" data-path={path} data-layout={split ? 'split' : 'unified'} bind:clientWidth={width}>
+  {#if !headless}
+    <div class="head">
+      <span class="path mono" title={path}>{path}</span>
+      {#if counts.added > 0}
+        <span class="count added">{fill(strings.chat.diffAdded, { count: String(counts.added) })}</span>
       {/if}
-    {/each}
+      {#if counts.removed > 0}
+        <span class="count removed">{fill(strings.chat.diffRemoved, { count: String(counts.removed) })}</span>
+      {/if}
+      <button type="button" class="ghost small icon toggle" data-testid="diff-whitespace" aria-pressed={diffPrefs.ignoreWhitespace}
+        title={strings.chat.diffIgnoreWhitespace} aria-label={strings.chat.diffIgnoreWhitespace}
+        onclick={() => setDiffPref('ignoreWhitespace', !diffPrefs.ignoreWhitespace)}><Space size={14} /></button>
+      {#if splittable}
+        <button type="button" class="ghost small icon toggle" data-testid="diff-split" aria-pressed={diffPrefs.split}
+          title={strings.chat.diffSideBySide} aria-label={strings.chat.diffSideBySide}
+          onclick={() => setDiffPref('split', !diffPrefs.split)}><Columns2 size={14} /></button>
+      {/if}
+    </div>
+  {/if}
+  <div class="rows mono">
+    {#if rows.length === 0 && diffPrefs.ignoreWhitespace && oldText !== newText}
+      <p class="same" data-testid="diff-whitespace-only">{strings.chat.diffWhitespaceOnly}</p>
+    {:else if split}
+      {#each pairs as pair, index (index)}
+        {#if pair.kind === 'gap'}
+          {@render gap(pair.hidden)}
+        {:else}
+          <div class="pair" data-testid="diff-pair">
+            {@render side(pair.left, 'old')}
+            {@render side(pair.right, 'new')}
+          </div>
+        {/if}
+      {/each}
+    {:else}
+      {#each shown as row, index (index)}
+        {#if row.kind === 'gap'}
+          {@render gap(row.hidden)}
+        {:else}
+          <div class="row {row.kind}" data-kind={row.kind} data-testid="diff-row">
+            <span class="num">{row.kind === 'remove' ? row.oldLine : row.newLine}</span>
+            <span class="gutter">{sign(row.kind)}</span>
+            <span class="text">{row.text}</span>
+          </div>
+        {/if}
+      {/each}
+    {/if}
+    {#if shown.length < rows.length}
+      <button type="button" class="ghost small more" data-testid="diff-show-all" onclick={() => (expanded = true)}>
+        {fill(strings.chat.diffShowAll, { count: String(rows.length) })}
+      </button>
+    {/if}
   </div>
 </div>
+
+{#snippet gap(hidden: number)}
+  <div class="row gap" data-kind="gap">
+    <span class="num"></span>
+    <span class="gutter"></span>
+    <span class="text">... {fill(strings.chat.diffHidden, { count: String(hidden) })}</span>
+  </div>
+{/snippet}
+
+{#snippet side(row: Exclude<DiffRow, { kind: 'gap' }> | null, which: 'old' | 'new')}
+  {#if row === null}
+    <div class="row empty"><span class="num"></span><span class="gutter"></span><span class="text"></span></div>
+  {:else}
+    <div class="row {row.kind}" data-kind={row.kind}>
+      <span class="num">{row.kind === 'context' ? (which === 'old' ? row.oldLine : row.newLine) : row.kind === 'remove' ? row.oldLine : row.newLine}</span>
+      <span class="gutter">{sign(row.kind)}</span>
+      <span class="text">{row.text}</span>
+    </div>
+  {/if}
+{/snippet}
 
 <style>
   .diff {
@@ -99,6 +169,41 @@
     align-items: flex-start;
     gap: 0;
     line-height: 1.55;
+  }
+
+  .more {
+    margin: 4px 10px;
+  }
+
+  .toggle {
+    flex: none;
+    color: var(--color-subtle);
+  }
+
+  .toggle[aria-pressed='true'] {
+    color: var(--color-foreground);
+    background: var(--color-surface-2);
+  }
+
+  /* Two halves of one line: each keeps its own number, sign and wrap. */
+  .pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .pair > .row:first-child {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .row.empty {
+    background: var(--color-surface-3);
+  }
+
+  .same {
+    margin: 0;
+    padding: 6px 10px;
+    color: var(--color-subtle);
+    font-size: var(--text-sm);
   }
 
   .num {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { onMount } from 'svelte';
   import { Download, Puzzle, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
   import type { PluginPool, PluginPreview, PluginRejected, PluginState, RpcParams } from '@boite/contracts';
@@ -229,10 +230,7 @@
     {#if plugin.status === 'installed' && plugin.pools.length > 0}
       <div class="pools">
         <div class="pools-head">
-          <div class="who">
-            <h4 class="section-label">{t.pools}</h4>
-            <p class="hint">{t.cliScope}</p>
-          </div>
+          <h4 class="section-label">{t.pools}<InfoTip topic={t.pools} text={t.cliScope} /></h4>
           <button class="quiet small" data-testid="plugin-refresh" data-plugin={plugin.id} disabled={working} onclick={() => void loadPools(plugin.id, true)}><RefreshCw size={14} />{t.refresh}</button>
         </div>
         {#each pools[plugin.id] ?? [] as pool (pool.provider)}
@@ -243,14 +241,20 @@
             </div>
             {#if pool.accounts.length === 0}<p class="hint">{t.empty}</p>{/if}
             {#each pool.accounts as account (account.email)}
-              <div class="saved-account" data-testid="plugin-account" data-email={account.email}>
-                <QuotaList compact rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: account.active ? t.active : '', enabled: true,
+              <div class="saved-account" class:active={account.active} data-testid="plugin-account" data-email={account.email}>
+                <div class="account-head">
+                  <strong>{account.email}</strong>
+                  {#if account.active}<span class="tag" data-testid="plugin-account-active">{t.active}</span>{/if}
+                  <span class="account-actions">
+                    {#if !account.active}
+                      <button class="quiet small" disabled={working} data-testid="plugin-switch" onclick={() => void accountAction(plugin, pool.provider, 'switch', account.email)}>{t.switch}</button>
+                    {/if}
+                    <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}>{t.forget}</button>
+                  </span>
+                </div>
+                <QuotaList bare rows={[{ accountId: account.email, providerId: pool.provider, providerName: account.email, label: '', enabled: true,
                   status: account.checkedSecondsAgo === null ? 'unavailable' : 'ready', windows: account.windows,
                   checkedAt: account.checkedSecondsAgo === null ? null : Date.now() - account.checkedSecondsAgo * 1000, error: null }]} />
-                <div class="account-actions">
-                  <button class="quiet small" disabled={working || account.active} data-testid="plugin-switch" onclick={() => void accountAction(plugin, pool.provider, 'switch', account.email)}>{t.switch}</button>
-                  <button class="ghost small" disabled={working} onclick={() => void accountAction(plugin, pool.provider, 'remove', account.email)}>{t.forget}</button>
-                </div>
               </div>
             {/each}
           </div>
@@ -261,7 +265,7 @@
 {/snippet}
 
 <div class="page" data-testid="plugins-page">
-  <header><div><h1>{t.heading}</h1><p>{t.intro}</p></div></header>
+  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.intro} /></h1></div></header>
   {#if error}<p class="bad" role="alert">{error}</p>{/if}
 
   <section aria-labelledby="plugins-installed" data-testid="plugins-installed">
@@ -287,9 +291,8 @@
   </section>
 
   <section aria-labelledby="plugins-add" data-testid="plugins-add">
-    <h2 id="plugins-add" class="section-label">{t.addHeading}</h2>
+    <h2 id="plugins-add" class="section-label">{t.addHeading}<InfoTip topic={t.addHeading} text={t.addHint} /></h2>
     <div class="card add">
-      <p class="hint">{t.addHint}</p>
       <form onsubmit={inspect}>
         <label class="url">
           <span>{t.urlLabel}</span>
@@ -400,12 +403,19 @@
   h4 { margin: 0; }
   h5 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
   .pool { display: grid; gap: 8px; }
-  .saved-account { display: grid; gap: 6px; }
-  .account-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+  /* One box per saved login: its name, its buttons and its limits together. */
+  .saved-account { display: grid; gap: 10px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-2); }
+  .account-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .account-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 600; }
+  .tag { flex: none; padding: 1px 6px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-success) 16%, transparent); color: var(--color-success); font-size: var(--text-xs); font-weight: 500; }
+  .account-actions { display: flex; margin-left: auto; gap: 4px; flex: none; }
 
-  .add { display: grid; gap: 12px; }
+  /* The card sits inside a section, where the page's card padding does not reach. */
+  .add { display: grid; gap: 12px; padding: var(--settings-padding); }
   form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto; align-items: end; gap: 8px; }
   form input { width: 100%; }
+  /* The button lines up with the fields beside it. */
+  form button { height: var(--input); }
   .preview { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); animation: rise var(--dur-3) var(--ease-out-quint); }
   .trust { margin: 0; display: flex; align-items: flex-start; gap: 8px; font-size: var(--text-sm); color: var(--color-muted-foreground); line-height: 1.5; }
   .trust :global(svg) { flex: none; margin-top: 2px; color: var(--color-live); }

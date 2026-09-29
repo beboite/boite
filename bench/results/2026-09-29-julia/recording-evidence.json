@@ -1,0 +1,1129 @@
+{
+  "schemaVersion": 1,
+  "source": "Actual CDP screencast events, normal speed, held last real frames while static. Screenshot rendering primers never enter the encoded video.",
+  "movies": [
+    {
+      "id": "candidate-model-github-issue-investigation-1",
+      "instrumented": true,
+      "sha256": "ed6db02bf1f42260c5f7b3a9194a30d601ffd6f60f5c7b475d255bb56dba2b17",
+      "metadataSha256": "0185fc9c0701e6efb078f22a16276d045693d0d9cfc0304bf18ad71b6ba3b0fd",
+      "bytes": 2016978,
+      "frames": 1151,
+      "capturedFrames": 343,
+      "fps": 10,
+      "elapsedMs": 115074.0768,
+      "targetChanges": 4,
+      "errors": [],
+      "exitCode": 0,
+      "events": [
+        {
+          "event": "screencast-render-request",
+          "atMs": 5.0538999999989755,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 31.757599999999,
+          "ms": 26.707000000000335
+        },
+        {
+          "event": "selected-target",
+          "atMs": 47.10770000000048
+        },
+        {
+          "atMs": 8256.8959
+        },
+        {
+          "atMs": 8275.070800000001
+        },
+        {
+          "atMs": 8284.82
+        },
+        {
+          "atMs": 8294.1966
+        },
+        {
+          "atMs": 8370.801899999999
+        },
+        {
+          "atMs": 8371.535
+        },
+        {
+          "atMs": 14189.919600000001
+        },
+        {
+          "atMs": 14208.551
+        },
+        {
+          "atMs": 14210.442200000001
+        },
+        {
+          "atMs": 14221.335200000001
+        },
+        {
+          "atMs": 14299.883300000001
+        },
+        {
+          "atMs": 14300.8459
+        },
+        {
+          "atMs": 23468.7511
+        },
+        {
+          "atMs": 23517.1062
+        },
+        {
+          "atMs": 23560.2555
+        },
+        {
+          "atMs": 23590.2217
+        },
+        {
+          "atMs": 23733.8569
+        },
+        {
+          "atMs": 23735.101799999997
+        },
+        {
+          "atMs": 33160.0611
+        },
+        {
+          "atMs": 33171.9156
+        },
+        {
+          "atMs": 33174.8119
+        },
+        {
+          "atMs": 33186.8903
+        },
+        {
+          "atMs": 33292.3755
+        },
+        {
+          "atMs": 33293.1093
+        },
+        {
+          "atMs": 40804.9359
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 43708.5318,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 43748.5732,
+          "ms": 40.042600000000675
+        },
+        {
+          "event": "selected-target",
+          "atMs": 43764.804
+        },
+        {
+          "atMs": 43764.8289
+        },
+        {
+          "atMs": 43877.0927
+        },
+        {
+          "atMs": 43937.2621
+        },
+        {
+          "atMs": 44165.2303
+        },
+        {
+          "atMs": 44165.9675
+        },
+        {
+          "atMs": 67928.4726
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 68188.4237,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 68316.0858,
+          "ms": 127.66599999999744
+        },
+        {
+          "event": "selected-target",
+          "atMs": 68349.3753
+        },
+        {
+          "atMs": 68349.4092
+        },
+        {
+          "atMs": 68388.5558
+        },
+        {
+          "atMs": 68402.0993
+        },
+        {
+          "atMs": 68499.4331
+        },
+        {
+          "atMs": 68501.7061
+        },
+        {
+          "atMs": 73947.6317
+        },
+        {
+          "atMs": 74993.147
+        },
+        {
+          "atMs": 74994.8876
+        },
+        {
+          "atMs": 75010.4581
+        },
+        {
+          "atMs": 75659.5507
+        },
+        {
+          "atMs": 75661.7882
+        },
+        {
+          "atMs": 82139.0388
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 82456.0085,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 82968.7622,
+          "ms": 512.7593000000052
+        },
+        {
+          "event": "selected-target",
+          "atMs": 82992.6095
+        },
+        {
+          "atMs": 82992.6428
+        },
+        {
+          "atMs": 83024.0995
+        },
+        {
+          "atMs": 83057.5947
+        },
+        {
+          "atMs": 83166.9998
+        },
+        {
+          "atMs": 83167.8097
+        },
+        {
+          "atMs": 88530.1903
+        },
+        {
+          "atMs": 90245.9946
+        },
+        {
+          "atMs": 90249.5584
+        },
+        {
+          "atMs": 90296.8232
+        },
+        {
+          "atMs": 90464.2401
+        },
+        {
+          "atMs": 90465.0614
+        },
+        {
+          "atMs": 109455.3518
+        },
+        {
+          "atMs": 109459.0064
+        },
+        {
+          "atMs": 109496.116
+        },
+        {
+          "atMs": 109620.9614
+        },
+        {
+          "atMs": 109621.5918
+        }
+      ],
+      "normalSpeed": true,
+      "allFramesDecoded": true
+    },
+    {
+      "id": "candidate-julia-github-issue-investigation-1",
+      "instrumented": true,
+      "sha256": "eb353de6b64988e0fd38b83daa780b96a924da5f2b5b51d79593f00a0c11289b",
+      "metadataSha256": "b1ee39f6caa606d45d320510cc0858e2926739802bd7a9fcbc4f270685ef2561",
+      "bytes": 2221629,
+      "frames": 1415,
+      "capturedFrames": 300,
+      "fps": 10,
+      "elapsedMs": 141661.06050000002,
+      "targetChanges": 3,
+      "errors": [],
+      "exitCode": 0,
+      "events": [
+        {
+          "event": "screencast-render-request",
+          "atMs": 4.916000000026543,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 28.797600000019884,
+          "ms": 23.88499999998021
+        },
+        {
+          "event": "selected-target",
+          "atMs": 47.59610000002431
+        },
+        {
+          "atMs": 10359.293200000015
+        },
+        {
+          "atMs": 10427.803700000019
+        },
+        {
+          "atMs": 10488.914300000004
+        },
+        {
+          "atMs": 10819.449100000027
+        },
+        {
+          "atMs": 11202.461500000005
+        },
+        {
+          "atMs": 11203.592700000008
+        },
+        {
+          "atMs": 19647.49590000001
+        },
+        {
+          "atMs": 19702.064800000022
+        },
+        {
+          "atMs": 19711.661200000002
+        },
+        {
+          "atMs": 19718.8315
+        },
+        {
+          "atMs": 19838.02900000001
+        },
+        {
+          "atMs": 19842.56640000001
+        },
+        {
+          "atMs": 29224.622900000017
+        },
+        {
+          "atMs": 29234.372600000002
+        },
+        {
+          "atMs": 29236.67850000001
+        },
+        {
+          "atMs": 29241.605100000015
+        },
+        {
+          "atMs": 29325.285500000027
+        },
+        {
+          "atMs": 29325.878000000026
+        },
+        {
+          "atMs": 38897.340400000016
+        },
+        {
+          "atMs": 38926.5711
+        },
+        {
+          "atMs": 38947.12250000003
+        },
+        {
+          "atMs": 38960.4559
+        },
+        {
+          "atMs": 39060.66830000002
+        },
+        {
+          "atMs": 39061.423700000014
+        },
+        {
+          "atMs": 51414.84860000003
+        },
+        {
+          "atMs": 51428.514200000005
+        },
+        {
+          "atMs": 51439.19420000003
+        },
+        {
+          "atMs": 51450.72700000001
+        },
+        {
+          "atMs": 51586.0368
+        },
+        {
+          "atMs": 51588.773000000016
+        },
+        {
+          "atMs": 64667.17850000001
+        },
+        {
+          "atMs": 64684.2629
+        },
+        {
+          "atMs": 64690.801600000006
+        },
+        {
+          "atMs": 64708.25470000002
+        },
+        {
+          "atMs": 64809.3952
+        },
+        {
+          "atMs": 64810.105300000025
+        },
+        {
+          "atMs": 75650.93960000001
+        },
+        {
+          "atMs": 77241.73130000001
+        },
+        {
+          "atMs": 77930.71480000002
+        },
+        {
+          "atMs": 77950.17190000002
+        },
+        {
+          "atMs": 78320.57020000002
+        },
+        {
+          "atMs": 78327.18240000002
+        },
+        {
+          "atMs": 90065.4897
+        },
+        {
+          "atMs": 90069.8102
+        },
+        {
+          "atMs": 90070.79590000003
+        },
+        {
+          "atMs": 90077.00510000001
+        },
+        {
+          "atMs": 90154.56770000001
+        },
+        {
+          "atMs": 90155.1208
+        },
+        {
+          "atMs": 105270.3052
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 106081.97200000001,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 106121.1803,
+          "ms": 39.216400000004796
+        },
+        {
+          "event": "selected-target",
+          "atMs": 106131.1955
+        },
+        {
+          "atMs": 106131.2268
+        },
+        {
+          "atMs": 106134.93960000001
+        },
+        {
+          "atMs": 106153.8468
+        },
+        {
+          "atMs": 106182.26180000001
+        },
+        {
+          "atMs": 106182.72850000003
+        },
+        {
+          "atMs": 125312.59350000002
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 125632.1177,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 125935.8211,
+          "ms": 303.7048000000068
+        },
+        {
+          "event": "selected-target",
+          "atMs": 125960.17080000002
+        },
+        {
+          "atMs": 125960.3799
+        },
+        {
+          "atMs": 125977.79830000002
+        },
+        {
+          "atMs": 126064.46710000001
+        },
+        {
+          "atMs": 126257.41210000002
+        },
+        {
+          "atMs": 126263.65710000001
+        },
+        {
+          "atMs": 138477.2575
+        },
+        {
+          "atMs": 138479.7057
+        },
+        {
+          "atMs": 138485.892
+        },
+        {
+          "atMs": 138570.5711
+        },
+        {
+          "atMs": 138571.27850000001
+        }
+      ],
+      "normalSpeed": true,
+      "allFramesDecoded": true
+    },
+    {
+      "id": "candidate-model-wikipedia-language-history-source-1",
+      "instrumented": true,
+      "sha256": "a68c47b1cbe11d39c1eb3bee582cf7f45ff826192da68ebe16f76239d6aedd9c",
+      "metadataSha256": "a5d186bdab708526f2640256df99bb80dd2c93c762768bff6b4fec1dcb9a2ff1",
+      "bytes": 4905140,
+      "frames": 996,
+      "capturedFrames": 126,
+      "fps": 10,
+      "elapsedMs": 99567.31290000002,
+      "targetChanges": 4,
+      "errors": [],
+      "exitCode": 0,
+      "events": [
+        {
+          "event": "screencast-render-request",
+          "atMs": 5.602000000013504,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 40.31130000000121,
+          "ms": 34.710699999995995
+        },
+        {
+          "event": "selected-target",
+          "atMs": 67.42790000000969
+        },
+        {
+          "atMs": 7371.093300000008
+        },
+        {
+          "atMs": 7385.566500000015
+        },
+        {
+          "atMs": 7393.2800999999745
+        },
+        {
+          "atMs": 7398.336699999985
+        },
+        {
+          "atMs": 7469.696599999967
+        },
+        {
+          "atMs": 7470.391100000008
+        },
+        {
+          "atMs": 12311.145599999989
+        },
+        {
+          "atMs": 12328.1642
+        },
+        {
+          "atMs": 12797.169899999979
+        },
+        {
+          "atMs": 13195.478499999968
+        },
+        {
+          "atMs": 14867.650800000003
+        },
+        {
+          "atMs": 16085.37479999999
+        },
+        {
+          "atMs": 16086.541499999992
+        },
+        {
+          "atMs": 28095.29269999999
+        },
+        {
+          "atMs": 28106.596499999985
+        },
+        {
+          "atMs": 28117.661399999983
+        },
+        {
+          "atMs": 28251.638999999966
+        },
+        {
+          "atMs": 29276.043599999975
+        },
+        {
+          "atMs": 29278.15499999997
+        },
+        {
+          "atMs": 38035.016
+        },
+        {
+          "atMs": 38042.34659999999
+        },
+        {
+          "atMs": 38082.76059999998
+        },
+        {
+          "atMs": 38191.0625
+        },
+        {
+          "atMs": 38492.25020000001
+        },
+        {
+          "atMs": 38722.59129999997
+        },
+        {
+          "atMs": 40461.494000000006
+        },
+        {
+          "atMs": 40463.21879999997
+        },
+        {
+          "atMs": 53032.30939999997
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 53354.63750000001,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 53381.18239999999,
+          "ms": 26.545799999963492
+        },
+        {
+          "event": "selected-target",
+          "atMs": 53395.485400000005
+        },
+        {
+          "atMs": 53395.50549999997
+        },
+        {
+          "atMs": 53396.98219999997
+        },
+        {
+          "atMs": 53406.4301
+        },
+        {
+          "atMs": 53613.451899999985
+        },
+        {
+          "atMs": 53614.0466
+        },
+        {
+          "atMs": 61687.798699999985
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 62412.616099999985,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 62711.024800000014,
+          "ms": 298.4098000000231
+        },
+        {
+          "event": "selected-target",
+          "atMs": 62728.96139999997
+        },
+        {
+          "atMs": 62728.985600000015
+        },
+        {
+          "atMs": 62731.57890000002
+        },
+        {
+          "atMs": 62813.390799999994
+        },
+        {
+          "atMs": 65118.01289999997
+        },
+        {
+          "atMs": 65119.745400000014
+        },
+        {
+          "atMs": 70759.64759999997
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 75717.52370000002,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 75744.8444,
+          "ms": 27.321999999985565
+        },
+        {
+          "event": "selected-target",
+          "atMs": 75764.61420000001
+        },
+        {
+          "atMs": 75764.63789999997
+        },
+        {
+          "atMs": 75767.00329999998
+        },
+        {
+          "atMs": 75771.05699999997
+        },
+        {
+          "atMs": 75797.69789999997
+        },
+        {
+          "atMs": 75798.64019999997
+        },
+        {
+          "atMs": 94595.7671
+        },
+        {
+          "atMs": 94635.3211
+        },
+        {
+          "atMs": 94655.15049999999
+        },
+        {
+          "atMs": 94687.40539999999
+        },
+        {
+          "atMs": 94688.14799999999
+        }
+      ],
+      "normalSpeed": true,
+      "allFramesDecoded": true
+    },
+    {
+      "id": "candidate-julia-wikipedia-language-history-source-1",
+      "instrumented": true,
+      "sha256": "1acc18581d1fd8a447579c649e07f6a6e5d7f79abb4d51a774a0980fc6e175a3",
+      "metadataSha256": "035de8f5f42318d517ee72896a5d47770d2f0f3832bbc13d403cb5243f375dbd",
+      "bytes": 8946340,
+      "frames": 1769,
+      "capturedFrames": 200,
+      "fps": 10,
+      "elapsedMs": 177064.00670000003,
+      "targetChanges": 3,
+      "errors": [],
+      "exitCode": 0,
+      "events": [
+        {
+          "event": "screencast-render-request",
+          "atMs": 6.483899999991991,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 42.12609999999404,
+          "ms": 35.64350000000559
+        },
+        {
+          "event": "selected-target",
+          "atMs": 57.243699999991804
+        },
+        {
+          "atMs": 7922.510300000024
+        },
+        {
+          "atMs": 7930.428300000029
+        },
+        {
+          "atMs": 7932.056199999992
+        },
+        {
+          "atMs": 7937.498499999987
+        },
+        {
+          "atMs": 8040.373200000031
+        },
+        {
+          "atMs": 8041.024600000004
+        },
+        {
+          "atMs": 15294.809999999998
+        },
+        {
+          "atMs": 15394.442500000005
+        },
+        {
+          "atMs": 15397.6299
+        },
+        {
+          "atMs": 15720.75920000003
+        },
+        {
+          "atMs": 17552.989100000006
+        },
+        {
+          "atMs": 17554.30780000001
+        },
+        {
+          "atMs": 25444.036100000027
+        },
+        {
+          "atMs": 25491.048699999985
+        },
+        {
+          "atMs": 25595.220499999996
+        },
+        {
+          "atMs": 25655.44510000001
+        },
+        {
+          "atMs": 25702.35619999998
+        },
+        {
+          "atMs": 25964.127099999983
+        },
+        {
+          "atMs": 25966.82030000002
+        },
+        {
+          "atMs": 36860.27059999999
+        },
+        {
+          "atMs": 36988.20410000003
+        },
+        {
+          "atMs": 37104.49839999998
+        },
+        {
+          "atMs": 37194.70970000001
+        },
+        {
+          "atMs": 37641.403099999996
+        },
+        {
+          "atMs": 39131.14559999999
+        },
+        {
+          "atMs": 39133.00560000003
+        },
+        {
+          "atMs": 48025.55930000002
+        },
+        {
+          "atMs": 48203.53460000001
+        },
+        {
+          "atMs": 48481.66490000003
+        },
+        {
+          "atMs": 48772.33679999999
+        },
+        {
+          "atMs": 50550.5661
+        },
+        {
+          "atMs": 50555.793999999994
+        },
+        {
+          "atMs": 61802.09720000002
+        },
+        {
+          "atMs": 61813.80619999999
+        },
+        {
+          "atMs": 61875.331600000034
+        },
+        {
+          "atMs": 63014.52960000001
+        },
+        {
+          "atMs": 63024.19089999999
+        },
+        {
+          "atMs": 69482.8125
+        },
+        {
+          "atMs": 69488.5871
+        },
+        {
+          "atMs": 69511.9717
+        },
+        {
+          "atMs": 69617.04119999998
+        },
+        {
+          "atMs": 69998.50449999998
+        },
+        {
+          "atMs": 70506.26370000001
+        },
+        {
+          "atMs": 72017.89890000003
+        },
+        {
+          "atMs": 72019.43420000002
+        },
+        {
+          "atMs": 85547.47149999999
+        },
+        {
+          "atMs": 85550.10070000001
+        },
+        {
+          "atMs": 85553.8528
+        },
+        {
+          "atMs": 85610.54269999999
+        },
+        {
+          "atMs": 87004.95909999998
+        },
+        {
+          "atMs": 87006.42430000001
+        },
+        {
+          "atMs": 96401.1349
+        },
+        {
+          "atMs": 96440.3457
+        },
+        {
+          "atMs": 96540.85690000001
+        },
+        {
+          "atMs": 96673.44190000003
+        },
+        {
+          "atMs": 96729.64069999999
+        },
+        {
+          "atMs": 97200.64559999999
+        },
+        {
+          "atMs": 97201.61739999999
+        },
+        {
+          "atMs": 109426.9497
+        },
+        {
+          "atMs": 109458.21350000001
+        },
+        {
+          "atMs": 109526.16739999998
+        },
+        {
+          "atMs": 109744.70150000002
+        },
+        {
+          "atMs": 110088.02250000002
+        },
+        {
+          "atMs": 111635.619
+        },
+        {
+          "atMs": 111637.9915
+        },
+        {
+          "atMs": 122826.805
+        },
+        {
+          "atMs": 122888.58559999999
+        },
+        {
+          "atMs": 123128.14799999999
+        },
+        {
+          "atMs": 123232.26900000003
+        },
+        {
+          "atMs": 123681.64510000002
+        },
+        {
+          "atMs": 123682.66749999998
+        },
+        {
+          "atMs": 143603.43870000006
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 144096.32929999998,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 144131.6814,
+          "ms": 35.355899999965914
+        },
+        {
+          "event": "selected-target",
+          "atMs": 144151.81539999996
+        },
+        {
+          "atMs": 144151.83739999996
+        },
+        {
+          "atMs": 144155.46270000003
+        },
+        {
+          "atMs": 144169.4103
+        },
+        {
+          "atMs": 144445.82960000006
+        },
+        {
+          "atMs": 144447.27170000004
+        },
+        {
+          "atMs": 163096.10349999997
+        },
+        {
+          "event": "screencast-render-request",
+          "atMs": 166970.36880000005,
+          "timeoutMs": 15000
+        },
+        {
+          "event": "screencast-render-ready",
+          "atMs": 167007.13970000006,
+          "ms": 36.77989999996498
+        },
+        {
+          "event": "selected-target",
+          "atMs": 167022.78949999996
+        },
+        {
+          "atMs": 167022.8127
+        },
+        {
+          "atMs": 167027.64800000004
+        },
+        {
+          "atMs": 167052.5749
+        },
+        {
+          "atMs": 167141.59160000004
+        },
+        {
+          "atMs": 167143.1921
+        }
+      ],
+      "normalSpeed": true,
+      "allFramesDecoded": true
+    }
+  ],
+  "recorderProbes": [
+    {
+      "id": "smoke-5:1",
+      "passed": false,
+      "phase": "initial-observation",
+      "error": "Error: Initial observation failed: readiness: document timed out after 3000 ms; title, content or document readiness is incomplete.",
+      "recordingSha256": null,
+      "summarySha256": "9b942ee0bdae4c50c7f32c5060226f0bfd38d772c47eb47aa230c0f07ce2972d",
+      "width": null,
+      "height": null,
+      "frames": null,
+      "capturedFrames": null,
+      "targetChanges": null,
+      "errors": null,
+      "browserRemaining": 0,
+      "videoRemaining": 0
+    },
+    {
+      "id": "smoke-5:2",
+      "passed": true,
+      "phase": "recording",
+      "error": null,
+      "recordingSha256": "d22b9294ba71df012991c85cc42c6993a0b609ec182941193aa393ece0eb0dc7",
+      "summarySha256": "9b942ee0bdae4c50c7f32c5060226f0bfd38d772c47eb47aa230c0f07ce2972d",
+      "width": 1280,
+      "height": 800,
+      "frames": 116,
+      "capturedFrames": 78,
+      "targetChanges": 3,
+      "errors": [],
+      "browserRemaining": 0,
+      "videoRemaining": 0
+    },
+    {
+      "id": "smoke-5:3",
+      "passed": false,
+      "phase": "initial-observation",
+      "error": "Error: Initial observation failed: readiness: document timed out after 3000 ms; title, content or document readiness is incomplete.",
+      "recordingSha256": null,
+      "summarySha256": "9b942ee0bdae4c50c7f32c5060226f0bfd38d772c47eb47aa230c0f07ce2972d",
+      "width": null,
+      "height": null,
+      "frames": null,
+      "capturedFrames": null,
+      "targetChanges": null,
+      "errors": null,
+      "browserRemaining": 0,
+      "videoRemaining": 0
+    },
+    {
+      "id": "smoke-6:1",
+      "passed": true,
+      "phase": "recording",
+      "error": null,
+      "recordingSha256": "bfe740e71cb75b11e92f65f74099e93c43d32a6088b45005214dd87edc840faf",
+      "summarySha256": "c3f0270de76a491c281bd10eedf6ff0470d19568ecc7d3d3096cdfdc04e07715",
+      "width": 1280,
+      "height": 800,
+      "frames": 89,
+      "capturedFrames": 81,
+      "targetChanges": 3,
+      "errors": [],
+      "browserRemaining": 0,
+      "videoRemaining": 0
+    },
+    {
+      "id": "smoke-6:2",
+      "passed": true,
+      "phase": "recording",
+      "error": null,
+      "recordingSha256": "cbe95791223e21b731e935fb1659f3e526708876aa09739824d090a4584f6d39",
+      "summarySha256": "c3f0270de76a491c281bd10eedf6ff0470d19568ecc7d3d3096cdfdc04e07715",
+      "width": 1280,
+      "height": 800,
+      "frames": 87,
+      "capturedFrames": 90,
+      "targetChanges": 3,
+      "errors": [],
+      "browserRemaining": 0,
+      "videoRemaining": 0
+    }
+  ],
+  "allOwnedGroupsZero": true,
+  "selectorTrialsSeparateFromRecorderProbes": true
+}

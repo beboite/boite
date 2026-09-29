@@ -13,6 +13,7 @@
  * of it.
  */
 
+import { notifiesOnFinish, threadActive, type ThreadSummary, type Turn } from '@boite/contracts';
 import { strings } from './strings';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'boite.notifications';
@@ -33,6 +34,18 @@ export function shouldNotify(input: NotifyDecision): boolean {
   if (!input.enabled) return false;
   if (!input.focused) return true;
   return input.openThreadId !== input.threadId;
+}
+
+/**
+ * Whether a finished turn is news at all, the core's push rule
+ * (`notifiesOnFinish`) applied to the threads this client holds. A thread it
+ * does not hold yet keeps the old answer: a done or a failure is news.
+ */
+export function finishNotifies(threads: readonly ThreadSummary[], turn: Pick<Turn, 'threadId' | 'status' | 'execution'>): boolean {
+  const thread = threads.find((t) => t.id === turn.threadId);
+  if (thread === undefined) return turn.status === 'done' || turn.status === 'error';
+  const activeChildren = threads.filter((t) => t.parentThreadId === thread.id && threadActive(t.status)).length;
+  return notifiesOnFinish(thread, turn, activeChildren);
 }
 
 export function readNotifications(): boolean {

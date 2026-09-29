@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
@@ -41,7 +41,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 /** A repository with one commit inside the test data directory, so its worktrees land in the data directory too. */
-async function repoProject(name = 'repo'): Promise<{ id: string; path: string }> {
+async function repoProject(name = 'repo'): Promise<{ id: string; path: string; repository?: boolean }> {
   const path = join(harness.dataDir, name);
   mkdirSync(path, { recursive: true });
   git(path, 'init', '-q');
@@ -57,14 +57,42 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
+  test('workspace recovery reattaches a surviving branch after its directory was removed', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const branch = 'boite/recovered-directory';
+    const original = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    git(original.path, 'commit', '-q', '--allow-empty', '-m', 'work to preserve');
+    const head = git(original.path, 'rev-parse', 'HEAD');
+    git(project.path, 'worktree', 'remove', original.path);
+    const recovered = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    expect(git(recovered.path, 'rev-parse', 'HEAD')).toBe(head);
+  });
+  test('workspace recovery adopts the registered directory through a parent alias', async () => {
+    const root = join(harness.dataDir, 'real');
+    mkdirSync(root);
+    const project = await repoProject(join('real', 'repo'));
+    const row = harness.core.projects.require(project.id);
+    const branch = 'boite/recovered-agent';
+    const original = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    const alias = join(harness.dataDir, 'alias');
+    symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const adopted = await harness.core.worktrees.ensure('thr_recover', { ...row, path: join(alias, 'repo') }, branch);
+      expect(realpathSync(adopted.path)).toBe(realpathSync(original.path));
+      expect(adopted.branch).toBe(branch);
+      expect(git(project.path, 'worktree', 'list', '--porcelain').split(`branch refs/heads/${branch}`)).toHaveLength(2);
+    } finally { unlinkSync(alias); }
+  });
+
   test('the slug and the root are what name the branch and its directory', () => {
     expect(slugOf('Fix the login: retry on 401!')).toBe('fix-the-login-retry-on-401');
     expect(slugOf('   ')).toBe('thread');
     expect(slugOf('a'.repeat(60))).toBe('a'.repeat(40));
-    expect(worktreeRoot(join('D:', 'Dev', 'boite'))).toBe(join('D:', 'Dev', '.boite-worktrees', 'boite'));
+    expect(worktreeRoot(join('D:', 'Dev', 'boite'))).toBe(join('D:', 'Dev', 'boite', '.boite', 'worktrees'));
   });
 
-  test('the branch is boite/<slug>, the worktree is beside the repository, and the journal keeps both', async () => {
+  test('the worktree lives inside the project without dirtying it, and the journal keeps its branch and path', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();
     const thread = await client.call('threads.create', {
@@ -77,12 +105,51 @@ describe('a thread in its own worktree', () => {
     expect(thread.branch).toBe('boite/fix-the-login');
     expect(thread.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login'));
     expect(existsSync(join(thread.cwd, '.git'))).toBe(true);
+    expect(thread.cwd).toBe(join(project.path, '.boite', 'worktrees', 'fix-the-login'));
+    expect(git(project.path, 'status', '--porcelain')).toBe('');
     expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/boite/fix-the-login');
     expect(harness.core.journal.getThread(thread.id)?.branch).toBe('boite/fix-the-login');
     expect(harness.core.journal.getThread(thread.id)?.cwd).toBe(thread.cwd);
     // The git calls ran under the thread's id, so the trace has them.
     const processes = await client.call('trace.get', { threadId: thread.id });
     expect(processes.some((record) => record.exe === 'git')).toBe(true);
+  });
+
+  test('storage changes affect new worktrees only and separate repositories with the same name', async () => {
+    const first = await repoProject('one/repo');
+    const second = await repoProject('two/repo');
+    const accountId = await echoAccount();
+    const create = (projectId: string, title: string) => client.call('threads.create', { projectId, title, providerId: 'echo', accountId, worktree: {} });
+    const original = await create(first.id, 'Original');
+    const directory = join(harness.dataDir, 'shared');
+    await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory } });
+    const a = await create(first.id, 'Same title');
+    const b = await create(second.id, 'Same title');
+    expect(a.cwd.startsWith(directory)).toBe(true);
+    expect(b.cwd.startsWith(directory)).toBe(true);
+    expect(a.cwd).not.toBe(b.cwd);
+    expect(harness.core.threads.require(original.id).cwd).toBe(original.cwd);
+    expect(existsSync(original.cwd)).toBe(true);
+    await client.call('settings.set', { worktreeStorage: { mode: 'project', directory } });
+    const back = await create(first.id, 'Back');
+    expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', 'back'));
+    const listed = (await client.call('worktrees.list', { projectId: first.id })).find(w => w.branch === a.branch);
+    if (!listed) throw new Error(`shared worktree ${a.branch} was not listed`);
+    // Bun's realpath preserves Windows 8.3 aliases; compare the directory identity.
+    const actual = statSync(listed.path, { bigint: true });
+    const expected = statSync(a.cwd, { bigint: true });
+    expect([actual.dev, actual.ino]).toEqual([expected.dev, expected.ino]);
+    expect(harness.core.journal.getSetting('settings')).toMatchObject({ worktreeStorage: { mode: 'project', directory } });
+  });
+
+  test('a shared folder inside the project escapes literal characters in its Git exclusion', async () => {
+    const project = await repoProject();
+    const name = process.platform === 'win32' ? 'shared [work] !' : 'shared \\[work] !';
+    const directory = join(project.path, name);
+    await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory } });
+    const accountId = await echoAccount();
+    await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Nested', worktree: {} });
+    expect(git(project.path, 'status', '--porcelain')).toBe('');
   });
 
   test('a second thread with the same title gets -2, and a wanted branch is honoured or refused', async () => {
@@ -119,6 +186,21 @@ describe('a thread in its own worktree', () => {
     ).rejects.toThrow(`${path} is not a git repository`);
     expect(await client.call('threads.list', {})).toHaveLength(0);
     expect(existsSync(worktreeRoot(path))).toBe(false);
+  });
+
+  test('a project says whether it is a repository, on add and on list, by the test the worktree refuses on', async () => {
+    const plainPath = join(harness.dataDir, 'plain');
+    mkdirSync(plainPath, { recursive: true });
+    const plain = await client.call('projects.add', { path: plainPath, name: 'plain' });
+    const repo = await repoProject();
+    expect(plain.repository).toBe(false);
+    expect(repo.repository).toBe(true);
+    const listed = await client.call('projects.list', {});
+    expect(listed.find((project) => project.id === plain.id)?.repository).toBe(false);
+    expect(listed.find((project) => project.id === repo.id)?.repository).toBe(true);
+    // Checked on each answer: a folder that becomes a repository says so next time.
+    git(plainPath, 'init', '-q');
+    expect((await client.call('projects.list', {})).find((project) => project.id === plain.id)?.repository).toBe(true);
   });
 
   test('a model nobody offers is refused before any worktree exists', async () => {

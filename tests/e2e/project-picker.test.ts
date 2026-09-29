@@ -38,7 +38,8 @@ test('an unreachable remembered machine appears as a problem without counting as
   const port = await freePort();
   await page.evaluate(`import('/src/lib/workspace.svelte.ts').then(({workspace}) => { void workspace.add({url:'http://127.0.0.1:${port}',token:'test-only',paired:false}, 'Build server'); })`);
   await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.classList.contains('problem')`, 15_000);
-  expect(await page.evaluate(`document.querySelector('[data-testid=status-connection]').textContent`)).toContain('1 machine connected');
+  // The footer draws one warning icon and no words; its label counts the machine in trouble.
+  expect(await page.evaluate(`document.querySelector('[data-testid=machine-status]').getAttribute('aria-label')`)).toContain('1 need attention');
   await page.click('[data-testid=machine-status]');
   await page.waitFor(`document.querySelector('[data-testid=status-connection]')?.textContent.includes('Build server')`);
   await capture('polish-machine-problem.png');

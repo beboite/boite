@@ -17,7 +17,7 @@ export function chatLink(raw: string): ChatLink | null {
     try {
       const url = new URL(target);
       if (url.hostname && url.hostname !== 'localhost') return null;
-      target = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, '$1');
+      target = decodeURIComponent(url.pathname);
     } catch { return null; }
   } else {
     // Accept drive letters, reject executable and unknown URI schemes.
@@ -25,9 +25,11 @@ export function chatLink(raw: string): ChatLink | null {
     try { target = decodeURIComponent(target); } catch { return null; }
   }
   if (/^[\\/]{2}/.test(target)) return null;
+  // Markdown links can use the same leading slash as a Windows file URI.
+  target = target.replaceAll('\\', '/').replace(/^\/([A-Za-z]:\/)/, '$1');
   const line = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?(?:-L?\d+)?)$/.exec(target);
   if (line) target = target.slice(0, line.index);
-  return { kind: 'file', target: target.replaceAll('\\', '/'), ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
+  return { kind: 'file', target, ...(line ? { line: Number(line[1] ?? line[2]) } : {}) };
 }
 
 export function fileLike(text: string): boolean {
@@ -42,11 +44,39 @@ export function linkHtml(label: string, raw: string): string {
   return `<a href="${escapeHtml(link.target)}"${link.kind === 'web' ? ' target="_blank" rel="noopener noreferrer"' : ''}>${title}</a>`;
 }
 
+const ABSOLUTE_PATH = String.raw`(?:[A-Za-z]:[\\/]|\.\.?[\\/]|\/)[^\s<>]+`;
+const RELATIVE_PATH = String.raw`((?:[\w@.-]+[\\/])+[\w@.-]+\.[\w.-]+(?::\d+)?)`;
+const LINK_TOKENS = String.raw`!?\[([^\]\n]+)\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^()]*\))+))\s*\)|<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|` + `${RELATIVE_PATH}|${ABSOLUTE_PATH}`;
+
+/**
+ * The link tokens of `text`, in order. A relative path (group 5) must not
+ * follow a word character or a colon; that check is made here instead of in a
+ * lookbehind, which Safari before 16.4 cannot parse. A path refused at one
+ * position falls through to the absolute path there, as the next alternative of
+ * one regex would, and the scan then moves on by one character.
+ */
+function* linkTokens(text: string): Generator<RegExpExecArray> {
+  const tokens = new RegExp(LINK_TOKENS, 'g');
+  const absoluteAt = new RegExp(ABSOLUTE_PATH, 'y');
+  for (let match = tokens.exec(text); match; match = tokens.exec(text)) {
+    if (match[5] !== undefined && match.index > 0 && /[\w:]/.test(text[match.index - 1]!)) {
+      absoluteAt.lastIndex = match.index;
+      const absolute = absoluteAt.exec(text);
+      if (!absolute) {
+        tokens.lastIndex = match.index + 1;
+        continue;
+      }
+      match = absolute;
+      tokens.lastIndex = match.index + match[0].length;
+    }
+    yield match;
+  }
+}
+
 /** Tokenize links before emphasis, keeping URL punctuation and escaped attributes intact. */
 export function richInline(text: string, format: (text: string) => string): string {
-  const tokens = /!?\[([^\]\n]+)\]\(\s*(?:<([^>\n]+)>|((?:[^\s()]|\([^()]*\))+))\s*\)|<((?:https?:\/\/|mailto:)[^>\s]+)>|https?:\/\/[^\s<>]+|(?<![\w:])(?:[\w@.-]+[\\/])+[\w@.-]+\.[\w.-]+(?::\d+)?|(?:[A-Za-z]:[\\/]|\.\.?[\\/]|\/)[^\s<>]+/g;
   let out = '', start = 0;
-  for (const match of text.matchAll(tokens)) {
+  for (const match of linkTokens(text)) {
     out += format(text.slice(start, match.index));
     let raw = match[2] ?? match[3] ?? match[4] ?? match[0];
     let suffix = '';

@@ -16,8 +16,18 @@ The squash commit message body is left empty.
 
 The changes job also runs `check:architecture` and its regression tests, even
 for documentation-only changes. Runtime dependency cycles and forbidden
-cross-package imports fail before the build matrix starts. The advisory
-complexity report does not impose a numeric merge threshold.
+cross-package imports fail before the build matrix starts. So does a
+production source file above 900 lines: the files already past it are listed in
+`scripts/architecture/size-budget.json` at their size on 2026-09-25, and may
+shrink but not grow. The contract, the in-memory client and the UI string
+tables are exempt, since every new RPC method or UI sentence adds to them. The advisory complexity report does not impose a numeric
+merge threshold.
+
+The changes job runs `scripts/ci/translations.ts` too. A UI sentence that
+exists in English and not yet in another language is a warning there, with its
+path, and does not block a merge or a nightly. The release workflow runs the
+same script with `--release` in its version job, before any build, and a
+missing sentence fails it ([language.md](language.md)).
 
 The `release tags` ruleset keeps `v*` tags from being moved or deleted. Creating
 one stays open, which the nightly reservation and a manual release rely on.
@@ -30,6 +40,7 @@ one stays open, which the nightly reservation and a manual release rely on.
 | Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux x64 and macOS ARM64 shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
+| `bench/`, `telemetry/`, `scripts/architecture/` | Type checks and UI tests: `bun run check` covers the benches and the telemetry Worker |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft Windows release |
 | Nightly with an unpublished commit | Complete checks, signed nightly installer, development server image, prerelease |
@@ -56,6 +67,13 @@ echo turn with a fresh data directory. It does not exercise native desktop contr
 The WebView2 shell end-to-end suite remains Windows-only.
 Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
 second architecture of each only after a merge and on a release.
+Core changes run the core tests on all five runners before a merge: Windows,
+Linux x64 and ARM64, and macOS ARM64 and Intel. The portable desktop jobs do
+not repeat those tests after a merge.
+
+Artifact uploads retry once through the shared upload action. A failed first
+attempt can leave an artifact name reserved, so the retry replaces that name.
+If the retry fails too, the job fails. Tests and builds are not retried.
 
 ## Build cost
 
@@ -74,27 +92,86 @@ use at most eight workers and persist transformed modules in Vitest's disk cache
 The cache key includes the lockfile and the Svelte and Vitest configuration;
 Vitest validates individual source files when loading cached transforms.
 
+Core test files run in parallel worker processes, one per CPU core by default
+(`bun test --parallel`). Each file gets a fresh global object, and the test
+harness gives every core its own temporary data directory and port, so files
+stay isolated. The whole core suite took 189 s serially and 35 s with 16
+workers on a 16-thread desktop on 2026-09-25, 53 s with 4 workers.
+`bun run --cwd packages/core test:serial` runs the files one after another
+when a failure needs a quiet run.
+
+Where the time goes, from `gh run view` on the 23 finished `ci` runs before
+2026-09-25 14:20 UTC: a run took 13.8 minutes at the median. The Windows
+desktop job sets that length (12.8 minutes): 5.8 for the end-to-end suite, 3.5
+for the installer build and 1.1 for the Rust tests. Every other job a pull
+request waits on finishes in under 6 minutes; the Windows core job took 4.9, of
+which 4.1 were the serial core tests that parallel workers now shorten. The
+Intel macOS portable leg (16.2 minutes) runs only after a merge and on
+releases. Four of those runs failed: three in the Windows end-to-end suite and
+one in the Ubuntu core tests. Rerun the same query before quoting new numbers.
+
 The Windows job builds the installer and runs Rust tests in the release profile,
 sharing compiled dependencies. Successful main jobs save Cargo caches under a
 release-specific key. Failed or interrupted jobs do not save an incomplete cache
 that GitHub would keep immutable.
 It builds the installer once, then copies the existing sidecar beside the shell
 for end-to-end testing. It does not recompile the core just to stage it again.
+After the build, `scripts/ci/budgets.ts` fails the job when the UI's entry
+chunk, the whole UI without its `.br` and `.gz` copies, or the core's
+`dist/main.js` grows past its limit in `scripts/ci/budgets.json`. The limits
+sit about 10% above the sizes measured on 2026-09-26 (337 KB, 2221 KB and
+649 KB; `main` built a 681 KB core that day). The core's limit moved on
+2026-09-27 to 10% above the 726 KB core of the agent hooks change, whose
+descriptor checks, profile sharing and hook ledger all run at startup. The
+whole UI's limit moved on 2026-09-28 to 10% above 3003 KB, once Settings,
+Appearance, Reading bundled seven more faces (about 600 KB of woff2 and their
+licences): a browser fetches a face's file only after it is picked, so the
+entry chunk and the first screen do not carry them. The entry chunk's limit
+moved the same day to 448 KB with the buttons chosen from Appearance. Folded
+tool rows, their diffs, the question dock and the zoom applied at boot also
+draw a thread's first screen: they added 13 KB to the 362 KB `main` of that
+morning, and the merge of both built 424 KB, under that limit. It moved again
+to 520 KB, 10% above the 462 KB that `bun run build:ui` then
+`bun scripts/ci/budgets.ts` measured on 2026-09-28 for the change that edits, forks, rewinds and
+moves a thread from its messages and menus, folds changed files and archives
+projects: all of it draws on the first screen. The project stack marks (28 KB)
+and the find bar stay out of the entry chunk and load when first needed. Raise
+one in the change that explains the growth. Timings are not
+gated: they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
-The Windows suite runs files sequentially: every file takes its own ports,
-data directory and browser profile. Two and three parallel workers produced
-repeated browser navigation and startup hook timeouts on 2026-09-24.
-Sequential execution keeps the same assertions and deadlines.
-`tests/e2e/lib/warm.ts` runs first.
+The native Windows shell suite runs against that installer in the desktop job.
+The remaining E2E files run on three independent Windows runners, starting
+alongside the installer build. Each runner builds the production UI from the
+same checkout and prepares its own Vite cache and fake-client bundle. Nightly
+version changes apply to these runners too. Bun's `--shard=N/3` partitions the
+complete list of E2E files except `shell.test.ts`, which the desktop job runs.
+New E2E files enter that list automatically.
+
+Files stay sequential within each shard: two and three parallel workers sharing
+a Windows runner produced navigation and startup hook timeouts on 2026-09-24.
+Every file still takes its own ports, data directory and browser profile.
+Assertions and test deadlines are unchanged. The matrix has `fail-fast: false`,
+so a failing shard does not prevent the others from reporting their failures.
+`CI required` also requires the E2E matrix; a failure, cancellation or unexpected
+skip blocks it. Retrying a failed browser shard does not rebuild the installer
+or rerun the other successful shards.
+
+`tests/e2e/lib/warm.ts` runs in a separate preparation step. Each phase logs its
+start, elapsed time and errors. It reads the optimized dependency's response
+body before closing Vite. The existing 35-minute job deadline remains; no
+shorter per-phase or per-test limit is introduced. Failure captures are also
+attempted when a step is cancelled.
 It optimizes Vite's dependencies once, since on a fresh checkout each dev
 server would otherwise empty `packages/ui/node_modules/.vite` under the
 servers of the other workers. It also builds the fake-client bundle that
 `BOITE_E2E_FAKE_UI` hands to every worker. Warming under a `NODE_ENV` other
 than `test`, the one `bun test` sets, changes Vite's config hash and brings the
 race back. Every file that only drives the page serves that bundle through
-`startUi`. A file whose page imports `/src/...`, or blocks a module by its
+`startUi`. The preparation uses the same fixture plugin as `startDevUi`, since
+Vite also hashes the plugin configuration and otherwise optimizes again.
+A file whose page imports `/src/...`, or blocks a module by its
 source URL, needs a dev server: `startDevUi` transforms every module the page
 can load before its hook returns, and that hook allows 60 s. Before this, the
 cold transform ran inside the first browser launch: on 2026-09-24 it outran the
@@ -110,6 +187,64 @@ the smoke test and combines both digests into one multi-platform tag.
 
 These are cache and job boundaries, not a promise of a particular runner time.
 Measure actual workflow durations after the first cold and warm runs on GitHub.
+
+### Measuring the E2E partition
+
+`bench/e2e.ts` runs every test in both modes and records per-group logs, elapsed
+time and JUnit reports. Case identities and counts come from JUnit, even when
+Bun suppresses passing console lines. Its comparison requires the serial report
+first and refuses failures, skipped tests or a different list of test cases.
+The parallel measurement uses four local
+processes, including the native shell; CI uses separate runners for those
+groups. Build and stage the shell once, then run from the checkout root:
+
+```powershell
+bun run build:shell
+bun run apps/shell/scripts/stage-sidecar.ts
+$env:BOITE_E2E_PREBUILT_UI = '1'
+$env:BOITE_E2E_FAKE_UI = 'tests/e2e/.artifacts/fake-ui'
+bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
+bun bench/e2e.ts serial
+bun bench/e2e.ts sharded
+bun bench/e2e.ts compare tests/e2e/.artifacts/timings/serial/result.json tests/e2e/.artifacts/timings/sharded/result.json
+```
+
+Run serial and sharded measurements on the same machine and checkout. Report
+local test latency separately from hosted CI latency and bot review latency.
+More concurrent runners can reduce elapsed time while increasing total runner
+minutes; the comparison does not claim a reduction in compute cost.
+
+On 2026-09-28, the commands above on Windows with Bun 1.4.2 produced:
+
+| Local measurement | Serial | Sharded |
+| --- | ---: | ---: |
+| Elapsed E2E time | 252.66 s | 103.74 s |
+| Passing cases | 185 | 185 |
+| Assertions | 1,184 | 1,184 |
+| Failures or skipped tests | 0 | 0 |
+
+The comparison reported `Same test cases; elapsed time reduced by 58.9%`.
+Two earlier sharded runs took 123.48 s and 119.56 s against a 272.31 s serial
+reference, with the same 185 cases. These are local measurements with prepared
+builds, not hosted workflow or review-cycle measurements.
+
+The first hosted run of [PR #108](https://github.com/beboite/boite/actions/runs/36480733289)
+passed all checks on its first attempt. Against the medians of successful runs
+from the September 28 PR audit:
+
+| Hosted measurement | Previous median | PR #108 |
+| --- | ---: | ---: |
+| Complete CI workflow | 15 min 41 s | 6 min 57 s |
+| Windows desktop job | 14 min 43 s | 6 min 31 s |
+| Full E2E window | 8 min 28 s | 5 min 35 s |
+
+The E2E window starts with the first preparation step and ends when every E2E
+group, including the native shell, has finished. It includes the native suite's
+wait for the installer build. The hosted logs contain the same 185 cases as the
+local reference. These reductions, 55.7%, 55.7% and 34.1%, compare historical
+medians with one new run; repeated hosted runs are needed to establish a median.
+The desktop job still spent 3 min 32 s building the installer, 1 min 12 s
+compiling and running Rust tests, and 35 s in the native shell E2E suite.
 
 Browser tests wait for committed navigation and resolved asynchronous conditions.
 They disable background timer throttling and report page state, JavaScript
@@ -135,9 +270,13 @@ on September 15 is `boite (de nuit) v2.0.0-nightly.20260915.1`; a new commit tha
 gets `.2`. The counter resets the next UTC day. The base `2.0.0` comes from the
 manifest, without its stable prerelease suffix.
 
-The workflow reserves the version tag against the exact commit before building.
-A failed build reuses that version on retry, even on a later day. A reserved tag
-alone is not a successful release. The installer and core carry the nightly
+The workflow reserves the version tag against the exact commit once the checks
+and server builds pass, before it publishes the server channel tags and the
+prerelease. The `release tags`
+ruleset keeps a tag from being deleted, so a build that fails its checks takes
+none, and the next build takes the same number. A build that fails while
+publishing keeps its tag and reuses that version on retry, even on a later day.
+A reserved tag alone is not a successful release. The installer and core carry the nightly
 version through temporary build inputs; source manifests keep their version.
 
 The desktop shares Boite's identifier, installation and data directory, allowing
@@ -145,9 +284,20 @@ the in-app update selector to move between stable and nightly. Local Boite Dev
 builds remain isolated. The server uses the `dev` channel; use a separate Compose
 project for nightly volumes. Nightly publication
 never changes the stable Docker `latest` tag or GitHub's latest stable release.
-Nightly verification skips the stable Docker job. Its publication job builds,
-smoke-tests and pushes the development image once per architecture after the
-other checks pass.
+Nightly verification skips the stable Docker job. The development images build
+and run smoke tests alongside verification, once per architecture. Tested images
+are pushed under run-specific staging tags, and their digests are saved as
+artifacts. Only after verification, both image builds and version reservation
+succeed does `server-manifest.yml` promote those digests to `nightly`, the version
+tag and the commit tag. A failed check leaves the published channel unchanged;
+an unchanged commit skips both verification and image builds. Ordinary server
+publication uses the same manifest workflow immediately after its builds.
+
+On 2026-09-29, `gh run view 36531647917 --json jobs` showed verification's last
+build finishing at 06:44:34 UTC and the server build starting at 06:44:48. The
+slowest server build took 4 min 27 s. Overlapping it with verification removes
+that serial build phase; the resulting total duration still needs a GitHub run
+to measure runner availability and cache effects.
 
 ## Pull request reviews
 
@@ -156,6 +306,14 @@ request changes or become a required merge check. Draft PRs and generated build
 artifacts are excluded. Installing the GitHub App on this repository is a
 separate prerequisite. CodeRabbit controls free-plan eligibility and review
 limits; repository configuration does not override them.
+
+Automatic code reviews and chat replies remain enabled. The
+[PR follow-up rules](../AGENTS.md#follow-through-on-pull-requests) group verified
+fixes before a push, inspect CI and reviews together, and avoid duplicate review
+requests. Acknowledgements need no further reply unless they contain a new
+finding. CI checks must still pass; unresolved bugs or missing reviews must be
+reported. Test requests must identify a failure that existing coverage cannot
+detect, rather than multiply equivalent cases.
 
 ## Security and labels
 

@@ -13,9 +13,10 @@
  *
  * Run as `bun <this file> <the descriptor's launch args>`. `GROK_FAKE_LOG`
  * names a file it appends to: `argv:<the args>`, `env <NAME>=<value>`,
- * `initialize`, `loaded:<sessionId>`, `set_model <modelId> <effort>` and
- * `set_config_option ...`, which must never appear. One `initialize` line per
- * process, so a test can count the processes a probe cache did or did not save.
+ * `initialize`, `loaded:<sessionId>`, `set_model <modelId> <effort>`,
+ * `interject <the text as JSON>`, `steer waiting` once a `[steer]` prompt can
+ * take one, and `set_config_option ...`, which must never appear. One `initialize` line per process, so a test can count the processes
+ * a probe cache did or did not save.
  */
 import { appendFileSync } from 'node:fs';
 import { Readable, Writable } from 'node:stream';
@@ -64,6 +65,8 @@ const MODELS = {
 
 const known = new Set<string>();
 const cancels = new Map<string, () => void>();
+/** The `[steer]` prompt waiting for an `_x.ai/interject`, by session. */
+const interjections = new Map<string, (text: string) => void>();
 
 function log(line: string): void {
   const file = process.env['GROK_FAKE_LOG'];
@@ -139,7 +142,23 @@ const app = agent({ name: 'grok-fake' })
   )
   .onNotification('session/cancel', ({ params }) => {
     cancels.get(params.sessionId)?.();
-  })
+  });
+
+// Grok 1.0.41's mid-turn input, answered as the real agent does. A fake run
+// with `GROK_FAKE_NO_INTERJECT=1` is an older Grok: method-not-found.
+if (process.env['GROK_FAKE_NO_INTERJECT'] !== '1') {
+  app.onRequest(
+    '_x.ai/interject',
+    (params: unknown) => params as { sessionId: string; text: string },
+    ({ params }) => {
+      log(`interject ${JSON.stringify(params.text)}`);
+      interjections.get(params.sessionId)?.(params.text);
+      return { result: { status: 'queued' } };
+    },
+  );
+}
+
+app
   .onRequest('session/prompt', async ({ params, client }) => {
     const sessionId = params.sessionId;
     const text = promptText(params.prompt);
@@ -153,6 +172,20 @@ const app = agent({ name: 'grok-fake' })
       });
       cancels.delete(sessionId);
       return { stopReason: 'cancelled' };
+    }
+
+    // Works until an interjection arrives, then reads it back in the same turn.
+    if (text.includes('[steer]')) {
+      const heard = await new Promise<string | null>((resolve) => {
+        interjections.set(sessionId, resolve);
+        cancels.set(sessionId, () => resolve(null));
+        log('steer waiting');
+      });
+      interjections.delete(sessionId);
+      cancels.delete(sessionId);
+      if (heard === null) return { stopReason: 'cancelled' };
+      await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `heard: ${heard}` } });
+      return { stopReason: 'end_turn' };
     }
 
     if (text.includes('[permission]')) {

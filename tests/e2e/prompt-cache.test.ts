@@ -28,7 +28,8 @@ async function open(size: { width: number; height: number }, cache: { minutesAgo
   pages.push(page);
   await page.waitFor(`document.querySelector('[data-testid="context-trigger"]')`);
   await page.evaluate(`(async () => {
-    (await import('/src/lib/i18n.svelte.ts')).setLocaleSetting(${JSON.stringify(locale)});
+    // A language other than English loads its catalogue first.
+    await (await import('/src/lib/i18n.svelte.ts')).setLocaleSetting(${JSON.stringify(locale)});
     (await import('/src/lib/experiments.ts')).setExperiment('prompt-cache', ${experiment});
     const store = ${STORE};
     const thread = store.openThread;
@@ -50,8 +51,46 @@ test('a warm Claude cache counts down beside the context meter', async () => {
   expect(await page.evaluate<string>(`document.querySelector('${CHIP}').dataset.state`)).toBe('warm');
   expect(await page.text(CHIP)).toContain('31 min');
   await capture(page, 'prompt-cache-desktop');
+  expect(await page.evaluate<boolean>(`(() => { const popup = document.querySelector('[data-testid="context-popup"]'); return popup.scrollHeight <= popup.clientHeight; })()`)).toBe(true);
+  expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid="composer"] [data-testid="context-trigger"]')`)).toBe(true);
+  expect(await page.text('[data-testid="context-trigger"]')).not.toContain('%');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('31 min left');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('1 h · API');
+}, 90_000);
+
+test('an active turn hides the old cache clock until its new result arrives', async () => {
+  const page = await open({ width: 1300, height: 850 }, { minutesAgo: 4, ttlSeconds: 300, source: 'reported' });
+  await page.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'warm'`);
+  for (const status of ['running', 'queued', 'waiting']) {
+    await page.evaluate(`(async () => {
+      const thread = (${STORE}).openThread;
+      thread.status = '${status}';
+      thread.promptCache.at = Date.now() - 6 * 60000;
+    })()`);
+    await page.waitFor(`!document.querySelector('${CHIP}')`);
+    if (status === 'running') await page.screenshot(join(import.meta.dir, '.artifacts', 'prompt-cache-running-desktop.png'));
+    expect(await page.evaluate<boolean>(`!!document.querySelector('${CHIP}')`)).toBe(false);
+    expect(await page.evaluate<string>(`document.querySelector('[data-testid="context-trigger"]').getAttribute('aria-label')`)).toBe('Context');
+    await page.click('[data-testid="context-trigger"]');
+    expect(await page.evaluate<boolean>(`!!document.querySelector('[data-testid="prompt-cache-detail"]')`)).toBe(false);
+  }
+  await page.evaluate(`(async () => {
+    const thread = (${STORE}).openThread;
+    thread.promptCache.at = Date.now();
+    thread.status = 'idle';
+  })()`);
+  await page.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'warm'`);
+  expect(await page.text(CHIP)).toContain('5 min');
+
+  const phone = await open({ width: 390, height: 844 }, { minutesAgo: 4, ttlSeconds: 300, source: 'reported' });
+  await phone.waitFor(`document.querySelector('${CHIP}')?.dataset.state === 'warm'`);
+  await phone.evaluate(`(async () => { (${STORE}).openThread.status = 'running'; })()`);
+  await phone.waitFor(`!document.querySelector('${CHIP}')`);
+  await phone.click('[data-testid="context-trigger"]');
+  await phone.waitFor(`document.querySelector('[data-testid="context-popup"]')`);
+  expect(await phone.evaluate<boolean>(`!!document.querySelector('[data-testid="prompt-cache-detail"]')`)).toBe(false);
+  await phone.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+  await phone.screenshot(join(import.meta.dir, '.artifacts', 'prompt-cache-running-phone.png'));
 }, 90_000);
 
 test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French', async () => {
@@ -62,6 +101,11 @@ test('past the OpenAI 30 minutes the cache reads maybe, on a phone and in French
   await capture(page, 'prompt-cache-phone-fr');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('peut-être · 23 h');
   expect(await page.text('[data-testid="prompt-cache-detail"]')).toContain('30 min à 24 h');
+  expect(await page.evaluate<boolean>(`(() => { const popup = document.querySelector('[data-testid="context-popup"]'); return popup.scrollHeight <= popup.clientHeight; })()`)).toBe(true);
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.waitFor(`!document.querySelector('[data-testid="context-popup"]')`);
+  expect(await page.evaluate<boolean>(`(() => { const trigger = document.querySelector('[data-testid="composer"] [data-testid="context-trigger"]'); const r = trigger.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'prompt-cache-phone-bar.png'));
 }, 90_000);
 
 test('another model reads cold, and the experiment off draws nothing', async () => {

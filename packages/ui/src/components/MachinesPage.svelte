@@ -1,26 +1,100 @@
+<script module lang="ts">
+  import type { SyncReport } from '../lib/settings-sync';
+
+  /**
+   * The last copy onto each machine, with the name of the one it came from.
+   * It outlives the page: the report points at the target's Providers page,
+   * and coming back from there, or turning a phone, draws the page anew.
+   */
+  const synced = $state<Record<string, { source: string; report: SyncReport }>>({});
+</script>
+
 <script lang="ts">
-  import { Plus, ArrowUpRight, RefreshCw, Unplug, X } from '@lucide/svelte';
-  import { workspace, machineIcons } from '../lib/workspace.svelte';
+  import InfoTip from './InfoTip.svelte';
+  import { Plus, ArrowUpRight, Copy, RefreshCw, Trash2, X } from '@lucide/svelte';
+  import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
+  import { SyncFailure, syncSettings } from '../lib/settings-sync';
   import { store as primary } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { confirm } from '../lib/confirm.svelte';
+  import { fill, strings } from '../lib/strings';
   import MachineIcon from './MachineIcon.svelte';
   import RemoteCoordination from './RemoteCoordination.svelte';
+  import PairingCard from './PairingCard.svelte';
+  import PhoneSettings from './PhoneSettings.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
     url = $state(''),
     token = $state('');
   let busy = $state(false);
-  let origins = $state('');
   /** The add form stays folded behind its button, unless there is nothing else to show. */
   let adding = $state(false);
   let open = $derived(adding || workspace.machines.length === 0);
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
   let linkInput = $state<HTMLInputElement | null>(null);
-  $effect(() => {
-    origins = (workspace.active.settings?.browserOrigins ?? []).join('\n');
-  });
+  /** The machine whose settings are being written, one at a time. */
+  let syncing = $state<string | null>(null);
+
+  /** The machine the settings pages speak for: what a copy starts from. */
+  let source = $derived(workspace.machines.find((machine) => machine.store === workspace.active) ?? null);
+
+  /** Both ends must be connected with full control: a copy reads one core's settings and writes the other's. */
+  const canSync = (machine: Machine): boolean =>
+    source !== null && machine.store !== source.store
+    && machine.store.owner && machine.store.connection === 'ready' && machine.store.client !== null
+    && source.store.owner && source.store.connection === 'ready' && source.store.client !== null;
+
+  async function sync(machine: Machine) {
+    const from = source;
+    if (!from || syncing !== null || !canSync(machine)) return;
+    const ok = await confirm.ask({
+      title: fill(strings.machines.syncTitle, { source: from.label, target: machine.label }),
+      body: fill(strings.machines.syncBody, { source: from.label, target: machine.label }),
+      confirmLabel: strings.machines.syncConfirm,
+      cancelLabel: strings.common.cancel
+    });
+    if (!ok || !from.store.client || !machine.store.client) return;
+    syncing = machine.id;
+    delete synced[machine.id];
+    try {
+      const report = await syncSettings(
+        { client: from.store.client, providers: from.store.providers, accounts: from.store.accounts },
+        { client: machine.store.client, providers: machine.store.providers, accounts: machine.store.accounts }
+      );
+      machine.store.settings = report.settings;
+      if (report.keybindings) machine.store.keybindings = report.keybindings;
+      synced[machine.id] = { source: from.label, report };
+    } catch (error) {
+      // What reached the target before the failure stays there, and its events
+      // have already brought this window's copy of it up to date.
+      const message = error instanceof Error ? error.message : String(error);
+      machine.store.error = error instanceof SyncFailure
+        ? fill(strings.machines.syncStopped, { stage: strings.machines.syncStages[error.stage], error: message })
+        : message;
+    } finally {
+      syncing = null;
+    }
+  }
+
+  /** Sign-ins happen on the machine that keeps them: its own Providers page. */
+  async function openProviders(machine: Machine) {
+    await workspace.select(machine.store);
+    machine.store.showSettings('accounts');
+  }
+  /** Forgetting a machine drops its saved address and key: getting it back takes a new pairing link made there. */
+  async function removeMachine(machine: { id: string; label: string }) {
+    const ok = await confirm.ask({
+      title: fill(strings.machines.removeTitle, { machine: machine.label }),
+      body: strings.machines.removeBody,
+      confirmLabel: strings.machines.remove,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (!ok) return;
+    await workspace.remove(machine.id);
+    delete synced[machine.id];
+  }
   function startAdding() {
     adding = true;
     requestAnimationFrame(() => linkInput?.focus());
@@ -49,8 +123,7 @@
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
-      <h1>{strings.machines.heading}</h1>
-      <p class="intro">{strings.machines.intro}</p>
+      <h1>{mobile ? strings.machines.heading : strings.settings.tabs.machines}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
     {#if !open}
       <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
@@ -61,12 +134,11 @@
     <div>
       <section class="card add" data-testid="machine-add-card" aria-label={strings.machines.add}>
         <div class="add-head">
-          <h2>{strings.machines.add}</h2>
+          <h2>{strings.machines.add}<InfoTip topic={strings.machines.add} text={strings.machines.addHint} /></h2>
           {#if workspace.machines.length > 0}
             <button class="ghost icon-only" data-testid="machine-add-close" aria-label={strings.common.cancel} title={strings.common.cancel} onclick={stopAdding}><X size={15} /></button>
           {/if}
         </div>
-        <p class="hint">{strings.machines.addHint}</p>
         <form
           onsubmit={(e) => {
             e.preventDefault();
@@ -106,7 +178,7 @@
     </div>
   </div>
 
-  <div class="machines">
+  <div class="machines" id="settings-machines">
     {#each workspace.machines as machine (machine.id)}
       <section class="card machine-card" data-testid="machine-card" data-machine-id={machine.id}>
         <div class="main">
@@ -131,11 +203,19 @@
               <button class="ghost icon-only" aria-label={strings.common.refresh} title={strings.common.refresh} onclick={() => void machine.store.connect()}><RefreshCw size={15} /></button>
             {/if}
             {#if machine.store !== primary}
-              <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void workspace.remove(machine.id)}><Unplug size={15} /></button>
+              <button class="ghost icon-only" data-testid="machine-remove" aria-label={strings.machines.remove} title={strings.machines.remove} onclick={() => void removeMachine(machine)}><Trash2 size={15} /></button>
             {/if}
-            <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
-              >{strings.machines.open}<ArrowUpRight size={13} /></button
-            >
+            {#if canSync(machine)}
+              <button class="ghost small" data-testid="machine-sync" disabled={syncing !== null} onclick={() => void sync(machine)}
+                ><Copy size={13} />{syncing === machine.id ? strings.machines.syncing : fill(strings.machines.syncFrom, { source: source?.label ?? '' })}</button
+              >
+            {/if}
+            <!-- The machine already open has nowhere to go. -->
+            {#if machine.store !== workspace.active}
+              <button class="ghost small" data-testid="machine-open" onclick={() => void workspace.select(machine.store)}
+                >{strings.machines.open}<ArrowUpRight size={13} /></button
+              >
+            {/if}
           </div>
         </div>
         <div class="reveal" class:open={customizing === machine.id} inert={customizing !== machine.id}>
@@ -147,30 +227,32 @@
             </div>
           </div>
         </div>
+        {#if synced[machine.id]}
+          {@const done = synced[machine.id]!}
+          <div class="sync-report" role="status" data-testid="machine-sync-report">
+            <p>{fill(strings.machines.synced, { source: done.source })}</p>
+            {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
+            {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
+            {#if done.report.providers.length > 0}
+              <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
+              <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+            {/if}
+          </div>
+        {/if}
         {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
       </section>
     {/each}
   </div>
 
-  {#if !mobile && workspace.machines.some(machine => machine.store.owner)}
+  <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
+  {#if !mobile && workspace.machines.filter(machine => machine.store.owner).length > 1}
     <RemoteCoordination />
   {/if}
 
-  {#if workspace.active.owner && !mobile}
-    <details class="card origins disclosure">
-      <summary>{strings.machines.browserOrigins}</summary>
-      <p class="hint">{strings.machines.browserOriginsHint}</p>
-      <textarea bind:value={origins} aria-label={strings.machines.browserOrigins} rows="3"></textarea>
-      <button
-        onclick={() =>
-          void workspace.active.saveSettings({
-            browserOrigins: origins
-              .split('\n')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          })}>{strings.settings.save}</button
-      >
-    </details>
+  {#if !mobile}
+    <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
+    <PairingCard store={workspace.active} />
+    <PhoneSettings store={workspace.active} />
   {/if}
 </div>
 
@@ -195,12 +277,6 @@
   h2 {
     font-size: var(--text-base);
     margin: 0;
-  }
-  .intro,
-  .hint {
-    color: var(--color-muted-foreground);
-    font-size: var(--text-sm);
-    line-height: 1.6;
   }
   .add-open {
     flex: none;
@@ -245,6 +321,7 @@
   .machines {
     display: grid;
     gap: 8px;
+    scroll-margin-top: 24px;
   }
   .machine-card {
     display: flex;
@@ -352,23 +429,6 @@
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
-  .origins {
-    padding: 14px 20px;
-  }
-  .origins summary {
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--color-muted-foreground);
-  }
-  .origins[open] summary {
-    margin-bottom: 10px;
-    color: var(--color-foreground);
-  }
-  textarea {
-    display: block;
-    width: 100%;
-    margin: 12px 0;
-  }
   label {
     display: flex;
     flex-direction: column;
@@ -380,7 +440,7 @@
   input {
     width: 100%;
   }
-  details:not(.origins) {
+  details {
     margin-top: 8px;
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
@@ -388,6 +448,16 @@
   summary {
     cursor: pointer;
   }
+  /* What the copy did, under the card it wrote to, and what is left to do there. */
+  .sync-report {
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+    margin: 10px 0 2px 52px;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+  }
+  .sync-report p { margin: 0; }
   .error {
     color: var(--color-danger);
     font-size: var(--text-sm);
@@ -422,8 +492,10 @@
       width: 100%;
       justify-content: flex-end;
     }
-    .icon-choices {
+    .icon-choices,
+    .sync-report {
       padding-left: 0;
+      margin-left: 0;
     }
   }
 </style>

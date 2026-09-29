@@ -46,12 +46,12 @@ test('a record that is not one reads as never seen', () => {
   expect(onboardingSeen()).toBe(true);
 });
 
-test('six screens explain the app without a redundant project screen', () => {
+test('seven screens explain the app, the second asking who is using it', () => {
   const shown = steps();
 
   expect(shown[0]).toBe('welcome');
   expect(shown.at(-1)).toBe('privacy');
-  expect(shown).toEqual(['welcome', 'agents', 'usage', 'reach', 'quiet', 'privacy']);
+  expect(shown).toEqual(['welcome', 'profile', 'agents', 'usage', 'reach', 'quiet', 'privacy']);
   // A fresh array every call: the caller keeps its own and may not change ours.
   expect(steps()).not.toBe(shown);
   expect(steps(false)).not.toContain('privacy');

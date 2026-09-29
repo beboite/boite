@@ -1,15 +1,18 @@
 <script lang="ts">
-  import { ArrowLeft, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { tick } from 'svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { separator } from '../lib/menu';
+  import { archiveThread } from '../lib/archive';
+  import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
+  import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
+  import { work } from '../lib/work-prefs.svelte';
+  import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
-  import ContextControl from './ContextControl.svelte';
-  import StatusMark from './StatusMark.svelte';
+  import Menu from './Menu.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
-  let project = $derived(store.openProject);
   let renaming = $state(false);
   let renameText = $state('');
 
@@ -33,45 +36,93 @@
     if (thread) await store.rename(thread.id, renameText);
   }
 
-  function onRenameKey(event: KeyboardEvent) {
+  let titleButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  /** Enter and Escape give the keyboard back to the title, never to the page, where Escape stops the turn. */
+  async function onRenameKey(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
       void commitRename();
     } else if (event.key === 'Escape') {
       renaming = false;
+    } else return;
+    await tick();
+    titleButton?.focus({ preventScroll: true });
+  }
+
+  /** The title's actions: a right-click on a desktop, a tap on the title on a phone. */
+  let titleItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const retitling = store.retitling.includes(thread.id);
+    return [
+      { id: 'rename', label: strings.sidebar.rename },
+      { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
+      { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
+      { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      // A phone has no Ctrl+F: this sheet is its way to the find bar.
+      { id: 'find', label: strings.keyboard.commands.find },
+      ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
+      separator(),
+      { id: 'archive', label: strings.sidebar.archive, danger: true }
+    ];
+  });
+
+  let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
+
+  /**
+   * The Team button is for a conversation that has one: delegation switched on,
+   * a profile set up, an agent launched, or this thread being one of them. On
+   * every other thread it was a word with no referent, so the way in is the
+   * title's menu until then.
+   */
+  let hasTeam = $derived.by(() => {
+    if (agentsOn || thread?.parentThreadId) return true;
+    const team = store.delegation;
+    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0);
+  });
+
+  /**
+   * A phone's header has room for the title or for every toggle, not both: the
+   * Agents and Terminal toggles move into the title's sheet there, ticked when on.
+   */
+  let phoneItems = $derived.by((): MenuItem[] => {
+    if (!thread) return [];
+    const toggles: MenuItem[] = [];
+    // Without a team, the same entry the desktop title menu offers to start one.
+    if (!hasTeam) toggles.push({ id: 'agents', label: strings.delegation.openTeam });
+    else if (work.shows('header.agents')) toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
+    if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
+    return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
+  });
+
+  function titleAction(action: string) {
+    const open = store.openThread;
+    if (!open) return;
+    if (action === 'agents') store.panel.toggleKind('agents');
+    else if (action === 'terminal') store.toggleTerminal();
+    else if (action === 'rename') beginRename();
+    else if (action === 'retitle') void store.retitle(open.id);
+    else if (action === 'pin') void store.pin(open.id, !open.pinned);
+    else if (action === 'copy') void store.copy(open.cwd);
+    else if (action === 'find') {
+      store.findOpen = true;
+      store.findRequest += 1;
     }
+    // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
+    else if (pickMoveItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
+    else if (action === 'archive') void archiveThread(store, open.id);
   }
 
   function openTitleMenu(event: MouseEvent) {
-    const open = store.openThread;
-    if (!open) return;
-    contextMenu.open(
-      event,
-      [
-        { id: 'rename', label: strings.sidebar.rename },
-        {
-          id: 'retitle',
-          label: store.retitling.includes(open.id) ? strings.sidebar.retitling : strings.sidebar.retitle,
-          disabled: store.retitling.includes(open.id)
-        },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: open.cwd },
-        separator(),
-        { id: 'archive', label: strings.sidebar.archive, danger: true }
-      ],
-      (action) => {
-        if (action === 'rename') beginRename();
-        else if (action === 'retitle') void store.retitle(open.id);
-        else if (action === 'copy') void store.copy(open.cwd);
-        else if (action === 'archive') void store.archive(open.id);
-      }
-    );
+    if (!store.openThread) return;
+    const items = hasTeam ? titleItems : [{ id: 'agents', label: strings.delegation.openTeam }, separator('sep-team'), ...titleItems];
+    contextMenu.open(event, items, titleAction);
   }
 
 </script>
 
-<div class="thread-header" data-testid="thread-header">
+<div class="thread-header" data-testid="thread-header" data-status={thread?.status}>
       {#if thread}
-        <StatusMark status={thread.status} testid="thread-status" />
         {#if renaming}
           <input
             class="rename"
@@ -86,6 +137,7 @@
           <button
             type="button"
             class="ghost title"
+            bind:this={titleButton}
             data-testid="thread-title"
             title={strings.sidebar.rename}
             onclick={beginRename}
@@ -93,6 +145,19 @@
           >
             {thread.title}
           </button>
+          <!-- A phone has no right-click: the title opens the same actions as a sheet. -->
+          <span class="title-menu">
+            <Menu items={phoneItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
+              <span class="title-text">{thread.title}</span><ChevronDown size={14} />
+            </Menu>
+          </span>
+        {/if}
+        {@const pending = pendingLine(thread)}
+        {#if pending}
+          <!-- A move asked for while the turn runs. A phone keeps only the mark; its sidebar row carries the words. -->
+          <span class="pending" data-testid="thread-pending" title={pending} aria-label={pending}>
+            <FolderInput size={13} strokeWidth={1.75} /><span class="pending-text">{pending}</span>
+          </span>
         {/if}
       {:else}
         <span class="draft-mark"></span>
@@ -101,65 +166,68 @@
 
       <span class="spacer"></span>
 
-      <!-- A draft names its project in the heading below, so the chip would say it twice. -->
-      {#if project && thread}
-        <span class="chip path" title={project.path}>{project.name}</span>
-      {/if}
       {#if thread?.parentThreadId}
         <button type="button" class="chip parent" data-testid="delegation-back-parent" onclick={() => void store.open(thread!.parentThreadId!)}>
           <ArrowLeft size={13} strokeWidth={1.75} />
           {strings.delegation.parent}
         </button>
       {/if}
-      {#if thread?.branch}
-        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch">
+      {#if thread?.branch && work.shows('header.branch')}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
           <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
       {/if}
-      {#if thread}<ContextControl {store} />{/if}
-      {#if thread}
+      {#if thread && hasTeam && work.shows('header.agents')}
         <button
           type="button"
-          class="ghost trace"
-          class:on={store.panelOpen && store.panel.active?.kind === 'agents'}
+          class="ghost trace in-title-menu"
+          class:on={agentsOn}
           title={strings.delegation.panelHint}
-          aria-pressed={store.panelOpen && store.panel.active?.kind === 'agents'}
+          aria-label={strings.delegation.heading}
+          aria-pressed={agentsOn}
           data-testid="agents-toggle"
           onclick={() => store.panel.toggleKind('agents')}
+          oncontextmenu={(event) => controlMenu(event, store, 'header.agents')}
         >
           <UsersRound size={16} strokeWidth={1.75} />
-          {strings.delegation.heading}
+          <span class="label">{strings.delegation.heading}</span>
         </button>
       {/if}
-      <!-- Every surface of the panel reads something only the owner may ask
-           for, so the button is not in a paired device's header at all. The
-           shell is the same: a phone reaches it by this button, not by Ctrl+J. -->
+      <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
         {@const terminalKey = store.keyLabel('terminal')}
+        {#if work.shows('header.terminal')}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost trace in-title-menu"
           class:on={store.terminalShown(thread.id)}
           title={terminalKey ? `${strings.thread.terminalHint} (${terminalKey})` : strings.thread.terminalHint}
           aria-label={strings.thread.terminalHint}
           aria-pressed={store.terminalShown(thread.id)}
           data-testid="terminal-toggle"
           onclick={() => store.toggleTerminal()}
+          oncontextmenu={(event) => controlMenu(event, store, 'header.terminal')}
         >
           <SquareTerminal size={16} strokeWidth={1.75} />
         </button>
+        {/if}
+      {/if}
+      <!-- A paired device opens the panel too: the Agents and Workflows surfaces are
+           its to follow, and the panel's menu offers only what available() allows. -->
+      {#if thread}
         <button
           type="button"
-          class="ghost trace"
+          class="ghost icon"
           class:on={store.panelOpen}
-          title={strings.thread.panelHint}
+          title={`${strings.thread.panelHint}${store.keyHint('panel')}`}
+          aria-label={strings.thread.panelHint}
           aria-pressed={store.panelOpen}
           data-testid="panel-toggle"
           onclick={() => store.togglePanel()}
         >
           <PanelRight size={16} strokeWidth={1.75} />
-          {strings.thread.panel}
         </button>
       {/if}
 </div>
@@ -223,6 +291,39 @@
   }
 
 
+  .pending {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--color-accent);
+  }
+  .pending :global(svg) { flex: none; }
+  .pending-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   .title { min-width: 0; }
-  @media (max-width: 720px) { .path { display: none; } .trace { padding: 0 6px; } }
+  .title-menu { display: none; }
+  @media (max-width: 720px) {
+    /* The title is what tells one conversation from another: the buttons give
+       up their words for it, and keep a finger-sized square. */
+    .thread-header { gap: 4px; }
+    .path { display: none; }
+    .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
+    .pending-text { display: none; }
+    .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
+    .trace .label { display: none; }
+    /* The title's sheet holds these on a phone. */
+    .in-title-menu { display: none; }
+    .rename { width: 100%; }
+    /* The thread's title button gives way to its menu; a draft's label has no menu and stays. */
+    .title:not(.draft) { display: none; }
+    .title.draft { max-width: none; }
+    .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
+    .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
+    .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
+    .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
+  }
 </style>

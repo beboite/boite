@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { RpcEvents } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { commandLine, pickShell, threadTerminalId } from '../src/terminals.ts';
+import { HISTORY_CHARS, OutputHistory, commandLine, pickShell, threadTerminalId } from '../src/terminals.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -89,6 +89,50 @@ describe('terminals', () => {
     await expect(client.call('terminals.write', { id, data: 'x' })).rejects.toThrow(/no terminal is running/);
   }, 30_000);
 
+  test('a burst of output goes out in fewer events than chunks, and a snapshot is exactly what went out', async () => {
+    const procs = harness.core.procs;
+    const spawn = procs.spawnTerminal.bind(procs);
+    let chunks = 0;
+    const spy = spyOn(procs, 'spawnTerminal').mockImplementation((threadId, cmd, args, opts) => spawn(threadId, cmd, args, {
+      ...opts,
+      onData: (bytes) => {
+        // PTY reads vary by OS and runner load. Deliver the real bytes in
+        // small chunks so this always exercises the output batching.
+        for (let at = 0; at < bytes.length; at += 64) {
+          chunks += 1;
+          opts.onData(bytes.subarray(at, at + 64));
+        }
+      },
+    }));
+    try {
+      const client = await harness.connect();
+      const { threadId } = await echoThread(harness, client);
+      const id = threadTerminalId(threadId);
+      let events = 0;
+      let text = '';
+      client.on('terminal.output', (event) => {
+        if (event.id !== id) return;
+        events += 1;
+        text += event.data;
+      });
+      await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
+      const burst = process.platform === 'win32' ? 'for /L %i in (1,1,3000) do @echo burst-%i\r' : 'i=0; while [ $i -lt 3000 ]; do i=$((i+1)); echo burst-$i; done\r';
+      await client.call('terminals.write', { id, data: burst });
+      await waitFor(() => text.includes('burst-3000'), SHELL_MS);
+      // The trailing prompt lands after the last line: wait for the stream to settle.
+      for (let seen = -1; seen !== text.length;) {
+        seen = text.length;
+        await Bun.sleep(150);
+      }
+      expect(chunks).toBeGreaterThan(20);
+      expect(events).toBeLessThan(chunks / 2);
+      const again = await client.call('terminals.open', { threadId, cols: 100, rows: 30 });
+      expect(again.output).toBe(text.slice(-HISTORY_CHARS));
+    } finally {
+      spy.mockRestore();
+    }
+  }, 30_000);
+
   test('archiving a thread closes its shell', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);
@@ -115,7 +159,7 @@ describe('terminals', () => {
     expect(harness.core.terminals.has(id)).toBe(false);
 
     await client.call('terminals.open', { threadId, cols: 80, rows: 24 });
-    await client.call('projects.remove', { projectId });
+    await client.call('projects.remove', { projectId: projectId! });
     expect(harness.core.procs.liveCount(id)).toBe(0);
   }, 30_000);
 
@@ -179,6 +223,35 @@ describe('terminals', () => {
     }), 'utf8');
     const { rejected } = await client.call('providers.reload', {});
     expect(rejected.find((entry) => entry.file.endsWith('bad-terminal.json'))?.field).toBe('login.terminal');
+  });
+});
+
+describe('output history', () => {
+  test('ten megabytes in small chunks keep exactly the last window, without copying it per chunk', () => {
+    // Making the chunks is the yardstick: a runner slow at one is slow at the other.
+    let started = performance.now();
+    const chunks = Array.from({ length: 160_000 }, (_, index) => `${String(index).padStart(8, '0')}${'x'.repeat(55)}\n`);
+    const making = performance.now() - started;
+    const history = new OutputHistory();
+    started = performance.now();
+    for (const chunk of chunks) history.push(chunk);
+    const pushing = performance.now() - started;
+    const text = history.text();
+    expect(text.length).toBe(HISTORY_CHARS);
+    expect(text).toBe(chunks.slice(-5000).join('').slice(-HISTORY_CHARS));
+    // Keeping them costs about half of making them. The old append-and-slice
+    // copied 256 KB per chunk: 800 ms, 50 to 60 times the making (2026-09-28,
+    // Ryzen 7 9800X3D). The bound stretches on a runner slow at both.
+    expect(pushing).toBeLessThan(Math.max(500, making * 10));
+  });
+
+  test('a chunk larger than the window keeps its tail', () => {
+    const history = new OutputHistory(10);
+    history.push('abc');
+    history.push('0123456789ABCDEF');
+    expect(history.text()).toBe('6789ABCDEF');
+    history.push('xy');
+    expect(history.text()).toBe('89ABCDEFxy');
   });
 });
 

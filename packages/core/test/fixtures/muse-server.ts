@@ -3,19 +3,21 @@
  * speaks Muse's session protocol as `muse schema generate-ts` writes it
  * (`initialize`, `model/list`, `session/start`, `session/resume`,
  * `session/setModel`, `session/setApprovalMode`, `turn/start`,
- * `turn/interrupt`, `approval/decide`, `userInput/answer`, `userInput/cancel`,
- * `session/compact`, and the `item/*`, `turn/*`, `approval/*`, `userInput/*`
+ * `turn/interrupt`, `turn/steer`, `approval/decide`, `userInput/answer`,
+ * `userInput/cancel`, `session/compact`, and the `item/*`, `turn/*`, `approval/*`, `userInput/*`
  * and `session/*` notifications) and obeys prompt directives, so the Muse
  * driver is proved without the real binary and without a login.
  *
  * Run as `bun <this file> [host flags]`. `MUSE_FAKE_LOG` names a file it
  * appends one line per incoming request to, and `MUSE_FAKE_HOME` is the
  * `museHome` it reports, where a test puts a `model-catalog/` of its own.
+ * `MUSE_FAKE_INIT` delays the answer to `initialize` by that many ms, or never
+ * sends it when set to `never`, for the tests of a stalled startup.
  */
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|crash|input|auth|server-request)\]/g;
+  /\[(command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -29,10 +31,12 @@ type Directive =
   | 'usage'
   | 'tasks'
   | 'slow'
+  | 'steer'
   | 'crash'
   | 'input'
   | 'auth'
-  | 'server-request';
+  | 'server-request'
+  | 'close-idle';
 
 /** The host flags after the script, fixed for the process like the real ones. */
 const FLAGS = process.argv.slice(2).join(' ');
@@ -43,12 +47,16 @@ let approvalMode = 'promptUnmatched';
 let itemCounter = 0;
 let turnsRun = 0;
 let nextServerId = 1;
+/** Set by `[close-idle]`: the session is unloaded, `turn/start` is refused until `session/resume`. */
+let closed = false;
 
 /** What waits on a command from the client, by the id the host handed out. */
 const interrupted = new Set<string>();
 const waitingInterrupt = new Map<string, () => void>();
 const waitingApproval = new Map<string, (choiceId: string) => void>();
 const waitingInput = new Map<string, (answers: unknown[] | null) => void>();
+/** The `[steer]` turn waiting for a `turn/steer` that names it. */
+const waitingSteer = new Map<string, (text: string) => void>();
 
 function log(line: string): void {
   const file = process.env['MUSE_FAKE_LOG'];
@@ -279,6 +287,15 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         interrupted.delete(turnId);
         notify('turn/completed', { turnId, terminal: 'cancelled', reason: 'interrupted' });
         return;
+      case 'steer': {
+        const heard = await new Promise<string>((resolve) => {
+          waitingSteer.set(turnId, resolve);
+          log('steer waiting');
+        });
+        waitingSteer.delete(turnId);
+        say(turnId, `heard: ${heard}`);
+        break;
+      }
       case 'crash':
         process.stderr.write('boom\n');
         setTimeout(() => {
@@ -294,11 +311,19 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         });
         return;
       case 'thought':
+      case 'close-idle':
         break;
     }
   }
 
   notify('turn/completed', { turnId, terminal: 'completed', ...(usage === undefined ? {} : { usage }) });
+  if (directives.includes('close-idle')) {
+    // The host's idle policy unloads the session once the turn is over.
+    closed = true;
+    setTimeout(() => {
+      notify('session/closed', { reason: 'idle' });
+    }, 50);
+  }
 }
 
 const MODELS = [
@@ -338,6 +363,7 @@ function handle(method: string, raw: unknown): unknown {
     case 'session/resume': {
       sessionId = textOf(params['sessionId']);
       log(`session/resume ${sessionId} excludeItems=${String(params['excludeItems'])}`);
+      closed = false;
       // A resumed session has a history of its own, which this process did not run.
       turnsRun = Math.max(turnsRun, 1);
       return { session: sessionRecord(), viewCursor: 0 };
@@ -360,6 +386,7 @@ function handle(method: string, raw: unknown): unknown {
       const input = Array.isArray(params['input']) ? (params['input'] as Record<string, unknown>[]) : [];
       const text = input.map((part) => textOf(part['text'])).join('');
       log(`turn/start uuid=${UUID_V7.test(commandId)} effort=${effort} display=${textOf(params['displayText']) === text}`);
+      if (closed) throw new Error('the session is closed');
       for (const part of input) {
         if (part['type'] === 'image') log(`image ${textOf(part['mediaType'])} ${textOf(part['base64Data'])}`);
       }
@@ -376,6 +403,19 @@ function handle(method: string, raw: unknown): unknown {
       if (waiter === undefined) interrupted.add(turnId);
       else waiter();
       return { accepted: true };
+    }
+    case 'turn/steer': {
+      const input = Array.isArray(params['input']) ? (params['input'] as Record<string, unknown>[]) : [];
+      const text = input.map((part) => textOf(part['text'])).join('');
+      const expected = textOf(params['expectedTurnId']);
+      log(`turn/steer ${JSON.stringify(text)} uuid=${UUID_V7.test(commandId)}`);
+      // The real host refuses a turn that is no longer active.
+      const waiter = waitingSteer.get(expected);
+      if (waiter === undefined) throw new Error(`turn ${expected} is not active`);
+      setTimeout(() => {
+        waiter(text);
+      }, 0);
+      return { turnId: expected };
     }
     case 'approval/decide': {
       const approvalId = textOf(params['approvalId']);
@@ -427,7 +467,8 @@ function handle(method: string, raw: unknown): unknown {
             tokensAfter: 32000,
           },
         });
-        notify('session/contextUsage', { usedTokens: 32000, windowTokens: 200000 });
+        // Well after the item, as a busy host may send it: the meter must not wait for it.
+        setTimeout(() => notify('session/contextUsage', { usedTokens: 32000, windowTokens: 200000 }), 150);
       }, 0);
       return { status: 'accepted' };
     }
@@ -457,6 +498,17 @@ process.stdin.on('data', (chunk: string) => {
     }
     const method = message['method'];
     const id = message['id'];
+    const stall = process.env['MUSE_FAKE_INIT'];
+    if (method === 'initialize' && id !== undefined && id !== null && stall !== undefined) {
+      // A stalled startup: logged, then answered late or never.
+      const result = handle(method, message['params']);
+      if (stall !== 'never') {
+        setTimeout(() => {
+          send({ id, result });
+        }, Number(stall));
+      }
+      continue;
+    }
     if (typeof method === 'string' && id !== undefined && id !== null) {
       try {
         send({ id, result: handle(method, message['params']) });

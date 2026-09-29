@@ -9,6 +9,13 @@ test('checks follow runtime boundaries and combine changed paths', () => {
   expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ core: false, web: false, desktop: true, server: true });
 });
 
+test('benches, telemetry and architecture scripts only need the type checks', () => {
+  for (const file of ['bench/retitle.ts', 'telemetry/src/index.ts', 'telemetry/wrangler.toml', 'scripts/architecture/check.ts']) {
+    expect(affectedChecks([file])).toEqual({ core: false, web: true, desktop: false, server: false });
+  }
+  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ core: true, web: true, desktop: true, server: true });
+});
+
 test('shared inputs and unknown files fail open to every check', () => {
   for (const file of ['bun.lock', 'package.json', 'packages/contracts/src/index.ts', '.github/workflows/ci.yml', 'new-config.json']) {
     expect(Object.values(affectedChecks([file])).every(Boolean)).toBe(true);

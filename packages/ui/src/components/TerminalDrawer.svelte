@@ -10,7 +10,8 @@
    * it, the shell keeps running while hidden, the cross kills it. The top edge
    * drags its height, kept per device.
    */
-  let { store, threadId, cwd }: { store: Store; threadId: ThreadId; cwd: string } = $props();
+  let { store, threadId, cwd, closing, attach, onexit }: { store: Store; threadId: ThreadId; cwd: string;
+    closing: boolean; attach: (node: HTMLElement) => { destroy: () => void }; onexit: (event: AnimationEvent) => void } = $props();
 
   const HEIGHT_KEY = 'boite:terminal-height';
   const MIN_HEIGHT = 120;
@@ -59,7 +60,8 @@
   }
 </script>
 
-<section class="drawer" style="height: {height}px" bind:this={drawer} data-testid="terminal-drawer">
+<section class="drawer motion-panel" class:closing inert={closing} use:attach onanimationend={onexit}
+  style="height: {height}px" bind:this={drawer} data-testid="terminal-drawer">
   <div
     class="handle"
     class:dragging
@@ -113,7 +115,6 @@
     min-height: 0;
     border-top: 1px solid var(--color-border);
     background: var(--color-surface-2);
-    animation: rise var(--dur-3) var(--ease-out-quint);
   }
 
   /* The top edge, a hairline on hover and while dragged, like the panel's. */

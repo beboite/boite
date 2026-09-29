@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
   import ChatView from './components/ChatView.svelte';
@@ -7,10 +8,10 @@
   import ConfirmDialog from './components/ConfirmDialog.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import DropOverlay from './components/DropOverlay.svelte';
-  import FirstRun from './components/FirstRun.svelte';
 
   import Sidebar from './components/Sidebar.svelte';
   import TitleBar from './components/TitleBar.svelte';
+  import WhipButton from './components/WhipButton.svelte';
   import { Closing } from './lib/closing.svelte';
   import { runCommand } from './lib/commands.svelte';
   import { confirm } from './lib/confirm.svelte';
@@ -20,25 +21,28 @@
   import { onNotificationOpen } from './lib/notify';
   import { closeTabs } from './lib/panel-close';
   import { strings } from './lib/strings';
+  import { experimentOn } from './lib/experiments.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
+  import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
+  import { setZoom, stepZoom, wantedZoom, ZOOM_DEFAULT, zoomKey } from './lib/zoom';
   import { appName, appUpdater } from './lib/app-update.svelte';
   import MobileNavigation from './components/MobileNavigation.svelte';
   import { startViewport } from './lib/viewport';
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
+  import { mobileOverlay } from './lib/mobile-history';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
-  let sidebar = $state<Sidebar | undefined>(undefined);
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
-  // it. Each loads the moment it is asked for, and all of them once the app is
-  // idle, so a key pressed a second after boot finds them and the service
+  // it. Each loads the moment it is asked for, and the rest once the app has
+  // booted and is idle, so a key pressed a second later finds them and the service
   // worker has them for a phone that loses its link. The tour is the same case
   // taken further: a device draws it once, then only when asked.
   const deferredLoaders = {
@@ -46,6 +50,7 @@
     CommandPalette: () => import('./components/CommandPalette.svelte'),
     ProjectPicker: () => import('./components/ProjectPicker.svelte'),
     ImportDialog: () => import('./components/ImportDialog.svelte'),
+    ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
     // xterm.js and its stylesheet: only once a terminal is asked for.
     TerminalDrawer: () => import('./components/TerminalDrawer.svelte')
@@ -66,15 +71,36 @@
         requested.delete(name);
         if (name === 'ProjectPicker' && store.projectPickerOpen) store.projectPickerOpen = false;
         else if (name === 'ImportDialog' && store.imports) store.closeImports();
+        else if (name === 'ConnectFlow' && store.connectDialog) store.closeConnect();
         else if (name === 'CommandPalette' && store.paletteOpen) store.paletteOpen = false;
         else return;
         store.error = strings.phone.dialogOffline;
       });
   }
   function needAll(): void {
-    for (const name of Object.keys(deferredLoaders) as (keyof Deferred)[]) need(name);
+    const names = Object.keys(deferredLoaders) as (keyof Deferred)[];
+    for (const name of prefetchNames(names, { tourSeen: tourSeen(), owner: store.owner })) need(name);
   }
+  // Once the first load has landed rather than against it, and only on a link
+  // that can spare the bytes (lib/prefetch.ts).
+  $effect(() => {
+    if (!store.booted || !prefetchAllowed()) return;
+    return whenIdle(needAll);
+  });
   let SettingsShell = $state<typeof import('./components/SettingsShell.svelte').default>();
+  let AgentsPage = $state<typeof import('./components/agents/AgentsPage.svelte').default>();
+  let agentsLoadError = $state('');
+  $effect(() => {
+    if (store.page !== 'agents' || !experimentOn('resident-agents') || AgentsPage) return;
+    void import('./components/agents/AgentsPage.svelte').then(module => { AgentsPage = module.default; })
+      .catch(() => { agentsLoadError = strings.agents.offline; });
+  });
+  // Switched off with the page open: every machine goes back to its chat, so
+  // switching it on again does not reopen a page nobody navigated to.
+  $effect(() => {
+    if (experimentOn('resident-agents')) return;
+    for (const machine of workspace.machines) if (machine.store.page === 'agents') machine.store.showChat();
+  });
   let settingsLoadError = $state('');
   $effect(() => {
     if (store.page !== 'settings' || SettingsShell) return;
@@ -96,6 +122,7 @@
     if (store.paletteOpen) need('CommandPalette');
     if (store.projectPickerOpen) need('ProjectPicker');
     if (store.imports) need('ImportDialog');
+    if (store.connectDialog) need('ConnectFlow');
     if (tour) need('Onboarding');
   });
 
@@ -108,10 +135,6 @@
       ? requestAnimationFrame(() => { updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0); })
       : undefined;
     if (updateFrame === undefined) updateDelay = window.setTimeout(() => { stopAppUpdater = appUpdater.start(); }, 0);
-    // After the first paint, not in its way. Safari has no requestIdleCallback.
-    const idle = typeof requestIdleCallback === 'function'
-      ? requestIdleCallback(needAll, { timeout: 1500 })
-      : setTimeout(needAll, 300);
     let hidden = document.hidden;
     const resume = () => {
       if (document.hidden) return;
@@ -125,8 +148,10 @@
       else if (hidden) { hidden = false; resume(); }
     };
     const pageshow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+    const offline = () => { for (const machine of workspace.machines) if (machine.store.client instanceof WsClient) machine.store.client.offline(); };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', resume);
+    window.addEventListener('offline', offline);
     window.addEventListener('pageshow', pageshow);
     const notification = (event: MessageEvent) => {
       if (event.data?.type !== 'boite.open-thread' || typeof event.data.threadId !== 'string') return;
@@ -136,8 +161,6 @@
     };
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
-      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(idle as number);
-      else clearTimeout(idle);
       stopViewport();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
@@ -145,6 +168,7 @@
       stopAppUpdater();
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('online', resume);
+      window.removeEventListener('offline', offline);
       window.removeEventListener('pageshow', pageshow);
       navigator.serviceWorker?.removeEventListener('message', notification);
     };
@@ -155,6 +179,7 @@
   const toast = new Closing();
   const scrim = new Closing();
   const panelSlot = new Closing();
+  const terminalSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
 
@@ -195,6 +220,27 @@
     if (store.panelOpen && store.openThread) panelSlot.show();
     else panelSlot.hide();
   });
+  $effect(() => {
+    if (terminalShown) terminalSlot.show();
+    else terminalSlot.hide();
+  });
+
+  // On a phone the panel covers the chat: Back shuts it.
+  $effect(() => {
+    if (panelSlot.open) return mobileOverlay(() => store.panel.hide());
+  });
+
+  // The tray menu is native: it speaks the UI's language only when told, at
+  // start and whenever the language changes.
+  $effect(() => {
+    if (!inShell) return;
+    const labels = { show: strings.quotas.trayShow, quit: strings.quotas.trayQuit };
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('tray_labels', labels))
+      .catch(() => {
+        // An older shell without the command keeps its English menu.
+      });
+  });
 
   // Every http(s) link the UI shows goes to the system browser, once, from here.
   $effect(() => {
@@ -203,23 +249,22 @@
     return installExternalLinks(root);
   });
 
-  // The unread count rides the document title, so the taskbar and a browser
-  // tab say "(2) Boite" while the window is somewhere behind.
+  // What wants the user rides the document title, so the taskbar and a browser
+  // tab say "(2) Boite" while the window is somewhere behind: the threads of
+  // every connected machine that wait on an answer or finished unread.
   $effect(() => {
-    const unread = store.unreadCount;
+    const stores = workspace.machines.length ? workspace.machines.map((machine) => machine.store) : [store];
+    const count = stores.reduce((sum, owner) => sum + owner.threads.filter((t) => !t.archived && (t.unread || t.status === 'waiting')).length, 0);
     const name = appName();
-    document.title = unread > 0 ? `(${unread}) ${name}` : name;
+    document.title = count > 0 ? `(${count}) ${name}` : name;
   });
 
   onMount(() => {
+    // A notification tapped with no window open: taken off the address at
+    // once, so a reload during the boot does not jump there again.
     const requestedThread = new URLSearchParams(location.search).get('thread');
-    void workspace.boot().then(async () => {
-      if (requestedThread) {
-        const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url);
-        const machine = workspace.machines.find(m => m.store.endpointUrl && new URL(m.store.endpointUrl).origin === location.origin);
-        if (machine) await workspace.select(machine.store, requestedThread);
-      }
-    });
+    if (requestedThread) { const url = new URL(location.href); url.searchParams.delete('thread'); history.replaceState(history.state, '', url); }
+    void workspace.boot(requestedThread || null);
     // The stored theme, and the OS one while the setting reads `system`.
     const stopTheme = startTheme();
     // The stored window material, which only the shell wears.
@@ -290,7 +335,7 @@
    * it. The tour counts once it is drawn: offline with a cold cache it never is,
    * and the keyboard must not stay held for it.
    */
-  let modal = $derived((tour && deferred.Onboarding !== undefined) || confirm.current !== null || store.imports !== null || store.projectPickerOpen);
+  let modal = $derived((tour && deferred.Onboarding !== undefined) || confirm.current !== null || store.imports !== null || store.projectPickerOpen || (store.connectDialog !== null && deferred.ConnectFlow !== undefined));
 
   /** A key that belongs to whatever the user is typing in, not to the app. */
   function typing(event: KeyboardEvent): boolean {
@@ -311,6 +356,17 @@
     if (quitHold && isQuitChord(event)) {
       event.preventDefault();
       quitHold.press();
+      return;
+    }
+    // Ctrl+=, Ctrl+- and Ctrl+0 zoom the whole interface in the shell, except
+    // inside a browser surface's own chrome, whose page walks its own ladder.
+    // A browser tab keeps its native zoom.
+    const zoom = inShell ? zoomKey(event) : null;
+    if (zoom !== null && !(event.target instanceof Element && event.target.closest('[data-testid=browser-surface]'))) {
+      event.preventDefault();
+      void setZoom(zoom === 0 ? ZOOM_DEFAULT : stepZoom(wantedZoom(), zoom)).catch((error: unknown) => {
+        store.error = error instanceof Error ? error.message : String(error);
+      });
       return;
     }
     // A dialog waiting for an answer owns the keyboard: a chord under it moves
@@ -337,7 +393,7 @@
       case 'panel':
         if (!store.openThread) return;
         event.preventDefault();
-        store.panel.toggle();
+        store.togglePanel();
         break;
       case 'browser': {
         if (!store.openThread || !inShell) return;
@@ -384,12 +440,11 @@
     }
   }
 
-  let firstRun = $derived(store.booted && store.connection !== 'closed' && store.projects.length === 0);
 </script>
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:quitting bind:this={appRoot}>
+<div class="app" class:shell={inShell} class:ready={store.booted} class:whip-enabled={store.booted && experimentOn('whip')} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
   <TitleBar {store} />
 
@@ -397,21 +452,26 @@
     {#if !store.booted}
       <p class="empty boot">{strings.app.loading}</p>
     {:else if store.connection === 'closed' && !store.core}
-      <Sidebar bind:this={sidebar} {store} />
-      <div class="notice">
-        <h1>{strings.app.noEndpointTitle}</h1>
-        <p class="muted">{strings.app.noEndpointBody}</p>
-        <button type="button" class="primary" onclick={() => store.showSettings()}>
-          {strings.app.openSettings}
-        </button>
-      </div>
+      <Sidebar {store} />
+      <!-- The notice gives way to Settings: the two cards side by side left
+           Settings too narrow for its nav and its page. -->
       {#if store.page === 'settings'}
         {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+      {:else}
+        <div class="notice framed">
+          <h1>{strings.app.noEndpointTitle}</h1>
+          <p class="muted">{strings.app.noEndpointBody}</p>
+          <button type="button" class="primary" onclick={() => store.showSettings()}>
+            {strings.app.openSettings}
+          </button>
+        </div>
       {/if}
+    {:else if store.page === 'agents' && experimentOn('resident-agents')}
+      {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
       {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
-      <Sidebar bind:this={sidebar} {store} />
+      <Sidebar {store} />
       {#if scrim.shown}
         <button
           type="button"
@@ -423,18 +483,15 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
-      <main>
-        {#if firstRun}
-          <FirstRun {store} />
-        {:else}
-          {#key store}
-            <ChatView {store} />
-          {/key}
-        {/if}
-        {#if terminalShown && store.openThread && deferred.TerminalDrawer}
+      <main class="framed">
+        {#key store}
+          <ChatView {store} />
+        {/key}
+        {#if terminalSlot.shown && store.openThread && deferred.TerminalDrawer}
           {@const TerminalDrawer = deferred.TerminalDrawer}
           {#key `${store.endpointUrl}:${store.openThread.id}`}
-            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd} />
+            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
+              closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
           {/key}
         {/if}
       </main>
@@ -487,6 +544,10 @@
       <NotificationCard title={strings.errors.prefix} message={toastText} dismiss={() => (store.error = null)} />
     </div>
   {/if}
+  <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  {#if store.booted && experimentOn('whip')}
+    <WhipButton onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />
+  {/if}
 </div>
 
 <ContextMenu />
@@ -494,6 +555,7 @@
 {#if deferred.ProjectPicker}{@const ProjectPicker = deferred.ProjectPicker}<ProjectPicker {store} />{/if}
 <ConfirmDialog />
 {#if deferred.ImportDialog}{@const ImportDialog = deferred.ImportDialog}<ImportDialog {store} />{/if}
+{#if deferred.ConnectFlow}{@const ConnectFlow = deferred.ConnectFlow}<ConnectFlow {store} />{/if}
 {#if deferred.CommandPalette}{@const CommandPalette = deferred.CommandPalette}<CommandPalette {store} />{/if}
 
 <style>
@@ -524,11 +586,29 @@
     flex-direction: column;
   }
 
-  /* Maximized, the panel takes the room and the chat column keeps none. */
+  /* The frame: the cards keep `--frame-gap` from the window's right and bottom
+     edges and from each other. The rails on the left stand on the frame, so
+     only a folded sidebar leaves the chat card a left gap to keep itself. */
+  @media (min-width: 721px) {
+    .body {
+      gap: var(--frame-gap);
+      padding: 0 var(--frame-gap) var(--frame-gap) 0;
+    }
+
+    .body:has(> :global(.sidebar.collapsed)) {
+      padding-left: var(--frame-gap);
+    }
+  }
+
+  /* Maximized, the panel takes the room and the chat column keeps none, not
+     even its edge or the gap beside it. */
   .body.panel-maximized main {
     flex: none;
     width: 0;
     overflow: hidden;
+    border: none;
+    box-shadow: none;
+    margin-right: calc(-1 * var(--frame-gap));
   }
 
   .boot {
@@ -536,12 +616,14 @@
   }
 
   .notice {
-    margin: auto;
+    flex: 1;
+    min-width: 0;
     padding: 40px;
     text-align: center;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 8px;
   }
 
@@ -628,9 +710,14 @@
 
   @media (max-width: 720px) {
     .app:not(.shell) { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: var(--app-height, 100dvh); top: var(--app-top, 0px); }
+    .app:not(.shell).whip-enabled { grid-template-rows: auto auto minmax(0, 1fr) calc(var(--touch-target) + 24px) auto; }
+    .app:not(.shell).whip-enabled :global(.mobile-tabs) { grid-row: 5; }
     .app:not(.shell) :global(.titlebar) { display: none; grid-row: 2; grid-column: 1; }
     .app.phone-chat :global(.titlebar) { display: flex; }
     .app:not(.shell) .body { grid-row: 3; grid-column: 1; }
+    /* Agents and Settings draw no mobile header: the body keeps clear of the
+       status bar and the notch itself. */
+    .app.off-chat .body { padding-top: env(safe-area-inset-top, 0px); box-sizing: border-box; }
     .body.mobile-covered { visibility: hidden; pointer-events: none; }
     .scrim {
       display: block;

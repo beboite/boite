@@ -16,15 +16,15 @@ describe('the keyboard table', () => {
     });
     expect(table.palette).toEqual({ text: null, chord: null, custom: true });
     expect(table.sidebar).toEqual({
-      text: 'mod+b',
-      chord: { mod: true, ctrl: false, alt: false, shift: false, meta: false, key: 'b' },
+      text: 'mod+s',
+      chord: { mod: true, ctrl: false, alt: false, shift: false, meta: false, key: 's' },
       custom: false
     });
     expect(table.archive).toEqual({ text: null, chord: null, custom: false });
   });
 
   test('a chord matches its exact modifiers, and mod is Ctrl here and Cmd on a Mac', () => {
-    const modB = resolveBindings({}).sidebar.chord!;
+    const modB = resolveBindings({ sidebar: 'mod+b' }).sidebar.chord!;
     expect(matchesChord(key({ key: 'b', ctrlKey: true }), modB, false)).toBe(true);
     expect(matchesChord(key({ key: 'B', ctrlKey: true }), modB, false)).toBe(true);
     expect(matchesChord(key({ key: 'b', ctrlKey: true, altKey: true }), modB, false)).toBe(false);
@@ -86,6 +86,17 @@ describe('recording a chord on the Keyboard page', () => {
       if (parsed.ok) expect(matchesChord(event, parsed.chord, false)).toBe(true);
     }
     expect(parseChord(chordFromEvent(key({ key: 'b' }), false)!).ok).toBe(false);
+  });
+
+  test('Alt and a digit reach the thread in that row, on a layout where the digit needs Shift too', () => {
+    const table = resolveBindings({});
+    expect(commandForKey(table, key({ key: '3', code: 'Digit3', altKey: true }), false)).toBe('thread-3');
+    // French AZERTY: the top row types `"` without Shift, the code still says Digit3.
+    expect(commandForKey(table, key({ key: '"', code: 'Digit3', altKey: true }), false)).toBe('thread-3');
+    expect(commandForKey(table, key({ key: '3', code: 'Numpad3', altKey: true }), false)).toBe('thread-3');
+    expect(commandForKey(table, key({ key: '"', code: 'Quote', altKey: true }), false)).toBeNull();
+    expect(commandForKey(table, key({ key: 't', code: 'KeyT', ctrlKey: true, shiftKey: true }), false)).toBe('reopen-thread');
+    expect(commandForKey(table, key({ key: 'f', code: 'KeyF', ctrlKey: true }), false)).toBe('find');
   });
 
   test('the page draws one cap per key, and every command sits in exactly one section', () => {

@@ -1,7 +1,9 @@
 # Agent brain
 
 Settings > Brain connects an existing folder on the selected core's
-machine. Browse folders or enter its absolute path, then select Connect folder.
+machine. Browse opens the system folder dialog in the desktop app with a local
+core, and Boite's folder list elsewhere; the path can also be typed. Then select
+Connect folder.
 Each core stores its own path, so the
 same repository can live at different locations on different computers.
 
@@ -34,6 +36,10 @@ manager still owns that operation. This catalog is separate from Boite's
 native extensions in Settings > Plugins. It does not inventory other agent
 profiles elsewhere on the machine.
 
+Hooks have a card of their own on this page: each agent's hook sources, whether
+its isolated accounts have them, and the runs that blocked or failed since the
+core started ([hooks.md](hooks.md)).
+
 ## Instructions in conversations
 
 When sharing is enabled, the core prepends the contents of the two `AGENTS.md`
@@ -43,15 +49,48 @@ Skill bodies stay on disk for the agent to read when needed. Project instruction
 files still follow each agent's native discovery rules.
 
 The shared driver context carries the prefix, including on warm sessions.
-The user's journalled message remains unchanged. Entry files and the catalog
-are reread for each normal turn, so a refresh or process restart is unnecessary.
+The user's journalled message remains unchanged. Each normal turn picks up
+edits to the entry files and the catalog, so a refresh or process restart is
+unnecessary. The core keeps its last scan and, before each turn, stats every
+path that scan looked at: the entry files, each catalog folder and each skill
+or plugin file, present or absent. Any difference in time or size means a new
+scan. A path changed within two seconds of a scan is not trusted, so an edit on
+a file system with coarse times is not missed. On a 26-entry brain this took a
+turn from 32 ms of scanning to about 6 ms of stats (2026-09-25).
 Missing folders or unreadable instruction files fail the turn instead of silently
 dropping their content. The combined prefix is limited to 128 KiB.
 
-Native slash commands, compaction and agent coordination turns do not receive
-the prefix. Disconnecting a brain stops future injection but cannot remove
-instructions already present in an agent's conversation history. Start a new
-thread when previous instructions must leave the context.
+### Boite guide
+
+Boite injects its environment guide before the first request of every native
+agent session, including when no brain is connected or sharing is disabled.
+The guide covers the CLI, panel, attachments, tasks and project todos. It lives
+in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
+session keeps the guide; a replacement session receives it again. The brain's
+own instructions still go every normal turn while sharing is enabled.
+The base guide is 569 bytes, or 724 with asynchronous questions. Coordination
+and delegation add only the instructions for enabled features; the full command
+formats stay behind `boite help` and `boite workflow help`.
+The Boite guide switch retains its saved preference independently of sharing.
+With the guide on, the separate `boite ask` note is not added, and with
+"Asynchronous questions" off, the guide leaves its `boite ask` line out. The
+test-only echo driver always omits that line because it parses question text
+as a test directive. Real drivers follow the asynchronous-questions setting.
+The guide exists only in the turn prefix: it is never written into the brain
+folder, so the brain's Git status and the global links stay untouched, and a
+harness started outside Boite never reads it.
+
+Native slash commands, compaction and coordination turns in existing sessions
+do not receive this prefix. Disconnecting a brain stops its instructions,
+but keeps Boite's environment guide enabled unless its switch is off.
+Instructions already in a session's history remain there; start a new thread
+when previous instructions must leave the context.
+
+Coordination and delegation add compact instructions only when enabled for
+the thread, independently of the brain. These name authorized contacts and
+profiles, messaging commands, shared-checkout rules and current limits.
+Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
+`boite workflow extend`, with `boite workflow help` for the full format.
 
 ## Global instructions
 

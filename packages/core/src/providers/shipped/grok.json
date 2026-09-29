@@ -85,10 +85,20 @@
   "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
   "login": { "command": ["grok", "login", "--device-auth"], "terminal": true },
   "quirks": ["grok"],
+  "shared": [
+    {
+      "variable": "GROK_HOME",
+      "paths": ["config.toml", "hooks", "AGENTS.md", "AGENT.md", "skills", "trusted_folders.toml", "installed-plugins"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "GROK_HOME", "path": "hooks", "format": "events" },
+    { "path": "~/.claude/settings.json", "format": "events" }
+  ],
   "models": [{ "id": "default", "name": "Grok default", "default": true }],
   "capabilities": {
     "approvals": true,
-    "hooks": false,
+    "hooks": true,
     "checkpoint": false,
     "images": false,
     "planMode": true,

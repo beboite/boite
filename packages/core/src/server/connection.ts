@@ -9,6 +9,8 @@ const REMOTE_DELTA_WINDOW_MS = 80;
 
 export interface SocketData {
   connection: ServerConnection;
+  /** The address its hello wait is counted under; null for the owner's own machine. */
+  peer: string | null;
 }
 
 interface OutgoingResponse {
@@ -82,7 +84,7 @@ export class ServerConnection implements Connection {
 
   private sendNow<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
     if (name === 'message.delta' && this.congested) {
-      this.queueCatchUp(payload);
+      this.queueCatchUp(payload as RpcEvents['message.delta']);
       return;
     }
     const sent = this.write({ jsonrpc: '2.0', method: name, params: payload });
@@ -92,7 +94,7 @@ export class ServerConnection implements Connection {
       return;
     }
     this.congested = true;
-    if (name === 'message.delta') this.queueCatchUp(payload);
+    if (name === 'message.delta') this.queueCatchUp(payload as RpcEvents['message.delta']);
   }
 
   sendResponse(response: OutgoingResponse): void {
@@ -118,32 +120,41 @@ export class ServerConnection implements Connection {
     return this.socket.send(JSON.stringify(frame), this.remote);
   }
 
-  /** Backpressure: deltas are dropped, then the whole part is resent once the socket drains. */
-  private queueCatchUp(payload: unknown): void {
-    if (typeof payload !== 'object' || payload === null) return;
-    const messageId = (payload as { messageId?: unknown }).messageId;
-    if (typeof messageId !== 'string') return;
-    this.catchUp.add(messageId);
+  /**
+   * Backpressure: deltas are dropped, and the part they belonged to is resent
+   * once the socket drains. Only that part: every other frame is still queued
+   * while congested, so a finished tool output never needs a second copy.
+   */
+  private queueCatchUp(payload: RpcEvents['message.delta']): void {
+    this.catchUp.add(`${payload.messageId}|${payload.partIndex}`);
   }
 
   drain(): void {
     if (this.core.journal.isClosed()) return;
+    // The bus holds up to 16 ms of text the journal flush below folds into the
+    // part. Dispatched now, while still congested, it lands in the catch-up
+    // rather than arriving after the part as a second copy.
+    this.core.bus.flush();
     this.core.journal.flushDeltas();
     this.congested = false;
-    const ids = [...this.catchUp];
-    for (const messageId of ids) {
-      const message = this.core.journal.getMessage(messageId);
-      if (message === null) { this.catchUp.delete(messageId); continue; }
-      for (const [partIndex, part] of message.parts.entries()) {
-        const sent = this.write({
-          jsonrpc: '2.0',
-          method: 'message.part',
-          params: { threadId: message.threadId, messageId, partIndex, part },
-        });
-        if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
-        if (sent < 0) { this.congested = true; return; }
-      }
-      this.catchUp.delete(messageId);
+    const messages = new Map<string, ReturnType<Core['journal']['getMessage']>>();
+    for (const key of [...this.catchUp]) {
+      const cut = key.lastIndexOf('|');
+      const messageId = key.slice(0, cut);
+      const partIndex = Number(key.slice(cut + 1));
+      if (!messages.has(messageId)) messages.set(messageId, this.core.journal.getMessage(messageId));
+      const message = messages.get(messageId) ?? null;
+      const part = message?.parts[partIndex];
+      this.catchUp.delete(key);
+      if (message === null || part === undefined) continue;
+      const sent = this.write({
+        jsonrpc: '2.0',
+        method: 'message.part',
+        params: { threadId: message.threadId, messageId, partIndex, part },
+      });
+      if (sent === 0) { this.close(1013, 'catch-up dropped; reconnect'); return; }
+      // -1 is queued, not lost: Bun delivers it. The keys left wait for the next drain.
+      if (sent < 0) { this.congested = true; return; }
     }
   }
 }

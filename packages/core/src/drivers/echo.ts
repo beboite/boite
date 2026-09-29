@@ -303,7 +303,8 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
       case 'compact':
         ctx.emit.part(messageId, takeIndex(), {
           type: 'compaction',
-          trigger: 'auto',
+          // threads.compact sends `[compact]` too: that one is the user's.
+          trigger: ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto',
           preTokens: COMPACT_PRE_TOKENS,
           postTokens: COMPACT_POST_TOKENS,
         });
@@ -457,8 +458,14 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
       }
       case 'spawn': {
         const shell = shellFor(segment.command);
-        const child = ctx.spawn(shell.cmd, shell.args);
-        const output = await new Response(child.proc.stdout).text();
+        const child = ctx.spawn(shell.cmd, shell.args, { agentRoot: false });
+        const output = await Promise.race([new Response(child.proc.stdout).text(), untilStopped(state)]);
+        if (output === null || state.stopped) {
+          // A stop does not wait for the child: the thread's tree goes, and
+          // nothing is written, the way a real driver ends its tool.
+          ctx.killTree?.();
+          break;
+        }
         await child.exited;
         await writeText(output);
         break;
@@ -470,6 +477,8 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         return { status: 'error', sessionId, usage: usage(), error: ERROR_MESSAGE };
       }
     }
+    const notice = state.stopped ? null : ctx.coordination?.();
+    if (notice) await writeText(notice);
   }
 
   ctx.emit.complete(messageId, 'complete');

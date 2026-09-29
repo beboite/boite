@@ -42,6 +42,43 @@ test.each(['question', '[permission]', '[tool]', '[tool-stream]', '[diff]', '[do
   } finally { client.close(); }
 });
 
+test('fake process events reach a client subscribed to that thread only, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const seen: string[] = [];
+    client.on('process.started', event => seen.push(`started ${event.threadId}`));
+    client.on('process.exited', event => seen.push(`exited ${event.threadId}`));
+    const run = async () => {
+      const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[spawn:fixture]' });
+      await vi.waitFor(async () => {
+        expect((await client.call('threads.get', { threadId: 't-trace' })).turns.find(entry => entry.id === turn.id)?.status).toBe('done');
+      }, { timeout: 500 });
+    };
+    await run();
+    expect(seen).toEqual([]);
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    await run();
+    expect(seen).toEqual(['started t-trace', 'exited t-trace']);
+  } finally { client.close(); }
+});
+
+test('fake resources.list carries only threads running something now, like the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const resources = await client.call('resources.list', {});
+    // t-trace only ran processes that exited: its history is in trace.get, not here.
+    expect((await client.call('trace.get', { threadId: 't-trace' })).length).toBeGreaterThan(0);
+    expect(resources.map(entry => entry.threadId)).not.toContain('t-trace');
+    for (const entry of resources) {
+      expect(entry.live.length).toBeGreaterThan(0);
+      expect(entry.live.every(record => record.exitedAt === null)).toBe(true);
+      expect(entry.load.processes).toBeGreaterThan(0);
+    }
+  } finally { client.close(); }
+});
+
 test('fake artifacts refuse publication if the thread is archived during the media read', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
@@ -105,7 +142,7 @@ test('paired fake clients can inspect, message and stop delegation but cannot co
   } finally { phone.close(); }
 });
 
-test('fake delegation promotes queued work with the same turn and returns current idempotent state', async () => {
+test('fake delegation starts independent children together and returns current idempotent state', async () => {
   const client = new FakeClient({ delayMs: 2 });
   await client.connect();
   try {
@@ -116,16 +153,17 @@ test('fake delegation promotes queued work with the same turn and returns curren
     await client.call('delegation.configure', { threadId: 't-trace', config });
     const firstParams = { threadId: 't-trace', profileId: 'echo', task: `First ${'a'.repeat(240)}`, requestId: 'spawn-first' };
     const first = await client.call('delegation.spawn', firstParams);
-    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Second queued task', requestId: 'spawn-second' });
-    expect(second.lastTurn?.status).toBe('queued');
-    const queuedTurnId = second.lastTurn!.id;
+    const second = await client.call('delegation.spawn', { threadId: 't-trace', profileId: 'echo', task: 'Second parallel task', requestId: 'spawn-second' });
+    expect(first.lastTurn?.status).toBe('running');
+    expect(second.lastTurn?.status).toBe('running');
+    const secondTurnId = second.lastTurn!.id;
 
     await vi.waitFor(async () => {
       const view = await client.call('delegation.get', { threadId: 't-trace' });
       expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.status).toBe('done');
     }, { timeout: 3000 });
     const view = await client.call('delegation.get', { threadId: 't-trace' });
-    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.id).toBe(queuedTurnId);
+    expect(view.agents.find(agent => agent.thread.id === second.thread.id)?.lastTurn?.id).toBe(secondTurnId);
     expect(view.turnsUsed).toBe(2);
     const retried = await client.call('delegation.spawn', firstParams);
     expect(retried.thread.status).toBe('idle');
@@ -141,7 +179,7 @@ test('fake delegation promotes queued work with the same turn and returns curren
   } finally { client.close(); }
 });
 
-test('child manual turns consume the shared budget without double-counting queued promotion', async () => {
+test('child manual turns update usage without a turn budget or duplicate retry', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
   try {
@@ -156,7 +194,27 @@ test('child manual turns consume the shared budget without double-counting queue
     await client.call('turns.start', manual);
     expect((await client.call('delegation.get', { threadId: child.thread.id })).turnsUsed).toBe(2);
     await expect(client.call('turns.start', manual)).resolves.toMatchObject({ threadId: child.thread.id });
-    await expect(client.call('turns.start', { threadId: child.thread.id, prompt: 'Over budget', clientRequestId: 'manual_02' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await vi.waitFor(async () => expect((await client.call('threads.get', { threadId: child.thread.id })).status).toBe('idle'));
+    await client.call('turns.start', { threadId: child.thread.id, prompt: 'Another follow-up', clientRequestId: 'manual_02' });
+    expect((await client.call('delegation.get', { threadId: child.thread.id })).turnsUsed).toBe(3);
+  } finally { client.close(); }
+});
+
+test('fake delegation launches thirty children despite legacy quotas from an older client', async () => {
+  const client = new FakeClient({ delayMs: 2 });
+  await client.connect();
+  try {
+    const config = { ...DEFAULT_DELEGATION_CONFIG, enabled: true, maxAgents: 1, maxConcurrent: 1, maxTurns: 1, maxMinutes: 1,
+      profiles: [{ id: 'echo', name: 'Echo', providerId: 'echo', accountId: 'a-echo', model: 'echo-1', effort: null }] };
+    await client.call('delegation.configure', { threadId: 't-trace', config });
+    for (let index = 0; index < 30; index++) await client.call('delegation.spawn', {
+      threadId: 't-trace', profileId: 'echo', task: 'Independent work', requestId: `parallel-${index}`
+    });
+    const view = await client.call('delegation.get', { threadId: 't-trace' });
+    expect(view.agents).toHaveLength(30);
+    expect(view.agents.every(agent => agent.thread.status === 'running')).toBe(true);
+    expect(view.turnsUsed).toBe(30);
+    for (const field of ['maxAgents', 'maxConcurrent', 'maxTurns', 'maxMinutes']) expect(view.config).not.toHaveProperty(field);
   } finally { client.close(); }
 });
 
@@ -374,6 +432,25 @@ test('fake speech refuses overlapping request IDs and accepts a retry after comp
   } finally { await first.catch(() => {}); client.close(); }
 });
 
+test('fake speech downloads a model from a link, uses it, and removing it hands back the default', async () => {
+  vi.useFakeTimers();
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await expect(client.call('speech.install', { url: 'http://models.example/ggml-tiny.bin' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+    const started = await client.call('speech.install', { url: 'https://models.example/ggml-tiny.bin' });
+    expect(started.downloading).toMatch(/^custom-[a-f0-9]{12}$/);
+    expect(started.models.at(-1)).toMatchObject({ kind: 'custom', name: 'ggml-tiny.bin', host: 'models.example', installed: false });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const done = await client.call('speech.status', {});
+    expect(done.installing).toBe(false);
+    expect((await client.call('speech.config', {})).model).toBe(started.downloading);
+    await client.call('speech.uninstall', { model: started.downloading! });
+    expect((await client.call('speech.config', {})).model).toBe('small-q5_1');
+    expect((await client.call('speech.status', {})).models.some(model => model.kind === 'custom')).toBe(false);
+  } finally { client.close(); vi.useRealTimers(); }
+});
+
 test('fake speech refuses a recording made before configuration changed', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
@@ -424,16 +501,33 @@ test.each(['remove', 'complete'] as const)('fake %s invalidates a goal before it
   client.close();
 });
 
-test.each(['maxConcurrentTurns', 'perAccountConcurrency'] as const)('fake settings reject invalid %s atomically', async (field) => {
+test('fake settings ignore retired launch limits from older clients', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
-  const before = await client.call('settings.get', {});
-  for (const value of [0, -1, 1.5, NaN, Infinity]) {
-    await expect(client.call('settings.set', { [field]: value, warmProcessMinutes: 99 }))
-      .rejects.toMatchObject({ code: RpcErrorCode.InvalidParams, message: `${field} must be a positive integer` });
-    expect(await client.call('settings.get', {})).toEqual(before);
+  const legacy = { maxConcurrentTurns: 1, perAccountConcurrency: 1, warmProcessMinutes: 3 };
+  const settings = await client.call('settings.set', legacy);
+  expect(settings.warmProcessMinutes).toBe(3);
+  expect(settings).not.toHaveProperty('maxConcurrentTurns');
+  expect(settings).not.toHaveProperty('perAccountConcurrency');
+  const scheduler = await client.call('scheduler.get', {});
+  expect(scheduler).not.toHaveProperty('maxConcurrentTurns');
+  expect(scheduler).not.toHaveProperty('perAccountConcurrency');
+  client.close();
+});
+
+test('fake settings store a pasted address as its origin and refuse what the core refuses', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  expect((await client.call('settings.get', {})).warmProcessMinutes).toBe(0);
+  const saved = await client.call('settings.set', {
+    publicUrl: 'https://boite.example.com/',
+    browserOrigins: ['http://192.168.1.20:8777/app', 'http://192.168.1.20:8777/']
+  });
+  expect(saved.publicUrl).toBe('https://boite.example.com');
+  expect(saved.browserOrigins).toEqual(['http://192.168.1.20:8777']);
+  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
+    await expect(client.call('settings.set', patch)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
   }
-  expect((await client.call('settings.set', { [field]: 3 }))[field]).toBe(3);
   client.close();
 });
 
@@ -445,7 +539,8 @@ test('fake refuses a second active turn and archived threads without adding mess
   await client.call('turns.start', { threadId: thread.id, prompt: '[permission]' });
   const before = await client.call('threads.get', { threadId: thread.id });
   await expect(client.call('turns.start', { threadId: thread.id, prompt: 'second' }))
-    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn' });
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn',
+      data: { threadId: thread.id, reason: 'turn-in-flight', thread: { id: thread.id, status: 'running' } } });
   expect((await client.call('threads.get', { threadId: thread.id })).messages).toEqual(before.messages);
   await vi.runAllTimersAsync();
   await expect(client.call('turns.start', { threadId: thread.id, prompt: 'while waiting' })).rejects.toThrow(/in-flight/);
@@ -667,5 +762,40 @@ test('fake async answers given while a turn runs start one turn together after i
     expect(after.turns).toHaveLength(4);
     const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
     expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
+  } finally { client.close(); }
+});
+
+test('an account check or provider reload that changes nothing stays silent, as on the core', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const heard: string[] = [];
+    client.on('accounts.updated', account => heard.push(`account:${account.id}:${account.status}`));
+    client.on('providers.updated', () => heard.push('providers'));
+    // As the core's `add`, which returns its own check: the new account is read and announced once.
+    const account = await client.call('accounts.add', { providerId: 'opencode', label: 'Checked', useDefaultLocation: true });
+    expect(account.status).toBe('ok');
+    expect(heard).toEqual([`account:${account.id}:ok`]);
+    heard.length = 0;
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
+    await client.call('providers.reload', {});
+    expect(heard).toEqual([]);
+  } finally { client.close(); }
+});
+
+test('fake hook counters move the way the core ledger moves them', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const before = (await client.call('hooks.status', {})).providers.find(provider => provider.providerId === 'claude')!;
+    const run = { at: Date.now(), providerId: 'claude', accountId: null, threadId: null, event: 'Stop', name: 'Stop', message: null } as const;
+    client.recordHookRun({ ...run, outcome: 'stopped' });
+    client.recordHookRun({ ...run, outcome: 'skipped' });
+    const after = (await client.call('hooks.status', {})).providers.find(provider => provider.providerId === 'claude')!;
+    // A stop counts as a blocked run; a skipped hook never ran.
+    expect(after.runs - before.runs).toBe(1);
+    expect(after.blocked - before.blocked).toBe(1);
+    expect(after.skipped - before.skipped).toBe(1);
+    expect(after.failed).toBe(before.failed);
   } finally { client.close(); }
 });

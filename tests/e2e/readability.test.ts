@@ -21,11 +21,50 @@ beforeAll(async () => {
 }, 90000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('connecting another machine keeps thread rows at their single-machine height', async () => {
+  await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
+  const height = () => page.evaluate<number>(`document.querySelector('[data-thread-id="t-descriptors"]').getBoundingClientRect().height`);
+  await page.evaluate(`window.__machines = globalThis.__boiteTest.workspace.machines; globalThis.__boiteTest.workspace.machines = window.__machines.slice(0, 1)`);
+  let single: number;
+  try {
+    await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
+    single = await height();
+  } finally {
+    await page.evaluate(`globalThis.__boiteTest.workspace.machines = window.__machines`);
+  }
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
+  await capture('readability-thread-density');
+  expect(await height()).toBeCloseTo(single, 1);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`)).toBe(true);
+  await page.click(id('view-recent'));
+  await page.click(id('project-filter'));
+  await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 1`);
+  expect(await height()).toBeCloseTo(single, 1);
+  await capture('readability-thread-filtered');
+  await page.click(id('project-filter'));
+  await page.click(`${id('project-filter-menu')} [data-value=all]`);
+  await page.click(id('view-projects'));
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(208)`);
+  await page.waitFor(`document.querySelector('${id('sidebar')}').getBoundingClientRect().width <= 210`);
+  await capture('readability-thread-narrow');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')} .headline')).every(e => e.scrollWidth <= e.clientWidth)`)).toBe(true);
+  await page.evaluate(`globalThis.__boiteTest.workspace.active.setSidebarWidth(280)`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`document.querySelector('${id('mobile-list')} .thread')`);
+  await capture('readability-thread-phone');
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await page.click(`${id('mobile-list')} .thread`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await page.click('[data-thread-id="t-trace"]');
+}, 30_000);
+
 test('thread metadata, message identity and expandable trace fit a narrow panel', async () => {
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('usage-pill')}') === null`)).toBe(true);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('.metadata')).every(e => !e.textContent.includes('No PR') && !e.textContent.includes('My computer') && !e.textContent.includes('Builder'))`)).toBe(true);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => e.nextElementSibling?.classList.contains('machine') && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => e.closest('.thread').querySelector('.machine') && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
   await page.evaluate(`window.__openedPr = null; window.open = (url) => { window.__openedPr = url; return null; }`);
   const prUrl = await page.evaluate<string>(`document.querySelector('${id('thread-pr')}').href`);
   await page.click(id('thread-pr'));
@@ -55,7 +94,10 @@ test('paragraphs arrive whole, keep previous nodes and flush when stopped; reaso
   await page.waitFor(`document.querySelectorAll('${id('paragraph')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('paragraph')}') === window.__firstParagraph`)).toBe(true);
   expect(await page.evaluate(`document.querySelectorAll('${id('thinking-part')}').length`)).toBe(1);
-  expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Checking results');
+  expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')}').textContent`)).toContain('Thinking');
+  await page.click(id('thinking-toggle'));
+  await page.waitFor(`document.querySelector('${id('thinking-text')}')?.textContent.includes('Checking results')`);
+  await page.click(id('thinking-toggle'));
   await capture('readability-working');
   await update(`thread.messages.at(-1).parts.push({type:'text',text:'Last partial paragraph'});`);
   await page.waitFor(`document.querySelector('${id('turn-summary')}').dataset.status === 'running'`);
@@ -106,3 +148,81 @@ test('goal prompts and markers stay readable and recognized commands are accente
   await capture('readability-chat-light');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
 });
+
+test('tool activity keeps failures visible and answered questions compact at desktop and phone widths', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await page.evaluate(`(() => { const input = document.querySelector('${id('composer-input')}'); input.value = ''; input.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+  await update(`
+    const turn = thread.turns[0]; turn.status = 'running'; turn.usage = null; turn.finishedAt = null; turn.startedAt = Date.now() - 120000;
+    thread.status = 'running'; thread.memoryEvents = [];
+    thread.messages[0].parts = [{type:'text',text:'Keep the archive branch and publish the project.'}];
+    const m = thread.messages.at(-1); m.state = 'streaming';
+    m.parts = [
+      { type:'thinking', text:'**Inspecting project files**\\nCheck the repository before publishing.' },
+      { type:'text', text:'I will keep the archived version on its branch, then publish both branches.\\n\\n' },
+      { type:'tool', toolId:'readability-check', name:'exec_command', input:{cmd:'git status --short\\ngit branch -vv\\ngit remote -v'}, output:'No remote configured.', status:'done' },
+      { type:'question', questionId:'readability-question', text:'Which remote should receive the branches?', options:[{id:'private',label:'Private repository'}], allowText:true, multiple:false, async:true, answer:{optionIds:['private'],text:'Create it on GitHub.'} },
+      { type:'tool', toolId:'readability-read', name:'Read', input:{file_path:'README.md'}, output:'Project documentation', status:'done' },
+      { type:'tool', toolId:'readability-failed', name:'Bash', input:{command:'git remote get-url origin'}, output:'error: No such remote origin', status:'error' },
+      { type:'tool', toolId:'readability-search', name:'Grep', input:{pattern:'repository'}, output:'README.md:3', status:'done' },
+      { type:'text', text:'I will create the private repository and publish the branches.\\n\\n' },
+      { type:'tool', toolId:'readability-live', name:'Bash', input:{command:'gh repo create sample-project --private --source=. --remote=origin'}, output:null, status:'running', startedAt:Date.now()-2000 }
+    ];
+  `);
+  await page.waitFor(`document.querySelector('${id('question-card')}[data-state=answered]')`);
+  await page.evaluate(`document.documentElement.dataset.theme = 'dark'`);
+  await capture('activity-desktop');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')} .line').textContent`)).toBe('Ran 1 command');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=error]').getBoundingClientRect().height > 0`)).toBe(true);
+  expect(await page.text(id('tool-error-preview'))).toBe('error: No such remote origin');
+  expect(await page.evaluate(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
+  expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh');
+  expect(await page.evaluate(`document.querySelector('${id('turn-summary')}') === null`)).toBe(true);
+  for (const width of [1300,390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', {width,height:850,deviceScaleFactor:1,mobile:width<720});
+    await page.click(id('question-toggle'));
+    await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'true'`);
+    expect(await page.text(id('question-text'))).toBe('Which remote should receive the branches?');
+    await page.evaluate(`document.querySelector('${id('question-toggle')}').scrollIntoView({block:'center'})`);
+    await capture(width<720 ? 'activity-phone-expanded' : 'activity-desktop-expanded');
+    await page.click(id('question-toggle'));
+    await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'false'`);
+    await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
+    await capture(width<720 ? 'activity-phone' : 'activity-desktop');
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    const rows = await page.evaluate<number[]>(`Array.from(document.querySelectorAll('${id('question-toggle')}, ${id('tool-toggle')}, ${id('thinking-toggle')}')).filter(e=>!e.closest('[inert]')).map(e=>e.getBoundingClientRect().height)`);
+    expect(rows.every(height => height >= (width<720 ? 44 : 30))).toBe(true);
+  }
+  await update(`thread.messages.at(-1).parts.at(-1).status = 'done';`);
+  await page.waitFor(`document.querySelector('${id('turn-summary')}[data-status=running]')`);
+}, 30_000);
+
+test('in forced colors a focused text field still shows where the keyboard is', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.send('Emulation.clearDeviceMetricsOverride', {});
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+  try {
+    await page.navigate(`${origin}/?fake=1&open=recent`);
+    await page.waitFor(`document.querySelector('${id('composer-input')}') && document.querySelector('${id('sidebar-search-open')}')`);
+    // A key first, so the focus that follows reads as the keyboard's.
+    const ring = async (name: string) => {
+      await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+      return page.evaluate<string>(`(() => {
+        const element = document.querySelector('${id(name)}');
+        element.focus();
+        const style = getComputedStyle(element);
+        return element.matches(':focus-visible') ? style.outlineStyle + ' ' + style.outlineWidth : 'not focus-visible';
+      })()`);
+    };
+    const composer = await ring('composer-input');
+    await page.click(id('sidebar-search-open'));
+    await page.waitFor(`document.querySelector('${id('palette-input')}')`);
+    const search = await ring('palette-input');
+    await capture('readability-forced-focus');
+    expect(composer).toMatch(/^solid [1-9]/);
+    expect(search).toMatch(/^solid [1-9]/);
+  } finally {
+    await page.send('Emulation.setEmulatedMedia', { features: [] });
+  }
+}, 30_000);

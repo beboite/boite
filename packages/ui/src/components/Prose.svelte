@@ -1,15 +1,17 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { renderMarkdown } from '../lib/markdown';
-  import { paragraphBlocks, answerText } from '../lib/message-display';
+  import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
   import type { Store } from '../lib/store.svelte';
   import ChatFile from './ChatFile.svelte';
+  import { executableLink, localFileDirectory, openLocalFile } from '../lib/local-files';
 
   let { text, live = false, store, threadId }: { text: string; live?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
   const rich = $derived(experimentOn('chat-artifacts'));
+  let opening = false;
   function follow(event: MouseEvent): void {
     const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
     if (!anchor) return;
@@ -24,9 +26,20 @@
       return;
     }
     event.preventDefault();
+    const directory = localFileDirectory(store, threadId);
+    if (directory && executableLink(anchor.dataset.filePath) && !anchor.dataset.fileLine) {
+      if (opening) return;
+      opening = true;
+      void openLocalFile(directory, anchor.dataset.filePath).catch(reason => {
+        if (store) store.error = reason instanceof Error ? reason.message : String(reason);
+      }).finally(() => { opening = false; });
+      return;
+    }
     selected = { path: anchor.dataset.filePath!, ...(anchor.dataset.fileLine ? { line: Number(anchor.dataset.fileLine) } : {}) };
   }
-  let blocks = $derived(paragraphBlocks(answerText(text, live), live));
+  // The scan resumes where the last delta stopped instead of reading the answer again.
+  const scan = new ParagraphScan();
+  let blocks = $derived(scan.blocks(answerText(text, live), live));
 
   let host = $state<HTMLDivElement>();
 
@@ -214,9 +227,16 @@
     color: var(--color-muted-foreground);
   }
 
-  /* A table is a code well's cousin: the surface-2 ground, hairlines, the head one step up. */
+  /* A table is a code well's cousin: the surface-2 ground, hairlines, the head one step up.
+     It takes its content's width up to the column's and scrolls inside itself past
+     that, like a code well: a table box ignores overflow, so it is a block here, or
+     a wide one pans the whole conversation on a phone. */
   .prose :global(table) {
-    width: 100%;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
     margin: 6px 0 12px;
     border-collapse: separate;
     border-spacing: 0;
@@ -224,7 +244,6 @@
     border-radius: var(--radius-md);
     background: var(--color-surface-2);
     font-size: var(--text-sm);
-    overflow: hidden;
   }
 
   .prose :global(th),

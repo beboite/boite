@@ -9,26 +9,35 @@
  * Run as `bun <this file>`. `CODEX_FAKE_LOG` names a file it appends one line
  * per incoming request to: `initialize`, `initialized`,
  * `thread/start approvalPolicy=<p> sandbox=<s> model=<m>`,
- * `thread/resume <threadId> ...`, `turn/start model=<m> effort=<e>`,
+ * `thread/resume <threadId> ... cwd=<cwd>`, `turn/start model=<m> effort=<e>`,
  * `turn/interrupt <turnId>` and `model/list`. One `initialize` line per process,
  * so a test can count the agent processes a warm session did or did not save.
+ * `CODEX_FAKE_LOST=1` makes every `thread/resume` fail the way a missing
+ * rollout does, `CODEX_FAKE_SLOW_START=<ms>` delays the answer to
+ * `thread/start` and `thread/resume`, and `CODEX_FAKE_DEAF=1` answers `turn/interrupt` without
+ * ending the turn.
  *
  * The wire is copied from the real server on purpose: responses and
  * notifications carry no `jsonrpc` member, which is what the driver has to
  * survive.
  */
 import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const DIRECTIVE = /\[(command|approve|thought|usage|late-context|slow|crash|input|async|stream)\]/g;
+const DIRECTIVE = /\[(command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
-type Directive = 'command' | 'approve' | 'thought' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream';
+type Directive =
+  | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block';
 
 let threadCounter = 0;
 let turnCounter = 0;
 let itemCounter = 0;
 let threadId = '';
 let planEnabled = false;
+/** The thread was opened `ephemeral`, the way the core asks for a title. */
+let ephemeral = false;
 /**
  * The turns an interrupt already arrived for, and what is waiting on one. A
  * real server knows a turn from the moment it answers `turn/start`, so an
@@ -232,7 +241,20 @@ async function runTurn(turnId: string, text: string): Promise<void> {
     });
   }
 
-  for (const chunk of chunksOf(plainOf(text))) say(chunk);
+  // Two summary sections of one reasoning item, the first in two deltas: the
+  // real server streams each section as its own `summaryIndex`.
+  if (directives.includes('summary')) {
+    const summary = (summaryIndex: number, delta: string): void => {
+      notify('item/reasoning/summaryTextDelta', { threadId, turnId, itemId: 'reasoning-2', delta, summaryIndex });
+    };
+    summary(0, '**Reading**');
+    summary(0, ' the file');
+    notify('item/reasoning/summaryPartAdded', { threadId, turnId, itemId: 'reasoning-2', summaryIndex: 1 });
+    summary(1, '**Editing** it');
+  }
+
+  // An ephemeral thread is a title call: it answers in a few words, not with the request.
+  for (const chunk of chunksOf(ephemeral ? '"Pelican notes."' : plainOf(text))) say(chunk);
 
   for (const directive of directives) {
     switch (directive) {
@@ -306,6 +328,39 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         say(q1.length === 0 ? 'input refused' : `input answered ${q1}`);
         break;
       }
+      case 'elicit':
+      case 'elicit-url': {
+        // An MCP tool approval the way Codex asks for one, or a url elicitation
+        // nothing in boite can show. The answer is logged whole and said back.
+        const params = directive === 'elicit'
+          ? {
+              threadId, turnId, serverName: 'fake-mcp', mode: 'form', message: 'Allow the fake tool to run?',
+              requestedSchema: { type: 'object', properties: {} },
+              _meta: { codex_approval_kind: 'mcp_tool_call', tool_title: 'Fake tool', tool_params: { path: 'a.txt' } },
+            }
+          : { threadId, turnId, serverName: 'fake-mcp', mode: 'url', message: 'Sign in', url: 'https://example.invalid', elicitationId: 'e1' };
+        const answer = await request<{ action: string }>('mcpServer/elicitation/request', params).catch(() => ({ action: 'error' }));
+        log(`${directive} ${JSON.stringify(answer)}`);
+        say(`${directive} ${answer.action}`);
+        break;
+      }
+      case 'permissions': {
+        itemCounter += 1;
+        const permissions = { network: { enabled: true }, fileSystem: null };
+        const answer = await request<{ permissions: unknown }>('item/permissions/requestApproval', {
+          threadId, turnId, itemId: `item-${itemCounter}`, environmentId: null, cwd: process.cwd(),
+          reason: 'the fake wants the network', permissions,
+        }).catch(() => ({ permissions: 'error' }));
+        log(`permissions ${JSON.stringify(answer)}`);
+        say(JSON.stringify(answer.permissions) === JSON.stringify(permissions) ? 'permissions granted' : 'permissions refused');
+        break;
+      }
+      case 'time': {
+        const answer = await request<{ currentTimeAt: unknown }>('currentTime/read', { threadId }).catch(() => ({ currentTimeAt: null }));
+        const at = answer.currentTimeAt;
+        say(typeof at === 'number' && Number.isInteger(at) && Math.abs(at - Date.now() / 1000) < 60 ? 'time ok' : `time wrong ${JSON.stringify(at)}`);
+        break;
+      }
       case 'async': {
         // GPT-6 Astra's asynchronous question: an agentMessage with
         // `delivery: "async"`, its text streamed like any other, and no wait.
@@ -367,6 +422,19 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         interrupted.delete(turnId);
         notify('turn/completed', { threadId, turn: turnRecord(turnId, 'interrupted') });
         return;
+      case 'hook-block':
+        // A userPromptSubmit hook that exits 2: the turn ends with nothing said (0.157.1).
+        notify('hook/completed', {
+          threadId,
+          turnId,
+          run: {
+            id: 'hook-run-1', eventName: 'userPromptSubmit', handlerType: 'command', executionMode: 'sync', scope: 'turn',
+            sourcePath: join(process.cwd(), 'hooks.json'), source: 'user', displayOrder: 0, status: 'blocked', statusMessage: null,
+            startedAt: Date.now(), completedAt: Date.now(), durationMs: 3,
+            entries: [{ kind: 'feedback', text: 'blocked by test hook' }],
+          },
+        });
+        break;
       case 'crash':
         process.stderr.write('boom\n');
         setTimeout(() => {
@@ -376,6 +444,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         await new Promise<void>(() => undefined);
         break;
       case 'thought':
+      case 'summary':
         // Already sent above, before the answer.
         break;
     }
@@ -395,6 +464,21 @@ function handle(method: string, raw: unknown): unknown {
         platformFamily: process.platform === 'win32' ? 'windows' : 'unix',
         platformOs: process.platform === 'win32' ? 'windows' : 'linux',
       };
+    case 'hooks/list':
+      log('hooks/list');
+      // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.
+      if (process.env['CODEX_FAKE_HOOKS'] !== '1') return { data: [] };
+      return {
+        data: [{
+          cwd: process.cwd(),
+          warnings: [],
+          errors: [],
+          hooks: [
+            { key: 'a', eventName: 'preToolUse', sourcePath: join(process.cwd(), 'hooks.json'), enabled: true, trustStatus: 'untrusted' },
+            { key: 'b', eventName: 'stop', sourcePath: join(process.cwd(), 'hooks.json'), enabled: true, trustStatus: 'trusted' },
+          ],
+        }],
+      };
     case 'model/list':
       log('model/list');
       // One page, and a null cursor: the driver stops asking on that.
@@ -403,18 +487,31 @@ function handle(method: string, raw: unknown): unknown {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
       threadCounter += 1;
       threadId = `codex-fake-${crypto.randomUUID().slice(0, 8)}-${threadCounter}`;
+      ephemeral = params['ephemeral'] === true;
       log(
-        `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}`,
+        `thread/start approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} model=${textOf(params['model'])}${ephemeral ? ' ephemeral' : ''}`,
       );
-      return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      const opened = { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      // `CODEX_FAKE_SLOW_START=<ms>`: an app-server slow to open its thread.
+      const slow = Number(process.env['CODEX_FAKE_SLOW_START'] ?? '0');
+      if (slow > 0) return Bun.sleep(slow).then(() => opened);
+      return opened;
     }
     case 'thread/resume': {
       planEnabled = (params['config'] as Record<string, unknown> | undefined)?.['tools.update_plan.enabled'] === true;
+      ephemeral = false;
       threadId = textOf(params['threadId']);
       log(
-        `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])}`,
+        `thread/resume ${threadId} approvalPolicy=${textOf(params['approvalPolicy'])} sandbox=${textOf(params['sandbox'])} cwd=${textOf(params['cwd'])}`,
       );
-      return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      const answer = (): unknown => {
+        // `CODEX_FAKE_LOST=1`: the rollout of every thread is gone, in the real server's words.
+        if (process.env['CODEX_FAKE_LOST'] === '1') throw new Error(`no rollout found for thread id ${threadId}`);
+        return { thread: threadRecord(), model: 'fake-codex', modelProvider: 'fake', serviceTier: null };
+      };
+      const slow = Number(process.env['CODEX_FAKE_SLOW_START'] ?? '0');
+      if (slow > 0) return Bun.sleep(slow).then(answer);
+      return answer();
     }
     case 'thread/compact/start': {
       log('thread/compact/start');
@@ -449,6 +546,8 @@ function handle(method: string, raw: unknown): unknown {
     case 'turn/interrupt': {
       const turnId = textOf(params['turnId']);
       log(`turn/interrupt ${turnId}`);
+      // `CODEX_FAKE_DEAF=1`: the request is answered and the turn goes on regardless.
+      if (process.env['CODEX_FAKE_DEAF'] === '1') return {};
       const waiter = waiting.get(turnId);
       if (waiter === undefined) interrupted.add(turnId);
       else waiter();
@@ -478,11 +577,14 @@ process.stdin.on('data', (chunk: string) => {
     const method = message['method'];
     const id = message['id'];
     if (typeof method === 'string' && id !== undefined && id !== null) {
-      try {
-        send({ id, result: handle(method, message['params']) });
-      } catch (error) {
-        send({ id, error: { code: -32601, message: (error as Error).message } });
-      }
+      const params = message['params'];
+      // A handler may answer later (a slow thread/start); the others answer in order.
+      void Promise.resolve()
+        .then(() => handle(method, params))
+        .then(
+          (result) => send({ id, result }),
+          (error: unknown) => send({ id, error: { code: -32601, message: (error as Error).message } }),
+        );
       continue;
     }
     if (typeof method === 'string') {

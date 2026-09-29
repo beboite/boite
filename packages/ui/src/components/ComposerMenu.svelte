@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Closing } from '../lib/closing.svelte';
+  import { floating } from '../lib/floating';
+  import { fitMenu } from '../lib/menu-fit';
   import type { PaletteItem } from '../lib/palette';
 
   /**
@@ -68,6 +70,7 @@
     data-testid="{kind}-menu"
     bind:this={list}
     use:popover.attach
+    use:floating={{ anchor: () => list?.closest<HTMLElement>('[data-testid=composer]') ?? list?.parentElement ?? null, placement: 'top', sheet: false, matchWidth: true, cap: 420, fit: fitMenu }}
     onanimationend={popover.end}
   >
     {#each items as item, index (item.id)}
@@ -109,7 +112,9 @@
 
 <style>
   /* Above the composer, on the picker's surface: same ground, same radius,
-     same shadow, same entrance. Eight rows fit, the rest scrolls. */
+     same shadow, same entrance. Eight rows fit, the rest scrolls; a shorter
+     window gets a shorter list, or the list under the box when that side has
+     more room (`lib/menu-fit.ts`). */
   .menu {
     position: absolute;
     bottom: calc(100% + 6px);
@@ -119,8 +124,6 @@
     flex-direction: column;
     gap: 1px;
     width: min(420px, 100%);
-    /* Eight rows of a name and its description, then it scrolls. */
-    max-height: 420px;
     overflow: auto;
     padding: 6px;
     background: var(--color-surface-2);

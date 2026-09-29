@@ -7,6 +7,7 @@ import type { MessagePart, PermissionMode, ProviderDescriptor, RpcEvents, Settin
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { choiceFor, mintUuidV7, museExecutable } from '../src/drivers/muse.ts';
+import { setMuseStartupDeadlineForTests } from '../src/drivers/muse/session.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -22,6 +23,8 @@ afterEach(async () => {
   harness = null;
   delete process.env['MUSE_FAKE_LOG'];
   delete process.env['MUSE_FAKE_HOME'];
+  delete process.env['MUSE_FAKE_INIT'];
+  setMuseStartupDeadlineForTests(null);
   if (open !== null) await open.stop();
 });
 
@@ -328,6 +331,97 @@ describe('muse driver', () => {
     await exited;
     expect(fakeLog()).toContain('turn/interrupt turn');
     await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('an async answer reaches the running turn through turn/steer, not at its end', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'working [steer]' });
+    // The host acks `turn/start` before its run exists: a steer sent earlier is refused.
+    await waitFor(() => fakeLog().includes('steer waiting'));
+
+    harness?.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
+    expect((await finished).status).toBe('done');
+    expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
+    expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+    expect(textsOf(await lastParts(client, threadId))).toEqual(['working heard: > Which database?\n\nSQLite']);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  test('a steer the host refuses keeps the answer for the turn after', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('turn/start'));
+
+    // `[slow]` waits for an interrupt, never a steer: the host refuses it.
+    harness?.core.threads.deferred.deliverAnswer(threadId, 'SQLite');
+    await waitFor(() => fakeLog().includes('turn/steer'));
+    await waitFor(() => harness?.core.threads.deferred.deferredAnswers.has(threadId) === true);
+    await client.call('turns.stop', { threadId });
+  });
+
+  test('a stop while the host never answers initialize ends the turn stopped and closes the host', async () => {
+    process.env['MUSE_FAKE_INIT'] = 'never';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await museThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await waitFor(() => fakeLog().includes('initialize '));
+
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    expect(Date.now() - stoppedAt).toBeLessThan(5000);
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    expect(fakeLog()).not.toContain('turn/start');
+  });
+
+  test('a stop during a slow initialize sends no turn to the model', async () => {
+    process.env['MUSE_FAKE_INIT'] = '800';
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await museThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await waitFor(() => fakeLog().includes('initialize '));
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    // Past the delayed answer: whatever the host sends late reaches nobody.
+    await Bun.sleep(1200);
+    expect(fakeLog()).not.toContain('session/start');
+    expect(fakeLog()).not.toContain('turn/start');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('a host that never finishes its startup fails the turn with the step it hung on', async () => {
+    process.env['MUSE_FAKE_INIT'] = 'never';
+    setMuseStartupDeadlineForTests(300);
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await museThread(client);
+    const failed = await runTurn(client, threadId, 'hello');
+    expect(failed.status).toBe('error');
+    expect(failed.error).toContain('did not answer initialize within');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+  });
+
+  test('a session the host closed while idle is resumed on a fresh host by the next turn', async () => {
+    const client = await startCore({ warmProcessMinutes: 5 });
+    const threadId = await museThread(client);
+    const counted = countProcesses(client, threadId);
+    expect((await runTurn(client, threadId, 'first [close-idle]')).status).toBe('done');
+    // The idle close retires the warm host at once.
+    await waitFor(() => counted.exited.length === 1);
+
+    const again = await runTurn(client, threadId, 'second');
+    expect(again.error).toBeNull();
+    expect(again.status).toBe('done');
+    expect(counted.started).toHaveLength(2);
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(fakeLog()).toContain(`session/resume ${sessionId} excludeItems=true`);
   });
 
   test('a host that dies fails the turn with its exit code and stderr, and the next turn resumes', async () => {

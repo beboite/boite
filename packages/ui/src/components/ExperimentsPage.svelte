@@ -1,16 +1,13 @@
 <script lang="ts">
+  import InfoTip from './InfoTip.svelte';
   import { untrack } from 'svelte';
   import { EXPERIMENT_IDS, readExperiments, setExperiment, type ExperimentId } from '../lib/experiments';
+  import { experimentCopy } from '../lib/experiment-copy';
   import { strings } from '../lib/strings';
 
-  /** One entry per shipped id, so a new experiment cannot land without its words. */
-  const copy: Record<ExperimentId, { title: string; hint: string }> = {
-    'theme-grain': strings.experiments.themeGrain,
-    'session-import': strings.experiments.sessionImport,
-    'prompt-cache': strings.experiments.promptCache,
-    'chat-artifacts': strings.experiments.chatArtifacts,
-    'preview-comments': strings.experiments.previewComments
-  };
+  const uid = $props.id();
+
+  let copy = $derived(experimentCopy());
 
   let enabled = $state<ExperimentId[]>(untrack(() => readExperiments()));
 
@@ -23,19 +20,17 @@
 <div class="page" data-testid="experiments-page">
   <header>
     <div>
-      <h1>{strings.settings.tabs.experiments}</h1>
-      <p>{strings.settings.experiments.intro}</p>
+      <h1>{strings.settings.tabs.experiments}<InfoTip topic={strings.settings.tabs.experiments} text={strings.settings.experiments.intro} /></h1>
     </div>
   </header>
 
   <section class="card">
     {#each EXPERIMENT_IDS as id (id)}
-      <label class="switch-row" id="settings-{id}">
+      <label for="{uid}-{id}" class="switch-row" id="settings-{id}">
         <span class="text">
-          {copy[id].title}
-          <span class="hint">{copy[id].hint}</span>
+          <span id="{uid}-{id}-name">{copy[id].title}</span><InfoTip topic={copy[id].title} text={copy[id].hint} />
         </span>
-        <input
+        <input id="{uid}-{id}" aria-labelledby="{uid}-{id}-name"
           type="checkbox"
           role="switch"
           data-testid="experiment-{id}"

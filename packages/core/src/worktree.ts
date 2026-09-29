@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import type { Project, ThreadId } from '@boite/contracts';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { Project, ThreadId, WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { messageOf, refused } from './errors.ts';
 
@@ -21,14 +21,13 @@ export function slugOf(title: string): string {
   return slug.length > 0 ? slug : 'thread';
 }
 
-/**
- * Where a project's worktrees go: beside the repository, never inside it, so
- * the agent's own walk and the project's tooling never see them, and on the
- * same volume, because `git worktree add` across two disks costs ten times
- * more than beside the repository.
- */
-export function worktreeRoot(projectPath: string): string {
-  return join(dirname(projectPath), '.boite-worktrees', basename(projectPath));
+/** The shared folder separates projects by their stable id, including namesakes. */
+export function worktreeRoot(projectPath: string, storage?: WorktreeStorage, projectId?: string): string {
+  if (storage?.mode === 'shared') {
+    if (!projectId) throw refused('a shared worktree folder requires a project id');
+    return join(storage.directory, `${slugOf(basename(projectPath))}-${projectId.replace(/[^a-z0-9_-]/gi, '-')}`);
+  }
+  return join(projectPath, '.boite', 'worktrees');
 }
 
 export interface PlacedWorktree {
@@ -45,7 +44,40 @@ export interface PlacedWorktree {
 export class Worktrees {
   constructor(private readonly core: Core) {}
 
-  async add(threadId: ThreadId, project: Project, title: string, wanted?: string): Promise<PlacedWorktree> {
+  pathFor(project: Project, branch: string): string {
+    return join(worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id), slugOf(branch.replace(/^boite\//, '')));
+  }
+
+  /** Adopt only the exact branch/path recorded before preparation, or create it once. */
+  async ensure(threadId: ThreadId, project: Project, branch: string, recordedPath?: string): Promise<PlacedWorktree> {
+    const path = recordedPath ?? this.pathFor(project, branch);
+    const listed = await this.git(threadId, project.path, ['worktree', 'list', '--porcelain', '-z']);
+    if (listed.code !== 0) throw refused(`cannot inspect worktrees in ${project.path}: ${listed.stderr.trim()}`);
+    for (const entry of listed.stdout.split('\0\0')) {
+      const fields = entry.split('\0');
+      const location = fields.find(field => field.startsWith('worktree '))?.slice(9);
+      const name = fields.find(field => field.startsWith('branch '))?.slice(7);
+      if (location && name === `refs/heads/${branch}` && existsSync(location) && existsSync(join(path, '.git'))) {
+        // Git may report a long Windows path while the journal carries its 8.3 alias.
+        const registered = statSync(location, { bigint: true });
+        const expected = statSync(path, { bigint: true });
+        if (registered.ino !== 0n && registered.dev === expected.dev && registered.ino === expected.ino) return { path, branch };
+      }
+      if (location && name === `refs/heads/${branch}` && existsSync(location)) throw refused(`branch ${branch} is already checked out at ${location}; expected ${path}`);
+    }
+    if (await this.branchExists(threadId, project.path, branch)) {
+      if (existsSync(path)) throw refused(`cannot recover ${branch}: ${path} already exists`);
+      // No live checkout uses this branch. One --force permits an obsolete registration,
+      // but does not bypass a locked worktree or overwrite an existing directory.
+      await this.exclude(threadId, project, path);
+      const added = await this.git(threadId, project.path, ['worktree', 'add', '--force', path, branch]);
+      if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
+      return { path, branch };
+    }
+    return this.add(threadId, project, branch, branch, path);
+  }
+
+  async add(threadId: ThreadId, project: Project, title: string, wanted?: string, recordedPath?: string): Promise<PlacedWorktree> {
     if (!existsSync(join(project.path, '.git'))) {
       throw refused(`${project.path} is not a git repository: a worktree needs one`, {
         projectId: project.id,
@@ -56,13 +88,13 @@ export class Worktrees {
       throw refused(`"${wanted}" is not a branch name: no spaces, not empty`, { branch: wanted });
     }
 
-    const root = worktreeRoot(project.path);
+    const root = worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id);
     const slug = wanted === undefined ? slugOf(title) : slugOf(wanted.startsWith(BRANCH_PREFIX) ? wanted.slice(BRANCH_PREFIX.length) : wanted);
     const tries = wanted === undefined ? SUFFIX_MAX : 1;
     for (let n = 1; n <= tries; n += 1) {
       const suffix = n === 1 ? '' : `-${n}`;
       const branch = wanted ?? `${BRANCH_PREFIX}${slug}${suffix}`;
-      const path = join(root, `${slug}${suffix}`);
+      const path = recordedPath ?? join(root, `${slug}${suffix}`);
       if (await this.branchExists(threadId, project.path, branch)) {
         if (wanted !== undefined) throw refused(`branch ${branch} already exists in ${project.path}`, { branch, path: project.path });
         continue;
@@ -71,6 +103,7 @@ export class Worktrees {
         if (wanted !== undefined) throw refused(`${path} already exists: pick another branch name`, { path, branch });
         continue;
       }
+      await this.exclude(threadId, project, path);
       const added = await this.git(threadId, project.path, ['worktree', 'add', '-b', branch, path]);
       if (added.code !== 0) {
         throw refused(`git worktree add failed in ${project.path}: ${added.stderr.trim() || `exit ${added.code}`}`, {
@@ -107,16 +140,31 @@ export class Worktrees {
     return result.code === 0;
   }
 
-  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string }> {
+  /** Local exclusions keep nested checkouts out of status without editing .gitignore. */
+  private async exclude(threadId: ThreadId, project: Project, path: string): Promise<void> {
+    const local = relative(project.path, dirname(path));
+    if (!local || isAbsolute(local) || local === '..' || local.startsWith(`..${sep}`)) return;
+    const folder = local.split(sep).join('/');
+    const pattern = folder.startsWith('.boite/') ? '/.boite/' : `/${folder.replace(/[\\[\]*?!# ]/g, '\\$&')}/`;
+    const result = await this.git(threadId, project.path, ['rev-parse', '--git-path', 'info/exclude']);
+    if (result.code !== 0) throw refused(`cannot locate the git exclude file in ${project.path}: ${result.stderr.trim()}`);
+    const file = resolve(project.path, result.stdout.trim());
+    try {
+      const previous = existsSync(file) ? readFileSync(file, 'utf8') : '';
+      if (previous.split(/\r?\n/).includes(pattern)) return;
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, `${previous && !previous.endsWith('\n') ? '\n' : ''}${pattern}\n`);
+    } catch (error) { throw refused(`cannot exclude worktrees in ${file}: ${messageOf(error)}`); }
+  }
+
+  private async git(threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; stderr: string; stdout: string }> {
     let spawned;
     try {
       spawned = this.core.procs.spawn(threadId, 'git', args, { cwd });
     } catch (error) {
       throw refused(`git did not start (${messageOf(error)}): a worktree needs git on PATH`, { cwd, args });
     }
-    const [stderr, code] = await Promise.all([new Response(spawned.proc.stderr).text(), spawned.exited]);
-    // stdout is piped by the registry; drained so a chatty git never blocks on it.
-    await new Response(spawned.proc.stdout).text();
-    return { code, stderr };
+    const [stderr, stdout, code] = await Promise.all([new Response(spawned.proc.stderr).text(), new Response(spawned.proc.stdout).text(), spawned.exited]);
+    return { code, stderr, stdout };
   }
 }

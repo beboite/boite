@@ -14,7 +14,7 @@
       ],
       "update": { "args": ["update"] },
       "isolation": {},
-      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1", "AGY_CLI_DISABLE_AUTO_UPDATE": "true" },
       "close": { "processes": [] }
     },
     "linux": {
@@ -22,7 +22,7 @@
       "executable": [{ "kind": "path", "value": "agy" }],
       "update": { "args": ["update"] },
       "isolation": {},
-      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1", "AGY_CLI_DISABLE_AUTO_UPDATE": "true" },
       "close": { "processes": [] }
     },
     "macos": {
@@ -30,7 +30,7 @@
       "executable": [{ "kind": "path", "value": "agy" }],
       "update": { "args": ["update"] },
       "isolation": {},
-      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1" },
+      "env": { "BROWSER": "{browserNoop}", "NO_COLOR": "1", "AGY_CLI_DISABLE_AUTO_UPDATE": "true" },
       "close": { "processes": [] }
     }
   },

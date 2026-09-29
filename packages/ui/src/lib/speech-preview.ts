@@ -1,11 +1,17 @@
 import type { Client } from './client';
 import { audioBase64 } from './speech-recorder';
 
-/** One preview at a time. Slow engines skip ticks instead of accumulating work. */
+/**
+ * One preview at a time. Slow engines skip ticks instead of accumulating work.
+ * The language the first preview hears is sent back with the next ones and the
+ * final request, so a local engine detects it once per recording.
+ */
 export class SpeechPreview {
   private pending: Promise<void> | null = null;
   private requestId: string | null = null;
   private stopped = false;
+  /** What the engine heard so far, when it says. */
+  language: string | undefined;
 
   constructor(
     private client: Client,
@@ -24,7 +30,11 @@ export class SpeechPreview {
       const audio = await snapshot();
       if (!audio || this.stopped) return;
       this.requestId = crypto.randomUUID();
-      const result = await this.client.call('speech.transcribe', { requestId: this.requestId, revision: this.revision, audio: audioBase64(audio) });
+      const result = await this.client.call('speech.transcribe', {
+        requestId: this.requestId, revision: this.revision, audio: audioBase64(audio), preview: true,
+        ...(this.language ? { language: this.language } : {}),
+      });
+      if (result.language) this.language = result.language;
       if (!this.stopped && result.text.trim()) this.ontext(result.text.trim());
     } catch (error) {
       if (!this.stopped) { this.stopped = true; this.onerror(error); }

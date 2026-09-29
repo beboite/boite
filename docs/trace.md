@@ -19,6 +19,13 @@ Every driver uses the same registry. Adding native tracking for another OS
 means implementing this interface, not adding OS branches to drivers or RPC
 handlers. Unsupported protections stay off even when their settings are enabled.
 
+Each process is one row of the `processes` table, written at start and again at
+exit, with no copy in the event log. A thread's rows stay while the thread
+does and go with its project. An id no thread stands behind (a plugin call, a
+plugin fetch, a brain sync, a dictation, a quota probe, a thread's terminal)
+loses its rows when the registry forgets it, 30 seconds after its last process
+exits: no RPC reads them. Rows written by older cores are not cleaned up.
+
 The shell follows the same boundary under `apps/shell/src-tauri/src/platform/`:
 core ownership, launch flags, data paths, toast delivery and native appbar queries
 live there. IPC caller checks remain in the shared shell commands. This split
@@ -35,11 +42,36 @@ inside a global job. Both are created unnamed, so neither can be looked up from
 another process. Both carry `KILL_ON_JOB_CLOSE` and neither carries
 `BREAKAWAY_OK`, so nothing a thread starts can leave the job, and
 a core that dies takes every agent process with it. The child is assigned right
-after spawn, and `windowsHide: true` is set on every one of them.
+after spawn, and `windowsHide: true` is set on every one of them. Thirty seconds
+after a thread's last process exits, the registry forgets the thread and its job
+is closed, unless the job still reports a process in it.
+
+Codex initialization temporarily runs its thread job at normal priority so a
+busy machine can schedule its session hooks and tool servers. The driver restores
+below-normal priority when the session opens, fails or is stopped. The registry
+also restores it when the agent exits or after 30 seconds without a ready signal.
+CPU and memory caps apply throughout, including when settings change during
+initialization. Other threads retain below-normal priority. Warm sessions reuse
+their process without another priority window. A refused native downgrade is
+retried every 250 ms until it succeeds or the job closes. The boost is withheld
+if global-job assignment or CPU-cap application fails, or the CPU cap is disabled
+(0 or 100 percent). This applies only on Windows;
+Linux and macOS retain their existing scheduling behavior.
 
 A completion port on the job reports every process that enters or leaves it,
-grandchildren included, and a Worker drains it. The Worker is built on the first
-traced pid rather than at core start, like everything else heavy here. Those
+grandchildren included, and a Worker drains it. The Worker is built when a turn
+starts or on the first traced pid, whichever comes first, never at core start:
+it takes tens of milliseconds to boot, and a turn prepares for about that long
+before its agent runs. Its wait has no timeout, so it sleeps in the kernel until
+a packet comes; it stops once no job has held a process for 30 seconds, a turn
+that spawned nothing included, and the shutdown or that idle stop posts a packet
+of its own to end the wait. The port stays open: the next assigned process
+starts a new Worker, after the old one has left, and the events queued meanwhile
+are read then. The Worker opens each new process the moment its packet comes,
+because the core's own thread may read the packet much later. A process already
+gone by then, such as the console host of an agent stopped within a millisecond
+of its start, has no name, parent or true start time left to record: it stays
+out of the trace, and its CPU stays in the job totals. Those
 events become `process.started` and `process.exited` on the wire, each carrying
 pid, parent pid, thread, executable, the command line when it is readable, start
 and exit times, exit code, CPU milliseconds, peak memory and bytes moved.
@@ -54,9 +86,12 @@ totals.
 ## What a client sees
 
 - `trace.get` gives one thread's processes, newest first.
-- `resources.list` gives every thread with its live processes and its totals.
+- `resources.list` gives each thread running at least one process now, archived
+  or not, with those processes and the latest `ThreadLoad` sample of its tree,
+  busiest first. What already exited stays in `trace.get`. Settings, Protection
+  asks again every two seconds while the page is visible.
 - `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
-  and registered direct children elsewhere. It returns before the completion port has
+  and the process group of each registered child elsewhere. It returns before the completion port has
   reported the exits, so anything that then reads the trace on the next line
   still sees them live: wait for the live count to reach zero instead.
 - `ThreadLoad` is sampled on a timer and carried on every thread summary: how
@@ -84,6 +119,43 @@ elsewhere, and both apply to jobs that already exist as well as to new ones.
   allocation, which the agent reports as its own out-of-memory error. 0 means no
   cap.
 
+## Orphans
+
+Stopping a shell does not stop what it started. When an agent's command is
+interrupted or refused, the agent ends the shell and whatever that shell
+launched keeps running inside the thread's job: a test runner, a dev server, a
+browser. The job holds it, so the trace and the load still count it, but
+nothing will ever stop it before `resources.killTree` or the core's exit.
+
+Ten seconds after `turn.finished`, if no new turn has started in the thread,
+the registry sweeps it. The same sweep follows every release of an agent
+process with no turn to finish, which all go through
+`ThreadStore.releaseAgent`: Stop on an idle thread whose agent still runs
+background work, an archive, an account switch, a stopped child agent, the
+archive of the previous delegation episode's children, a provider update, a
+plugin login change and a resident agent's compaction checkpoint. The agent
+exits inside those ten seconds, and a background command it started (a dev
+server, a watcher) is an orphan by then. A process is an orphan when the job reported it, it is
+at least ten seconds old, and its parent pid is not a live process of the
+thread, or belongs to one that started after it (a pid Windows gave to someone
+else). Each orphan is stopped with everything under it, through the process
+handle the job listener opened when the process started, never through a fresh
+open by pid. Each stop is a `core.log` line naming the thread, the pid and the
+executable.
+
+The agent process and anything else the core spawned have the core as their
+parent and are never taken. Neither is a process whose shell is still
+running, such as a background command the agent is still waiting on. A process
+an agent detaches on purpose and means to keep across turns is stopped too:
+that is what the switch below is for. So is the child of a launcher that hands
+over and exits, even a launcher the core spawned: only a process whose parent
+is the core itself is exempt, since the rule reads the parent pid, never the
+intent. The walk is linear in the thread's live
+processes, and it runs once per finished turn. Off Windows, only direct children are
+tracked, and their parent is the core, so the sweep finds nothing and the
+setting does nothing there: what a turn leaves running stays until the
+thread's tree is killed.
+
 ## The focus guard
 
 An agent that opens a window takes the foreground, and the user loses whatever
@@ -92,6 +164,18 @@ they were typing into. The guard is a second Worker holding a system-wide
 core's own process, plus the message pump that hook needs, because an
 out-of-context event is delivered on the thread that installed the hook and only
 while that thread pumps. The main thread posts it the pid set and the setting.
+Like the jobs Worker, it unhooks and stops once no traced pid has been alive for
+30 seconds, and the next traced pid builds it again.
+
+The Worker is built when a turn starts or on the first traced pid, whichever
+comes first, and stopped 30 seconds after the last traced process exits, or 30
+seconds after both the guard and the audio mute are turned off, however many
+processes still run. A turn that starts restarts those 30 seconds, so back-to-back
+turns keep the same Worker. What the Worker reports to the core log (a refused
+hook, a missing endpoint, a skipped session) is written once per core run, not
+once per Worker. With both protections off no Worker is built at all. When
+the system refuses the hook (a core with no interactive desktop), the Worker
+keeps running for the audio mute and `guardStatus().failure` names the refusal.
 
 When the window that just took the foreground belongs to a pid a thread
 launched, two remedies fire in order. `SetWindowPos` to `HWND_BOTTOM` without
@@ -122,15 +206,22 @@ after every new pid, the sessions of the default render endpoint are walked over
 `bun:ffi`: the device enumerator to the default endpoint, the session manager,
 each session's process id, then its volume interface. A session whose process id
 is a traced pid and that is not muted already is muted, and its volume interface
-is held.
+is held. A session that cannot be read is skipped and named once in the core
+log; only a failure of the endpoint itself, such as a removed device, drops it
+and opens it again on the next walk. Each walk also reads the default device's id
+again: when the user switches output, from speakers to a headset say, the old
+device is released and the walk moves to the new one, where the agents now play.
 
 Holding it is the point. Windows keeps a rendering session's mute across
 restarts, so a process that exited muted would come back muted. The mute is
 undone and the interface released when the pid exits, when the setting goes off
-and when the Worker stops. A session the user muted by hand in the mixer reads as
+and when the Worker stops. The core's shutdown waits for that last release, one
+second at most, before it lets the process exit: a core that left first would
+leave those executables muted for their next run. A session the user muted by hand in the mixer reads as
 muted already, so it is left alone and never unmuted on exit. `process.muted`
-says which thread and which pid, and a machine with no render endpoint says so
-once and keeps that half off for the Worker's life.
+says which thread and which pid. A machine with no render endpoint says so once
+and asks again every 30 seconds, so a headset plugged in later is covered. Only
+a COM runtime that refuses to start keeps that half off for the Worker's life.
 
 Like the guard, the rule is a logic class decided on a fake. The one test that
 touches the real endpoint plays two seconds of zeroed PCM, which is a session in
@@ -138,14 +229,15 @@ the mixer and silence in the speakers.
 
 ## Turning them off
 
-Both live under Settings, General, Background, and both are on by default.
+All three live under Settings, Protection, and all three are on by default.
 
 | Setting | Effect when off |
 |---|---|
 | `focusGuard` | an agent's window keeps the foreground it took |
 | `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
+| `reapOrphans` | what a thread leaves running after its turn runs until the thread's tree is killed or the core exits |
 
-The third switch of that card, the notifications, is the UI's own and never
+The notifications switch, under Settings, General, is the UI's own and never
 reaches the core: a system toast when a thread finishes, fails or asks
 something while another thread is open or the window is not in front. The
 shell carries it as a Windows toast through its `notify` command, the phone
@@ -159,10 +251,25 @@ exit; it does not discover grandchildren or poll a process group. Bun supplies
 exit usage for its own subprocesses, while the Node spawn path has no exit
 usage off Windows. The reported `poll` mode denotes this limited fallback.
 
+On Linux the thread load is read from procfs every second: CPU time from each
+registered child's `/proc/<pid>/stat` (in the kernel's fixed 100 ticks a
+second) and resident memory from the `VmRSS` line of its `/proc/<pid>/status`.
+It counts the direct children only, not what they started. macOS has no
+procfs, so its gauge still reads 0% and 0 B while a process runs.
+
 Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
 `events`, `poll` or `none`, and a note saying why, and every client reads it
 before promising anything. Windows with a working FFI surface reports `events`;
 Windows where that surface failed to load reports `poll` with the error in the
-note. Off Windows, `resources.killTree` kills registered direct children only.
+note. Off Windows, each registered child is spawned detached, so it leads a
+process group of its own that whatever it starts joins. `resources.killTree`
+sends SIGTERM to each child's group, then SIGKILL two seconds later, which the
+group still gets after its leader exited: a tool that ignored SIGTERM goes too,
+and project removal no longer times out on it. The group is probed every 100 ms
+meanwhile, and a group found empty gets no SIGKILL: once its last member is gone
+its id is free, and a new session leader could hold it two seconds later. A
+normal quit, and a hang-up of the terminal the core was started from, wait for
+those SIGKILLs before the core exits. A tool that leaves the group with
+its own `setsid` escapes, and the trace still lists only the direct children.
 The focus guard and audio mute do not exist there. A hard kill of the shell
 does not guarantee that its core exits on Linux or macOS.

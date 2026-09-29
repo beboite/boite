@@ -11,7 +11,7 @@ try {
   journal.db.transaction(() => {
     for (let index = 0; index < 5000; index++) journal.putMessage({
       id: `bench-message-${index}`, threadId, turnId: 'bench-turn',
-      role: index % 2 === 0 ? 'user' : 'assistant', state: 'done', createdAt: index,
+      role: index % 2 === 0 ? 'user' : 'assistant', state: 'complete', createdAt: index,
       parts: [{ type: 'text', text: index === 0 ? 'Inspect the first exchange only' : 'history '.repeat(1000) }],
     });
   })();

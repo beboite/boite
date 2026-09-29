@@ -4,6 +4,7 @@
   import type { UsageHistory } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
   import {
     dayEdges,
     formatMetric,
@@ -19,6 +20,7 @@
     type UsageRange,
     type UsageTotals
   } from '../lib/usage';
+  import InfoTip from './InfoTip.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageChart from './UsageChart.svelte';
 
@@ -95,8 +97,9 @@
     return totals.priced === 0 ? strings.usage.noPrice : formatMetric('cost', totals.usage.costUsdEquivalent ?? 0);
   }
 
-  const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-  const percent = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 0 });
+  // In the language the app speaks, not the system's.
+  const dayName = $derived(new Intl.DateTimeFormat(formatLocale(), { weekday: 'short', day: 'numeric', month: 'short' }));
+  const percent = $derived(new Intl.NumberFormat(formatLocale(), { style: 'percent', maximumFractionDigits: 0 }));
 </script>
 
 {#snippet numbers(totals: UsageTotals)}
@@ -122,8 +125,7 @@
 
 <div class="page usage" data-testid="usage-page">
   <header>
-    <div><h1>{strings.usage.heading}</h1>
-      <p>{strings.usage.intro} {strings.usage.note}</p></div>
+    <div><h1>{strings.usage.heading}<InfoTip topic={strings.usage.heading} text={`${strings.usage.intro} ${strings.usage.note}`} /></h1></div>
   </header>
 
   <div class="filters">

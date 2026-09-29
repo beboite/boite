@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { currentOs, homePath } from '../paths.ts';
+import { which } from './which.ts';
 
 /**
  * A CLI published on npm, found where a global install really put it. npm
@@ -49,7 +50,7 @@ export function globalRoots(binHint: string | null): string[] {
   // The shims sit in the prefix itself on Windows and in `<prefix>/bin` elsewhere.
   for (const name of [binHint, 'npm', 'node']) {
     if (name === null) continue;
-    const found = Bun.which(name);
+    const found = which(name);
     if (found === null) continue;
     const dir = dirname(windows ? found : realpathOr(found));
     add(windows ? join(dir, 'node_modules') : join(dir, '..', 'lib', 'node_modules'));
@@ -109,7 +110,7 @@ export function scriptRuntime(root: string): string | null {
   const exe = windows ? 'node.exe' : 'node';
   const beside = windows ? join(root, '..', exe) : join(root, '..', '..', 'bin', exe);
   if (existsSync(beside)) return resolve(beside);
-  const onPath = Bun.which('node');
+  const onPath = which('node');
   if (onPath !== null) return onPath;
   if (windows) {
     const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
@@ -118,7 +119,7 @@ export function scriptRuntime(root: string): string | null {
   } else {
     for (const path of ['/usr/local/bin/node', '/opt/homebrew/bin/node', '/usr/bin/node']) if (existsSync(path)) return path;
   }
-  return Bun.which('bun');
+  return which('bun');
 }
 
 /** The command an `npm` candidate resolves to, or null when the package or a runtime for it is missing. */

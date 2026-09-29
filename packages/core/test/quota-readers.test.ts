@@ -9,9 +9,23 @@ let directory = '';
 let restore: (() => void) | undefined;
 afterEach(async () => { restore?.(); restore = undefined; if (directory) await rm(directory, { recursive: true, force: true }); directory = ''; delete process.env.BOITE_DATA_DIR; });
 
-test('Grok unknown credits never turn into a zero; known zero and period survive', () => {
-  expect(grokQuotaWindows({ config: { currentPeriod: { end: '2026-10-01T00:00:00Z' } } })).toEqual([]);
+test('Grok omitted proto3 zero is known only with a valid credits period', () => {
+  expect(grokQuotaWindows({ config: { currentPeriod: { end: '2026-10-01T00:00:00Z' } } })).toEqual([{ id: 'credits', label: 'Credits', usedPercent: 0, resetsAt: Date.parse('2026-10-01T00:00:00Z') }]);
   expect(grokQuotaWindows({ config: { creditUsagePercent: 0, currentPeriod: { end: '2026-10-01T00:00:00Z' } } })).toEqual([{ id: 'credits', label: 'Credits', usedPercent: 0, resetsAt: Date.parse('2026-10-01T00:00:00Z') }]);
+  for (const config of [{}, { currentPeriod: {} }, { currentPeriod: { end: 'invalid' } }, { creditUsagePercent: '25' }, { creditUsagePercent: null, currentPeriod: { end: '2026-10-01T00:00:00Z' } }]) {
+    expect(grokQuotaWindows({ config })).toEqual([]);
+  }
+  expect(grokQuotaWindows({ config: null })).toEqual([]);
+});
+
+test('Grok reads legacy credit amounts and prefers the reported percentage', () => {
+  const config = { monthlyLimit: { val: 2000 }, used: { val: 500 }, billingPeriodEnd: '2026-10-01T00:00:00Z' };
+  expect(grokQuotaWindows({ config })[0]?.usedPercent).toBe(25);
+  expect(grokQuotaWindows({ config: { ...config, currentPeriod: { end: config.billingPeriodEnd } } })[0]?.usedPercent).toBe(25);
+  expect(grokQuotaWindows({ config: { ...config, used: {} } })[0]?.usedPercent).toBe(0);
+  expect(grokQuotaWindows({ config: { ...config, creditUsagePercent: 40 } })[0]?.usedPercent).toBe(40);
+  expect(grokQuotaWindows({ config: { ...config, monthlyLimit: {} } })).toEqual([]);
+  expect(grokQuotaWindows({ config: { ...config, used: null } })).toEqual([]);
 });
 test('OpenCode Go percentages below one stay percentages and relative resets use the reading time', () => {
   const now = 1900000000000;

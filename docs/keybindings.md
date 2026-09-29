@@ -69,8 +69,8 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | Id | Default | What it does |
 |---|---|---|
 | `new-thread` | `mod+n` | A draft in the open project |
-| `palette` | `mod+k` | The command palette |
-| `sidebar` | `mod+b` | Fold or unfold the sidebar |
+| `palette` | `mod+k` | The command palette, also the command button at the foot of the sidebar |
+| `sidebar` | `mod+s` | Fold or unfold the thread sidebar |
 | `panel` | `mod+alt+b` | The right panel, on an open thread |
 | `browser` | `mod+shift+j` | The browser surface, in the shell |
 | `changes` | `mod+shift+c` | The changes surface, the working tree of the thread |
@@ -79,7 +79,7 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `terminal` | `mod+j` | The thread's shell under the chat ([terminal.md](terminal.md)) |
 | `close-surface` | `mod+w` | The active surface of the panel, never the window |
 | `settings` | `mod+,` | Settings |
-| `stash` | `mod+s` | Put the composer text aside, or take it back |
+| `stash` | `mod+shift+s` | Put the composer text aside, or take it back |
 | `send-and-draft` | `mod+enter` | Send, then a fresh draft on the same choice |
 | `add-project` | none | The folder dialog in the shell, General in a browser |
 | `pin` | none | Pin or unpin the open thread |
@@ -92,8 +92,24 @@ A chord is modifiers, then one key, joined with `+`, case and spaces ignored.
 | `pair` | none | General, where a phone pairs |
 | `theme-dark`, `theme-light`, `theme-system` | none | The theme |
 | `archive` | none | Archive the open thread |
+| `reopen-thread` | `mod+shift+t` | Restore the thread archived last and open it: those archived in this window first, newest first, then the machine's most recent one |
+| `copy-answer` | `mod+alt+c` | Copy the open thread's last answer |
+| `find` | `mod+f` | Search the open thread; Enter and Shift+Enter walk the matches, Escape closes |
+| `thread-1` to `thread-9` | `alt+1` to `alt+9` | Open the thread in that row of the sidebar, counted from the top of what it shows |
+
+A digit chord matches the physical key too, so `alt+3` fires on a layout
+where the top row types another character without Shift. In a plain browser
+tab, the browser keeps `Ctrl+Shift+T` for itself; the shell and the palette
+always reach it.
+
+While a writable file editor has focus, `mod+s` saves its file. Elsewhere it toggles
+the thread sidebar and keeps the browser's save dialog closed. The panel button's
+tooltip shows its current chord, including any custom binding.
 
 `Ctrl+Q` in the shell, the quit hold, is not in the table and cannot move.
+Neither can the shell's zoom, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` (`+` and `-` of
+the keypad and of any layout included), which follow the browser's own keys
+([development.md](development.md#faces-and-zoom)).
 
 ## What is refused
 

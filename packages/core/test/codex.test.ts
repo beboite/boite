@@ -5,11 +5,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
+/** The fixture's environment switches a test may set; every one is cleared after it. */
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS'];
 
 test('coordination steers the current Codex turn without creating a user turn', async () => {
   const client = await startCore();
@@ -32,6 +35,7 @@ afterEach(async () => {
   const open = harness;
   harness = null;
   delete process.env['CODEX_FAKE_LOG'];
+  for (const name of FAKE_SWITCHES) delete process.env[name];
   if (open !== null) await open.stop();
 });
 
@@ -134,8 +138,18 @@ async function codexThread(client: CoreClient, permissionMode?: PermissionMode, 
     ...(effort === undefined ? {} : { effort }),
     ...(permissionMode === undefined ? {} : { permissionMode }),
   });
+  await keepTitle(client, thread.id);
   await client.call('threads.subscribe', { threadId: thread.id });
   return thread.id;
+}
+
+/**
+ * A title the user typed: no title call follows the first turn, so the
+ * app-servers, `initialize` and `thread/start` lines a test counts are the turns' own.
+ */
+async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
+  const thread = await client.call('threads.get', { threadId });
+  await client.call('threads.update', { threadId, title: thread.title });
 }
 
 describe('codex driver', () => {
@@ -386,6 +400,107 @@ describe('codex driver', () => {
     };
   }
 
+  /** Starts a turn on `prompt`, answers its one permission card, and returns what the agent said. */
+  async function answerCard(
+    client: CoreClient,
+    threadId: string,
+    prompt: string,
+    decision: 'allow' | 'deny',
+  ): Promise<{ request: RpcEvents['permission.requested']; text: string; permission: MessagePart | undefined }> {
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt });
+    const request = await requested;
+    await client.call('permissions.answer', { requestId: request.id, decision });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    const text = parts.find((part) => part.type === 'text');
+    return { request, text: text?.type === 'text' ? text.text : '', permission: parts.find((part) => part.type === 'permission') };
+  }
+
+  test('an MCP tool approval elicited by a server is a permission card, answered accept or decline', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+
+    const allowed = await answerCard(client, threadId, '[elicit]', 'allow');
+    expect(allowed.request.toolName).toBe('mcp:fake-mcp');
+    expect(allowed.request.input).toMatchObject({ message: 'Allow the fake tool to run?', tool_title: 'Fake tool', tool_params: { path: 'a.txt' } });
+    expect(allowed.text).toBe('elicit accept');
+    expect(allowed.permission).toMatchObject({ type: 'permission', toolName: 'mcp:fake-mcp', decision: 'allow' });
+
+    const denied = await answerCard(client, threadId, '[elicit]', 'deny');
+    expect(denied.text).toBe('elicit decline');
+    expect(denied.permission).toMatchObject({ type: 'permission', toolName: 'mcp:fake-mcp', decision: 'deny' });
+    expect(fakeLog()).toContain('elicit {"action":"accept","content":{}}');
+    expect(fakeLog()).toContain('elicit {"action":"decline"}');
+  });
+
+  test('a stop during a pending elicitation cancels it', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const requested = client.next('permission.requested', (request) => request.threadId === threadId, 20000);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[elicit][slow]' });
+    await requested;
+    await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('stopped');
+    await waitFor(() => fakeLog().includes('elicit {"action":"cancel"}'), 3000);
+  });
+
+  test('an elicitation boite cannot show is declined without a card', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    let cards = 0;
+    client.on('permission.requested', (request) => {
+      if (request.threadId === threadId) cards += 1;
+    });
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[elicit-url]' });
+    const done = await finished;
+    expect(done.status).toBe('done');
+    expect(cards).toBe(0);
+    expect(fakeLog()).toContain('elicit-url {"action":"decline"}');
+  });
+
+  test('a permissions request is a card, granted for the turn or refused', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+
+    const allowed = await answerCard(client, threadId, '[permissions]', 'allow');
+    expect(allowed.request.input).toMatchObject({ permissions: { network: { enabled: true } } });
+    expect(allowed.request.description).toBe('the fake wants the network');
+    expect(allowed.text).toBe('permissions granted');
+
+    const denied = await answerCard(client, threadId, '[permissions]', 'deny');
+    expect(denied.text).toBe('permissions refused');
+    expect(fakeLog()).toContain('permissions {"permissions":{"network":{"enabled":true},"fileSystem":null},"scope":"turn"}');
+    expect(fakeLog()).toContain('permissions {"permissions":{}}');
+  });
+
+  test('currentTime/read is answered in whole Unix seconds', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[time]' });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([{ type: 'text', text: 'time ok' }]);
+  });
+
+  test('reasoning summary sections are kept apart, the deltas of one section are not', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[summary][thought]the answer' });
+    expect((await finished).status).toBe('done');
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages[1]?.parts).toEqual([
+      { type: 'thinking', text: 'thinking about it\n\n**Reading** the file\n\n**Editing** it' },
+      { type: 'text', text: 'the answer' },
+    ]);
+  });
+
   test('context reported after completion is retained, including a missing total', async () => {
     const client = await startCore({warmProcessMinutes: 1});
     const threadId = await codexThread(client);
@@ -436,6 +551,8 @@ describe('codex driver', () => {
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
     await client.call('turns.start', { threadId, prompt: '[slow]' });
     await started;
+    // A turn under way: a stop during the start sends no prompt at all (below).
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
 
     expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
     expect((await finished).status).toBe('stopped');
@@ -446,6 +563,51 @@ describe('codex driver', () => {
     const trace = await client.call('trace.get', { threadId });
     expect(trace).toHaveLength(1);
     expect(trace[0]?.exitedAt).not.toBeNull();
+  });
+
+  test('a stop the agent never acts on ends the turn stopped after the grace, and the thread goes on', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_DEAF'] = '1';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: '[slow]' });
+    await waitFor(() => fakeLog().includes('waiting for interrupt'));
+    const stoppedAt = Date.now();
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    // The grace, then the process: never the whole scheduler drain.
+    expect(Date.now() - stoppedAt).toBeLessThan(4500);
+    expect(fakeLog()).toContain('turn/interrupt codex-fake-turn-1');
+    await waitFor(() => harness?.core.procs.liveCount(threadId) === 0);
+    expect((await client.call('threads.get', { threadId })).status).toBe('idle');
+
+    delete process.env['CODEX_FAKE_DEAF'];
+    await runTurn(client, threadId, 'still here');
+  });
+
+  test('a stop that lands while the thread opens sends no prompt', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_SLOW_START'] = '800';
+
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    if (process.platform === 'win32') {
+      expect(memoryLimitOfJob(threadId)?.priority).toBe(0x20);
+      expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    }
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    expect(fakeLog()).not.toContain('turn/start');
+    if (process.platform === 'win32') expect(memoryLimitOfJob(threadId)?.priority).toBe(0x4000);
+    // The thread the agent opened is kept for the next turn.
+    expect((await client.call('threads.get', { threadId })).sessionId).not.toBeNull();
   });
 
   test('a server that dies fails the turn with its exit code and stderr, and the next turn works', async () => {
@@ -511,9 +673,11 @@ describe('codex driver', () => {
     await runTurn(warmClient, warmThread, 'first');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     await runTurn(warmClient, warmThread, 'second');
     expect(warm.started).toHaveLength(1);
     expect(warm.exited).toHaveLength(0);
+    if (process.platform === 'win32') expect(memoryLimitOfJob(warmThread)?.priority).toBe(0x4000);
     // One process, so one `initialize` and one `thread/start` for the two turns.
     expect(countLines('initialize')).toBe(1);
     await stopCore();
@@ -540,6 +704,7 @@ describe('codex driver', () => {
       model: 'fake-codex',
       effort: 'low',
     });
+    await keepTitle(client, thread.id);
     await client.call('threads.subscribe', { threadId: thread.id });
     const counted = countProcesses(client, thread.id);
 
@@ -570,6 +735,91 @@ describe('codex driver', () => {
     await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
     expect(countLines('initialize')).toBe(2);
     expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+  });
+
+  test('a moved thread resumes its codex session in the new folder, told where it went', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, 'first');
+    const sessionId = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(sessionId).not.toBe('');
+
+    const path = join(harness!.dataDir, 'elsewhere');
+    mkdirSync(path, { recursive: true });
+    const target = await client.call('projects.add', { path, name: 'elsewhere' });
+    const moved = await client.call('threads.move', { threadId, projectId: target.id });
+    expect(moved).toMatchObject({ cwd: path, sessionId });
+
+    await runTurn(client, threadId, 'second');
+    // The warm process was started in the old folder: a new one resumes the same thread with the new cwd.
+    await waitFor(() => fakeLog().includes(`thread/resume ${sessionId} `));
+    expect(fakeLog()).toContain(`cwd=${path}`);
+    expect(countLines('initialize')).toBe(2);
+    expect((await client.call('threads.get', { threadId })).sessionId).toBe(sessionId);
+    const prompt = harness!.core.threads.get(threadId).messages.filter((message) => message.role === 'user').at(-1)?.parts[0];
+    expect(prompt?.type === 'text' ? prompt.moved?.to.cwd : null).toBe(path);
+  });
+
+  test('a thread whose rollout is gone starts over with the history instead of failing for good', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+
+    await runTurn(client, threadId, 'remember the word pelican');
+    const lost = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(lost).not.toBe('');
+
+    process.env['CODEX_FAKE_LOST'] = '1';
+    await runTurn(client, threadId, 'which word?');
+    expect(fakeLog()).toContain(`thread/resume ${lost} `);
+    // Resume refused, then one fresh start in the same turn.
+    expect(countLines('initialize')).toBe(3);
+    expect(fakeLog().split('\n').filter((line) => line.startsWith('thread/start'))).toHaveLength(2);
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.sessionId).not.toBe(lost);
+    expect(thread.sessionId).not.toBeNull();
+    expect(thread.sessionGeneration).toBe(1);
+    const parts = thread.messages.flatMap((message) => message.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(false);
+    // The fake echoes its prompt: the fresh thread was told what the lost one knew.
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
+  });
+
+  test('a stop that lands while a lost thread resumes ends the turn stopped and starts nothing fresh', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+    await runTurn(client, threadId, 'remember the word pelican');
+    const lost = (await client.call('threads.get', { threadId })).sessionId ?? '';
+    expect(lost).not.toBe('');
+
+    process.env['CODEX_FAKE_LOST'] = '1';
+    process.env['CODEX_FAKE_SLOW_START'] = '800';
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 15000);
+    await client.call('turns.start', { threadId, prompt: 'expensive prompt' });
+    await waitFor(() => fakeLog().includes(`thread/resume ${lost} `));
+    expect(await client.call('turns.stop', { threadId })).toEqual({ stopped: true });
+    const done = await finished;
+    expect(done.status).toBe('stopped');
+    expect(done.error).toBeNull();
+    // The resume was refused and nothing followed it: no fresh process, thread or prompt.
+    const log = fakeLog();
+    const afterResume = log.slice(log.indexOf('thread/resume'));
+    expect(afterResume).not.toContain('initialize');
+    expect(afterResume).not.toContain('thread/start');
+    expect(afterResume).not.toContain('turn/start');
+    const stopped = await client.call('threads.get', { threadId });
+    expect(stopped.messages.flatMap((message) => message.parts).some((part) => part.type === 'error')).toBe(false);
+    // The lost id goes all the same: the next prompt opens a fresh thread with the history.
+    expect(stopped.sessionId).toBeNull();
+    expect(stopped.sessionGeneration).toBe(1);
+
+    delete process.env['CODEX_FAKE_SLOW_START'];
+    await runTurn(client, threadId, 'which word?');
+    expect(countLines('initialize')).toBe(3);
+    const thread = await client.call('threads.get', { threadId });
+    const answer = thread.messages.at(-1)?.parts.find((part) => part.type === 'text');
+    expect(answer?.type === 'text' ? answer.text : '').toContain('remember the word pelican');
   });
 
   test('the permission mode becomes the approval policy and the sandbox codex takes', async () => {
@@ -690,6 +940,33 @@ describe('codex driver', () => {
     expect(fakeLog()).not.toContain('model=default');
   });
 
+  test('the first turn is titled on an ephemeral read-only thread, on the small model at low effort', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    const thread = await client.call('threads.create', {
+      projectId,
+      providerId: 'codex-fake',
+      accountId,
+      title: 'remember the word pelican',
+      model: 'fake-codex',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const titled = client.next(
+      'thread.updated',
+      (summary) => summary.id === thread.id && summary.titleSource === 'agent',
+      20000,
+    );
+    await runTurn(client, thread.id, 'remember the word pelican');
+
+    // The core's one cleaning rule: quotes and the closing period go.
+    expect((await titled).title).toBe('Pelican notes');
+    // No small model was listed by a probe, so the first of Codex's picks goes out.
+    expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna ephemeral');
+    expect(fakeLog()).toContain('turn/start model=gpt-6-luna effort=low');
+    // Its app-server is gone with the answer, traced under the thread.
+    await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
+  });
+
   /** How many lines of the fake log are exactly this one. */
   function countLines(line: string): number {
     return fakeLog()
@@ -719,4 +996,36 @@ describe('codex driver', () => {
     expect(done.error).toBeNull();
     expect(done.status).toBe('done');
   }
+});
+
+describe('codex hooks', () => {
+  test('a prompt a hook refused shows why in the thread, and a hook Codex skips is reported once', async () => {
+    process.env['CODEX_FAKE_HOOKS'] = '1';
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: '[hook-block]' });
+    expect((await finished).status).toBe('done');
+    await waitFor(() => fakeLog().includes('hooks/list'));
+
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.at(-1)?.parts).toEqual([
+      { type: 'hook', event: 'userPromptSubmit', outcome: 'blocked', message: 'blocked by test hook' },
+    ]);
+    await waitFor(() => harness!.core.hooks.status().recent.length === 2);
+    const status = await client.call('hooks.status', {});
+    expect(status.providers.find((provider) => provider.providerId === 'codex-fake'))
+      .toMatchObject({ runs: 1, blocked: 1, failed: 0, skipped: 1 });
+    expect(status.recent.map((run) => [run.event, run.outcome])).toEqual(
+      expect.arrayContaining([['userPromptSubmit', 'blocked'], ['preToolUse', 'skipped']]),
+    );
+    expect(status.recent.find((run) => run.outcome === 'skipped')?.message).toContain('not reviewed yet');
+
+    // No warm process in tests: the next turn starts a second one, which asks again and adds nothing.
+    const again = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    expect((await again).status).toBe('done');
+    await waitFor(() => fakeLog().split('hooks/list').length === 3);
+    expect((await client.call('hooks.status', {})).recent).toHaveLength(2);
+  });
 });

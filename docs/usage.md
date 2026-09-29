@@ -30,6 +30,14 @@ itself.
 - The tab reads the quotas itself and follows `quotas.updated`, so opening it
   costs one call and no history. Its own refresh button asks the providers
   again.
+- Providers refresh independently, with up to two accounts per provider in
+  flight. Each `quotas.progress` event carries the request ID and one account's
+  result; the final response retains the account order. Both events and calls
+  remain owner-only.
+- In the tray and the limits tab, existing bars lose saturation while their
+  account is pending. Each answer updates its bars and restores their colour
+  with a transition. A slow provider does not hold up the others. Cache and
+  failure backoff still apply to refreshes.
 
 Provider colours come from `--series-1` to `--series-8` in `app.css`, with a
 light and a dark set. The order is fixed (Claude, Codex, OpenCode, Grok,
@@ -86,6 +94,18 @@ Claude's `total_cost_usd` is a running total: it grows across the turns of a
 warm process, and a process that resumes a session restores it. The driver
 charges each turn the difference, reading the earlier turns of the session from
 the journal, and takes the total as it stands when the CLI started from zero.
+The ACP `usage_update` cost is the session's running total in the same way,
+and each turn is charged what it added. The driver measures from the last
+total the same process reported, in an earlier turn, between turns or while a
+`session/load` replayed the history; a session the process created starts at
+zero. A process that loaded the session and has reported nothing yet starts
+from the session's earlier turns in the journal, because the protocol defines
+the cost as the session's and OpenCode sums it from the session's stored
+messages. When such a first total comes in below that sum, the turn is charged
+the total, and the driver takes that agent to count every process from zero:
+its later cold turns are charged their whole total until the core restarts or
+the provider is reloaded. A `usage_update` with no token counts still records
+its cost.
 On a subscription the figure is what the same tokens would cost on the API, not
 money spent.
 

@@ -2,8 +2,11 @@
   import { ArrowUp, Brain, Check, ChevronRight, FileText, Folder, GitBranch, Puzzle, RefreshCw, Sparkles } from '@lucide/svelte';
   import { RpcErrorCode, type BrainConfig, type BrainStatus, type RpcResult } from '@boite/contracts';
   import { RpcFailure } from '../lib/client';
+  import HooksCard from './HooksCard.svelte';
+  import InfoTip from './InfoTip.svelte';
   import type { Store } from '../lib/store.svelte';
   import { strings } from '../lib/strings';
+  import { formatLocale } from '../lib/i18n.svelte';
 
   let { store }: { store: Store } = $props();
   let status = $state.raw<BrainStatus | null>(null);
@@ -35,19 +38,20 @@
     return () => { ++revision; };
   });
 
-  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global', policy?: BrainConfig['autoPull']) {
+  async function run(action: 'save' | 'refresh' | 'sync' | 'disconnect' | 'toggle' | 'auto' | 'global' | 'guide', policy?: BrainConfig['autoPull']) {
     const client = store.client;
     if (!client || busy) return;
     const current = revision;
     busy = true; error = '';
     try {
-      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global'
+      const next = action === 'save' || action === 'disconnect' || action === 'toggle' || action === 'auto' || action === 'global' || action === 'guide'
         ? await client.call('brain.configure', {
           ...status?.config,
           path: action === 'disconnect' ? null : action === 'save' ? path.trim() : status!.config.path,
           enabled: action === 'disconnect' ? false : action === 'toggle' ? !status!.config.enabled : status?.config.path ? status.config.enabled : true,
           ...(policy ? { autoPull: policy } : {}),
           ...(action === 'global' ? { globalInstructions: !status!.config.globalInstructions } : {}),
+          ...(action === 'guide' ? { boiteGuide: status!.config.boiteGuide === false } : {}),
         })
         : action === 'sync' ? await client.call('brain.sync', {}) : await client.call('brain.status', {});
       if (current !== revision) return;
@@ -57,6 +61,26 @@
       }
     } catch (cause) { if (current === revision) error = failure(cause); }
     finally { if (current === revision) busy = false; }
+  }
+
+  /**
+   * The system's own folder dialog when this window sits on the machine that
+   * holds the brain. A browser, a phone or a remote machine cannot reach that
+   * disk through it, so they walk the folders the core lists instead.
+   */
+  async function choose() {
+    if (!store.pickerAvailable) return browse(path || undefined);
+    // The dialog stays open as long as the user likes: a folder picked for a
+    // core this page no longer shows must not be saved to the one it shows now.
+    const current = revision;
+    const client = store.client;
+    const stale = () => current !== revision || client !== store.client;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({ directory: true, multiple: false, defaultPath: path.trim() || undefined });
+      if (stale()) return;
+      if (typeof picked === 'string' && picked.length > 0) path = picked;
+    } catch (cause) { if (!stale()) error = failure(cause); }
   }
 
   async function browse(target?: string) {
@@ -73,7 +97,7 @@
 </script>
 
 <div class="page" data-testid="brain-page" aria-busy={busy}>
-  <header><div><h1>{t.heading}</h1><p>{t.description}</p></div></header>
+  <header><div><h1>{t.heading}<InfoTip topic={t.heading} text={t.description} /></h1></div></header>
   {#if error}<p class="error" role="alert" data-testid="brain-error">{error}</p>{/if}
   {#if status && !status.config.path}
     {#each status.links ?? [] as link (link.path)}
@@ -81,7 +105,7 @@
     {/each}
   {/if}
   {#if status?.config.path}
-    <section class="brain-connection" data-testid="brain-sync-card">
+    <section class="brain-connection" id="settings-brain-folder" data-testid="brain-sync-card">
       <div class="connection-top">
         <div class="folder-mark"><Brain size={24} strokeWidth={1.5} /></div>
         <div class="folder-info"><h2>{folderName}</h2><code>{status.config.path}</code></div>
@@ -92,7 +116,7 @@
         {:else if !status.git}<span>{t.noGit}</span>
         {:else if !status.git.upstream}<span>{t.noUpstream}</span>
         {:else if status.git.ahead || status.git.behind}<span>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</span>
-        {:else}<Check size={14} /><span>{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString()}` : t.never}</span>{/if}
+        {:else}<Check size={14} /><span>{status.lastSync ? `${t.lastSync} ${new Date(status.lastSync).toLocaleString(formatLocale())}` : t.never}</span>{/if}
       </div>
       <div class="connection-bottom">
         <label class="sharing"><input type="checkbox" role="switch" checked={status.config.enabled} onchange={event => { event.currentTarget.checked = status!.config.enabled; void run('toggle'); }} disabled={busy} data-testid="brain-enabled" /><span>{t.enabled}</span></label>
@@ -110,6 +134,10 @@
           </details>
         {/if}
       </div>
+      <div class="boite-guide">
+        <label class="sharing"><input type="checkbox" role="switch" checked={status.config.boiteGuide !== false} disabled={busy || !status.config.enabled} data-testid="brain-guide" onchange={event => { event.currentTarget.checked = status!.config.boiteGuide !== false; void run('guide'); }} /><span>{t.boiteGuide}</span></label>
+        <p>{t.boiteGuideHint}</p>
+      </div>
       {#if status.git?.upstream || status.config.autoPull}
         <div class="automation">
           <h3>{t.autoPull}</h3>
@@ -125,10 +153,10 @@
     </section>
   {/if}
   {#if status && (!status.config.path || editing)}
-    <form class="folder-form" onsubmit={event => { event.preventDefault(); void run('save'); }}>
+    <form class="folder-form" id={status.config.path ? undefined : 'settings-brain-folder'} onsubmit={event => { event.preventDefault(); void run('save'); }}>
       {#if !status.config.path}<Brain size={32} strokeWidth={1.5} /><h2>{t.empty}</h2><p>{t.emptyHint}</p>{/if}
       <label for="brain-path">{t.folder}</label>
-      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} onclick={() => void browse(path || undefined)}><Folder size={15} />{t.browse}</button></div>
+      <div class="path-row"><input id="brain-path" data-testid="brain-path" bind:value={path} placeholder={t.pathHint} disabled={busy} /><button type="button" disabled={busy} data-testid="brain-browse" onclick={() => void choose()}><Folder size={15} />{t.browse}</button></div>
       {#if folders}
         <div class="folders" data-testid="brain-folders">
           <code>{folders.path}</code>
@@ -163,16 +191,19 @@
     </section>
     {#if status.git}<details class="git-details"><summary><GitBranch size={14} />{t.details}</summary><div><code>{status.git.branch}{#if status.git.upstream} → {status.git.upstream}{/if}</code><p>{t.counts.replace('{ahead}', String(status.git.ahead)).replace('{behind}', String(status.git.behind))}</p></div></details>{/if}
   {/if}
+  <!-- The agents' own hooks are theirs, not the brain folder's: the card shows with or without one. -->
+  <HooksCard {store} />
 </div>
 
 <style>
-  .page { width: 100%; padding: 24px; }
+  /* The padding is the settings page's own (app.css), so the title lines up with every other tab. */
+  .page { width: 100%; }
   .page > :is(section, form, details, .error) { max-width: var(--settings-width); }
   h1 { margin: 0; font-size: var(--text-lg); }
   h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
   header { margin-bottom: 28px; }
   p { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  header p { margin-top: 6px; }
+  #settings-brain-folder { scroll-margin-top: 24px; }
   .brain-connection { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; }
   .connection-top { display: flex; align-items: center; gap: 14px; padding: 24px 24px 0; }
   .folder-mark { width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--radius-md); background: var(--color-surface-2); flex: none; }
@@ -184,7 +215,8 @@
   .sync-state :global(svg) { flex: none; }
   .connection-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px 12px 24px; border-top: 1px solid var(--color-border); }
   .sharing { display: flex; align-items: center; gap: 10px; font-size: var(--text-sm); }
-  .global-instructions { padding: 16px 24px; border-top: 1px solid var(--color-border); }
+  .global-instructions, .boite-guide { padding: 16px 24px; border-top: 1px solid var(--color-border); }
+  .boite-guide p { margin: 8px 0 0; }
   .global-links { margin-top: 12px; font-size: var(--text-sm); }
   .global-links summary { display: flex; gap: 10px; align-items: center; cursor: pointer; color: var(--color-muted-foreground); }
   .global-links summary span { font-variant-numeric: tabular-nums; }
@@ -235,7 +267,7 @@
     .sync-state { padding: 12px 16px 20px; }
     .connection-bottom { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
     .automation { padding: 16px; }
-    .global-instructions { padding: 16px; }
+    .global-instructions, .boite-guide { padding: 16px; }
     .folder-form { padding: 20px 16px; }
     .path-row { flex-wrap: wrap; }
     .path-row input { flex-basis: 100%; }

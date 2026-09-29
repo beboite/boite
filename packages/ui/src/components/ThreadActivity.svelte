@@ -1,13 +1,53 @@
 <script lang="ts">
-  import { Check, ChevronDown, Circle, CircleCheck, CircleDot, ListTodo, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
+  import { Check, ChevronDown, ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDot, ListTodo, MessageCircleQuestionMark, Pause, Play, Repeat, Target, X } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
+  import { dockRoom, questionDock } from '../lib/question-dock.svelte';
+  import QuestionCard from './QuestionCard.svelte';
 
   let { store }: { store: Store } = $props();
   let activity = $derived(store.openThread?.activity);
   let expanded = $state(false);
   let saving = $state(false);
-  let visible = $derived(Boolean(activity?.goal && !activity.goal.dismissed || activity?.loop || activity?.tasks.length && !activity.tasksDismissed));
+
+  /*
+   * The questions an agent asked without stopping (`boite ask`) wait here, on
+   * top of the goal, the loop and the tasks, rather than in the timeline where
+   * a running turn would push them out of sight. Several stack behind a pager;
+   * each keeps what was picked or typed while another is on screen.
+   */
+  let asked = $derived(store.openThread ? store.pendingQuestions.filter((question) => question.async === true && question.threadId === store.openThread?.id) : []);
+  let shownId = $state<string | null>(null);
+  let shown = $derived(asked.find((question) => question.id === shownId) ?? asked[0]);
+  let at = $derived(shown ? asked.indexOf(shown) : 0);
+  let questionOpen = $state(true);
+  // A new question comes up open, even over one the user folded, and so does
+  // another thread's: the dock stays mounted while the open thread changes, and
+  // a count would miss a question that replaces another.
+  let seen = new Set<string>();
+  let seenThread: string | undefined;
+  $effect(() => {
+    const thread = store.openThread?.id;
+    const fresh = asked.filter((question) => !seen.has(question.id));
+    if (thread !== seenThread || fresh.length > 0) {
+      shownId = (fresh.at(-1) ?? asked.at(-1))?.id ?? null;
+      questionOpen = true;
+    }
+    seen = new Set(asked.map((question) => question.id));
+    seenThread = thread;
+  });
+  // The timeline's line for a docked question brings that one up.
+  $effect(() => {
+    if (questionDock.nonce === 0 || questionDock.focus === null) return;
+    shownId = questionDock.focus;
+    questionOpen = true;
+  });
+  function page(step: -1 | 1) {
+    const next = asked[(at + step + asked.length) % asked.length];
+    if (next) shownId = next.id;
+  }
+
+  let visible = $derived(Boolean(asked.length > 0 || activity?.goal && !activity.goal.dismissed || activity?.loop || activity?.tasks.length && !activity.tasksDismissed));
   // Keep completed content mounted during the fade out, without occupying chat space.
   let tasks = $derived(activity?.tasksDismissed && visible ? [] : activity?.tasks ?? []);
   let goal = $derived(activity?.goal?.dismissed && visible ? null : activity?.goal);
@@ -17,6 +57,37 @@
     (done === tasks.length ? strings.activity.allTasksDone : strings.activity.waitingTasks));
   let history = $derived([...(loop?.history ?? [])].reverse());
   const detailsId = $props.id();
+
+  // Questions reserve reading room; tasks only move the return button.
+  let height = $state(0);
+  $effect(() => {
+    dockRoom.height = visible && shown && questionOpen ? height : 0;
+    dockRoom.clearance = visible ? height : 0;
+  });
+  $effect(() => () => {
+    dockRoom.height = 0;
+    dockRoom.clearance = 0;
+  });
+  function measure(node: HTMLElement): { destroy(): void } | undefined {
+    // jsdom lays nothing out and ships no ResizeObserver: the margin stays fixed.
+    if (typeof ResizeObserver === 'undefined') return;
+    // Taken on the next frame: the margin it moves can bring the timeline's
+    // scrollbar and resize the messages another observer watches, which inside
+    // this callback is a ResizeObserver loop.
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => (height = node.offsetHeight));
+    });
+    observer.observe(node);
+    return {
+      destroy() {
+        observer.disconnect();
+        cancelAnimationFrame(frame);
+        height = 0;
+      }
+    };
+  }
 
   function interval(ms: number) {
     if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
@@ -42,8 +113,48 @@
   }
 </script>
 
-{#if activity}
-  <section class="activity" class:hidden={!visible} data-testid="thread-activity" aria-label={strings.activity.tasks} inert={!visible}>
+{#if activity || asked.length > 0}
+  <section class="activity" class:hidden={!visible} use:measure data-testid="thread-activity" aria-label={strings.activity.tasks} inert={!visible}>
+    {#if shown}
+      <div class="questions" data-testid="activity-questions" data-count={asked.length}>
+        <div class="activity-row question-row">
+          <MessageCircleQuestionMark size={16} />
+          <span class="kind">{strings.activity.question}</span>
+          <button type="button" class="ghost objective question-toggle" aria-expanded={questionOpen}
+            title={questionOpen ? strings.activity.questionFold : strings.activity.questionUnfold} data-testid="activity-question-toggle"
+            onclick={() => (questionOpen = !questionOpen)}>
+            <span class="question-line">{questionOpen ? strings.chat.questionAsyncHeading : shown.text}</span>
+            <ChevronDown size={16} class={questionOpen ? 'turned' : ''} />
+          </button>
+          {#if asked.length > 1}
+            <span class="pager">
+              <button type="button" class="ghost small icon" aria-label={strings.activity.questionPrev} title={strings.activity.questionPrev} data-testid="activity-question-prev" onclick={() => page(-1)}><ChevronLeft size={16} /></button>
+              <span class="meta" data-testid="activity-question-index">{fill(strings.activity.questionOf, { index: String(at + 1), total: String(asked.length) })}</span>
+              <button type="button" class="ghost small icon" aria-label={strings.activity.questionNext} title={strings.activity.questionNext} data-testid="activity-question-next" onclick={() => page(1)}><ChevronRight size={16} /></button>
+            </span>
+          {/if}
+        </div>
+        <div class="task-disclosure" class:open={questionOpen} inert={!questionOpen}>
+          <div class="task-clip">
+            {#each asked as question (question.id)}
+              <div hidden={question.id !== shown.id} data-testid="activity-question" data-question={question.id}>
+                <QuestionCard
+                  text={question.text}
+                  options={question.options}
+                  allowText={question.allowText}
+                  multiple={question.multiple}
+                  async
+                  docked
+                  answer={null}
+                  pending
+                  submit={(optionIds, text) => store.answerQuestion(question.threadId, question.id, optionIds, text)}
+                />
+              </div>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
     {#each ['goal', 'loop'] as kind (kind)}
       {@const entry = kind === 'goal' ? goal : loop}
       {#if entry}
@@ -117,11 +228,22 @@
   /* Four pixels of card around every line: the rows and the toggle carry their
      own inline padding, so a hover fill sits inset by the same four pixels on
      every side and the air above the first line equals the air under the last. */
-  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
+  /* The questions sit above the goal, the loop and the tasks, a hairline between. */
+  .questions + :is(.activity-row, .tasks-toggle) { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 4px; }
+  .question-row > :global(svg) { color: var(--color-live); }
+  .question-toggle { display: flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 6px; font-weight: 400; color: var(--color-foreground); justify-content: flex-start; }
+  .question-toggle > :global(svg) { flex: none; color: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
+  .question-toggle > :global(.turned) { transform: rotate(180deg); }
+  .question-line { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+  .pager { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .pager .meta { font-variant-numeric: tabular-nums; }
   .activity-row > :global(svg) { flex: none; color: var(--color-muted-foreground); }
   .activity-row button { flex: none; }
+  /* A folded question's text gives way to the pager, not the pager to it. */
+  .activity-row .question-toggle { flex: 1 1 auto; min-width: 0; }
   .kind { font-weight: 600; color: var(--color-accent); }
   .status { padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-surface-2); }
   .status.live { color: var(--color-accent); }

@@ -72,6 +72,21 @@ client as `boite.accent-hue` and colours reasoning, primary buttons, links and
 focus indicators. The file attachment button sits beside Send; keyboard help
 stays out of the chatbar.
 
+On Windows, Appearance also picks the window material from what the Windows
+build draws without lag: acrylic from build 22523, where DWM draws it as a
+system backdrop, mica from 22000, and solid always. Windows 10 offers solid
+alone, so the row is hidden there and the window opens opaque. A stored choice
+the build does not offer is shown and applied as solid. The shell refuses a
+material its build does not offer, because DWM accepts a value it cannot draw
+and the page would turn transparent over nothing.
+
+The shell sets every material, solid included, as one value of the DWM system
+backdrop and reads it back, so changes work in any order. It does not use
+Tauri's `set_effects`, whose clear (our solid) also sets the window's accent
+policy to disabled. That call is the only one the broken path made: a material
+picked after solid was stored by DWM, yet the window showed no backdrop and
+turned see-through.
+
 ## Context transfer
 
 The first prompt carries historical user and assistant text, tool outcomes and
@@ -92,6 +107,11 @@ A thread whose last context reading is over 200,000 tokens asks before it moves
 to another account: the receiving agent gets these excerpts, not what the old
 session held, and a compaction summary is not part of them. A model change
 inside one account keeps its session.
+
+Moving a thread to another project uses the same transfer on every driver but
+Codex, whose resume takes the new folder and keeps its session. The seeded
+prompt says the thread moved during the conversation and that the latest move
+note names the folder it works in now ([moving a thread](development.md#moving-a-thread)).
 
 Keeping the session does not keep the provider's prompt cache. Measured on
 2026-09-22 with a four-turn probe per provider: a model change on Claude sent

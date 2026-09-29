@@ -64,7 +64,7 @@ test('browser progress reaches the owner and owning agent, not other agents or d
   harness = await startTestCore(); const owner = await harness.connect();
   const { threadId, accountId } = await echoThread(harness, owner);
   const first = await owner.call('threads.get', { threadId });
-  const second = await owner.call('threads.create', { projectId: first.projectId, providerId: 'echo', accountId, title: 'second' });
+  const second = await owner.call('threads.create', { projectId: first.projectId!, providerId: 'echo', accountId, title: 'second' });
   const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
   const other = await connect(harness.url, harness.core.agents.tokenFor(second.id));
   const { grant } = await owner.call('pairing.grant', {});

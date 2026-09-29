@@ -1,7 +1,8 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { PROTOCOL_VERSION, RpcCloseCode, RpcErrorCode } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
-import { principalOf, type Identity } from '../sessions.ts';
+import { NONCE_MAX, NONCE_MIN, nonceProblem, principalOf, type Identity } from '../sessions.ts';
 import type { ServerConnection } from './connection.ts';
 
 export function hello(core: Core, connection: ServerConnection, id: number | string, method: string, rawParams: unknown): void {
@@ -15,7 +16,7 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
     return;
   }
   const params = rawParams as
-    | { token?: unknown; grant?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
+    | { token?: unknown; grant?: unknown; nonce?: unknown; protocolVersion?: unknown; client?: { name?: unknown; version?: unknown } }
     | undefined;
   const refuse = (message: string, reason: string): void => {
     connection.sendResponse({ jsonrpc: '2.0', id, error: { code: RpcErrorCode.Unauthorized, message } });
@@ -30,6 +31,22 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
 
   let session: ReturnType<typeof core.sessions.exchange> | undefined;
   let identity: Identity;
+  // Absent, a grant is strictly one-shot. Present, a nonce must be usable, or
+  // the client would believe a retry is safe when it is not.
+  if (params?.nonce !== undefined) {
+    const problem = grant === null && token !== null
+      ? 'nonce goes with a grant; a hello with a token takes none'
+      : nonceProblem(params.nonce);
+    if (problem !== null) {
+      connection.sendResponse({
+        jsonrpc: '2.0', id, error: {
+          code: RpcErrorCode.InvalidParams, message: problem, data: { field: 'nonce', min: NONCE_MIN, max: NONCE_MAX },
+        }
+      });
+      connection.close(RpcCloseCode.Unauthorized, 'bad nonce');
+      return;
+    }
+  }
   if (grant !== null && token === null) {
     // Check the protocol before consuming a one-shot grant.
     if (params?.protocolVersion !== PROTOCOL_VERSION) {
@@ -42,7 +59,8 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
       return;
     }
     try {
-      session = core.sessions.exchange(grant, client);
+      const nonce = typeof params?.nonce === 'string' ? params.nonce : null;
+      session = core.sessions.exchange(grant, client, Date.now(), nonce);
     } catch (error) {
       refuse(messageOf(error), 'bad grant');
       return;
@@ -81,9 +99,15 @@ export function hello(core: Core, connection: ServerConnection, id: number | str
   });
 }
 
+/** Equal without the time taken saying how much of the owner token matched. */
+function sameSecret(given: string, secret: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  return timingSafeEqual(digest(given), digest(secret));
+}
+
 /** Owner tokens, paired sessions and per-thread agent tokens share the hello frame. */
 function authenticateToken(core: Core, token: string): Identity | null {
-  if (token === core.token) return { principal: 'owner', sessionId: null, threadId: null };
+  if (sameSecret(token, core.token)) return { principal: 'owner', sessionId: null, threadId: null };
   if (token.length === 0) return null;
   const session = core.sessions.authenticate(token);
   if (session !== null) return { principal: principalOf(session.role), sessionId: session.id, threadId: null };

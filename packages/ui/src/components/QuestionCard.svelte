@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MessageCircleQuestionMark } from '@lucide/svelte';
+  import { ChevronRight, MessageCircleQuestionMark } from '@lucide/svelte';
   import type { QuestionAnswer, QuestionOption } from '@boite/contracts';
   import { strings } from '../lib/strings';
 
@@ -9,6 +9,7 @@
     allowText,
     multiple,
     async = false,
+    docked = false,
     answer,
     pending,
     submit
@@ -19,15 +20,21 @@
     multiple: boolean;
     /** Asked with `boite ask`: the agent did not stop for it and the answer reaches it later. */
     async?: boolean;
+    /** Drawn inside the dock above the composer, whose own row names it: no frame, no heading. */
+    docked?: boolean;
     answer: QuestionAnswer | null;
     /** False on a card whose turn ended before anyone answered: nothing to press. */
     pending: boolean;
-    submit: (optionIds: string[], text: string) => void;
+    /** False when the answer did not reach the core: the card is given back to answer again. */
+    submit: (optionIds: string[], text: string) => unknown;
   } = $props();
 
   let picked = $state<string[]>([]);
   let typed = $state('');
   let sent = $state(false);
+  let open = $state(false);
+  let built = $state(false);
+  $effect(() => { if (open) built = true; });
 
   const ready = $derived(picked.length > 0 || typed.trim().length > 0);
 
@@ -39,10 +46,10 @@
     picked = picked[0] === id ? [] : [id];
   }
 
-  function send(): void {
+  async function send(): Promise<void> {
     if (!ready || sent) return;
     sent = true;
-    submit(picked, typed.trim());
+    if ((await submit(picked, typed.trim())) === false) sent = false;
   }
 
   /** What the folded card says: the labels picked, then whatever was typed. */
@@ -58,26 +65,41 @@
   class="question"
   class:resolved={answer !== null}
   class:async
+  class:docked
   data-testid="question-card"
   data-async={async ? 'true' : undefined}
   data-state={answer !== null ? 'answered' : pending ? 'pending' : 'cancelled'}
 >
-  <div class="head">
-    <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
-    <span class="muted">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
-    {#if answer !== null}
+  {#if answer !== null}
+    <button type="button" class="ghost answered-row" data-testid="question-toggle" aria-expanded={open} onclick={() => (open = !open)}>
+      <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
       <span class="verdict" data-testid="question-verdict">{strings.chat.questionAnswered}</span>
-    {/if}
-  </div>
+      <span class="given" data-testid="question-answer" title={summary(answer)}>{summary(answer)}</span>
+      <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+    </button>
+    <div class="fold" class:open inert={!open}>
+      <div class="clip">
+        {#if built}
+          <div class="answer-detail">
+            <p class="prompt" data-testid="question-text">{text}</p>
+            <p>{summary(answer)}</p>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {:else}
+  {#if !docked}
+    <div class="head">
+      <span class="glyph"><MessageCircleQuestionMark size={15} strokeWidth={1.75} /></span>
+      <span class="muted">{async ? strings.chat.questionAsyncHeading : strings.chat.questionHeading}</span>
+    </div>
+  {/if}
 
   <p class="prompt" data-testid="question-text">{text}</p>
-  {#if async && answer === null && pending}
+  {#if async && answer === null && pending && !docked}
     <p class="muted description" data-testid="question-async-hint">{strings.chat.questionAsyncHint}</p>
   {/if}
 
-  {#if answer !== null}
-    <p class="given" data-testid="question-answer">{summary(answer)}</p>
-  {:else}
     {#if options.length > 0}
       <div class="options" role={multiple ? 'group' : 'radiogroup'}>
         {#each options as option (option.id)}
@@ -137,8 +159,7 @@
 
 <style>
   .question {
-    border: 1px solid var(--color-border);
-    border-left: 2px solid color-mix(in srgb, var(--color-live) 60%, var(--color-border));
+    border: 1px solid var(--color-edge);
     border-radius: var(--radius-md);
     background: var(--color-surface);
     box-shadow: var(--shadow-e1);
@@ -153,14 +174,23 @@
     border-left-style: dashed;
   }
 
-  /* Answered, it drops to a collapsed tool card's weight: the question and what went back. */
-  .question.resolved {
-    border-left-color: var(--color-border);
+  /* In the dock the dock is the frame. */
+  .question.docked {
+    border: none;
     background: transparent;
     box-shadow: none;
-    padding: 4px 10px;
-    gap: 2px;
+    padding: 2px 8px 8px 32px;
+  }
+
+  /* Resolved questions use the same inset and touch target as tool disclosures. */
+  .question.resolved {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    gap: 0;
     color: var(--color-muted-foreground);
+    min-width: 0;
   }
 
   .question.resolved .prompt {
@@ -185,12 +215,9 @@
   }
 
   .verdict {
-    margin-left: auto;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--color-success);
+    flex: none;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
   }
 
   .prompt {
@@ -201,7 +228,25 @@
   .given {
     margin: 0;
     font-size: var(--text-sm);
+    color: var(--color-foreground);
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
+
+  .answered-row { display: flex; align-items: center; justify-content: flex-start; gap: var(--activity-gap); width: 100%; height: auto; min-height: var(--control); padding: var(--activity-padding); border-radius: var(--radius-sm); font-weight: 400; text-align: left; }
+  .answered-row:hover:not(:disabled) { background: var(--color-surface-2); }
+  .answered-row:active:not(:disabled) { transform: none; }
+  .answered-row .glyph { flex: none; width: var(--activity-glyph); justify-content: center; }
+  .caret { display: inline-flex; flex: none; color: var(--color-subtle); transition: transform var(--dur-2) var(--ease-out-quint); }
+  .caret.open { transform: rotate(90deg); }
+  .fold { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--dur-3) var(--ease-out-quint), opacity var(--dur-3) var(--ease-out-quint); }
+  .fold.open { grid-template-rows: 1fr; opacity: 1; }
+  .clip { min-height: 0; overflow: hidden; }
+  .answer-detail { margin: 4px 0 8px calc(var(--activity-padding) + var(--activity-glyph) / 2); padding: 4px var(--activity-padding) 4px calc(var(--activity-glyph) / 2 + var(--activity-gap)); border-left: 1px solid var(--color-border); font-size: var(--text-sm); }
+  .answer-detail p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .answer-detail p + p { margin-top: 8px; color: var(--color-foreground); }
 
   .options {
     display: flex;

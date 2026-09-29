@@ -29,6 +29,9 @@ export const SLEEP_TOOL_NAME = 'Sleep';
 /** Nor for a patch: `fileChange` is the apply-patch item under another name. */
 export const FILE_CHANGE_TOOL_NAME = 'ApplyPatch';
 
+/** `item/permissions/requestApproval`: a wider sandbox for the rest of the turn. */
+export const PERMISSIONS_TOOL_NAME = 'Permissions';
+
 // ---------------------------------------------------------------------------
 // The slice of the generated protocol this driver speaks
 // ---------------------------------------------------------------------------
@@ -52,6 +55,26 @@ export interface CodexTurnRecord {
   id: string;
   status: CodexTurnStatus;
   error?: CodexTurnError | null;
+}
+
+/** `HookRunSummary`, what `hook/completed` carries (0.157.1), the fields read. */
+export interface CodexHookRun {
+  eventName: string;
+  sourcePath: string;
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'stopped';
+  entries?: { kind: 'warning' | 'stop' | 'feedback' | 'context' | 'error'; text: string }[];
+}
+
+/** `HooksListResponse`: every hook Codex found for each cwd, and whether it trusts it. */
+export interface CodexHooksListed {
+  data?: {
+    hooks?: {
+      eventName: string;
+      sourcePath: string;
+      enabled?: boolean;
+      trustStatus: 'managed' | 'untrusted' | 'trusted' | 'modified';
+    }[];
+  }[];
 }
 
 /** `TokenUsageBreakdown`. */

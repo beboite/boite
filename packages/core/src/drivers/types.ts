@@ -35,9 +35,11 @@ export interface EmitSink {
 
 /**
  * The decision, plus the id of the request that carries it, so a driver can
- * draw the permission card before the user has answered.
+ * draw the permission card before the user has answered. `withdraw` takes the
+ * card back when the agent stopped waiting for it: the core denies it, tells
+ * every client, and the ticket settles `deny`. Once answered, it does nothing.
  */
-export type PermissionTicket = Promise<'allow' | 'deny'> & { readonly requestId: RequestId };
+export type PermissionTicket = Promise<'allow' | 'deny'> & { readonly requestId: RequestId; withdraw(): void };
 
 /** What a driver hands the core to draw a question card. */
 export interface QuestionAsk {
@@ -68,7 +70,11 @@ export interface TurnContext {
   provider: ProviderDescriptor;
   turn: Turn;
   prompt: string;
-  /** An authenticated agent message at a safe tool boundary, never a user instruction. */
+  /**
+   * What reaches a running turn at a safe tool boundary: an authenticated agent
+   * message (never a user instruction), or the user's answers to asynchronous
+   * questions, for a driver with no steer.
+   */
   coordination?(): string | null;
   /**
    * The images sent with the prompt, already checked by the core (format,
@@ -77,6 +83,22 @@ export interface TurnContext {
    */
   attachments: ImageAttachment[];
   sessionId: string | null;
+  /**
+   * Resume `sessionId` only up to this entry of its transcript and fork the
+   * rest away (`ThreadSummary.sessionResumeAt`). Set only with a `sessionId`,
+   * and only for a driver that reports `TurnResult.checkpoint`; the others
+   * never see a thread in that state.
+   */
+  resumeAt?: string | null;
+  /**
+   * This turn's prompt and images as a fresh session needs them: the
+   * conversation so far carried in front of the request, the way the core
+   * writes the first turn of a new session generation. For a driver that finds
+   * out only once its agent is up that it cannot resume `sessionId`, and opens
+   * a new session instead. Built on demand; it throws what the core's own
+   * continuation throws (historical images for an agent that takes none).
+   */
+  continuation?(): { prompt: string; attachments: ImageAttachment[] };
   /**
    * What the finished turns of this agent session already used, for an agent
    * whose running totals survive a resume. Absent or zero on a fresh session.
@@ -117,12 +139,25 @@ export interface TurnContext {
    * tells the clients; a driver calls it once per turn, at the end.
    */
   context(use: Omit<import('@boite/contracts').ContextUse, 'at'>): void;
+  /**
+   * One of the user's own hooks ran and the agent said so. The core counts it
+   * and keeps the ones that did not pass for Settings; the thread shows only
+   * what the driver draws itself (a blocked prompt, a stopped turn).
+   */
+  hook?(report: import('../hooks.ts').HookReport): void;
   requestPermission(toolName: string, input: unknown, description: string | null): PermissionTicket;
   /** The inline question card. One call per question, and they are asked in order. */
   askQuestion(ask: QuestionAsk): QuestionTicket;
+  /**
+   * The agent stopped waiting on a card by itself (pi's dialog `timeout`): the
+   * card goes as if cancelled, every client is told, and the thread runs again.
+   */
+  withdrawQuestion?(questionId: QuestionTicket['questionId']): void;
   spawn(cmd: string, args: string[], opts?: SpawnOptions): SpawnedProcess;
   /** Same registry as `spawn`, node streams and node events, environment as given. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
+  /** Release the launch priority once the native session has initialized. */
+  finishStartup?(): void;
   /**
    * Terminates every process this thread launched, grandchildren included,
    * through the registry that traced them. For a driver whose only stop is the
@@ -141,6 +176,22 @@ export interface TurnResult {
    * The core stamps the time, the model and the account; see `PromptCache`.
    */
   promptCache?: PromptCacheLife | null;
+  /**
+   * The agent no longer has the native session the turn asked to resume (a
+   * transcript cleaned up, deleted or never copied, an ACP `session/load`
+   * refused), and the turn wrote nothing. Only that specific refusal sets it,
+   * never a transport error or a crash. The core then forgets the session id,
+   * starts a new session generation carrying the journal's history and runs
+   * the turn again, once, unless the user stopped it: a stopped turn reports
+   * `stopped` and is never run again.
+   */
+  sessionLost?: boolean;
+  /**
+   * The session this turn ended on and the id of the last entry it wrote to
+   * that session's transcript, for a driver that can later resume at such an
+   * entry (`Turn.checkpoint`). Absent when the driver has none.
+   */
+  checkpoint?: { sessionId: string; entry: string };
 }
 
 export type PromptCacheLife = Pick<import('@boite/contracts').PromptCache, 'ttlSeconds' | 'maxSeconds' | 'source'>;
@@ -184,7 +235,9 @@ export interface ProbeResult {
  */
 export interface TitleContext {
   thread: ThreadSummary;
+  /** The provider that writes the title: the thread's own, or the one Settings names. */
   provider: ProviderDescriptor;
+  /** The thread's account when the provider is the thread's, else that provider's first signed-in one. */
   account: Account;
   /** The isolation environment of this account, empty for the provider's own login. */
   accountEnv: Record<string, string>;
@@ -192,6 +245,12 @@ export interface TitleContext {
   prompt: string;
   /** The first answer of the thread, its text parts only. Empty when the agent wrote no text. */
   answer: string;
+  /**
+   * The model to write it with: the one Settings names, else the provider's
+   * small default. Null only for a provider with no small model on record,
+   * where the driver keeps its own choice.
+   */
+  model: string | null;
   /** Traced under the thread the title is for, like a turn's process. */
   spawnChild(cmd: string, args: string[], opts?: SpawnOptions): SpawnedChild;
   log(level: 'info' | 'warn' | 'error', message: string): void;

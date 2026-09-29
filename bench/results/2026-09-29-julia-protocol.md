@@ -6,6 +6,8 @@ This experiment tests finite-choice selection on saved public-page observations 
 
 The checkpoint is [SupersonicLabs/Julia-1](https://huggingface.co/SupersonicLabs/Julia-1/tree/a85b127321d580d65176c89ced8273f305745d85), revision `a85b127321d580d65176c89ced8273f305745d85`. The optional export is [Julia-1-ONNX](https://huggingface.co/SupersonicLabs/Julia-1-ONNX/tree/82a2fadf8fccfccdc5fd4e1009ba8f1a265eb7a8), revision `82a2fadf8fccfccdc5fd4e1009ba8f1a265eb7a8`. [Runtime provenance](2026-09-29-julia/runtime.json) records the weight, graph, runtime and server hashes.
 
+The [source archive](2026-09-29-julia/source-archive.json) preserves exact UTF-8 contents for the 13 files in each live cohort, deduplicated into 15 source versions. It identifies the core checkout used during collection. Recorded and timing source versions remain separate; hashing reconstructed content reproduces every archived source digest.
+
 Inference runs sequentially on an AMD Ryzen 7 5825U, Linux x86_64, CPU only, two intra-op threads and one inter-op thread. Both runtimes remain loaded in one process. Its peak RSS therefore does not measure either runtime alone. The benchmark does not test Apple hardware, WebGPU, quantization or GPU inference.
 
 The server uses the official strict encoder, `maxLength=8192`, `head_length=1536`, batch size one and the CPU marker-only head. The combined input limit is 8,192 tokens; each option has a 48-token contract. Overflow fails explicitly. ONNX uses the same encoder and tensor layout with CPUExecutionProvider and FP32. Backend errors never invoke a different selector.
@@ -45,6 +47,8 @@ Live timing medians use the arithmetic mean of the two central values for even s
 ## Recordings and exclusions
 
 Timing trials run without an encoder. Separate instrumented trials use actual CDP screencast events at normal speed, holding the last real frame while the page is static. They begin after the initial observation, before planner actions. They contain no reconstructed action replay, synthetic cursor or accelerated waiting. Instrumented timings are not mixed with the main comparison.
+
+[Recording evidence](2026-09-29-julia/recording-evidence.json) records the four actual video hashes, frames, target transitions and encoder results. It also preserves all five fresh probes after the final recorder repair, including the two initial readiness failures. Recorder probes do not invoke either selector.
 
 The [12 engineering preflights](2026-09-29-julia/engineering-preflights.json) remain separate from scored trials. The initial pilot had invalid reference and URL handling. Two later recorded starts failed before planning on screencast initialization or a capture timeout; their companion trials were deliberately stopped. These are infrastructure failures and cancellations, not Julia accuracy measurements. Recordings with encoder errors or missing target transitions cannot serve as completion evidence.
 

@@ -43,10 +43,19 @@
     }
   },
   "auth": { "kind": "oauth-cli", "session": ["auth.json"] },
+  "shared": [
+    {
+      "variable": "PI_CODING_AGENT_DIR",
+      "paths": ["settings.json", "AGENTS.md", "extensions", "skills", "prompts", "themes"]
+    }
+  ],
+  "hookSources": [
+    { "variable": "PI_CODING_AGENT_DIR", "path": "extensions", "format": "modules" }
+  ],
   "models": [{ "id": "default", "name": "pi default", "default": true }],
   "capabilities": {
     "approvals": false,
-    "hooks": false,
+    "hooks": true,
     "checkpoint": false,
     "images": true,
     "planMode": false,

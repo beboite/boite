@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { removeDir } from './fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Account, AccountQuota, QuotaWindow } from '@boite/contracts';
@@ -106,7 +106,10 @@ async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);
-    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // A descendant can hold the directory after the direct child closed. Neither
+    // waiting for it nor removing the directory may replace the windows just read.
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `codex quota: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(cwd, (message) => core.log('warn', `codex quota: ${message}`));
   }
 }
 
@@ -129,11 +132,31 @@ export class QuotaStore {
     return { accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
   }
-  async list(refresh = false): Promise<AccountQuota[]> {
-    // Two requests at a time, including across accounts. No background polling.
+  async list(refresh = false, requestId?: string): Promise<AccountQuota[]> {
+    if (requestId !== undefined && (typeof requestId !== 'string' || !requestId || requestId.length > 128)) {
+      throw invalidParams('quotas.list requestId must be a non-empty string of at most 128 characters');
+    }
+    // Providers run independently; at most two accounts per provider per list.
+    // Concurrent lists still share the account's pending read and cache.
     const rows = [...this.core.accounts.list(), cliAccount];
-    const result: AccountQuota[] = [];
-    for (let i = 0; i < rows.length; i += 2) result.push(...await Promise.all(rows.slice(i, i + 2).map((account) => this.one(account, refresh))));
+    const result = new Array<AccountQuota>(rows.length);
+    const groups = new Map<string, { account: Account; index: number }[]>();
+    rows.forEach((account, index) => {
+      const group = groups.get(account.providerId) ?? [];
+      group.push({ account, index });
+      groups.set(account.providerId, group);
+    });
+    await Promise.all([...groups.values()].map(async (group) => {
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(2, group.length) }, async () => {
+        while (next < group.length) {
+          const { account, index } = group[next++]!;
+          const quota = await this.one(account, refresh);
+          result[index] = quota;
+          if (requestId) this.core.bus.emit('quotas.progress', { requestId, quota });
+        }
+      }));
+    }));
     return result;
   }
   private async one(account: Account, refresh: boolean): Promise<AccountQuota> {

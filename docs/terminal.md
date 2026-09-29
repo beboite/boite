@@ -2,9 +2,10 @@
 
 Each thread has a shell under the chat, opened in the thread's working
 directory. `Ctrl+J` (the `terminal` command, [keybindings.md](keybindings.md))
-shows and hides it, and so does the terminal button in the thread header. The
-top edge of the drawer sets its height, which the browser keeps per device. The
-cross ends the shell; hiding the drawer does not.
+shows and hides it at any time. The terminal button in the thread header does
+the same unless Settings, Appearance, Buttons hides it. The top edge of the
+drawer sets its height, which the browser keeps per device. The cross ends the
+shell; hiding the drawer does not.
 
 ## Where the shell runs
 
@@ -17,6 +18,9 @@ xterm.js. xterm loads the first time a terminal opens, never at startup.
   256 KiB of output, so a reload or a second window redraws the screen.
 - What the shell prints arrives as `terminal.output`, what the user types goes
   back through `terminals.write`, and `terminals.resize` follows the drawer.
+  The first output after a quiet moment goes out at once, so a typed key echoes
+  without delay; output that keeps coming is sent every 16 ms as one event.
+  The 256 KiB snapshot is exactly what those events carried so far.
 - `terminals.close` kills the shell with everything it started and waits for
   it to exit. `terminal.exited` follows, and the drawer closes.
 - Archiving the thread and stopping the core close its shell too.

@@ -29,7 +29,8 @@ the panel; only an owner connection can change permissions.
 ## Reaching another computer
 
 Connect both machines in Machines using owner connections. Give each core an
-HTTPS public address in General settings, reachable from the other core. Then
+HTTPS public address in Settings, Machines and devices, Phone app, reachable
+from the other core. Then
 use the agent coordination section in Machines to link them. Boite exchanges
 their public identities and checks the connection in both directions. HTTP is
 accepted only on numeric loopback for two cores on the same computer.
@@ -58,7 +59,8 @@ the body as data from another agent. It does not become a user request or grant
 permission to run a tool.
 
 Claude receives messages at its next PostToolUse hook. Codex uses `turn/steer`
-with the active turn ID. Pi uses its `steer` RPC. Providers without an interrupt
+with the active turn ID, and Muse its own `turn/steer` the same way. Pi uses
+its `steer` RPC, Grok its `_x.ai/interject`. Providers without an interrupt
 mechanism receive a new coordination turn once the current turn ends. An idle
 conversation can wake within its hourly budget. A permission or question prompt
 is never answered by coordination.
@@ -68,6 +70,15 @@ that the provider accepted the input, or a scheduled coordination turn completed
 It does not prove that the agent understood, agreed or finished acting. Uncertain
 means submission may have happened; Boite does not replay it automatically.
 An offline machine leaves outgoing messages queued until recovery or expiry.
+
+A message goes to its recipient as soon as it arrives, and again when the
+recipient's current turn ends. A check every two seconds covers the rest:
+expiry, retries to another machine and a provider that was not ready to take
+input yet. When no message is waiting, that check is one or two index lookups.
+An uncertain message is not waiting: nothing replays it, and only an outgoing
+one to another machine is asked about again until it expires. Delivered,
+expired, rejected and uncertain messages leave the journal after 30 days; the
+panel shows the last 100 of a conversation.
 
 For a restart, the maintenance agent should ask the agent using the resource
 to confirm readiness and wait for its answer. A delivery receipt or silence is

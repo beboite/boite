@@ -1,9 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Account, MessagePart } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
-import { claudeProjectFolder } from '../src/imports/claude.ts';
+import { LISTING_TAIL_BYTES, claudeProjectFolder, listTranscript } from '../src/imports/claude.ts';
 import { claudeSessionFixture, FIXTURE_SESSION_ID } from './fixtures/claude-session.ts';
 import { startTestCore, testProject } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -141,4 +141,79 @@ test('refused by name: another provider, a bad id, a missing file, a transcript 
   });
   const listed = await client.call('imports.list', { projectId: emptyProject });
   expect(listed.map((session) => session.sessionId)).toEqual([FIXTURE_SESSION_ID]);
+});
+
+/** Assistant records of accented text, so a byte offset can fall inside a character. */
+function padding(bytes: number): string {
+  const record = JSON.stringify({ type: 'assistant', uuid: 'pad', message: { role: 'assistant', content: [{ type: 'text', text: 'été "summary" '.repeat(40) }] } });
+  return `${record}\n`.repeat(Math.ceil(bytes / Buffer.byteLength(`${record}\n`)));
+}
+
+function title(text: string): string {
+  return `${JSON.stringify({ type: 'ai-title', aiTitle: text, sessionId: FIXTURE_SESSION_ID })}\n`;
+}
+
+test('a long transcript is listed from its head and its tail, and gives the last title a full read gives', async () => {
+  const client = await harness.connect();
+  const project = await testProject(harness, client);
+  const head = claudeSessionFixture(project.path, { aiTitle: 'Early title' });
+  const dir = join(harness.dataDir, 'transcripts');
+  mkdirSync(dir, { recursive: true });
+
+  // The last title sits in the tail, past a megabyte the listing never reads.
+  const late = join(dir, 'late.jsonl');
+  writeFileSync(late, `${head}${padding(1024 * 1024)}${title('Late title')}${padding(4096)}`);
+  expect(await listTranscript(late)).toEqual({
+    prompt: 'List the files of this folder, then say hello',
+    promptAt: Date.parse('2026-09-10T08:00:01.000Z'),
+    cwd: project.path,
+    agentTitle: 'Late title',
+  });
+
+  // Every offset around the window's first byte: a cut line or character never parses.
+  for (let shift = 0; shift < 4; shift += 1) {
+    const cut = join(dir, `cut-${shift}.jsonl`);
+    const tail = `${title('Right at the edge')}${'x'.repeat(shift)}\n`;
+    const body = `${head}${padding(LISTING_TAIL_BYTES)}${tail}${padding(LISTING_TAIL_BYTES - Buffer.byteLength(tail) - 8)}`;
+    writeFileSync(cut, body);
+    expect((await listTranscript(cut))?.agentTitle).toBe('Right at the edge');
+  }
+
+  // An old transcript with one summary near its head: the empty tail falls back to a full read.
+  const summary = join(dir, 'summary.jsonl');
+  writeFileSync(summary, `${JSON.stringify({ type: 'summary', summary: 'Old summary', leafUuid: 'x' })}\n${claudeSessionFixture(project.path)}${padding(LISTING_TAIL_BYTES * 2)}`);
+  expect((await listTranscript(summary))?.agentTitle).toBe('Old summary');
+
+  // A short file the head read to its end, one with no title at all, one with no prompt.
+  const short = join(dir, 'short.jsonl');
+  writeFileSync(short, claudeSessionFixture(project.path, { aiTitle: 'Short title' }));
+  expect((await listTranscript(short))?.agentTitle).toBe('Short title');
+  const none = join(dir, 'none.jsonl');
+  writeFileSync(none, `${claudeSessionFixture(project.path)}${padding(LISTING_TAIL_BYTES * 2)}`);
+  expect((await listTranscript(none))?.agentTitle).toBeNull();
+  const empty = join(dir, 'empty.jsonl');
+  writeFileSync(empty, `${JSON.stringify({ type: 'queue-operation' })}\n`);
+  expect(await listTranscript(empty)).toBeNull();
+});
+
+test('an unchanged transcript is listed from memory, a changed one read again, and one listing is shared', async () => {
+  const client = await harness.connect();
+  const { projectId, file } = await seeded(client, { aiTitle: 'First title' });
+  // A whole second, which the file system keeps exactly.
+  const mtime = new Date('2026-09-20T10:00:00.000Z');
+  utimesSync(file, mtime, mtime);
+  expect((await client.call('imports.list', { projectId }))[0]!.title).toBe('First title');
+
+  // Same size, same modification time: the listing does not open the file again.
+  writeFileSync(file, readFileSync(file, 'utf8').replace('First title', 'Other title'));
+  utimesSync(file, mtime, mtime);
+  expect((await client.call('imports.list', { projectId }))[0]!.title).toBe('First title');
+
+  utimesSync(file, mtime, new Date(mtime.getTime() + 5000));
+  expect((await client.call('imports.list', { projectId }))[0]!.title).toBe('Other title');
+
+  const first = harness.core.imports.list(projectId);
+  expect(harness.core.imports.list(projectId)).toBe(first);
+  await first;
+  expect(harness.core.imports.list(projectId)).not.toBe(first);
 });

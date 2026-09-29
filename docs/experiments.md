@@ -1,7 +1,16 @@
-# Chat and preview experiments
+# Experiments
 
 Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
+A phone has its own Experiments row under Settings, This phone.
+
+## Whip
+
+Shows a Whip button at the bottom left, above the sidebar footer or phone tabs.
+Each hit shakes the native Boite window and returns it to its original position.
+Maximized and fullscreen windows, browsers, phones and window managers that
+ignore positioning shake the whole interface instead. Hits do not overlap. Turning the experiment off removes the button
+immediately. Reduced motion disables the shake.
 
 ## Chat files and previews
 
@@ -26,6 +35,15 @@ owning machine. Links outside its working directory are refused. Published
 PDFs, images, audio and video have inline previews. Other files remain downloadable.
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
+
+## Resident agents
+
+The Agents page ([agents](agents.md)) and every button that leads there: the
+sidebar icon, the phone tab, the command palette row and the link from an agent's
+own thread. Turning
+the switch off closes the page if it is open. It hides the page only: agents
+already made keep their routines and missions on the core, which knows nothing
+of a client's experiments.
 
 ## Preview comments
 
@@ -65,6 +83,10 @@ the core. The end-to-end tests `artifacts.test.ts` and
 `preview-comments.test.ts` cover desktop and phone-sized interfaces. Preview
 unit tests cover owning-machine boundaries and selection validation.
 No live provider login is required.
+
+`whip.test.ts` covers the toggle, persistence, desktop and phone layout, whole
+interface movement, cancellation and reduced motion. `shell.test.ts` verifies
+native window movement and restoration, and refusal from a browser child webview.
 
 The opt-in `codex.live.test.ts` attachment case asks a real Codex process to
 discover file publication through `boite --help`. It checks the inherited CLI,

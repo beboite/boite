@@ -18,35 +18,61 @@ interface GitRun {
   stderr: string;
 }
 
-export async function git(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<GitRun> {
-  let spawned;
+/** How long a read may take before its git is stopped and the panel told. */
+export const GIT_READ_TIMEOUT_MS = 30_000;
+
+/**
+ * A git that only reads. `GIT_OPTIONAL_LOCKS=0` keeps `git status` from
+ * refreshing the index under `index.lock`, which made an agent's own
+ * `git add` or `git commit` in the same checkout fail; it reaches any git
+ * that git starts itself, too.
+ */
+function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], needs: string) {
   try {
-    spawned = core.procs.spawn(threadId, 'git', args, { cwd });
+    return core.procs.spawn(threadId, 'git', args, { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
   } catch (error) {
-    throw refused(`git did not start (${messageOf(error)}): reading the changes needs git on PATH`, { args });
+    throw refused(`git did not start (${messageOf(error)}): ${needs} needs git on PATH`, { args });
   }
-  const [stdout, stderr, code] = await Promise.all([
+}
+
+/**
+ * Waits for `work`, and stops that one git by its own process when it has not
+ * answered in time: the thread's other processes are the agent's, never touched.
+ */
+async function bounded<T>(spawned: { proc: { kill(): void } }, cwd: string, args: string[], work: Promise<T>, timeoutMs = GIT_READ_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      spawned.proc.kill();
+      reject(refused(`git ${args[0] ?? ''} did not answer within ${timeoutMs / 1000} s in ${cwd}`, { args, cwd }));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function git(core: Core, threadId: ThreadId, cwd: string, args: string[], timeoutMs = GIT_READ_TIMEOUT_MS): Promise<GitRun> {
+  const spawned = spawnRead(core, threadId, cwd, args, 'reading the changes');
+  const [stdout, stderr, code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).text(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]);
+  ]), timeoutMs);
   return { code, stdout, stderr };
 }
 
 /** The same, for a blob: `git show` hands back bytes, and whether they are text is the question. */
 async function gitBytes(core: Core, threadId: ThreadId, cwd: string, args: string[]): Promise<{ code: number; data: Uint8Array }> {
-  let spawned;
-  try {
-    spawned = core.procs.spawn(threadId, 'git', args, { cwd });
-  } catch (error) {
-    throw refused(`git did not start (${messageOf(error)}): reading a file at a ref needs git on PATH`, { args });
-  }
+  const spawned = spawnRead(core, threadId, cwd, args, 'reading a file at a ref');
   // Drained with the rest, so a git that has something to say never blocks on a full pipe.
-  const [buffer, , code] = await Promise.all([
+  const [buffer, , code] = await bounded(spawned, cwd, args, Promise.all([
     new Response(spawned.proc.stdout).arrayBuffer(),
     new Response(spawned.proc.stderr).text(),
     spawned.exited,
-  ]);
+  ]));
   return { code, data: new Uint8Array(buffer) };
 }
 

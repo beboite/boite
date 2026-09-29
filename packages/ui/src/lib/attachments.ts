@@ -7,6 +7,7 @@
 import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENTS_PER_TURN,
+  ATTACHMENTS_TOTAL_MAX_BYTES,
   IMAGE_MIME_TYPES,
   type Attachment,
   type ImageMimeType
@@ -54,6 +55,11 @@ export function readAttachmentFile(file: File): Promise<Attachment> {
   });
 }
 
+/** What the attachments already held weigh together, decoded. */
+export function attachedBytes(attachments: Attachment[]): number {
+  return attachments.reduce((sum, attachment) => sum + decodedBytes(attachment.data), 0);
+}
+
 export interface AcceptResult {
   /** What the composer should hold now: the ones it had plus the ones that passed. */
   accepted: Attachment[];
@@ -64,14 +70,16 @@ export interface AcceptResult {
 /**
  * The incoming attachments against the caps, in the order a user meets them:
  * a format no agent reads, a body over `ATTACHMENT_MAX_BYTES`, then more than
- * `ATTACHMENTS_PER_TURN` in one turn. Everything that passes is kept, so one
- * bad file in a drop of five does not lose the other four.
+ * `ATTACHMENTS_PER_TURN` in one turn, then a turn heavier than
+ * `ATTACHMENTS_TOTAL_MAX_BYTES` altogether. Everything that passes is kept, so
+ * one bad file in a drop of five does not lose the other four.
  */
 export function acceptAttachments(
   current: Attachment[],
   incoming: Attachment[]
 ): AcceptResult {
   const accepted = [...current];
+  let total = attachedBytes(current);
   let refused: string | null = null;
   const refuse = (message: string): void => {
     refused ??= message;
@@ -83,7 +91,8 @@ export function acceptAttachments(
       refuse(fill(strings.composer.attachFormat, { name, type: attachment.mimeType, formats: FORMATS }));
       continue;
     }
-    if (decodedBytes(attachment.data) > ATTACHMENT_MAX_BYTES) {
+    const weight = decodedBytes(attachment.data);
+    if (weight > ATTACHMENT_MAX_BYTES) {
       refuse(fill(strings.composer.attachTooLarge, { name, max: bytes(ATTACHMENT_MAX_BYTES) }));
       continue;
     }
@@ -91,6 +100,11 @@ export function acceptAttachments(
       refuse(fill(strings.composer.attachTooMany, { name, max: String(ATTACHMENTS_PER_TURN) }));
       continue;
     }
+    if (total + weight > ATTACHMENTS_TOTAL_MAX_BYTES) {
+      refuse(fill(strings.composer.attachTotalTooLarge, { name, max: bytes(ATTACHMENTS_TOTAL_MAX_BYTES) }));
+      continue;
+    }
+    total += weight;
     accepted.push(attachment);
   }
 

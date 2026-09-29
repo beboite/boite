@@ -10,8 +10,11 @@ import type { Message } from '@boite/contracts';
 
 /** What a title from a prompt is cut to, the same width a client uses on create. */
 export const PROMPT_TITLE_MAX = 60;
-/** What an agent's answer is cut to: a sentence, never a paragraph. */
-export const AGENT_TITLE_MAX = 80;
+/**
+ * What an agent's answer is cut to. The model is asked for under 40
+ * characters, one sidebar line; this is the bound when it writes more.
+ */
+export const AGENT_TITLE_MAX = 60;
 /** How much of the prompt and the answer an agent is shown to write the title. */
 export const TITLE_INPUT_MAX = 2000;
 
@@ -67,7 +70,8 @@ export function titleRequest(prompt: string, answer: string): string {
   const user = prompt.length > TITLE_INPUT_MAX ? `${prompt.slice(0, TITLE_INPUT_MAX)} [cut]` : prompt;
   const assistant = answer.length > TITLE_INPUT_MAX ? `${answer.slice(0, TITLE_INPUT_MAX)} [cut]` : answer;
   return [
-    'Write a title for the conversation below: at most six words, no quotes, no period, the same language as the user.',
+    'Write a short title for the conversation below, one line of a sidebar: 2 to 6 words, fewer than 40 characters.',
+    'Name the task itself. No quotes, no trailing period, no emoji, the same language as the user.',
     'Answer with the title alone.',
     '',
     '<user>',

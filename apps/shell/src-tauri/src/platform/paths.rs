@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use crate::Channel;
+use crate::channel::Channel;
 
 #[cfg(windows)]
 pub(crate) fn default_data_dir(channel: Channel) -> Result<PathBuf, String> {

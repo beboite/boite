@@ -35,3 +35,11 @@ test('reconnecting after an upgrade probes again', async () => {
   resetPullRequestSupport(client);
   expect(await lookupPullRequest(client,'one')).toEqual({supported:true,pullRequest:null});
 });
+
+test('only a refresh the user asked for tells the core to read the repository again', async () => {
+  const call = vi.fn().mockResolvedValue(null);
+  const client = {call} as unknown as Client;
+  await lookupPullRequest(client,'one');
+  await lookupPullRequest(client,'one',true);
+  expect(call.mock.calls.map(args => args[1])).toEqual([{threadId:'one'},{threadId:'one',refresh:true}]);
+});
