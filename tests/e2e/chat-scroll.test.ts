@@ -34,7 +34,12 @@ for (const phone of [false, true]) {
     const offsets = await page.evaluate<number[]>(`(() => {
       const button = document.querySelector('${jump}');
       const parent = button.parentElement.getBoundingClientRect();
+      // Restart the real CSS entrance even if it finished during the CDP round trip.
+      button.style.animation = 'none';
+      void button.offsetWidth;
+      button.style.removeProperty('animation');
       const animations = button.getAnimations();
+      if (animations.length === 0) throw new Error('The return button entrance animation is missing');
       animations.forEach(a => a.pause());
       return [0, 0.5, 1].map(progress => {
         animations.forEach(a => a.currentTime = Number(a.effect.getTiming().duration) * progress);
