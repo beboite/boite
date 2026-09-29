@@ -79,6 +79,14 @@ hooks into the generated installer script and runs them over a shell that
 restarts its core; it needs a Windows `build:shell` first and is skipped
 without one.
 
+Both in-app updates and downloaded Windows installers replace an existing
+installation in place. They keep its Start menu and desktop shortcuts intact
+when the executable path is unchanged, preserving the shortcuts used by pinned
+entries. Switching between stable and nightly uses that same path. Removing
+Boite through Windows' installed apps still removes its shortcuts and pins.
+The custom NSIS template and its upstream version are documented in
+`apps/shell/src-tauri/windows/VENDOR.md`.
+
 When the new shell starts, it reads the version the running core reports on
 `/health`. A core of another version, left by an install that could not stop
 it, is stopped and replaced by the core shipped with the shell.
