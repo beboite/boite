@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
-import { RpcErrorCode } from '@boite/contracts';
+import { RpcErrorCode, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from './client';
 
 async function ready() {
@@ -87,5 +87,29 @@ test('a late refusal from the former client cannot populate the replacement sess
     expect(store.composerStates).toEqual({});
     expect(store.threads.find(row => row.id === 't-trace')?.title).not.toBe('Former session');
     expect(replacementCalls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(0);
+  } finally { store.detach(); client.close(); replacement.close(); }
+});
+
+test('a late accepted batch stays sent after replacing the client', async () => {
+  const { store, client } = await ready();
+  const replacement = new FakeClient({ delayMs: 0 });
+  let acceptSend!: (result: RpcResult<'turns.start'>) => void;
+  const pending = new Promise<RpcResult<'turns.start'>>(resolve => { acceptSend = resolve; });
+  // Only the turn is delayed; connection metadata continues to use the fixture.
+  const call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
+    method === 'turns.start' ? pending as ReturnType<typeof call> : call(method, params));
+  try {
+    store.composerStates['t-trace'] = queued('Accepted first prompt');
+    store.composerStates['t-trace']!.queued.push({ text: 'Accepted second prompt', attachments: [] });
+    const state = store.composerStates['t-trace']!;
+    await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1));
+    store.attach(replacement);
+    await store.connect();
+    acceptSend({ id: 'accepted-former-turn', threadId: 't-trace', status: 'queued',
+      queuedAt: Date.now(), startedAt: null, finishedAt: null, usage: null, error: null });
+    await vi.waitFor(() => expect(state.sending).toBe(false));
+    expect(state.queued).toHaveLength(0);
+    expect(state.paused).toBe(false);
   } finally { store.detach(); client.close(); replacement.close(); }
 });
