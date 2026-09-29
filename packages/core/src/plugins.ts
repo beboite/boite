@@ -174,7 +174,14 @@ export class PluginStore {
   private directory(id: string): string {
     const root = this.root();
     const dir = resolve(root, id);
-    for (const path of [root, dir]) if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
+    for (const path of [root, dir]) {
+      try {
+        if (lstatSync(path).isSymbolicLink()) throw refused(`plugin path ${path} must not be a symbolic link`);
+      } catch (error) {
+        // Install cleanup can remove the directory while callers read its state.
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+      }
+    }
     return dir;
   }
 
