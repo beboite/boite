@@ -84,6 +84,7 @@ describeWindows('thread jobs of forgotten threads', () => {
     await exitQuietly('warm-up');
     await waitFor(() => threadJobCount() === 0, 5000);
     const jobsBefore = threadJobCount();
+    Bun.gc(true);
     const handlesBefore = handleCount();
 
     const ids: string[] = [];
@@ -96,7 +97,14 @@ describeWindows('thread jobs of forgotten threads', () => {
     await waitFor(() => ids.every((id) => procs.liveCount(id) === 0), 5000);
 
     await waitFor(() => threadJobCount() === jobsBefore, 5000);
-    // The kernel's own count, the way the leak was measured: one handle per id.
+    // Bun owns a process handle until the exited subprocess is collected.
+    // Collect those wrappers before comparing kernel counts; a leaked native
+    // Job Object cannot be reclaimed by Bun's garbage collector.
+    await waitFor(() => {
+      Bun.gc(true);
+      return handleCount() - handlesBefore < SPAWNS / 2;
+    }, 5000);
+    // Preserve the kernel assertion: one leaked Job Object per id still fails.
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
 
