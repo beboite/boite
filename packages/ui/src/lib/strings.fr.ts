@@ -966,8 +966,8 @@ export const fr: Translation = {
     queued: 'Envoyé à la fin du tour en cours',
     queuedPaused: 'Retenu après un envoi refusé',
     sendNow: 'Envoyer maintenant',
-    sendNowHint: 'Arrête le tour en cours et envoie le plus ancien message en attente. Entrée dans le champ vide fait de même.',
-    retryQueuedHint: 'Renvoie le plus ancien message en attente. Entrée dans le champ vide fait de même.',
+    sendNowHint: 'Arrête le tour en cours et envoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
+    retryQueuedHint: 'Renvoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
     picker: 'Fournisseur et modèle',
     models: 'Modèles',
     searchModels: 'Rechercher un modèle',
@@ -1194,6 +1194,12 @@ export const fr: Translation = {
     critical: 'Une limite de mémoire a été dépassée. Boite arrête de gros processus quand il le peut pour libérer de la mémoire.',
     stopped: "Boite a arrêté un processus pour libérer de la mémoire.",
     onMachine: (name: string) => `Sur ${name}`,
+    killTitle: 'Processus arrêté pour libérer de la mémoire',
+    killReason: {
+      'thread-quota': (limit: string) => `Cette conversation a dépassé sa limite mémoire de ${limit}.`,
+      budget: (limit: string) => `Les agents ont dépassé leur budget mémoire commun de ${limit}.`,
+      machine: (limit: string) => `La mémoire disponible est passée sous la réserve de ${limit}.`,
+    },
     killed: {
       'thread-quota': (exe: string, size: string, limit: string) => `Boite a coupé ${exe} (${size}) : cette conversation a dépassé son quota de mémoire (${limit}). Réessaie en lançant moins de choses à la fois.`,
       budget: (exe: string, size: string, limit: string) => `Boite a coupé ${exe} (${size}) : les agents ont dépassé leur budget mémoire commun (${limit}). Réessaie en lançant moins de choses à la fois.`,

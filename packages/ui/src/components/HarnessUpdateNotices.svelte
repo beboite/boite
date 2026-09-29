@@ -4,7 +4,6 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
-  import MemoryBanner from './MemoryBanner.svelte';
 
   /** More than this many at once would bury the thread; the settings page lists the rest. */
   const MOST = 3;
@@ -36,16 +35,12 @@
     return out.slice(0, MOST);
   });
   let several = $derived(workspace.machines.length > 1);
-  let memoryMachines = $derived(workspace.machines.filter(machine => machine.store.connection === 'ready' && machine.store.owner && machine.store.memoryState && machine.store.memoryState !== 'ok'));
   /** A phone's settings are one narrow column: the notices wait for the conversation. */
   let offChat = $derived(workspace.active.page !== 'chat');
 </script>
 
-{#if notices.length > 0 || memoryMachines.length > 0}
-  <div class="update-notices" class:off-chat={offChat && memoryMachines.length === 0} data-testid="harness-update-notices" role="region" aria-label={memoryMachines.length ? strings.resources.memory : strings.harnessUpdates.heading}>
-    {#each memoryMachines as machine (machine.id)}
-      <MemoryBanner state={machine.store.memoryState} stopped={machine.store.memoryStopped} machine={several ? machine.label : undefined} />
-    {/each}
+{#if notices.length > 0}
+  <div class="update-notices" class:off-chat={offChat} data-testid="harness-update-notices" role="region" aria-label={strings.harnessUpdates.heading}>
     {#each notices as notice (notice.key)}
       {@const update = notice.update}
       <article class="notice" data-testid="harness-update-notice" data-update-provider={update.providerId} data-state={update.state}>

@@ -15,7 +15,10 @@ test.each([['en', 'thread-quota'], ['en', 'budget'], ['en', 'machine'], ['fr', '
   mounted = mount(MemoryRow, { target: document.body, props: { event: { threadId: 't', kind: 'killed', reason, limitBytes: 9728 * 1048576, state: 'critical', exe: 'C:\\bin\\cargo.exe', bytes: 2147483648, at: 1 } } });
   flushSync();
   const row = document.querySelector('[data-testid=memory-row]')!;
-  expect(row.textContent).toContain(strings.resources.killed[reason]('cargo.exe', locale === 'fr' ? '2,0 Go' : '2.0 GB', locale === 'fr' ? '9,5 Go' : '9.5 GB'));
+  expect(row.querySelector('.title')?.textContent).toBe(strings.resources.killTitle);
+  expect(row.querySelector('p')?.textContent).toBe(strings.resources.killReason[reason](locale === 'fr' ? '9,5 Go' : '9.5 GB'));
+  expect(row.querySelector('.process')?.textContent).toBe('cargo.exe');
+  expect(row.querySelector('.size')?.textContent).toBe(locale === 'fr' ? '2,0 Go' : '2.0 GB');
   expect(row.textContent).not.toContain('C:\\bin');
 });
 
@@ -34,6 +37,11 @@ test('thread history and live notices appear in the timeline and survive reopeni
     expect(document.querySelectorAll('[data-testid=memory-row]')).toHaveLength(1);
     client.emitMemory({ threadId: 't-trace', kind: 'budget', state: 'critical', at: Date.now() });
     flushSync(); expect(document.querySelectorAll('[data-testid=memory-row]')).toHaveLength(2);
+    store.openThread!.messages.push({ id: 'after-memory', threadId: 't-trace', turnId: 'after-memory', role: 'user', parts: [{ type: 'text', text: 'Continue after the memory warning' }], state: 'complete', createdAt: Date.now() + 1 });
+    flushSync();
+    const notice = [...document.querySelectorAll('[data-testid=memory-row]')].at(-1)!;
+    expect(notice.closest('[data-testid=timeline]')).not.toBeNull();
+    expect(notice.closest('article')?.nextElementSibling?.textContent).toContain('Continue after the memory warning');
     await store.open('t-trace'); flushSync();
     expect(document.querySelectorAll('[data-testid=memory-row]')).toHaveLength(2);
   } finally { store.detach(); client.close(); }

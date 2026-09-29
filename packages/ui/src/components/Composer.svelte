@@ -8,7 +8,7 @@
   import { attachFiles } from '../lib/composer-attachments';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
-  import { drainQueue, sentPrompts, type SentPrompt } from '../lib/composer-queue';
+  import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
   import { clearStash, DRAFT_STASH_KEY, readStash, writeStash } from '../lib/prefs';
   import { claudeKeywords, promptSegments } from '../lib/message-display';
@@ -111,16 +111,6 @@
     store.draft;
     recall = null;
     box?.focus();
-  });
-
-  /** Only this thread's next prompt goes out, after the previous turn ends. */
-  $effect(() => {
-    const state = composer;
-    const threadId = store.openThread?.id;
-    if (store.connection === 'ready' && !store.busy && threadId && state &&
-        state.queued.length > 0 && !state.sending && !state.paused) {
-      untrack(() => void drainQueue(store, threadId, state));
-    }
   });
 
   /** This thread's own sent prompts, most recent first: what ArrowUp walks. */
@@ -489,10 +479,8 @@
   );
 
   /**
-   * Send now: the oldest pending prompt goes instead of waiting for the turn
-   * to end. The turn is stopped, the way Escape stops it, and the queue's own
-   * drain sends that prompt once the thread is idle; the ones behind it still
-   * wait for its turn. A queue a refusal held is resumed too.
+   * Send now stops the current turn and sends all queued prompts together once
+   * the thread is idle. A queue held after a refusal is resumed too.
    */
   function sendQueuedNow() {
     const state = composer;

@@ -1,6 +1,7 @@
 import { RpcErrorCode, PREVIEW_REFERENCES_PER_TURN, previewReferencesError, type PreviewReference } from '@boite/contracts';
+import { untrack } from 'svelte';
 import type { Attachment, Message, MessageId, ThreadSummary, TurnInFlightData } from '@boite/contracts';
-import { sentPrompt } from '../composer-queue';
+import { drainQueue, sentPrompt } from '../composer-queue';
 import { restorePreviewMentions } from '../preview-mentions';
 import { activityCommand } from '../activity-command';
 import { RpcFailure, readyAgain, wasDropped } from '../client';
@@ -48,6 +49,22 @@ export class Composer {
   pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
 
   constructor(private readonly ctx: StoreContext) {}
+
+  /** Queued input follows its machine and thread even when their composer is off screen. */
+  watchQueues(): () => void {
+    return $effect.root(() => {
+      $effect(() => {
+        const s = this.ctx.store;
+        if (s.connection !== 'ready') return;
+        for (const [threadId, state] of Object.entries(this.composerStates)) {
+          if (!state.queued.length || state.sending || state.paused) continue;
+          const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
+          if (!thread || thread.archived || ['queued', 'running', 'waiting'].includes(thread.status)) continue;
+          untrack(() => void drainQueue(s, threadId, state));
+        }
+      });
+    });
+  }
 
   registerComposerInsertion(key: string, insert: (start: number, end: number, text: string) => void): () => void {
     this.composerInsertions.set(key, insert);

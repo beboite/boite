@@ -4,7 +4,6 @@ import type { MemoryStatus } from '@boite/contracts';
 import { FakeClient } from '../lib/fake-client';
 import { Store } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
-import { strings } from '../lib/strings';
 import HarnessUpdateNotices from './HarnessUpdateNotices.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -27,14 +26,14 @@ async function machine(id = 'one') {
   return { client, store };
 }
 
-test('global notices show critical only, report an actual stop and disappear on ok', async () => {
+test('memory pressure and process stops never create a persistent global notice', async () => {
   const { client } = await machine();
   mounted = mount(HarnessUpdateNotices, { target: document.body }); await settle();
   expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   client.emitMemory({ threadId: null, kind: 'pressure', state: 'critical', at: 1 }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')?.textContent).toContain(strings.resources.critical);
+  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   client.emitMemory({ threadId: 't-trace', kind: 'killed', reason: 'budget', limitBytes: 19456 * 1048576, state: 'critical', exe: 'cargo', at: 2 }); await settle();
-  expect(document.querySelector('[data-testid=memory-banner]')?.textContent).toContain(strings.resources.stopped);
+  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   client.emitMemory({ threadId: null, kind: 'pressure', state: 'ok', at: 3 }); await settle();
   expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
 });
@@ -44,8 +43,9 @@ test('pressure belongs to its machine and disconnected machines show no stale wa
   mounted = mount(HarnessUpdateNotices, { target: document.body }); await settle();
   second.client.emitMemory({ threadId: null, kind: 'pressure', state: 'critical', at: 1 });
   first.client.emitMemory({ threadId: null, kind: 'pressure', state: 'ok', at: 1 }); await settle();
-  expect(document.querySelectorAll('[data-testid=memory-banner]')).toHaveLength(1);
-  expect(document.querySelector('[data-testid=memory-banner]')?.textContent).toContain(strings.resources.onMachine('second'));
+  expect(second.store.memoryState).toBe('critical');
+  expect(first.store.memoryState).toBe('ok');
+  expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
   second.client.drop(); await settle();
   expect(document.querySelector('[data-testid=memory-banner]')).toBeNull();
 });

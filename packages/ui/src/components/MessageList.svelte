@@ -628,9 +628,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* A fixed reading margin keeps the last answer above compact activity.
-       Open questions reserve more room; expanding tasks leaves reading still. */
-    padding: 20px 20px max(132px, calc(var(--dock-room, 0px) + 20px)) var(--outline-room);
+    /* Reserve only the space occupied by the activity overlay. Queued prompts
+       already take their own space in the composer below this viewport. */
+    padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
   }
 
