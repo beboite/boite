@@ -968,7 +968,8 @@ tr:last-child td {
   scrollbar-color: var(--color-scrollbar) transparent;
 }
 
-@supports selector(::-webkit-scrollbar) {
+/* Some Firefox versions recognize the track selector without thumb styling. */
+@supports selector(::-webkit-scrollbar-thumb) {
   @media (forced-colors: none) {
     /* Standard non-auto values override the custom thumb in Chromium. */
     * {
