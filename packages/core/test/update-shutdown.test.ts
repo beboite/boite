@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
+import { echoThread, holdAccountTurns, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 function ask(h: TestCore): Promise<Response> {
   return fetch(`${h.url}/shutdown-if-idle?pid=${process.pid}`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } });
@@ -17,7 +17,8 @@ function trustedPeer(h: TestCore) {
 
 test('an update lets running and queued turns finish before admitting shutdown', async () => {
   let stops = 0;
-  const h = await startTestCore({ onShutdown: () => { stops += 1; }, settings: { maxConcurrentTurns: 1 } });
+  const h = await startTestCore({ onShutdown: () => { stops += 1; } });
+  let release: (() => void) | undefined;
   try {
     const client = await h.connect();
     const first = await echoThread(h, client, 'first');
@@ -28,12 +29,15 @@ test('an update lets running and queued turns finish before admitting shutdown',
     const queuedFinished = client.next('turn.finished', turn => turn.threadId === second.threadId);
     void finished.catch(() => undefined); void queuedFinished.catch(() => undefined);
     await client.call('turns.start', { threadId: first.threadId, prompt: '[sleep:300] completes once' });
+    release = holdAccountTurns(h, second.accountId);
     const queued = await client.call('turns.start', { threadId: second.threadId, prompt: 'also completes once' });
     expect(queued.status).toBe('queued');
     expect((await ask(h)).status).toBe(409);
     expect(h.core.stopping).toBe(false);
     expect(stops).toBe(0);
     expect((await finished).status).toBe('done');
+    expect((await ask(h)).status).toBe(409);
+    release(); release = undefined;
     expect((await queuedFinished).status).toBe('done');
     await waitFor(() => h.core.scheduler.state().running.length === 0);
     const accepted = await ask(h);
@@ -42,7 +46,7 @@ test('an update lets running and queued turns finish before admitting shutdown',
     await waitFor(() => stops === 1);
     expect(h.core.journal.listTurns(first.threadId)).toHaveLength(1);
     expect(h.core.journal.listTurns(second.threadId)).toHaveLength(1);
-  } finally { await h.stop(); }
+  } finally { release?.(); await h.stop(); }
 });
 
 test('an update leaves a permission card answerable and its turn completes', async () => {

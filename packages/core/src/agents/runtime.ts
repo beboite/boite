@@ -139,7 +139,7 @@ export class AgentRuntime {
         if (this.closed || this.core.stopping || this.store.limits().paused) break;
         const active = this.active();
         const scheduler = this.core.scheduler.state();
-        const cap = Math.min(this.store.limits().backgroundConcurrency, Math.max(1, scheduler.maxConcurrentTurns - 1));
+        const cap = this.store.limits().backgroundConcurrency;
         if (active.length >= cap || scheduler.queued.length > 0) break;
         if (work.status !== 'pending' || work.notBefore > Date.now() || active.some(run => run.agentId === work.agentId)) continue;
         try { if (this.eligible(work)) await this.start(work); }

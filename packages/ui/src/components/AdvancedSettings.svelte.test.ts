@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 const settle = async () => { for (let i = 0; i < 20; i++) { await Promise.resolve(); flushSync(); } };
-const base = { maxConcurrentTurns: 4, perAccountConcurrency: 2, warmProcessMinutes: 5 };
+const base = { warmProcessMinutes: 5 };
 
 test('an origins draft survives a settings update from elsewhere, and a save lets the saved list back in', async () => {
   const store = $state({

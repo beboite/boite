@@ -910,10 +910,6 @@ export const strings = {
     profileName: 'Agent {count}',
     profileLabel: 'Agent profile',
     removeProfile: 'Remove profile',
-    maxAgents: 'Agents total',
-    maxConcurrent: 'Running at once',
-    maxTurns: 'Team turns',
-    maxMinutes: 'Minutes per turn',
     pause: 'Pause team',
     resume: 'Resume team',
     launch: 'Launch agent',
@@ -924,7 +920,6 @@ export const strings = {
     agentsShort: 'agents',
     turnsShort: 'turns',
     usage: 'Delegated team usage',
-    limitReached: "Turn limit reached. Increase it in team settings to continue.",
     openThread: 'Open conversation',
     backToTeam: 'Back to the team',
     stop: 'Stop',
@@ -1417,8 +1412,6 @@ export const strings = {
     app: 'App',
     tourReplay: 'Replay the tour',
     execution: 'Agent execution',
-    maxConcurrentTurnsHint: 'How many turns run at the same time across every thread. The next ones wait in line.',
-    perAccountConcurrencyHint: 'How many turns one account runs at once.',
     warmProcessMinutesHint: 'How long an agent stays loaded after a turn, so the next message starts faster. 0 stops it right away.',
     projects: 'Projects',
     /** The language the UI speaks, on this device. `system` follows the machine. */
@@ -1492,8 +1485,6 @@ export const strings = {
     coreUrl: 'Core URL',
     token: 'Token',
     connect: 'Connect',
-    maxConcurrentTurns: 'Max concurrent turns',
-    perAccountConcurrency: 'Per account concurrency',
     warmProcessMinutes: 'Warm process minutes',
     listenOnLan: 'Reachable on the local network',
     listenOnLanHint: 'Lets a phone on the same network reach this computer. Takes effect the next time Boite starts; a --host or --lan flag wins over it.',
@@ -1644,6 +1635,11 @@ export const strings = {
   },
 
   experiments: {
+    whip: {
+      title: 'Whip',
+      hint: 'A button at the bottom left shakes the Boite window with each hit. In a browser or maximized window, it shakes the whole interface. Respects reduced motion',
+      action: 'Whip'
+    },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
     themeGrain: {

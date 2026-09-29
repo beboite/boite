@@ -26,6 +26,16 @@ export interface TestCoreOptions {
   onShutdown?: () => void;
 }
 
+/** Hold admission as an account login would, without limiting unrelated work. */
+export function holdAccountTurns(harness: TestCore, accountId?: string): () => void {
+  const blocksAccount = harness.core.plugins.blocksAccount;
+  harness.core.plugins.blocksAccount = id => accountId === undefined || id === accountId || blocksAccount.call(harness.core.plugins, id);
+  return () => {
+    harness.core.plugins.blocksAccount = blocksAccount;
+    harness.core.scheduler.onSettingsChanged();
+  };
+}
+
 /** Scripted SDK tests need an available executable, never a real CLI install. */
 export function scriptedClaude(harness: TestCore): void {
   const descriptor = harness.core.providers.require('claude');

@@ -7,7 +7,7 @@ import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
-import { echoThread, startTestCore, waitFor } from './harness.ts';
+import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const FAKE = fileURLToPath(new URL('./fixtures/update-agent.ts', import.meta.url));
@@ -213,10 +213,10 @@ describe('harness updates', () => {
     const { client, state } = await start('command');
     const core = harness!.core;
     await client.call('providers.updates', { refresh: true });
-    await client.call('settings.set', { maxConcurrentTurns: 1 });
     const blocker = await echoThread(harness!, client);
     await client.call('turns.start', { threadId: blocker.threadId, prompt: '[sleep:60000]' });
     const account = await client.call('accounts.add', { providerId: 'update-fake', label: 'Fake', useDefaultLocation: true });
+    holdAccountTurns(harness!, account.id);
     const thread = await client.call('threads.create', { projectId: core.threads.require(blocker.threadId).projectId!, providerId: 'update-fake', accountId: account.id });
     await client.call('turns.start', { threadId: thread.id, prompt: 'queued on the old provider' });
     await client.call('threads.update', { threadId: thread.id, accountId: blocker.accountId });

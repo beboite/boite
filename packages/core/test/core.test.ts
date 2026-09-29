@@ -70,8 +70,6 @@ describe('settings', () => {
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
       worktreeStorage: { mode: 'project', directory: null },
-      maxConcurrentTurns: 6,
-      perAccountConcurrency: 2,
       warmProcessMinutes: 0,
       listenOnLan: false,
       agentCpuCapPercent: 75,
@@ -86,18 +84,17 @@ describe('settings', () => {
       asyncQuestions: false,
     });
 
-    const next = await client.call('settings.set', { maxConcurrentTurns: 3 });
-    expect(next.maxConcurrentTurns).toBe(3);
-    expect(next.perAccountConcurrency).toBe(2);
-    expect((await client.call('settings.get', {})).maxConcurrentTurns).toBe(3);
+    const next = await client.call('settings.set', { warmProcessMinutes: 3 });
+    expect(next.warmProcessMinutes).toBe(3);
+    expect((await client.call('settings.get', {})).warmProcessMinutes).toBe(3);
 
     let failure = 'none';
     try {
-      await client.call('settings.set', { maxConcurrentTurns: -1 });
+      await client.call('settings.set', { warmProcessMinutes: -1 });
     } catch (error) {
       failure = (error as Error).message;
     }
-    expect(failure).toContain('maxConcurrentTurns');
+    expect(failure).toContain('warmProcessMinutes');
   });
 
   test('focusGuard is a boolean, on by default, and a change reaches every client', async () => {

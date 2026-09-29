@@ -9,8 +9,7 @@ export const BROWSER_ORIGINS_MAX = 32;
 /** A model id is a name, never a paragraph. */
 const TITLE_MODEL_MAX = 200;
 
-const NUMERIC_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency', 'warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
-const POSITIVE_KEYS = ['maxConcurrentTurns', 'perAccountConcurrency'] as const;
+const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
 const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
 const PERCENT_KEYS = ['agentCpuCapPercent'] as const;
@@ -55,6 +54,9 @@ function browserOrigin(value: unknown): string | null {
  */
 export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck {
   const next: Partial<Settings> = { ...patch };
+  // Older clients and saved settings may still carry the retired launch limits.
+  Reflect.deleteProperty(next, 'maxConcurrentTurns');
+  Reflect.deleteProperty(next, 'perAccountConcurrency');
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;
     if (!storage || typeof storage !== 'object' || !['project', 'shared'].includes(storage.mode)) {
@@ -83,10 +85,6 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'browserOrigins', message: `browserOrigins must contain at most ${BROWSER_ORIGINS_MAX} HTTP or HTTPS origins` };
     }
     next.browserOrigins = unique;
-  }
-  for (const key of POSITIVE_KEYS) {
-    const value = patch[key];
-    if (value !== undefined && (!Number.isInteger(value) || value < 1)) return { ok: false, field: key, message: `${key} must be a positive integer` };
   }
   for (const key of NUMERIC_KEYS) {
     const value = patch[key];

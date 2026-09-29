@@ -108,14 +108,15 @@ once more on a fresh session, with no error part. Any other resume failure
 keeps the id. Each accepted turn freezes its execution target,
 so a later picker change cannot redirect queued work.
 
-## The scheduler counts turns, not threads
+## The scheduler tracks independent turns
 
-`maxConcurrentTurns` defaults to 6 and `perAccountConcurrency` to 2. A turn past
-the cap is `queued`, visible as queued, and started in order. A thread is not a
-process: a process exists only while a turn runs, unless `warmProcessMinutes`
-lets a driver keep its own one for the next turn. Raising the global cap alone
-changes nothing when every thread shares one account, which is the shape of the
-bench.
+Independent conversations start immediately, including those on the same
+account. Boite imposes no global or per-account turn count. Old saved launch
+limits are ignored. A turn can remain `queued` while its account is being
+configured or its team is paused. Each conversation accepts one in-flight turn.
+A process exists only while a turn runs, unless `warmProcessMinutes` lets a
+driver keep its own one for the next turn. Process CPU and memory guards remain
+independent of turn admission.
 
 ## Delegation shares the scheduler
 
@@ -124,8 +125,9 @@ relationship and a separate provider session per child. The owner's named
 profiles select the account, model and effort. The child inherits the parent's
 checkout and permission mode. No additional orchestration model runs.
 
-Delegation admission applies team limits before the existing global and
-account scheduler limits. Compact briefs and bounded final answers cross the
+Delegation requires an enabled team and an owner-approved profile. It imposes
+no agent count, concurrency, turn count or duration quota. Compact briefs and
+bounded final answers cross the
 thread boundary; transcripts and tool payloads stay in their own threads.
 The core serializes live steering with ordinary coordination and queues input
 for drivers without steering. Results can also join the next user prompt.

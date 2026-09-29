@@ -17,8 +17,8 @@ interface RunningEntry extends Entry {
 const DRAIN_TIMEOUT_MS = 5_000;
 
 /**
- * A thread is not a process: this counts turns. A turn past `maxConcurrentTurns`
- * or past `perAccountConcurrency` waits in order and is visible as `queued`.
+ * Starts independent threads immediately. A paused team or account login
+ * change can hold admission; each thread still has one in-flight turn.
  */
 export class Scheduler {
   private readonly queue: Entry[] = [];
@@ -38,10 +38,7 @@ export class Scheduler {
   }
 
   state(): SchedulerState {
-    const settings = this.core.settings.get();
     return {
-      maxConcurrentTurns: settings.maxConcurrentTurns,
-      perAccountConcurrency: settings.perAccountConcurrency,
       running: [...this.running.values()].map((entry) => ({
         turnId: entry.turnId,
         threadId: entry.threadId,
@@ -82,13 +79,10 @@ export class Scheduler {
 
   private pump(): void {
     if (this.core.stopping) return;
-    const settings = this.core.settings.get();
     let started = false;
     for (;;) {
-      if (this.running.size >= settings.maxConcurrentTurns) break;
       const index = this.queue.findIndex(
-        (entry) => this.runningForAccount(entry.accountId) < settings.perAccountConcurrency
-          && this.core.delegation.canRun(entry.threadId, [...this.running.values()].map(run => run.threadId))
+        (entry) => this.core.delegation.canRun(entry.threadId)
           && !this.core.plugins.blocksAccount(entry.accountId)
           && ![...this.running.values()].some((run) => run.threadId === entry.threadId),
       );
@@ -130,12 +124,6 @@ export class Scheduler {
     });
     await Promise.race([Promise.allSettled(entries.map((entry) => entry.done)), deadline]);
     if (timer !== undefined) clearTimeout(timer);
-  }
-
-  private runningForAccount(accountId: AccountId): number {
-    let count = 0;
-    for (const entry of this.running.values()) if (entry.accountId === accountId) count += 1;
-    return count;
   }
 
   private emitUpdated(): void {

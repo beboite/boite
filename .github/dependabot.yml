@@ -41,3 +41,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Move to a new Node major after it enters LTS; keep digest updates enabled.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
