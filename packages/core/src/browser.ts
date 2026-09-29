@@ -4,7 +4,7 @@ import type { BrowserConfig, BrowserRequest, BrowserStatus, BrowserTask } from '
 import type { Core } from './core.ts';
 import { invalidParams, refused } from './errors.ts';
 import { newToken } from './ids.ts';
-import { validateBrowserRequest } from './browser/loop.ts';
+import { validateBrowserRequest } from './browser/request.ts';
 
 interface Job { task: BrowserTask; controller: AbortController; done: Promise<void> }
 export class BrowserStore {

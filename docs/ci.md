@@ -138,6 +138,17 @@ projects: all of it draws on the first screen. The project stack marks (28 KB)
 and the find bar stay out of the entry chunk and load when first needed. Raise
 one in the change that explains the growth. Timings are not
 gated: they vary too much on shared runners.
+
+On 2026-09-29, fresh `bun run build:core` builds measured 811,714 bytes for
+`dist/main.js` at the merged main commit `5bef4f7` and 821,602 bytes with the
+browser plugin, an increase of 9,888 bytes (1.22%). Its task loop now loads
+only when a browser task starts; request validation remains synchronous.
+Following static imports from the entry bundle measured 878,554 bytes,
+10,417 fewer than before separating validation from the loop. This measures
+code size, not elapsed startup time. Provider SDKs remain lazy. The core
+budget moved to 903,800 bytes, about 10% above that fresh measurement;
+both UI budgets stayed unchanged.
+
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
 The test refuses a missing UI build. Local end-to-end runs rebuild it by default.
