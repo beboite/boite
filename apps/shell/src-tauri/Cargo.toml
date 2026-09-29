@@ -49,7 +49,7 @@ libc = "0.2"
 # cannot do on a desktop.
 tauri-winrt-notification = "0.8"
 # The Windows build, which decides the window materials the setting offers.
-windows-version = "0.1"
+windows-version = "0.100"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
