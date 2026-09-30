@@ -70,6 +70,21 @@ export class Requests {
     }
   }
 
+  async skipQuestion(threadId: ThreadId, questionId: RequestId): Promise<boolean> {
+    const client = this.ctx.client;
+    if (!client) return false;
+    try {
+      await client.call('questions.skip', { threadId, questionId });
+      if (this.ctx.client !== client) return false;
+      this.pendingQuestions = this.pendingQuestions.filter(question => question.id !== questionId);
+      return true;
+    } catch (error) {
+      if (this.ctx.client !== client) return false;
+      this.ctx.fail(error);
+      return false;
+    }
+  }
+
   async answer(requestId: string, decision: 'allow' | 'deny'): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;

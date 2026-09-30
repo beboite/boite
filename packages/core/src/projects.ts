@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
-import { notFound, refused } from './errors.ts';
+import { messageOf, notFound, refused } from './errors.ts';
 import { FileIndex } from './files.ts';
 import { documentsDir } from './platform/folders.ts';
 import { threadTerminalId } from './terminals.ts';
@@ -380,6 +380,9 @@ export class ProjectStore {
           return removed;
         },
       );
+      await this.core.threads.codeCheckpoints.discard(threadIds).catch(error => {
+        this.core.log('warn', `file checkpoints of removed project ${projectId} were not deleted: ${messageOf(error)}`);
+      });
       for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
       this.core.bus.emit('project.removed', { projectId });
       this.core.bus.emit('thread.deletionsUpdated', {});

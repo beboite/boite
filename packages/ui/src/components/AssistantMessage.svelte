@@ -112,6 +112,7 @@
           pending={store.pendingQuestions.some((q) => q.id === part.questionId)}
           submit={(optionIds, text) =>
             store.answerQuestion(message.threadId, part.questionId, optionIds, text)}
+          skip={() => store.skipQuestion(message.threadId, part.questionId)}
         />
       {:else if part.type === 'compaction'}
         <div class="compaction" data-testid="compaction-part" data-trigger={part.trigger}>

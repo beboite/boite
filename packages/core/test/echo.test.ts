@@ -397,6 +397,22 @@ describe('echo driver', () => {
     expect(assistant?.parts[1]).toEqual({ type: 'text', text: 'answered short one line please' });
   });
 
+  test('skipping a blocking question resumes the turn without a user answer', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    await client.call('threads.subscribe', { threadId });
+    const asked = client.next('question.asked', request => request.threadId === threadId);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'question' });
+    const question = await asked;
+    await client.call('questions.skip', { threadId, questionId: question.id });
+    expect((await finished).status).toBe('done');
+    expect(await client.call('questions.list', { threadId })).toEqual([]);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.filter(message => message.role === 'user')).toHaveLength(1);
+    expect(thread.messages.flatMap(message => message.parts).find(part => part.type === 'question')).toMatchObject({ answer: null });
+  });
+
   test('a question refuses an unknown id, an option nobody offered and an empty answer', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

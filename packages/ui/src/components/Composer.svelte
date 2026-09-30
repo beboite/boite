@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
+  import { rewindComposerEdit } from '../lib/composer-edit';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
@@ -371,20 +372,14 @@
     const images = attachments;
     const references = previewReferences;
     if (!canSend || !choice) return;
+    const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
-    // An edited message: the thread goes back to before it, then this goes out
-    // in its place. A refusal is shown and the text stays in the box.
-    if (state.editing && !store.busy && state.queued.length === 0 && !offline) {
-      state.sending = true;
-      const rewound = await store.rewind(state.editing);
-      state.sending = false;
-      if (!rewound) return;
-      state.editing = null;
-    }
+    const editedThread = state.editing ? inputStore.openThread : null;
+    if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
-    if (store.busy || state.queued.length > 0 || offline) {
+    if (!editedThread && (inputStore.busy || state.queued.length > 0 || offline)) {
       state.queued.push({ text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) });
       state.editing = null;
       state.text = '';
@@ -397,9 +392,17 @@
     }
     state.sending = true;
     const finishImageSend = trackImageSend(state, prompt, images);
-    const accepted = await (nextDraft
-      ? store.submitAndDraft(prompt, choice, images, references)
-      : store.submit(prompt, choice, images, references));
+    // A rewind can finish after navigation: the replacement belongs to the
+    // captured thread and machine, whichever conversation is on screen now.
+    const accepted = await (editedThread
+      ? inputStore.send(prompt, inputKey, images, references)
+      : nextDraft
+        ? inputStore.submitAndDraft(prompt, sendChoice, images, references)
+        : inputStore.submit(prompt, sendChoice, images, references));
+    if (accepted && editedThread && nextDraft && inputStore.openThread?.id === inputKey) {
+      inputStore.startDraft(editedThread.projectId);
+      inputStore.draftChoice = { ...sendChoice };
+    }
     finishImageSend(accepted);
     if (accepted) {
       // Text typed and images attached while the RPC was pending belong to the

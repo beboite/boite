@@ -36,7 +36,7 @@ export const FORK_TITLE_SUFFIX = ' (fork)';
 export class ThreadBranching {
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
-  rewind(threadId: ThreadId, messageId: MessageId): ThreadRewind {
+  async rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
     const thread = this.threads.require(threadId);
     if (thread.agentSessionId) {
       throw refused('a persistent agent session takes its work through Agents and cannot be rewound', { threadId, field: 'threadId', expected: 'a conversation thread' });
@@ -68,58 +68,64 @@ export class ThreadBranching {
     // A live follow-up can cut inside a turn; its final checkpoint is then too late.
     const kept = this.core.journal.listMessagePage(threadId, { beforeRowid: rowid, limit: 1 }).messages[0] ?? null;
     const removed = this.core.journal.messageIdsFrom(threadId, rowid);
-    // The thread moved after the kept turn: its checkpoint belongs to the old
-    // folder, and the notes that told the agent go with the removed messages.
-    // The next one says it again, from where the kept history left the agent
-    // to where the thread is now, however many moves came between.
-    const moved = firstMove(removed.messageIds.map((id) => this.core.journal.getMessage(id)));
-    const note = moved === null ? undefined : this.noteSince(thread, moved.from);
-    const plan = kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
-    const next: ThreadSummary = {
-      ...thread,
-      sessionId: plan.sessionId,
-      sessionResumeAt: plan.sessionResumeAt,
-      // A new generation, as a change of account: nothing the old session
-      // reports late can land on this one, and its totals start again.
-      sessionGeneration: (thread.sessionGeneration ?? 0) + 1,
-      context: null,
-      promptCache: null,
-      status: 'idle',
-      updatedAt: Date.now(),
-    };
-    // The process that holds the whole session goes first, whatever it still runs.
-    this.threads.releaseAgent(threadId);
-    this.threads.agentState.noteBackground(threadId, []);
-    this.threads.cards.clearQuestionsOf(threadId, true);
-    this.threads.deferred.deferredAnswers.delete(threadId);
-    this.threads.deferred.pendingWakes.delete(threadId);
+    return this.threads.codeCheckpoints.rewind(thread, removed.turnIds, messageId, files => {
+      const current = this.threads.require(threadId);
+      if (current.archived || current.cwd !== thread.cwd || threadActive(current.status) || current.updatedAt !== thread.updatedAt || this.core.journal.messageRowid(threadId, messageId) !== rowid) {
+        throw refused('this thread changed while restoring files; retry the edit', { field: 'threadId', threadId, expected: 'the unchanged idle thread' });
+      }
+      // The thread moved after the kept turn: its checkpoint belongs to the old
+      // folder, and the notes that told the agent go with the removed messages.
+      // The next one says it again, from where the kept history left the agent
+      // to where the thread is now, however many moves came between.
+      const moved = firstMove(removed.messageIds.map((id) => this.core.journal.getMessage(id)));
+      const note = moved === null ? undefined : this.noteSince(thread, moved.from);
+      const plan = kept === null || moved !== null ? fresh() : this.resumable(thread, kept.turnId, thread.cwd) ?? fresh();
+      const next: ThreadSummary = {
+        ...thread,
+        sessionId: plan.sessionId,
+        sessionResumeAt: plan.sessionResumeAt,
+        // A new generation, as a change of account: nothing the old session
+        // reports late can land on this one, and its totals start again.
+        sessionGeneration: (thread.sessionGeneration ?? 0) + 1,
+        context: null,
+        promptCache: null,
+        status: 'idle',
+        updatedAt: Date.now(),
+      };
+      // The process that holds the whole session goes first, whatever it still runs.
+      this.threads.releaseAgent(threadId);
+      this.threads.agentState.noteBackground(threadId, []);
+      this.threads.cards.clearQuestionsOf(threadId, true);
+      this.threads.deferred.deferredAnswers.delete(threadId);
+      this.threads.deferred.pendingWakes.delete(threadId);
 
-    this.core.journal.append(
-      {
-        type: 'thread.rewound',
-        threadId,
-        version: 1,
-        payload: {
-          messageId,
-          removedMessageIds: removed.messageIds,
-          removedTurnIds: removed.turnIds,
-          session: plan.session,
-          sessionId: plan.sessionId,
-          sessionResumeAt: plan.sessionResumeAt,
-          previousSessionId: thread.sessionId,
+      this.core.journal.append(
+        {
+          type: 'thread.rewound',
+          threadId,
+          version: 1,
+          payload: {
+            messageId,
+            removedMessageIds: removed.messageIds,
+            removedTurnIds: removed.turnIds,
+            session: plan.session,
+            sessionId: plan.sessionId,
+            sessionResumeAt: plan.sessionResumeAt,
+            previousSessionId: thread.sessionId,
+          },
         },
-      },
-      () => {
-        this.core.journal.truncateMessages(threadId, rowid);
-        this.core.journal.putThread(next);
-        if (note) this.core.journal.setSetting(`${MOVE_NOTE_PREFIX}${threadId}`, note);
-        else if (note === null) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
-      },
-    );
-    this.core.bus.emit('message.truncated', { threadId, messageId });
-    this.core.bus.emit('thread.updated', withLoad(this.core, this.threads.require(threadId)));
-    const content = contentOf(message);
-    return { thread: this.threads.get(threadId), ...content, session: plan.session };
+        () => {
+          this.core.journal.truncateMessages(threadId, rowid);
+          this.core.journal.putThread(next);
+          if (note) this.core.journal.setSetting(`${MOVE_NOTE_PREFIX}${threadId}`, note);
+          else if (note === null) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
+        },
+      );
+      this.core.bus.emit('message.truncated', { threadId, messageId });
+      this.core.bus.emit('thread.updated', withLoad(this.core, this.threads.require(threadId)));
+      const content = contentOf(message);
+      return { thread: this.threads.get(threadId), ...content, session: plan.session, files };
+    });
   }
 
   /**

@@ -478,6 +478,7 @@ export class Store {
   set questionRequests(value) { this.#ctx.requests.questionRequests = value; }
 
   answerQuestion(...args: Parameters<Requests['answerQuestion']>) { return this.#ctx.requests.answerQuestion(...args); }
+  skipQuestion(...args: Parameters<Requests['skipQuestion']>) { return this.#ctx.requests.skipQuestion(...args); }
   answer(...args: Parameters<Requests['answer']>) { return this.#ctx.requests.answer(...args); }
 
   // -------------------------------------------------------------------------

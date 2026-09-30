@@ -12,7 +12,8 @@
     docked = false,
     answer,
     pending,
-    submit
+    submit,
+    skip
   }: {
     text: string;
     options: QuestionOption[];
@@ -27,6 +28,8 @@
     pending: boolean;
     /** False when the answer did not reach the core: the card is given back to answer again. */
     submit: (optionIds: string[], text: string) => unknown;
+    /** Resolve without sending an answer. A failure leaves the card usable. */
+    skip?: () => unknown;
   } = $props();
 
   let picked = $state<string[]>([]);
@@ -50,6 +53,12 @@
     if (!pending || !ready || sent) return;
     sent = true;
     if ((await submit(picked, typed.trim())) === false) sent = false;
+  }
+
+  async function pass(): Promise<void> {
+    if (!pending || sent || !skip) return;
+    sent = true;
+    if ((await skip()) === false) sent = false;
   }
 
   /** What the folded card says: the labels picked, then whatever was typed. */
@@ -147,6 +156,9 @@
 
     {#if pending}
       <div class="actions">
+        {#if skip}
+          <button type="button" class="ghost" data-testid="question-skip" disabled={sent} onclick={pass}>{strings.chat.questionSkip}</button>
+        {/if}
         <button
           type="button"
           class="primary"

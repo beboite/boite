@@ -85,6 +85,7 @@ describe('claude rewind and fork', () => {
     expect(cut?.forkSession).toBe(true);
     // The prompt is the edited one alone: the transcript already holds the rest.
     expect(calls[2]?.prompts[0]).not.toContain('first');
+    expect(calls[2]?.prompts[0]).toContain('second, edited');
 
     // The fork is the thread's session now, resumed whole from here on.
     const after = harness.core.threads.require(threadId);

@@ -95,6 +95,7 @@ export class Threads {
     try {
       const { thread, ...rewound } = await client.call('threads.rewind', { threadId, messageId });
       this.applyRewound(thread);
+      if (rewound.files?.status === 'unavailable') this.ctx.store.error = strings.composer.filesUnavailable;
       return rewound;
     } catch (error) {
       this.ctx.fail(error);

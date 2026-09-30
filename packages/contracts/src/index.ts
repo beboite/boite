@@ -1099,6 +1099,8 @@ export interface ThreadRewind {
    * carrying the kept history, as a change of account does.
    */
   session: 'native' | 'seeded';
+  /** File changes restored before the cut. Missing on older cores. */
+  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -2633,6 +2635,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'questions.answer': {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
+    result: { ok: true };
+  };
+  /** Resolve a pending question without an answer, a steer or a new user message. */
+  'questions.skip': {
+    params: { threadId: ThreadId; questionId: RequestId };
     result: { ok: true };
   };
   /**
