@@ -340,25 +340,15 @@ jobs:
             Get-Content $out
             Get-Content $err
           }
-          $jobsPath = 'packages/core/src/platform/windows/jobs.ts'
-          $originalJobs = Get-Content $jobsPath -Raw
-          $memoryPath = 'packages/core/src/platform/windows/memory.ts'
-          $originalMemory = Get-Content $memoryPath -Raw
-          $journalPath = 'packages/core/src/journal.ts'
-          $originalJournal = Get-Content $journalPath -Raw
-          for ($i = 1; $i -le 3; $i++) {
-            Run-NativeProbe 'thread-remove' "only-remove-$i" 'removal'
-            Run-NativeProbe 'thread-remove' "only-paired-$i" 'paired'
-          }
-          Set-Content $memoryPath ($originalMemory.Replace('kernel32 ??= loadKernel32();', 'return null;'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-memory-ffi-$i" }
-          Set-Content $jobsPath ($originalJobs.Replace('function ensureNative(): Native | null {', 'function ensureNative(): Native | null { return null;'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-native-ffi-$i" }
-          Set-Content $jobsPath $originalJobs
-          Set-Content $memoryPath $originalMemory
-          Set-Content $journalPath ($originalJournal.Replace('this.db.close(false);', '/* diagnostic: keep sqlite open */'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-sqlite-close-$i" }
-          Set-Content $journalPath $originalJournal
+          $serverPath = 'packages/core/src/server.ts'
+          $originalServer = Get-Content $serverPath -Raw
+          Set-Content $serverPath ($originalServer.Replace('void server.stop(true);', 'await server.stop(true);'))
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "await-server-stop-$i" }
+          Set-Content $serverPath ($originalServer.Replace('perMessageDeflate: true,', 'perMessageDeflate: false,'))
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-compression-$i" }
+          Set-Content $serverPath ($originalServer.Replace('perMessageDeflate: true,', "perMessageDeflate: { compress: 'dedicated', decompress: 'dedicated' },"))
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "dedicated-compression-$i" }
+          Set-Content $serverPath $originalServer
 
   required:
     name: CI required
