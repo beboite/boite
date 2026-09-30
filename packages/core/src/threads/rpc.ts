@@ -85,6 +85,10 @@ export function registerThreadMethods(core: Core): void {
   });
   core.router.register('questions.list', (params) => core.threads.listQuestions(params.threadId));
   core.router.register('questions.ask', (params) => core.threads.askAsync(params));
+  core.router.register('questions.skip', (params) => {
+    core.threads.skipQuestion(params);
+    return { ok: true } as const;
+  });
   core.router.register('questions.answer', (params) => {
     core.threads.answerQuestion({
       threadId: params.threadId,

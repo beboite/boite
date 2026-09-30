@@ -768,6 +768,10 @@ export class ThreadStore {
     this.cards.answerQuestion(params);
   }
 
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
+    this.cards.skipQuestion(params);
+  }
+
   askAsync(params: { threadId: ThreadId; text: string; options?: string[]; multiple?: boolean }): { questionId: RequestId } {
     return this.cards.askAsync(params);
   }

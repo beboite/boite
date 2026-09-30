@@ -162,6 +162,20 @@ export const SCENARIOS: Record<string, Scenario> = {
       same((await summary(env, created.id)).permissionMode, 'default', 'restored mode');
     } finally { seen.stop(); }
   },
+  'questions.skip removes only its own pending card without another turn': async (env) => {
+    const { setup, threadId, questionId } = await asked(env);
+    const other = await thread(env, setup, 'other');
+    const data = await refusedWith(env.call('questions.skip', { threadId: other.id, questionId }), RpcErrorCode.Refused, ['expected']);
+    same(data.expected, threadId, 'expected thread');
+    await stillPending(env, threadId, questionId);
+    const before = await env.call('threads.get', { threadId });
+    await env.call('questions.skip', { threadId, questionId });
+    same(await env.call('questions.list', { threadId }), [], 'pending after skip');
+    const after = await env.call('threads.get', { threadId });
+    same(after.turns, before.turns, 'turns after skip');
+    same(after.messages.filter(message => message.role === 'user'), before.messages.filter(message => message.role === 'user'), 'user messages after skip');
+    await refusedWith(env.call('questions.skip', { threadId, questionId }), RpcErrorCode.NotFound);
+  },
   'questions.answer refuses an answer sent for another thread': async (env) => {
     const { setup, threadId, questionId } = await asked(env);
     const other = await thread(env, setup, 'other');

@@ -306,6 +306,44 @@ test('ask draws a card that does not stop the agent, and the answer comes back a
   expect(card).toMatchObject({ async: true, answer: { optionIds: ['2'], text: 'after lunch' } });
 });
 
+test('skipping async questions neither steers running work nor starts a later turn', async () => {
+  let finish!: () => void;
+  let starts = 0;
+  let steers = 0;
+  const restore = setDriver('echo', { protocol: 'echo', startTurn() {
+    starts++;
+    const done = new Promise<TurnResult>(resolve => { finish = () => resolve({ status: 'done', sessionId: null, usage: null }); });
+    return { done, stop: () => finish(), async steer() { steers++; return true; } };
+  } });
+  try {
+    const client = await harness.connect();
+    await client.call('threads.subscribe', { threadId });
+    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await waitFor(() => starts === 1);
+    for (const active of [true, false]) {
+      if (!active) {
+        finish();
+        await waitFor(() => harness.core.threads.require(threadId).status === 'idle');
+      }
+      const { questionId } = await client.call('questions.ask', { threadId, text: 'Deploy now?', options: ['Yes', 'No'] });
+      const other = await echoThread(harness, client, 'Other thread');
+      await expect(client.call('questions.skip', { threadId: other.threadId, questionId })).rejects.toThrow('another thread');
+      expect(await client.call('questions.list', { threadId })).toHaveLength(1);
+      const answered = client.next('question.answered', event => event.questionId === questionId);
+      await client.call('questions.skip', { threadId, questionId });
+      expect((await answered).answer).toBeNull();
+      expect(await client.call('questions.list', { threadId })).toEqual([]);
+      await expect(client.call('questions.skip', { threadId, questionId })).rejects.toThrow('unknown question');
+      expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+      expect(harness.core.threads.require(threadId).status).toBe(active ? 'running' : 'idle');
+      expect(harness.core.journal.listMessages(threadId).filter(message => message.role === 'user')).toHaveLength(1);
+      expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
+      expect(steers).toBe(0);
+      expect(starts).toBe(1);
+    }
+  } finally { restore(); }
+});
+
 test('an answer the running turn refuses to take is held for the next prompt', async () => {
   let finish: (() => void) | null = null;
   let steers = 0;

@@ -90,6 +90,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'permissions.answer',
   'questions.list',
   'questions.answer',
+  // Paired phones can dismiss the same question cards as the owner's chat.
+  'questions.skip',
   // Read-only screens.
   'scheduler.get',
   'usage.get',

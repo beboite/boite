@@ -89,6 +89,11 @@ messages, so `threads.get` and `messages.list` no longer return them. The turn
 rows stay, so the usage history still counts what they spent. Every subscribed
 client gets `message.truncated` and drops the message and what follows it.
 
+The composer keeps an edit if a turn starts before it is sent: the rewind
+refusal leaves its text intact instead of queuing a duplicate. Navigating while
+the rewind is pending still sends the replacement to the original thread on
+its owning machine.
+
 `threads.fork { threadId, messageId, worktree? }` copies the history up to and
 including any finished message into a new thread titled after the source with
 ` (fork)`. The source is left as it was. `worktree: true` makes the worktree

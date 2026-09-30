@@ -207,7 +207,9 @@ asked. The core answers it by steering the running turn (Claude takes it at
 the main agent's next PostToolUse hook), or by sending `> question` and the
 answer as the next prompt once the thread is idle. The core stamps `startedAt`
 and `finishedAt` on every tool part, so a tool's line shows how long a command
-has run.
+has run. Skip resolves a question without an answer: a blocking question stops
+waiting, while an asynchronous question leaves the composer dock without a
+steer or another user prompt. Both desktop and paired phones use `questions.skip`.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when
