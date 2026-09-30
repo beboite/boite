@@ -59,10 +59,13 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
-  test('one title call names the temporary branch without moving files or losing commits', async () => {
+  test('one title call names the temporary branch while the first turn runs without moving files or losing commits', async () => {
+    let titleCalls = 0;
     const restore = setDriver('echo', {
       ...echoDriver,
       title: async ctx => {
+        titleCalls += 1;
+        expect(ctx.initial).toBe(true);
         expect(ctx.nameBranch).toBe(true);
         return JSON.stringify({ title: 'Noms de worktrees', needsRefinement: false, branch: 'fix-worktree-names' });
       },
@@ -81,9 +84,11 @@ describe('a thread in its own worktree', () => {
       await client.call('threads.subscribe', { threadId: thread.id });
       const finished = client.next('turn.finished', row => row.threadId === thread.id, 5000);
       const named = client.next('thread.updated', row => row.id === thread.id && row.branch === 'boite/fix-worktree-names-2' && row.titleSource === 'agent', 5000);
-      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree naming' });
-      expect((await finished).status).toBe('done');
+      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree naming [sleep:1000]' });
       expect(await named).toMatchObject({ title: 'Noms de worktrees', cwd: thread.cwd, branchNamingPending: false });
+      expect((await client.call('threads.get', { threadId: thread.id })).status).toBe('running');
+      expect((await finished).status).toBe('done');
+      expect(titleCalls).toBe(1);
       expect(git(thread.cwd, 'branch', '--show-current').trim()).toBe('boite/fix-worktree-names-2');
       expect(git(thread.cwd, 'rev-parse', 'HEAD')).toBe(head);
       expect(readFileSync(join(thread.cwd, 'pending.txt'), 'utf8')).toBe('keep this edit');

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 
@@ -34,7 +34,10 @@ test('new worktrees follow storage settings while existing ones keep their paths
   expect(back.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${back.branch!.slice(6)}`);
   await client.call('turns.start', { threadId: before.id, prompt: 'Fix worktree names' });
   await client.settled();
-  const named = await client.call('threads.retitle', { threadId: before.id });
+  await vi.waitFor(async () => {
+    expect((await client.call('threads.list', {})).find(thread => thread.id === before.id)?.branch).toBe('boite/fix-worktree-names');
+  });
+  const named = (await client.call('threads.list', {})).find(thread => thread.id === before.id)!;
   expect(named).toMatchObject({ branch: 'boite/fix-worktree-names', cwd: before.cwd, branchNamingPending: false });
   expect((await client.call('worktrees.list', { projectId: 'p-boite' })).find(entry => entry.path === before.cwd)?.branch).toBe(named.branch);
 });

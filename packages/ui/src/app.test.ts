@@ -237,7 +237,6 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
   const cwd = store.openThread!.cwd;
   await waitFor(() => store.openThread?.turns.some(turn => turn.status === 'done') === true);
-  await store.retitle(store.openThread!.id);
   await waitFor(() => query('[data-testid=thread-branch]').textContent?.trim() === 'boite/fix-the-login');
   expect(store.openThread?.cwd).toBe(cwd);
 });
