@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
-  import type { AgentLetter, Message, MoveNotice } from '@boite/contracts';
+  import type { AgentLetter, Message, MoveNotice, ThreadLink } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import TurnSummary from './TurnSummary.svelte';
@@ -13,6 +13,7 @@
   import UserMessage from './UserMessage.svelte';
   import AssistantMessage from './AssistantMessage.svelte';
   import MoveMarker from './MoveMarker.svelte';
+  import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
@@ -87,6 +88,13 @@
   function movedBy(message: Message): MoveNotice | null {
     if (message.role !== 'system') return null;
     for (const part of message.parts) if (part.type === 'text' && part.moved?.by === 'agent') return part.moved;
+    return null;
+  }
+
+  /** The core's line for a thread the agent started (`boite thread new`). */
+  function startedFrom(message: Message): ThreadLink | null {
+    if (message.role !== 'system') return null;
+    for (const part of message.parts) if (part.type === 'text' && part.started) return part.started;
     return null;
   }
 
@@ -590,6 +598,8 @@
             <MemoryRow event={memoryRows.get(message.id)!} />
           {:else if movedBy(message)}
             <MoveMarker notice={movedBy(message)!} />
+          {:else if startedFrom(message)}
+            <SpawnMarker {store} link={startedFrom(message)!} direction="to" />
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}

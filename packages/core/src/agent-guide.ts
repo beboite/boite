@@ -6,5 +6,6 @@ export function agentGuide(asyncQuestions: boolean): string {
     '`boite show <file>[:line]`, `boite diff [file]`, `boite browse <url>` open the panel; `boite attach <file>` publishes a file in chat.',
     ...(asyncQuestions ? ['`boite ask "<question>" [option ...]` asks asynchronously. Keep working on independent tasks; the answer arrives as a message. Silence grants no approval.'] : []),
     '`boite task add <text>` / `boite task start|done <id>` track your work. `boite todo list|add <text>|claim <id>` manages project todos; claim marks work done for user confirmation.',
+    '`boite projects` lists projects. `boite thread new <project> <brief>` starts a thread there, when the user asks or a part of the task belongs to that project; its first answer comes back to you.',
   ].join('\n') + '\n\n';
 }

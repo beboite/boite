@@ -244,6 +244,32 @@ export class ProjectStore {
     return 'changed';
   }
 
+  /**
+   * A project named by id, by name (any case) or by its absolute folder, among
+   * the ones the owner added. `method` and `field` name the parameter in a
+   * refusal; a name two projects share is refused with both ids.
+   */
+  find(query: unknown, method: string, field: string, context: Record<string, unknown> = {}): Project {
+    const expected = 'the id, name or absolute folder of a project added to Boite';
+    if (typeof query !== 'string' || query.trim().length === 0) {
+      throw refused(`${method}.${field} must name a project`, { ...context, field, expected });
+    }
+    const wanted = query.trim();
+    const projects = this.core.journal.listProjects();
+    const fold = (text: string): string => (process.platform === 'win32' ? text.toLowerCase() : text);
+    const byId = projects.find((project) => project.id === wanted);
+    const byPath = isAbsolute(wanted) ? projects.find((project) => fold(resolve(project.path)) === fold(resolve(wanted))) : undefined;
+    const byName = projects.filter((project) => project.name.toLowerCase() === wanted.toLowerCase());
+    if (byId === undefined && byPath === undefined && byName.length > 1) {
+      throw refused(`${byName.length} projects are named ${wanted}; name one by its id or folder`, {
+        ...context, field, project: wanted, candidates: byName.map((project) => ({ id: project.id, path: project.path })), expected: 'a project id or folder',
+      });
+    }
+    const found = byId ?? byPath ?? byName[0];
+    if (found === undefined) throw notFound(`no project ${wanted} in Boite`, { ...context, field, project: wanted, expected });
+    return this.require(found.id);
+  }
+
   require(projectId: ProjectId | null): Project {
     if (projectId === null) throw refused('this agent session has no project');
     if (this.removing.has(projectId)) throw refused('this project is being removed', { projectId });

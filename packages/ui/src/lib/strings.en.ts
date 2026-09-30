@@ -793,6 +793,11 @@ export const strings = {
     moveHide: 'Hide what the agent was told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
+    /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */
+    startedByAgent: 'Started by the agent of {title} in {project}',
+    /** A line of the starting thread's timeline: its agent started another thread. */
+    agentStartedThread: 'The agent started {title} in {project}',
+    openLinkedThread: 'Open this thread',
     /** One of the user's own hooks ended the turn (`part.type === 'hook'`). */
     hookBlocked: 'A hook blocked this message',
     hookStopped: 'A hook stopped the turn',

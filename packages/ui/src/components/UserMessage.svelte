@@ -11,6 +11,7 @@
   import PreviewReferences from './PreviewReferences.svelte';
   import MessageActions from './MessageActions.svelte';
   import MoveMarker from './MoveMarker.svelte';
+  import SpawnMarker from './SpawnMarker.svelte';
 
   /**
    * A prompt in the timeline: its bubble, the pictures and files it was sent
@@ -60,9 +61,12 @@
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
   /** The move this prompt told the agent about, first thing the core put before its words. */
   const moved = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.moved ? [part.moved] : []))[0]);
+  /** The thread whose agent sent this prompt with `boite thread new`. */
+  const startedBy = $derived(message.parts.flatMap((part) => (part.type === 'text' && part.startedBy ? [part.startedBy] : []))[0]);
 </script>
 
 {#if moved}<MoveMarker notice={moved} />{/if}
+{#if startedBy}<SpawnMarker {store} link={startedBy} direction="from" />{/if}
 <div class="bubble">
   {#each message.parts as part, index (index)}
     {#if part.type === 'text'}

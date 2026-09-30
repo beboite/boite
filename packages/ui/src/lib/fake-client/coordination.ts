@@ -14,7 +14,7 @@ export function unregisterCore(ctx: FakeContext): void {
   if (cores.get(ctx.identity.coreId) === ctx) cores.delete(ctx.identity.coreId);
 }
 
-function coordinationConfig(ctx: FakeContext, threadId: ThreadId): CoordinationConfig {
+export function coordinationConfig(ctx: FakeContext, threadId: ThreadId): CoordinationConfig {
   if (ctx.thread(threadId).agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
   return ctx.coordination.get(threadId) ?? defaultCoordinationConfig();
 }

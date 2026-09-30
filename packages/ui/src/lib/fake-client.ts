@@ -34,6 +34,7 @@ import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
 import { threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
+import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { worktreeMethods } from './fake-client/worktrees';
@@ -270,6 +271,7 @@ export class FakeClient implements ObservableClient {
   // Every method's input and output are checked against the real RPC contract,
   // and each domain module answers its own share of it.
   #answer(ctx: FakeContext): FakeMethods {
+    const threads = threadMethods(ctx);
     return {
       'core.shutdown': async () => { ctx.agents.close(); await Promise.all([...ctx.threads.keys()].map(id => ctx.stopTurn(id))); setTimeout(() => this.close(), 25); return { ok: true }; },
       'hello': async (params) => {
@@ -280,8 +282,9 @@ export class FakeClient implements ObservableClient {
       ...pairingMethods(ctx),
       ...projectMethods(ctx),
       ...projectIconMethods(ctx),
-      ...threadMethods(ctx),
+      ...threads,
       ...threadMoveMethods(ctx),
+      ...spawnMethods(ctx, threads['threads.create']),
       ...activityMethods(ctx),
       ...requestMethods(ctx),
       ...providerCatalogMethods(ctx),
