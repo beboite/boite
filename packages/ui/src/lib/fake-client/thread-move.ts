@@ -131,9 +131,9 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
 }
 
 /** A project named by id, by name (any case) or by its folder, as the core resolves `agent.move.project`. */
-function resolveProject(ctx: FakeContext, threadId: ThreadId, query: string): Project {
+export function resolveProject(ctx: FakeContext, threadId: ThreadId, query: string, method = 'agent.move'): Project {
   const expected = 'the id, name or absolute folder of a project added to Boite';
-  if (typeof query !== 'string' || query.trim().length === 0) throw refuse('agent.move.project must name a project', { threadId, field: 'project', expected });
+  if (typeof query !== 'string' || query.trim().length === 0) throw refuse(`${method}.project must name a project`, { threadId, field: 'project', expected });
   const wanted = query.trim();
   const fold = (text: string): string => text.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
   const byId = ctx.projects.find((p) => p.id === wanted);
@@ -218,6 +218,10 @@ export function threadMoveMethods(ctx: FakeContext) {
       }
       forgetWaiting(ctx, thread);
       return announce(ctx, thread);
+    },
+    'agent.projects': async (params) => {
+      const own = ctx.thread(params.threadId).projectId;
+      return ctx.projects.filter((p) => p.archived !== true).map((p) => ({ id: p.id, name: p.name, path: p.path, repository: p.repository === true, drafts: p.kind === 'drafts', current: p.id === own }));
     },
     'agent.move': async (params): Promise<AgentMove> => {
       const { threadId } = params;

@@ -146,6 +146,25 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
   } finally { client.close(); }
 });
 
+test('fake agent.spawn starts a real thread marked at both ends and keeps retries idempotent', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const caller = await client.call('threads.get', { threadId: 't-descriptors' });
+    const target = (await client.call('agent.projects', { threadId: caller.id })).find(p => !p.current)!;
+    const params = { threadId: caller.id, project: target.name.toUpperCase(), prompt: 'Check the build\nthen report', requestId: 'spawn-1' };
+    const spawned = await client.call('agent.spawn', params);
+    expect(await client.call('agent.spawn', params)).toEqual(spawned);
+    expect(spawned.thread).toMatchObject({ projectId: target.id, title: 'Check the build', providerId: caller.providerId, permissionMode: caller.permissionMode });
+    expect(spawned.thread.parentThreadId ?? null).toBeNull();
+    const opened = await client.call('threads.get', { threadId: spawned.thread.id });
+    expect(opened.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ displayText: 'Check the build\nthen report', startedBy: { threadId: caller.id } });
+    const back = await client.call('threads.get', { threadId: caller.id });
+    expect(back.messages.at(-1)?.parts[0]).toMatchObject({ started: { threadId: spawned.thread.id, project: target.name } });
+    await expect(client.call('agent.spawn', { ...params, requestId: 'spawn-2', project: 'nowhere' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound, data: { field: 'project' } });
+  } finally { client.close(); }
+});
+
 test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async () => {
   const phone = new FakeClient({ delayMs: 0, principal: 'session', delegationDemo: true });
   await phone.connect();

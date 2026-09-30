@@ -55,6 +55,10 @@ token is read.
 boite where                      thread, title, project, cwd, branch, worktree, agent
 boite thread move <project>      move this thread to another project (name, id or
                                  folder) when this turn ends
+boite thread new <project> <brief> [--worktree] [--title <title>]
+                                 start a thread in a project; its first answer
+                                 comes back as an agent message
+boite projects                   the projects the owner added
 boite attach <file>               publish a file snapshot in chat, at most 5 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
@@ -130,6 +134,49 @@ saying why. Until then the thread's row shows "Moves to <project> after this
 turn", and the user can cancel it or replace it with a move of their own, which
 waits for the same turn end. A pending move lives in memory: a core restart
 before the turn ends drops it.
+
+`thread new` starts an ordinary top-level thread in a project the owner
+added, named like `thread move` does, and sends the brief as its first
+message. It is the same thread the user would start from the sidebar: it
+appears there, keeps its own session and can be opened, answered, moved or
+archived like any other. It is not a delegated child. The new thread runs on
+the caller's provider, account, model, effort and permission mode, in the
+project folder or, with `--worktree`, on a new `boite/` branch of its own.
+The title is `--title` or the brief's first line. The CLI prints the thread,
+its folder and its address:
+
+```
+thread: thr_...
+title: Blog post for 2.4
+project: Website
+cwd: /src/website
+agent: claude claude-opus-5-5
+address: <core-id>/thr_...
+Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.
+```
+
+The agent there reads a note before the brief: which thread's agent started
+it, that the user did not type it, and that it grants no approval the user
+did not give. When that first turn ends, its final answer, or its failure,
+goes back to the starter as an [agent coordination](coordination.md) message
+from the new thread, capped at 4,000 characters, and wakes an idle starter
+within its budget. Later turns report nothing by themselves; the two agents
+use `agents send` and `agents reply` like any pair of conversations. Both
+timelines show a line linking the other thread: "Started by the agent of ..."
+above the first prompt, "The agent started ..." in the starter.
+
+The owner's Communication settings of the calling thread decide: Off refuses,
+Pause refuses, and a thread restricted to its own project cannot start one
+elsewhere. A thread starts at most 3 threads per rolling hour in Brief and 12
+in Team. A thread an agent started cannot start another until the user has
+written in it, so agents cannot chain threads on their own. Delegated
+children, workflow steps and persistent agent sessions are refused. A retry
+with the same `--request-id` returns the thread already started.
+
+`projects` prints one row per project: its id, name and folder, `(this
+thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
+`drafts` on the drafts project. Archived projects are left out, although
+`thread new` and `thread move` still accept them by name.
 
 `attach` saves a copy in an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread

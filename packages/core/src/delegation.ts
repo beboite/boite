@@ -186,7 +186,7 @@ export class Delegation {
   }
   private available(root: ThreadSummary): DelegationConfig {
     const config = this.config(root.id);
-    if (this.closed || root.archived || !config.enabled || config.paused) throw refused('delegation is disabled or paused; the owner must enable it in Agents');
+    if (this.closed || root.archived || !config.enabled || config.paused) throw refused('delegation is disabled or paused; tell the user the owner must enable or resume it in Team > Team settings');
     return config;
   }
 

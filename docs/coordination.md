@@ -105,6 +105,12 @@ boite agents send <core-id>/<thread-id> "May I restart the shared VM?"
 boite agents reply <message-id> "Wait, the deployment is still running."
 ```
 
+An agent can also start a new conversation in another project with
+`boite thread new <project> <brief>`; the [CLI page](cli.md) describes it. Its
+first answer comes back as a message from that conversation, and the same
+Communication settings and a separate hourly budget (3 in Brief, 12 in Team)
+decide whether the agent may start one.
+
 The CLI uses the authenticated current conversation as sender. Agents cannot
 impersonate a different local conversation, link machines or change budgets.
 Addresses include both core and thread IDs because thread IDs can collide
