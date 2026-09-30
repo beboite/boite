@@ -262,6 +262,39 @@ core answered or two seconds passed, so a fast start shows no empty frame and a
 slow one shows the page's "connecting" state. After ten seconds it appears
 whatever the page said, so a broken bundle still gets a window to quit from.
 
+## What a frame costs
+
+A frame has to be drawn again wherever something moved, and some styles make
+that redraw expensive for as long as they are on screen. Measured on
+2026-09-30 with `bench/ui-frames.ts`, in headless Chrome with software
+compositing, the case a WebView2 without acceleration meets:
+
+- A backdrop blur is redrawn whenever anything under it moves. A window-wide
+  one under the command palette or the tour, over a streaming answer or an
+  animated scene, drew 6 to 12 fps instead of 60. Scrims are a flat
+  `--color-scrim` tint; a blur stays on the bounded floating surfaces (the
+  composer, the activity panel, toasts, notification and update cards), where
+  it measured no cost even with a 401 px activity panel over a scrolled thread.
+- An endless animation moves only opacity or a transform, which the
+  compositor plays without painting. The two exceptions repaint a box a few
+  pixels high and are named in the test.
+- A `:has()` never takes the app's outer containers for its subject: it is
+  checked again whenever that subtree changes, which is every node a streaming
+  answer or a scroll mounts. A class set from the state does the same job.
+- An entrance animation belongs to what arrives live. A paragraph eases in
+  only while its answer streams, and a message rises only when it lands at the
+  bottom being watched, not when a scroll up the history mounts it again.
+- Scrolling reads layout as little as it can: the outline rail follows once
+  per frame, and a message's height comes from its `ResizeObserver` entry. A
+  wheel up a 400-message thread went from 340 to 310 ms of main thread per
+  1,000 px. The reading anchor is still read right after each scroll event:
+  read a frame or a timer later, a tap that left the thread right after a
+  scroll brought it back on the next message.
+
+`packages/ui/src/render-cost.test.ts` fails on a blur outside the named
+surfaces or on any `inset: 0` rule, on an endless animation of anything else,
+and on a `:has()` on `html`, `body`, `#app`, `.app` or `.body`.
+
 ## Benches
 
 ```sh
@@ -269,6 +302,8 @@ bun run build:ui
 bun run bench/bandwidth.ts --rtt 150          # bytes and time per scenario behind a delayed relay
 bun run bench/bandwidth.ts --core <other checkout>/packages/core/src/main.ts --sequence sequential
 bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
+bun bench/ui-frames.ts --noblur                # fps and main thread per UI scenario, software compositing
+bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x1080@1.5
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -280,7 +315,13 @@ client sends a non-loopback `Host`, otherwise the core would treat it as local.
 `bench/startup.ts` starts the hidden shell on a fresh data directory and a fresh
 WebView2 profile, and reads the page's own timings over the debugging port.
 
-Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md).
+`bench/ui-frames.ts` builds the fake-client UI in a child process, serves it,
+and plays each scenario in headless Chrome without a GPU: frames drawn, long
+tasks and main-thread time, per 1,000 px for the scroll scenarios. `--noblur`
+repeats each one with backdrop filters off, `--ui` measures another checkout.
+
+Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
+[bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md).
 
 ## The Windows sidecar is the signed runtime
 

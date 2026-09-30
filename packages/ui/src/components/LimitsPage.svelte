@@ -6,7 +6,7 @@
   import UsageLimits from './UsageLimits.svelte';
   import { quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
 
   /**
    * The subscription windows of every signed-in provider. The last reading
@@ -25,7 +25,9 @@
   $effect(() => {
     const client = store.client;
     const current = reader;
-    if (!client || !store.owner) return;
+    // A call before the socket is up is refused at once: read when it becomes
+    // ready, and again after a reconnect. A failure shows on `reader.error`.
+    if (!client || !store.owner || store.connection !== 'ready') return;
     const off = client.on('quotas.updated', (value) => current.accept(value));
     untrack(() => void current.read(client).catch(() => {}));
     return off;
@@ -52,6 +54,12 @@
     {/if}
   </header>
 
+  {#if store.owner && reader.error}
+    <div class="card failed" role="alert" data-testid="limits-error">
+      <p>{fill(strings.quotas.readFailed, { error: reader.error })}</p>
+      <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-retry" onclick={refresh}>{strings.quotas.retry}</button>
+    </div>
+  {/if}
   {#if !store.owner}
     <p class="muted" data-testid="usage-limits-owner">{strings.usage.limitsOwner}</p>
   {:else if rows === null}
@@ -59,10 +67,11 @@
       {#each [0, 1] as index (index)}<div class="card ghost-card"></div>{/each}
     </div>
   {:else if rows.length === 0 && tracked.length === 0}
-    <div class="card empty" data-testid="limits-empty">
+    <!-- A failed read never passes for "no provider connected". -->
+    {#if !reader.error}<div class="card empty" data-testid="limits-empty">
       <p>{strings.quotas.empty}</p>
       <button type="button" onclick={() => store.showSettings('accounts')}>{strings.settings.connectProvider}</button>
-    </div>
+    </div>{/if}
   {:else}
     {#if rows.length > 0}<UsageLimits {rows} loading={reader.loading} completed={reader.completed} />{/if}
     <section class="card tracked" data-testid="limits-tracked">
@@ -91,6 +100,8 @@
   .who { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; font-size: var(--text-sm); }
   .provider { flex: none; font-weight: 500; }
   .account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); }
+  .failed { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); margin-bottom: 12px; padding: var(--settings-padding); color: var(--color-danger); font-size: var(--text-sm); }
+  .failed p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
   .empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: var(--settings-width); padding: var(--settings-padding); }
   .empty p { margin: 0; color: var(--color-muted-foreground); font-size: var(--text-sm); }
   .skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; max-width: var(--settings-width); }

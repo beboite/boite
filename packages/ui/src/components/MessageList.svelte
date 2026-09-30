@@ -261,7 +261,9 @@
       }
       const id = node.dataset['mid'];
       if (!id) continue;
-      const next = Math.round(node.offsetHeight) + GAP;
+      // The observer already measured the box; reading `offsetHeight` again
+      // would lay out, mid-scroll, whatever the window just mounted.
+      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + GAP;
       const previous = heights.get(id) ?? ESTIMATE;
       if (previous === next) continue;
       heights.set(id, next);
@@ -310,8 +312,11 @@
    */
   function track(node: HTMLElement, id: string): { destroy(): void } {
     node.dataset['mid'] = id;
-    if (risen.has(id)) node.style.animation = 'none';
-    else risen.add(id);
+    // A message rises as it arrives at the bottom being watched. One that a
+    // scroll up the history brings into the window is already there: rising
+    // then animated every message a fast scroll crossed.
+    if (risen.has(id) || !pinned) node.style.animation = 'none';
+    risen.add(id);
     boxes?.observe(node);
     return {
       destroy() {
@@ -371,6 +376,9 @@
     if (navigationTarget) return;
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
+    // Read right after each event, once the window has rendered. Deferred to
+    // the next frame or to a timer, the read let a navigation that followed a
+    // scroll at once restore the message below (tests/e2e/mobile.test.ts).
     void tick().then(rememberAnchor);
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;

@@ -134,7 +134,10 @@ notice at once, without waiting for the next check.
   the descriptor pins, since a Boite release may pin an older, working one.
 - An updater that exits with zero and leaves the version unchanged while a
   newer release is known is reported as failed, with the version it still
-  reports. With no newer release known, the same run reads `Up to date`.
+  reports and the last line of its output that names a failure or a skip.
+  `opencode upgrade` exits with zero on every failure, so that line is the
+  only reason it gives. With no newer release known, the same run reads
+  `Up to date`.
 - Skips live in `<dataDir>/harness-updates.json`. An unreadable file skips
   nothing and says so in the core log.
 - The methods are owner-only. A paired phone neither sees nor starts an update.

@@ -25,6 +25,9 @@ The catalog scans `skills`, `.agents/skills`, `.claude/skills`, `.codex/skills`,
 YAML frontmatter containing a nonempty name and description. An agent plugin
 has a `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` manifest with
 a nonempty name. Malformed entries remain visible with their file and reason.
+The folders under a skill hold its scripts and assets, so the scan does not
+enter them: a deep test corpus inside a skill neither reaches the depth bound
+nor counts as more skills.
 
 Links inside the folder are followed once; links outside it are reported and
 not read. Git metadata, dependencies and secret directories are skipped.

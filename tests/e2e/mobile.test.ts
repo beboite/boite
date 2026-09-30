@@ -148,6 +148,27 @@ test('returning to a long conversation preserves the reading position', async ()
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
 }, 15_000);
 
+test('leaving a long conversation right after a scroll returns to that scroll', async () => {
+  // The same round trip as above, without the capture between the scroll and
+  // the tap: an anchor read later than the scroll restored the next message.
+  const origin = await page.evaluate<string>('location.origin');
+  await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
+  await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
+  await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
+  const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  await page.click('[data-testid=mobile-conversations]');
+  await page.click('[data-testid=mobile-thread-t-long]');
+  await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  const restoredAnchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
+  expect(restoredAnchor.id).toBe(anchor.id);
+  expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
+}, 15_000);
+
 test('a wide markdown table scrolls inside itself and leaves the conversation still', async () => {
   const origin = await page.evaluate<string>('location.origin');
   await page.navigate(`${origin}/?fake=1&open=recent`);

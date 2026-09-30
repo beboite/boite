@@ -120,6 +120,14 @@
   $effect(() => { if (level) return mobileOverlay(back); });
 
   onMount(() => { view.start(); return () => view.close(); });
+  // On a phone an open conversation hides the tab bar. The root carries it as a
+  // class: `.app:has(.agents-page.detail-open)` made the whole app a `:has()`
+  // subject, rechecked on every node mounted anywhere.
+  $effect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('agents-detail-open', !!chosen || !!creating);
+    return () => root.classList.remove('agents-detail-open');
+  });
   $effect(() => { if (store.connection === 'ready') void view.refresh(); });
   $effect(() => { if (current === 'activity' && workHistory) view.fill(workKey, workHistory, work); });
 

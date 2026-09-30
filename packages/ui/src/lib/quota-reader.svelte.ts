@@ -58,6 +58,8 @@ export class QuotaReader {
   rows = $state.raw<AccountQuota[] | null>(null);
   loading = $state(false);
   completed = $state.raw<string[]>([]);
+  /** Why the newest read failed, null once one lands. */
+  error = $state<string | null>(null);
   readonly #key: string;
   #latest = 0;
 
@@ -89,10 +91,14 @@ export class QuotaReader {
     });
     try {
       const rows = await client.call('quotas.list', { refresh, requestId });
-      if (request === this.#latest) this.accept(rows);
+      if (request === this.#latest) {
+        this.accept(rows);
+        this.error = null;
+      }
     } catch (error) {
       if (request === this.#latest) {
         this.rows ??= [];
+        this.error = error instanceof Error ? error.message : String(error);
         throw error;
       }
     } finally {
@@ -101,11 +107,12 @@ export class QuotaReader {
     }
   }
 
+  /** Saves the switch, then reads either way: its failure stays on `error`, not on the switch. */
   async configure(client: Client, accountId: string, enabled: boolean): Promise<void> {
     ++this.#latest;
     this.loading = false;
     this.accept(await client.call('quotas.configure', { accountId, enabled }));
-    if (enabled) await this.read(client);
+    await this.read(client).catch(() => {});
   }
 }
 

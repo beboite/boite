@@ -40,6 +40,8 @@ available through the SDK.
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
+With no cached list, the column shows placeholder rows and the reading line until
+the first answer lands, and the descriptor's list if that answer fails.
 The refresh button forces a new probe; concurrent requests share one
 operation. A failed refresh keeps the visible list and waits for a manual retry.
 The menu floats without changing the page layout. It prefers the space below the

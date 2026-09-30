@@ -50,8 +50,9 @@
     align-items: center;
     justify-content: center;
     padding: 24px;
-    background: color-mix(in oklch, var(--color-scrim), var(--color-background) 35%);
-    backdrop-filter: blur(6px);
+    /* Near opaque instead of a blur: a window-wide blur is redrawn on every
+       frame something moves under it (docs/performance.md, "What a frame costs"). */
+    background: color-mix(in oklch, var(--color-background) 94%, transparent);
     animation: appear var(--dur-2) ease-out;
   }
   .backdrop { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: none; cursor: zoom-out; }

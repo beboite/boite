@@ -314,6 +314,7 @@ export class Store {
   modelOf(...args: Parameters<Models['modelOf']>) { return this.#ctx.models.modelOf(...args); }
   probeModelEffort(...args: Parameters<Models['probeModelEffort']>) { return this.#ctx.models.probeModelEffort(...args); }
   isProbing(...args: Parameters<Models['isProbing']>) { return this.#ctx.models.isProbing(...args); }
+  modelsPending(...args: Parameters<Models['modelsPending']>) { return this.#ctx.models.modelsPending(...args); }
   probeModels(...args: Parameters<Models['probeModels']>) { return this.#ctx.models.probeModels(...args); }
   defaultModelOf(...args: Parameters<Models['defaultModelOf']>) { return this.#ctx.models.defaultModelOf(...args); }
   composerChoice(...args: Parameters<Models['composerChoice']>) { return this.#ctx.models.composerChoice(...args); }
