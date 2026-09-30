@@ -247,6 +247,16 @@ export function requestMethods(ctx: FakeContext) {
       }
       return { questionId: askAsync(ctx, thread, turn, null, asked.text, asked.labels, asked.multiple) };
     },
+    'questions.skip': async (params) => {
+      const pending = ctx.pendingQuestions.get(params.questionId);
+      if (!pending) throw ctx.notFound('question', params.questionId);
+      if (pending.request.threadId !== params.threadId) {
+        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the question belongs to another thread', data: { ...params, expected: pending.request.threadId } });
+      }
+      ctx.pendingQuestions.delete(params.questionId);
+      pending.resolve(null);
+      return { ok: true };
+    },
     'questions.answer': async (params) => {
       const pending = ctx.pendingQuestions.get(params.questionId);
       if (!pending) throw ctx.notFound('question', params.questionId);
@@ -255,7 +265,7 @@ export function requestMethods(ctx: FakeContext) {
       ctx.pendingQuestions.delete(params.questionId);
       const text = params.text ?? '';
       const answer: QuestionAnswer =
-        text.length > 0 ? { optionIds: params.optionIds, text } : { optionIds: params.optionIds };
+        text.length > 0 ? { optionIds: [...params.optionIds], text } : { optionIds: [...params.optionIds] };
       pending.resolve(answer);
       return { ok: true };
     },

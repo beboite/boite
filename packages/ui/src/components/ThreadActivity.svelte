@@ -154,6 +154,7 @@
                   answer={null}
                   pending
                   submit={(optionIds, text) => store.answerQuestion(question.threadId, question.id, optionIds, text)}
+                  skip={() => store.skipQuestion(question.threadId, question.id)}
                 />
               </div>
             {/each}

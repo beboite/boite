@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { QuestionAnswer } from '@boite/contracts';
 import QuestionCard from './QuestionCard.svelte';
@@ -75,6 +75,36 @@ test('an option turns Answer on, and what was picked goes out once', () => {
   submit().click();
   flushSync();
   expect(sent).toHaveLength(1);
+});
+
+test('Skip sends no answer, prevents duplicate presses and allows retry after failure', async () => {
+  const submit = vi.fn();
+  let settle!: (accepted: boolean) => void;
+  const skip = vi.fn(() => new Promise<boolean>(resolve => { settle = resolve; }));
+  running = mount(QuestionCard, {
+    target: document.body,
+    props: { text: 'Which shape?', options: OPTIONS, allowText: true, multiple: false, answer: null, pending: true, submit, skip }
+  });
+  flushSync();
+  const button = query<HTMLButtonElement>('[data-testid=question-skip]');
+  expect(button.disabled).toBe(false);
+  options()[0]!.click();
+  flushSync();
+  button.click();
+  button.click();
+  flushSync();
+  expect(skip).toHaveBeenCalledTimes(1);
+  expect(submit).not.toHaveBeenCalled();
+  expect(button.disabled).toBe(true);
+  settle(false);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  flushSync();
+  expect(button.disabled).toBe(false);
+  expect(options()[0]!.getAttribute('aria-checked')).toBe('true');
+  button.click();
+  flushSync();
+  expect(skip).toHaveBeenCalledTimes(2);
+  settle(true);
 });
 
 test('typing alone is enough when the question allows text and offers nothing', () => {
@@ -211,7 +241,7 @@ test('a question whose turn ended says so instead of offering a button', () => {
 
   expect(query('[data-testid=question-card]').getAttribute('data-state')).toBe('cancelled');
   expect(document.querySelector('[data-testid=question-submit]')).toBeNull();
-  expect(query('[data-testid=question-cancelled]').textContent).toContain('turn ended');
+  expect(query('[data-testid=question-cancelled]').textContent).toContain('No longer waiting');
   expect(options()[0]?.disabled).toBe(true);
 });
 

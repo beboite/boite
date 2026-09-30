@@ -2558,6 +2558,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
     params: { threadId: ThreadId; questionId: RequestId; optionIds: string[]; text?: string };
     result: { ok: true };
   };
+  /** Resolve a pending question without an answer, a steer or a new user message. */
+  'questions.skip': {
+    params: { threadId: ThreadId; questionId: RequestId };
+    result: { ok: true };
+  };
   /**
    * An asynchronous question from the agent of a thread (`boite ask`): the card
    * is drawn in the running turn, the agent keeps working, and the answer

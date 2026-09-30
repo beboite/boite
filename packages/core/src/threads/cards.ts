@@ -26,7 +26,7 @@ interface PendingPermission {
 
 interface PendingQuestion {
   request: QuestionRequest;
-  /** Null is the cancel: the turn ended before the user answered. */
+  /** Null resolves a question without an answer, on skip or cancellation. */
   resolve: (answer: QuestionAnswer | null) => void;
 }
 
@@ -87,6 +87,24 @@ export class ThreadCards {
     const pending = [...this.questions.values()].map((entry) => entry.request);
     const scoped = threadId === undefined ? pending : pending.filter((q) => q.threadId === threadId);
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  skipQuestion(params: { threadId: ThreadId; questionId: RequestId }): void {
+    const pending = this.questions.get(params.questionId);
+    if (pending === undefined) throw notFound(`unknown question ${params.questionId}`, params);
+    const request = pending.request;
+    if (request.threadId !== params.threadId) {
+      throw refused('the question belongs to another thread', { ...params, expected: request.threadId });
+    }
+    this.questions.delete(request.id);
+    this.core.journal.append(
+      { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
+      () => undefined,
+    );
+    this.core.bus.emit('question.answered', { questionId: request.id, threadId: request.threadId, answer: null });
+    this.foldAsyncCard(request.id, null);
+    if (request.async !== true) setThreadStatus(this.core, request.threadId, this.waitingOn(request.threadId) ? 'waiting' : 'running');
+    pending.resolve(null);
   }
 
   answerQuestion(params: {

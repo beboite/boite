@@ -1516,6 +1516,16 @@ test('an async question waits in the dock above the composer, stacked, and the t
   await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'false');
   query<HTMLButtonElement>('[data-testid=question-docked]').click();
   await waitFor(() => query('[data-testid=activity-question-toggle]').getAttribute('aria-expanded') === 'true');
+
+  // Passing the remaining question removes the dock without sending another prompt.
+  await waitFor(() => store.openThread?.status === 'idle');
+  const beforeSkip = await store.client!.call('threads.get', { threadId: store.openThread!.id });
+  query<HTMLButtonElement>('[data-testid=question-skip]').click();
+  await waitFor(() => document.querySelectorAll('[data-testid=activity-question]').length === 0);
+  expect(document.querySelector('[data-testid=question-docked]')).toBeNull();
+  const afterSkip = await store.client!.call('threads.get', { threadId: beforeSkip.id });
+  expect(afterSkip.turns).toEqual(beforeSkip.turns);
+  expect(afterSkip.messages.filter(message => message.role === 'user')).toEqual(beforeSkip.messages.filter(message => message.role === 'user'));
 });
 
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';

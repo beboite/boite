@@ -182,6 +182,73 @@ async function send(prompt: string): Promise<void> {
   await waitFor(() => (store.openThread?.messages.length ?? 0) >= before + 2 && !store.busy);
 }
 
+test.each([false, true])('editing replaces the sent message and later turns (next draft: %s)', async (nextDraft) => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await send('original request');
+  const original = store.openThread!.messages.findLast(message => message.role === 'user')!;
+  const kept = store.openThread!.messages.slice(0, store.openThread!.messages.indexOf(original)).map(message => message.id);
+  await send('later request');
+  const removed = store.openThread!.messages.filter(message => !kept.includes(message.id)).map(message => message.id);
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'original request')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'original request');
+  expect(document.querySelector('[data-testid=composer-editing]')).not.toBeNull();
+  await type('changed request');
+  input().focus();
+  press('Enter', { ctrlKey: nextDraft });
+  await waitFor(() => !store.busy && input().value === '');
+  const updated = await store.client!.call('threads.get', { threadId: 't-trace' });
+  expect(updated.messages.slice(0, kept.length).map(message => message.id)).toEqual(kept);
+  expect(updated.messages.some(message => removed.includes(message.id))).toBe(false);
+  expect(updated.messages.filter(message => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'changed request' }]);
+  if (nextDraft) expect(store.draft?.projectId).toBe(updated.projectId);
+});
+
+test('a turn that starts during editing does not silently turn the edit into a queued resend', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await send('original request');
+  const row = Array.from(document.querySelectorAll('[data-testid=message][data-role=user]')).find(row => row.querySelector('[data-testid=text-part]')?.textContent === 'original request')!;
+  row.querySelector<HTMLButtonElement>('[data-testid=message-edit]')!.click();
+  await waitFor(() => input().value === 'original request');
+  await type('changed request');
+  const messageId = store.composerStates['t-trace']!.editing;
+  await store.client!.call('turns.start', { threadId: 't-trace', prompt: '[question] another client started this turn' });
+  await waitFor(() => store.openThread?.status === 'waiting');
+  input().focus(); press('Enter');
+  await waitFor(() => !store.composerStates['t-trace']!.sending);
+  expect(store.composerStates['t-trace']!.editing).toBe(messageId);
+  expect(store.composerStates['t-trace']!.queued).toEqual([]);
+  expect(input().value).toBe('changed request');
+  expect(store.openThread!.messages.some(message => message.id === messageId)).toBe(true);
+});
+
+test('an edit submitted before navigation replaces the original thread on its owning machine', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await send('original request');
+  const message = store.openThread!.messages.findLast(message => message.role === 'user')!;
+  store.startEdit('t-trace', message);
+  await type('changed request');
+  const rewind = store.rewind.bind(store);
+  let release!: () => void;
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  vi.spyOn(store, 'rewind').mockImplementation(async (...args) => { await paused; return rewind(...args); });
+  input().focus(); press('Enter');
+  await waitFor(() => store.composerStates['t-trace']!.sending);
+  await store.open('t-descriptors');
+  const before = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+  release();
+  await waitFor(() => !store.composerStates['t-trace']!.sending);
+  const after = await store.client!.call('threads.get', { threadId: 't-descriptors' });
+  expect(after.messages).toEqual(before.messages);
+  const original = await store.client!.call('threads.get', { threadId: 't-trace' });
+  expect(original.messages.some(item => item.id === message.id)).toBe(false);
+  expect(original.messages.filter(item => item.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'changed request' }]);
+  expect(store.openThread?.id).toBe('t-descriptors');
+});
+
 test('Ctrl+Enter sends and leaves a fresh draft open on the same picker values', async () => {
   await mountOnFake();
   await store.open('t-trace');
