@@ -375,7 +375,7 @@
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
     const editedThread = state.editing ? inputStore.openThread : null;
-    if (!await rewindComposerEdit(inputStore, inputKey, state)) return;
+    if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
