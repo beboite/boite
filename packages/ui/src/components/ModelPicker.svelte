@@ -94,6 +94,8 @@
   });
   let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
+  /** No answer yet for this instance: the descriptor's list would be replaced once it lands. */
+  let pending = $derived(shown ? store.modelsPending(shown.id, shownAccountId) : false);
 
   async function refreshModels() {
     if (favoritesOpen) {
@@ -381,6 +383,14 @@
               {strings.composer.installInSettings}
             </button>
           {/if}
+        {:else if pending}
+          <!-- The first answer is on its way: the descriptor's list would jump
+               to another one, so the column holds placeholders until it lands.
+               The reading line comes first, where a short phone column still shows it. -->
+          <p class="none subtle probing first" data-testid="picker-probing">{strings.composer.probing}</p>
+          <div class="skeletons" aria-hidden="true">
+            {#each [0, 1, 2] as index (index)}<span class="skeleton"></span>{/each}
+          </div>
         {:else}
           {#if searchable}
             <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
@@ -433,7 +443,7 @@
       </div>
     </div>
   {/if}
-  {#if popover.shown && legacy.shown && !favoritesOpen && filteredLegacy.length > 0}
+  {#if popover.shown && legacy.shown && !favoritesOpen && !pending && filteredLegacy.length > 0}
     <div class="popover legacy-menu" class:closing={legacy.closing} role="menu" tabindex="-1" data-testid="picker-legacy-menu" aria-label={strings.composer.legacyModels} use:legacy.attach onanimationend={legacy.end} use:floating={{ anchor: () => menu ?? null, side: 'right' }} {onkeydown}>
       <div class="column models">
         <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name">{strings.composer.legacyModels}</span></div>
@@ -660,11 +670,28 @@
     font-size: var(--text-sm);
   }
 
-  /* The agent is being asked for its models; the descriptor's stay above. */
+  /* The agent is being asked for its models; on a refresh the listed ones stay above. */
   p.probing {
     margin-top: 2px;
     font-size: var(--text-sm);
   }
+  p.probing.first { margin: 0 0 4px; }
+
+  /* Placeholder rows while the first answer is read, the size of a model row. */
+  .skeletons { display: flex; flex-direction: column; gap: 1px; }
+  .skeleton {
+    display: block;
+    min-height: var(--row);
+    margin: 0 8px;
+    border-radius: var(--radius-sm);
+    background: var(--color-hover);
+    animation: skeleton-pulse calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
+  }
+  .skeleton:nth-child(2) { margin-right: 25%; }
+  .skeleton:nth-child(3) { margin-right: 40%; }
+  @keyframes skeleton-pulse { to { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+  :global(html[data-motion='reduced']) .skeleton { animation: none; }
 
   @media (max-width: 720px) {
     .popover {

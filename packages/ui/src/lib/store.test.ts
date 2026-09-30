@@ -811,6 +811,8 @@ describe('Store', () => {
     });
     const request = store.probeModels('opencode', 'a-opencode', true);
     expect(store.isProbing('opencode', 'a-opencode')).toBe(true);
+    // A cached answer is an answer: the picker keeps it rather than reading again.
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
     expect(store.modelsOf('opencode', 'a-opencode')).toEqual(expected);
     const second = store.probeModels('opencode', 'a-opencode', true);
     expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
@@ -828,6 +830,8 @@ describe('Store', () => {
     expect(store.error).toBeNull();
     expect(store.modelsOf('opencode', 'a-opencode')).toEqual(models);
     expect(store.isProbing('opencode', 'a-opencode')).toBe(false);
+    // Nothing answered, so the descriptor's list stands instead of a reading state forever.
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
     await store.probeModels('opencode', 'a-opencode', true);
     expect(calls).toHaveBeenCalledTimes(2);
     expect(store.error).toBe('agent offline');
@@ -885,9 +889,15 @@ describe('Store', () => {
     const { store, client } = await ready();
     expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
     expect(store.probedModels).toEqual({});
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
 
     // Straight through the client: what a second shell's probe looks like here.
+    // This store's own first probe is pending until either answer lands.
+    const own = store.probeModels('opencode', 'a-opencode');
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(true);
     await client.call('providers.probe', { providerId: 'opencode', accountId: 'a-opencode' });
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
+    await own;
 
     expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
     const probed = store.modelsOf('opencode', 'a-opencode').map((m) => m.id);
