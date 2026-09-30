@@ -74,6 +74,7 @@ export class TurnRunner {
       this.handles.set(threadId, handle);
       const forced = Promise.withResolvers<TurnResult>();
       this.stopDeadlines.set(threadId, { handle, forced, timer: null });
+      if (!queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
       // A `done` that settles after a forced stop is ignored.
       result = await Promise.race([handle.done, forced.promise]);
       const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
@@ -149,7 +150,7 @@ export class TurnRunner {
     // works in the old folder, before any wake or held answer starts the next.
     await this.threads.moves.applyWaiting(threadId);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
-    if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
+    if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
     const woke = this.threads.deferred.pendingWakes.get(threadId);
     if (woke !== undefined) {
       this.threads.deferred.pendingWakes.delete(threadId);
