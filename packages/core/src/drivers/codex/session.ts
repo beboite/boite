@@ -359,7 +359,7 @@ export class CodexSession {
           try {
             await Promise.race([
               new Promise<void>(resolve => { timer = setTimeout(resolve, delay); }),
-              this.active?.stopped,
+              ...(this.active === null ? [] : [this.active.stopped]),
             ]);
           } finally {
             clearTimeout(timer);

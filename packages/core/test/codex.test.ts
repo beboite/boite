@@ -271,6 +271,37 @@ describe('codex driver', () => {
     } finally { setup.mockRestore(); }
   });
 
+  test('preparation honors SQLite backoff without an active turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    const procs = harness!.core.procs;
+    const spawn = procs.spawnChild.bind(procs);
+    const launches: number[] = [];
+    const launch = spyOn(procs, 'spawnChild').mockImplementation((...args) => {
+      if (args[0] === threadId) launches.push(performance.now());
+      return spawn(...args);
+    });
+    let retryAt = 0;
+    const log = harness!.core.log.bind(harness!.core);
+    const logging = spyOn(harness!.core, 'log').mockImplementation((level, message) => {
+      if (message.includes('retrying SQLite initialization')) retryAt = performance.now();
+      log(level, message);
+    });
+    try {
+      await client.call('threads.focus', { threadId });
+      await waitFor(() => fakeLog().includes('thread/start'));
+      expect(launches).toHaveLength(2);
+      expect(retryAt).toBeGreaterThan(0);
+      expect(launches[1]! - retryAt).toBeGreaterThanOrEqual(450);
+      expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: 'after preparation recovered' });
+      expect((await finished).status).toBe('done');
+      expect(countLines('initialize')).toBe(2);
+    } finally { launch.mockRestore(); logging.mockRestore(); }
+  });
+
   test('an initialize RPC error waits for late SQLite stderr and exit before retrying', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);
