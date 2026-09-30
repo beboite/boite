@@ -81,20 +81,20 @@
 
 <style>
   .overview { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  article { min-width: 0; padding: 3px 0; }
+  article { min-width: 0; padding: 2px 0; }
   article + article { border-top: 1px solid var(--color-border); }
-  .summary { width: 100%; height: auto; min-height: 60px; padding: 6px 4px; display: flex; gap: 10px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
+  .summary { width: 100%; height: auto; min-height: 52px; padding: 3px 4px; line-height: 1.2; display: flex; gap: 10px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
   .summary:disabled { opacity: 1; cursor: default; }
   .logo { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-3); align-self: start; margin-top: 2px; }
-  .content { flex: 1; min-width: 0; display: grid; gap: 4px; }
+  .content { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .headline { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .name { font-size: var(--text-base); font-weight: 550; color: var(--color-foreground); }
-  .amount { color: var(--color-foreground); background: var(--color-surface-3); border-radius: var(--radius-sm); padding: 4px 6px; font-size: var(--text-xs); line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .amount { color: var(--color-foreground); background: var(--color-surface-3); border-radius: var(--radius-sm); padding: 2px 6px; font-size: var(--text-xs); line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); background: color-mix(in srgb, var(--color-live) 10%, var(--color-surface-2)); }
   .amount.out { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-2)); }
   .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
   .extras { display: grid; gap: 10px; padding: 2px 4px 10px 44px; }
-  .extras:empty { display: none; }
+  .extras:not(:has(> :global(*))) { display: none; }
   .error { margin: 0; padding: 0 4px 12px 44px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 6px; }
   .mini-window { min-width: 0; display: flex; align-items: center; gap: 3px; }
