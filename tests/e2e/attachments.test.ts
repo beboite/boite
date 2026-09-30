@@ -52,7 +52,10 @@ test('desktop and paired phone upload files, preserve bytes and show downloadabl
       const file = user.parts.find(p => p.type === 'file')!;
       expect(file.type === 'file' && Buffer.from(file.data, 'base64').toString()).toBe(body);
       const reply = updated.messages.filter(m => m.role === 'assistant').at(-1)!.parts.filter(p => p.type === 'text').map(p => p.text).join('');
-      const reference = JSON.parse(reply.slice(reply.indexOf('{"name":')).trim());
+      const referenceLine = reply.split('\n').find(line => line.startsWith('{"name":'));
+      expect(referenceLine).toBeDefined();
+      const reference = JSON.parse(referenceLine!);
+      expect(reference).toMatchObject({ name, bytes: Buffer.byteLength(body) });
       expect(readFileSync(reference.path).toString()).toBe(body);
       const download = await page.evaluate<string>(`Array.from(document.querySelectorAll('[data-testid=file-part]')).find(el => el.download === ${JSON.stringify(name)}).href`);
       expect(Buffer.from(download.split(',')[1]!, 'base64').toString()).toBe(body);
