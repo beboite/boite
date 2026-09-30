@@ -16,7 +16,7 @@ loop and audio context close when it is turned off.
 Throwing also shakes the native Boite window and returns it to its original
 position. Maximized and fullscreen windows, browsers, phones and window managers
 that ignore positioning shake the interface instead. Hits do not overlap.
-Reduced motion disables the rope and shake, including when enabled during a throw.
+Reduced motion disables new throws and stops any visible rope.
 
 ## Chat files and previews
 
