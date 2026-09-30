@@ -35,8 +35,15 @@ else if (command === 'check') {
   writeFileSync(stateFile, '1.2.0');
   console.log('updated to 1.2.0');
 } else if (command === 'update-broken') {
+  console.log('Using global installation update method...');
   console.error('error: the release server refused the download');
   process.exit(3);
+} else if (command === 'update-permission') {
+  console.log('Updating agent via npm install -g...');
+  console.error('npm error code EACCES');
+  console.error("npm error Error: EACCES: permission denied, mkdir '/usr/lib/node_modules/@boite-test'");
+  console.error('npm error A complete log of this run can be found in: /tmp/npm-debug.log');
+  process.exit(1);
 } else {
   console.error(`unknown command ${command}`);
   process.exit(2);

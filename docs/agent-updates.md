@@ -34,8 +34,9 @@ buttons stay in reach.
 - Skip stops offering that version. A later version is offered again.
   In Settings, Providers, each provider's row shows its agent's version, the
   newer one when there is one, and offers a skipped version again.
-- A failed update brings its notice back with the updater's last line and Try
-  again.
+- A failed update brings its notice back with the updater's error and Try
+  again. Standard error takes priority over progress on standard output; an
+  explicit error takes priority over npm's final log-file location.
 - When the agent that runs is the user's own install (the `self` route), its
   provider row offers no Update for a copy Boite downloaded earlier: that copy
   is not what runs, and the version shown is the one the update reads.
@@ -140,6 +141,23 @@ from Settings, Providers while that machine is the selected one. On Linux and
 macOS the shipped agents have no managed release, so they update through the
 self route, as the user the core runs as: an agent installed system-wide by
 root fails with its updater's own permission error, which the notice shows.
+
+For an npm install that fails with `EACCES` or `EPERM`, install the agent under
+the core user's own prefix. Run these commands as that user, then place
+`$HOME/.local/bin` before the system agent directory in the core service's
+`PATH`:
+
+```sh
+npm config set prefix "$HOME/.local" --location=user
+npm install -g @anthropic-ai/claude-code @openai/codex
+"$HOME/.local/bin/claude" --version
+"$HOME/.local/bin/codex" --version
+```
+
+Restart the core after its active turns finish, then check for updates again.
+Installing a second copy without changing the service's `PATH` leaves the old
+copy selected. A remote core owns these installations even when the notice is
+displayed by a desktop client.
 
 A core older than this feature answers `MethodNotFound` to `providers.updates`.
 The client treats that machine as having no updates and shows no error.

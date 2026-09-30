@@ -163,6 +163,19 @@ describe('harness updates', () => {
     expect(update.message).toContain('the release server refused the download');
   });
 
+  test('npm permission failures report the denied path rather than progress or the log location', async () => {
+    const { client } = await start('command', 'update-permission');
+    await client.call('providers.updates', { refresh: true });
+    const failed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    const update = only(await failed);
+    expect(update.current).toBe('1.0.0');
+    expect(update.message).toContain('exited with 1');
+    expect(update.message).toContain('EACCES: permission denied');
+    expect(update.message).toContain('/usr/lib/node_modules/@boite-test');
+    expect(update.message).not.toContain('/tmp/npm-debug.log');
+  });
+
   test('an updater that reads how it was installed gets the environment its skipped launcher sets', async () => {
     const bare = await start('command', 'update-launched');
     await bare.client.call('providers.updates', { refresh: true });
