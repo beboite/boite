@@ -429,8 +429,8 @@ export const strings = {
     archivedProjects: 'Archived projects ({count})',
     restoreProject: 'Restore',
     /** The drawer under a project's rows: its archived threads, opened for this session only. */
-    archivedThreadsOne: '1 archived',
-    archivedThreadsMany: '{count} archived',
+    archivedThreadsOne: 'Archived conversations (1)',
+    archivedThreadsMany: 'Archived conversations ({count})',
     restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     removeProjectTitle: 'Remove {project} from Boite?',
@@ -466,8 +466,7 @@ export const strings = {
     pinned: 'Pinned',
     archive: 'Archive',
     delete: 'Delete',
-    deleteTitle: 'Delete this thread?',
-    deleteBody: '"{title}" and its sub-threads will disappear from your conversations. Running agents will stop. You can undo this until Boite is fully stopped. Project files and Git branches will be kept.',
+    deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
     archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */

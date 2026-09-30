@@ -53,6 +53,7 @@ export interface SubscriptionSink {
 }
 
 export interface CoreOptions {
+  bundleHash?: string;
   dataDir: string;
   token: string;
   /** Which install this core belongs to. Absent means the stable one. */
@@ -95,6 +96,7 @@ export function resolveCliDir(
 
 export class Core {
   readonly version = CORE_VERSION;
+  readonly bundleHash: string | undefined;
   readonly dataDir: string;
   readonly token: string;
   readonly channel: Channel;
@@ -191,6 +193,7 @@ export class Core {
   }
 
   constructor(options: CoreOptions) {
+    this.bundleHash = options.bundleHash;
     this.dataDir = options.dataDir;
     this.token = options.token;
     this.channel = options.channel ?? 'stable';
@@ -268,6 +271,7 @@ export class Core {
   info(): CoreInfo {
     return {
       version: this.version,
+      ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
       hostname: hostname(),
       os: currentOs(),

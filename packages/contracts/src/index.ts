@@ -1488,6 +1488,8 @@ export interface CoreInfo {
   /** Display name reported by the execution host. */
   hostname?: string;
   version: string;
+  /** SHA-256 of the loaded JavaScript entry bundle, captured before serving requests. */
+  bundleHash?: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */

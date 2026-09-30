@@ -55,6 +55,7 @@ fn state(directory: &Path, shell_version: &str, core: CoreCommand, resident: boo
         resources: None,
         resident,
         version: shell_version.to_string(),
+        bundle_hash: None,
         timeout,
     })
 }
@@ -124,6 +125,21 @@ fn a_running_core_of_this_version_is_adopted_and_nothing_is_started() {
     let _ = core.wait();
     assert_eq!(outcome.expect("the running core is adopted").1, Some(pid));
     assert!(spawned_pid(&state).is_none());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_same_version_core_without_the_installed_bundle_is_replaced() {
+    let _process_guard = crate::process_test_guard();
+    let directory = scratch("stale-bundle");
+    let (mut old, old_pid) = running_core(&directory, "2.0.0");
+    let mut state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
+    state.launch.bundle_hash = Some("installed".to_string());
+    let outcome = resolve_core(&state);
+    let old_status = old.wait().unwrap();
+    state.kill_child();
+    assert_ne!(outcome.expect("a same-version reinstall replaces the previous core").1, Some(old_pid));
+    assert_eq!(old_status.code(), Some(0));
     std::fs::remove_dir_all(directory).unwrap();
 }
 

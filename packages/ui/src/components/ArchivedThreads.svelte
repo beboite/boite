@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Trash2 } from '@lucide/svelte';
+  import { RotateCcw, Trash2 } from '@lucide/svelte';
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
@@ -108,13 +108,13 @@
             </button>
           {:else}
             <button type="button" class="small" data-testid="archived-restore" disabled={restoring !== null} onclick={() => void restore(thread)}>
-              {strings.settings.archived.restore}
+              <RotateCcw size={14} />{strings.settings.archived.restore}
             </button>
           {/if}
           {#if canDeleteThread(store, thread)}
-            <button type="button" class="ghost small icon danger" data-testid="archived-delete"
+            <button type="button" class="ghost small danger" data-testid="archived-delete"
               aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
-              onclick={() => void remove(thread)}><Trash2 size={14} /></button>
+              onclick={() => void remove(thread)}><Trash2 size={14} />{strings.sidebar.delete}</button>
           {/if}
         </li>
       {/each}
@@ -135,43 +135,29 @@
   }
 
   .archived li {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 10px;
+    gap: 6px 10px;
     min-height: var(--row);
-    padding: 4px 4px 4px 10px;
+    padding: 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
   }
 
   .title {
-    flex: 1;
+    grid-column: 1 / -1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
   }
 
   .meta {
-    flex: none;
+    overflow-wrap: anywhere;
     font-size: var(--text-sm);
   }
 
   .archived button {
-    flex: none;
-  }
-
-  @media (max-width: 720px) {
-    .archived li {
-      flex-wrap: wrap;
-    }
-
-    .title {
-      flex-basis: 100%;
-    }
-
-    .meta {
-      flex: 1;
-    }
+    gap: 4px;
   }
 </style>
