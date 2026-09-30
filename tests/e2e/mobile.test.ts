@@ -71,6 +71,9 @@ test('phone navigates conversations, activity and settings without a sidebar', a
   expect(tabs.bottom).toBeLessThanOrEqual(844);
   expect(tabs.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  // Each row names its provider, and a worktree thread its branch after the project.
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('[data-testid=mobile-list] .thread')).every(row => row.querySelector('[data-testid=thread-provider]'))`)).toBe(true);
+  expect(await page.evaluate<string>(`document.querySelector('[data-testid=mobile-thread-t-trace] .detail').textContent`)).toContain('boite/trace');
   await capture('mobile-conversations.png');
   await page.click('[data-testid=mobile-list] .thread');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]') && document.querySelector('[data-testid=chat]')`);
