@@ -424,6 +424,7 @@ export const fr: Translation = {
     projectMenu: 'Actions du projet',
     copyPath: 'Copier le chemin',
     manageProject: 'Gérer le projet',
+    worktreeDefault: 'Worktree par défaut',
     backToProjectMenu: 'Retour',
     viewArchivedThreads: 'Voir les conversations archivées',
     copied: 'Copié',

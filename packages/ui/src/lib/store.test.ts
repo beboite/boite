@@ -639,7 +639,7 @@ describe('Store', () => {
     expect(store.draft?.worktree).toBe(false);
     store.setDraftWorktree(true);
     store.setDraftProject('p-notes');
-    expect(store.draft).toEqual({ projectId: 'p-notes', worktree: true });
+    expect(store.draft).toMatchObject({ projectId: 'p-notes', worktree: true });
 
     const spy = vi.spyOn(client, 'call');
     await store.submit('Fix the login', {

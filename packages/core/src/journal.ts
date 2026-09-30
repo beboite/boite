@@ -161,8 +161,8 @@ export class Journal {
 
   putProject(project: Project): void {
     this.db
-      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at, archived) VALUES (?, ?, ?, ?, ?)')
-      .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0);
+      .query('INSERT OR REPLACE INTO projects (id, name, path, created_at, archived, worktree_default) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(project.id, project.name, project.path, project.createdAt, project.archived === true ? 1 : 0, project.worktreeDefault === true ? 1 : 0);
   }
 
   /** How many of a project's own threads are archived, sub-threads left out, per project id. */

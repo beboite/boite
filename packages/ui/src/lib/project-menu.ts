@@ -26,7 +26,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     ...(owner.owner
       ? [
           ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession, glyph: Import }] : []),
-          ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
+          ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktree-default', label: strings.sidebar.worktreeDefault, glyph: GitBranch, checked: project.worktreeDefault === true }, { id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw }])
         ]
       : []),
@@ -59,6 +59,10 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         undo.offer(fill(strings.sidebar.projectArchivedToast, { project: projectName(project) }), async () => {
           await owner.archiveProject(project.id, false);
         });
+      if (action === 'worktree-default') {
+        const current = owner.projects.find(p => p.id === project.id);
+        if (current) await owner.setProjectWorktreeDefault(project.id, current.worktreeDefault !== true);
+      }
       if (action === 'worktrees') {
         if (workspace.active !== owner) await workspace.select(owner);
         owner.showSettings('general', 'worktrees');

@@ -37,6 +37,18 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('schema 23 projects migrate with worktree defaults off and retain enabled defaults after reopen', () => {
+    journal.putProject({ id: 'prj_default', name: 'test', path: dir, createdAt: 1 });
+    journal.db.exec('ALTER TABLE projects DROP COLUMN worktree_default; PRAGMA user_version = 23');
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getProject('prj_default')?.worktreeDefault).toBeUndefined();
+    journal.putProject({ ...journal.getProject('prj_default')!, worktreeDefault: true });
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getProject('prj_default')?.worktreeDefault).toBe(true);
+  });
+
   test('an existing journal indexes newest process traces without sorting its whole history', () => {
     journal.db.exec('DROP INDEX IF EXISTS processes_by_started');
     journal.close();

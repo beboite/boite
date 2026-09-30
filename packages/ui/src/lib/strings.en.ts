@@ -418,6 +418,7 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     manageProject: 'Manage project',
+    worktreeDefault: 'Worktree by default',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     copied: 'Copied',
