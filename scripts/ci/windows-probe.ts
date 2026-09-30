@@ -1,19 +1,19 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 const path = 'packages/core/test/thread-remove.test.ts';
 const original = readFileSync(path, 'utf8');
-const checks = [
+const checks: [string,string][] = [
   ['baseline', original],
-  ['shared-core', original.replace('afterEach, beforeEach,', 'afterAll, beforeAll,').replace('beforeEach(async', 'beforeAll(async').replace('afterEach(async', 'afterAll(async')],
-  ['no-rejects-matcher', original.replace("await expect(client.call('threads.get', { threadId })).rejects.toThrow('unknown thread');", "expect(await client.call('threads.get', { threadId }).then(() => 'unexpected success', e => e.message)).toContain('unknown thread');")
-    .replace("await expect(device.call(method, { threadId })).rejects.toThrow();", "expect(await device.call(method, { threadId }).then(() => 'unexpected success', e => e.message)).not.toBe('unexpected success');")
-    .replace("await expect(device.call('threads.deleted', {})).rejects.toThrow();", "expect(await device.call('threads.deleted', {}).then(() => 'unexpected success', e => e.message)).not.toBe('unexpected success');")
-    .replace("await expect(client.call('threads.remove', { threadId })).rejects.toThrow('persistent agent sessions');", "expect(await client.call('threads.remove', { threadId }).then(() => 'unexpected success', e => e.message)).toContain('persistent agent sessions');")],
-  ['close-delay', original.replace('await harness.stop();', 'await harness.stop(); await Bun.sleep(100); Bun.gc(true);')],
+  ['first-matcher', original.replace(".rejects.toThrow('unknown thread')", ".rejects.toMatchObject({ message: expect.stringContaining('unknown thread') })")],
+  ['device-matchers', original.replaceAll('.rejects.toThrow();', '.rejects.toMatchObject({ message: expect.stringContaining("for the owner only") });')],
+  ['last-matcher', original.replace(".rejects.toThrow('persistent agent sessions')", ".rejects.toMatchObject({ message: expect.stringContaining('persistent agent sessions') })")],
+  ['all-matchers', original.replace(".rejects.toThrow('unknown thread')", ".rejects.toMatchObject({ message: expect.stringContaining('unknown thread') })")
+    .replaceAll('.rejects.toThrow();', '.rejects.toMatchObject({ message: expect.stringContaining("for the owner only") });')
+    .replace(".rejects.toThrow('persistent agent sessions')", ".rejects.toMatchObject({ message: expect.stringContaining('persistent agent sessions') })")],
 ];
 try {
   for (const [label, source] of checks) {
-    writeFileSync(path, source!);
-    for (let i=1;i<=3;i++) {
+    writeFileSync(path, source);
+    for (let i=1;i<=(label==='all-matchers'?10:3);i++) {
       console.log(`PROBE ${label} ${i}`);
       const child = Bun.spawn([process.execPath, 'test', path], {stdout:'pipe',stderr:'pipe',windowsHide:true});
       const timer = setTimeout(() => child.kill(), 15000);
