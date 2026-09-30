@@ -63,8 +63,14 @@ The lightning button beside the effort chip cycles through the model's advertise
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
 Ultrafast only when listed, and sends the selected id as `turn/start.serviceTier`.
 Claude uses `supportsFastMode` and session-scoped `settings.fastMode`; changing it
-reopens the CLI on the same native session. ACP and pi expose no speed switch.
-A model/account change clears speed and effort. Schema 10 stores `threads.speed`,
+reopens the CLI on the same native session. Older Codex catalogs use
+`additionalSpeedTiers` when `serviceTiers` is absent.
+Native tiers cycle Fast before Ultrafast regardless of catalog order. When no
+native tier is advertised, a listed model and its `-fast`, `_fast` or `:fast`
+variant share the lightning control, as do `ultrafast` variants. Both ids must
+come from the same provider and account. Switching variants changes the model
+id with no service tier and preserves an effort both models support.
+Other model/account changes clear speed and effort. Schema 10 stores `threads.speed`,
 and each accepted turn freezes it with the other execution settings.
 
 Appearance offers accent swatches and a hue slider. The colour persists per

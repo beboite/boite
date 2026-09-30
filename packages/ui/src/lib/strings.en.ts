@@ -620,7 +620,7 @@ export const strings = {
   permissionMode: {
     default: 'Ask',
     acceptEdits: 'Edit freely',
-    bypassPermissions: 'Autonomous',
+    bypassPermissions: 'Auto',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },

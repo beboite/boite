@@ -445,6 +445,60 @@ test('a first run shows the reasoning, mode and worktree chips at their defaults
   query('[data-testid=effort-fast-mark]');
 });
 
+test('the lightning cycles fast, ultrafast and standard in a draft and saves each native tier on a thread', async () => {
+  await mountOnFake();
+  await openDraft();
+  const choice = store.defaultChoice()!;
+  await store.probeModels(choice.providerId, choice.accountId);
+  const model = store.modelOf(choice)!;
+  store.probedModels = { ...store.probedModels, [choice.providerId + '::' + choice.accountId]: [{ ...model, speeds: [{ id: 'ultrafast', label: 'Ultrafast' }, { id: 'fast', label: 'Fast' }] }] };
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed]') !== null);
+  for (const speed of ['fast', 'ultrafast', null]) {
+    query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+    await waitFor(() => store.draftChoice?.speed === speed);
+    expect(document.querySelector('[data-testid=effort-speed-label]')?.textContent ?? null).toBe(speed === null ? null : speed === 'fast' ? 'Fast' : 'Ultrafast');
+  }
+  press('Escape');
+  await waitFor(() => document.querySelector('[data-testid=composer-effort-menu]') === null);
+  const account = store.accounts.find(entry => entry.providerId === 'codex')!;
+  await store.probeModels('codex', account.id);
+  const created = await store.client!.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: account.id, model: 'codex-demo', permissionMode: 'bypassPermissions' });
+  await store.open(created.id);
+  await waitFor(() => !store.busy && query('[data-testid=composer-picker]').textContent?.includes('demo') === true);
+  const update = vi.spyOn(store, 'update');
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed]') !== null);
+  for (const speed of ['fast', 'ultrafast', null]) {
+    query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+    await waitFor(() => store.openThread?.speed === speed);
+    expect(update).toHaveBeenLastCalledWith(created.id, expect.objectContaining({ speed }));
+    expect((await store.client!.call('threads.get', { threadId: created.id })).speed).toBe(speed);
+  }
+});
+
+test('the lightning switches a draft to a separate fast model without losing its effort', async () => {
+  await mountOnFake();
+  await openDraft();
+  const choice = store.defaultChoice()!;
+  await store.probeModels(choice.providerId, choice.accountId);
+  const model = store.modelOf(choice)!;
+  const base = { ...model, id: 'grok-4.7', name: 'Grok 4.7', speeds: undefined };
+  store.probedModels = { ...store.probedModels, [choice.providerId + '::' + choice.accountId]: [base, { ...base, id: 'grok-4.7-fast', name: 'Grok 4.7 Fast' }] };
+  store.draftChoice = { ...choice, model: base.id, effort: 'high', speed: null };
+  await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Grok 4.7') === true);
+  effortChip()!.click();
+  await waitFor(() => document.querySelector('[data-testid=effort-speed]') !== null);
+  query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+  await waitFor(() => store.draftChoice?.model === 'grok-4.7-fast');
+  expect(store.draftChoice?.effort).toBe('high');
+  expect(store.draftChoice?.speed).toBeNull();
+  expect(query('[data-testid=effort-speed]').getAttribute('aria-pressed')).toBe('true');
+  query<HTMLButtonElement>('[data-testid=effort-speed]').click();
+  await waitFor(() => store.draftChoice?.model === 'grok-4.7');
+  expect(store.draftChoice?.effort).toBe('high');
+});
+
 test('the picker keeps row, account and legacy keyboard navigation separate', async () => {
   await mountOnFake();
   await openDraft();
@@ -721,7 +775,7 @@ test('a pasted image becomes a chip, comes off again, and rides the prompt', asy
 
   paste(pngFile());
   await waitFor(() => chips().length === 1);
-  expect(chips()[0]?.getAttribute('title')).toBe('pixel.png');
+  expect(chips()[0]?.getAttribute('title')).toBe('[Image 1] · pixel.png');
   expect(query<HTMLImageElement>('[data-testid=composer-attachment] img').getAttribute('src')).toBe(
     `data:image/png;base64,${PIXEL}`
   );
@@ -969,8 +1023,8 @@ test('permission menu offers three policies and preserves legacy modes until pic
   query('[data-testid=composer-mode]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
   const menu = query('[data-testid=composer-mode-menu]');
-  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Autonomous', 'Edit freely', 'Ask']);
-  for (const [mode, label] of [['bypassPermissions', 'Autonomous'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Auto', 'Edit freely', 'Ask']);
+  for (const [mode, label] of [['bypassPermissions', 'Auto'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
     query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
     await waitFor(() => store.openThread?.permissionMode === mode);
     expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);

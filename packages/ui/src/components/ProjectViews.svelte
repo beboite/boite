@@ -34,11 +34,9 @@
     <button class="ghost small view" class:chosen={workspace.view === 'recent'} aria-pressed={workspace.view === 'recent'} title={strings.machines.recentHint} data-testid={`${prefix}view-recent`} onclick={() => workspace.setView('recent')}>
       <List size={14} />{strings.machines.recent}
     </button>
-    {#if entries.length}
-      <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
-      {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
-    {/if}
+
   </div>
+  <div class="tools">
   {#if workspace.view === 'recent' && entries.length}
     <div class="filter">
       <Menu {items} onpick={key => projectView.pick(key)} label={strings.sidebar.filterProject} placement="bottom" variant="text" testid={`${prefix}project-filter`}>
@@ -50,16 +48,25 @@
       {#if projectView.order === 'manual'}<GripVertical size={12} />{:else}<ArrowDownWideNarrow size={12} />{/if}{mode}
     </button>
   {/if}
+    <div class="actions">
+    {#if entries.length}
+      <button class="ghost icon small" title={`${strings.sidebar.search}${store.keyHint('palette')}`} aria-label={strings.sidebar.search} data-testid={`${prefix}sidebar-search-open`} onclick={() => store.paletteOpen = true}><Search size={15} /></button>
+      {#if !prefix}<button class="ghost icon small" title={`${newLabel}${store.keyHint('new-thread')}`} aria-label={newLabel} data-testid="new-thread" onclick={create}><Plus size={16} /></button>{/if}
+    {/if}
+    </div>
+  </div>
 </div>
 
 <style>
   .project-views { container-type: inline-size; min-width: 0; padding: 8px 0 6px; border-bottom: 1px solid var(--color-border); }
-  .toolbar { display: flex; align-items: center; gap: 3px; }
+  .toolbar { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--color-edge); }
+  .tools { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
   .view { flex: 1; min-width: 0; padding-inline: 5px; color: var(--color-muted-foreground); }
   .chosen { background: var(--color-active); color: var(--color-foreground); }
   .icon { flex: none; }
   .order { height: var(--control-sm); padding: 0 6px; gap: 6px; font-size: var(--text-xs); color: var(--color-muted-foreground); }
-  .filter { padding-top: 4px; min-width: 0; }
+  .filter { flex: 1; min-width: 0; }
   .filter :global(.menu) { display: flex; min-width: 0; }
   .filter :global(.trigger) { min-width: 0; width: 100%; height: var(--control-sm); justify-content: flex-start; font-size: var(--text-sm); gap: 6px; }
   .filter span { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
