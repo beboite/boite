@@ -99,7 +99,7 @@
   .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 6px; }
   .mini-window { min-width: 0; display: flex; align-items: center; gap: 3px; }
   .mini-window .track { flex: 1; }
-  .mini-label { order: -1; max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: calc(var(--text-xs) - 1px); line-height: 1.2; font-weight: 400; }
+  .mini-label { order: -1; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-muted-foreground); font-size: calc(var(--text-xs) - 1px); line-height: 1.2; font-weight: 400; }
   .meters.stale { opacity: 0.45; }
   .track { flex: 1; width: 0; min-width: 0; height: 4px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }

@@ -230,6 +230,12 @@ test('exhausted quotas expose banked resets and a confirmed budget on desktop an
   await scheme('light');
   await capture('quota-extras-compact-light.png');
   await scheme('dark');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.navigate(`${origin}/?fake=1&quotaExtras=1&view=quotas`);
+  await page.waitFor(`document.documentElement.lang === 'fr' && document.querySelector('[data-testid=quota-credits]')?.textContent.includes('Budget mensuel')`);
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=quota-popup] [data-provider=claude] .mini-label')].every(el => el.scrollWidth <= el.clientWidth)`)).toBe(true);
+  await capture('quota-extras-compact-fr.png');
+  await page.evaluate(`localStorage.setItem('boite.locale', 'en')`);
   await viewport(1280, 800);
   expect(page.errors()).toEqual([]);
 }, 60_000);
