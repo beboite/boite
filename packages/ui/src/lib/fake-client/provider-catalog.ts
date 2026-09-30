@@ -66,6 +66,8 @@ export function providerCatalogMethods(ctx: FakeContext) {
       const before = JSON.stringify(ctx.providers);
       for (const provider of ctx.providers) {
         if (!provider.available || ctx.accounts.some(account => account.providerId === provider.id)) continue;
+        // With no seeded CLI login, a piped sign-in creates only its isolated account.
+        if (!provider.alwaysIsolated && provider.login && provider.login.kind !== 'terminal') continue;
         const id = `a-${++ctx.seq}`;
         const account: Account = {
           id, providerId: provider.id, label: 'Default',

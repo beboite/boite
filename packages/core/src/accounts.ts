@@ -315,11 +315,14 @@ export class AccountStore {
     if (currentOs() !== 'windows') chmodSync(file, 0o755);
   }
 
-  /** One "Default" account per available provider, created on first start only. */
+  /** Adopt existing CLI logins; guided sign-in creates its own isolated account. */
   ensureDefaults(): void {
     const known = new Set(this.list().map((account) => account.providerId));
-    for (const provider of this.core.providers.available()) {
-      if (known.has(provider.id)) continue;
+    for (const summary of this.core.providers.available()) {
+      if (known.has(summary.id)) continue;
+      const provider = this.core.providers.require(summary.id);
+      if (provider.isolation?.alwaysIsolated !== true && provider.login !== undefined
+        && provider.login.terminal !== true && this.sessionStatus({ isolationDir: null }, provider) === 'unauthenticated') continue;
       this.add({ providerId: provider.id, label: 'Default', useDefaultLocation: true });
     }
   }
@@ -691,7 +694,7 @@ export class AccountStore {
     this.emitLogin(accountId, failure === null ? 'done' : 'failed', failure ?? run.lastLine, run, failure === null ? 0 : exitCode || 1);
   }
 
-  private sessionStatus(account: Account, provider: ProviderDescriptor): Account['status'] {
+  private sessionStatus(account: Pick<Account, 'isolationDir'>, provider: ProviderDescriptor): Account['status'] {
     if (provider.auth.kind === 'none') return 'ok';
     // A profile may say where the login lives on its OS, or, with an empty list,
     // that it can live outside any file there: then a file still proves a login

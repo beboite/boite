@@ -21,6 +21,25 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test('model picker account tooltips keep emails private on desktop and phone', async () => {
+  await page.navigate(`${uiUrl}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelector('${id('composer-picker')}')`);
+  for (const [width, height, mobile] of [[1400, 1000, false], [390, 844, true]] as const) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
+    await page.click(id('composer-picker'));
+    await page.waitFor(`document.querySelector('[data-testid="composer-picker-menu"] [data-provider="claude"]')`);
+    await page.click('[data-testid="composer-picker-menu"] [data-provider="claude"]');
+    await page.waitFor(`document.querySelector('[data-instance="claude::a-claude-main"]')`);
+    expect(await page.evaluate(`document.querySelector('[data-instance="claude::a-claude-main"]').title`)).toBe('Default login');
+    expect(await page.evaluate(`document.querySelector('[data-testid="composer-picker-menu"]').textContent.includes('you@example.com')`)).toBe(false);
+    const point = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('[data-instance="claude::a-claude-main"]').getBoundingClientRect(); return {x: r.x + r.width / 2, y: r.y + r.height / 2}; })()`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    await capture(mobile ? 'model-account-private-phone.png' : 'model-account-private-desktop.png');
+    await page.click(id('composer-picker'));
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+}, 30_000);
+
 test('provider settings show login controls, and quota monitoring lives on the Limits page', async () => {
   await page.click(id('nav-settings')); await page.click(id('settings-tab-accounts'));
   await page.waitFor(`document.querySelectorAll('${id('provider-settings')}').length > 1`);
@@ -84,6 +103,13 @@ test('installing a missing agent goes on to its sign-in without a second click o
   await capture('connect-login-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await page.type('[data-testid="account-login-input"]', 'fake-code');
+  await page.evaluate(`document.querySelector('[data-testid="account-login-input"]').closest('form').requestSubmit()`);
+  await page.waitFor(`document.querySelector('[data-provider-id="claude"][data-step="ready"]')`);
+  await page.evaluate(`import('/src/lib/workspace.svelte.ts').then(({workspace}) => workspace.active.reloadProviders())`);
+  expect(await page.evaluate(`import('/src/lib/workspace.svelte.ts').then(({workspace}) => workspace.active.accountsOf('claude').map(({label,status}) => ({label,status})))`)).toEqual([{ label: 'Claude', status: 'ok' }]);
+  await page.click('[data-provider-id="claude"] [data-testid="provider-details-toggle"]');
+  await capture('connect-single-account.png');
 }, 30_000);
 
 test('Grain is visible above solid and acrylic surfaces and the settings fit a phone', async () => {

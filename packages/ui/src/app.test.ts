@@ -274,6 +274,10 @@ test('a machine with no AI offers to connect one, and the composer keeps its tex
   code.dispatchEvent(new Event('input', { bubbles: true }));
   code.closest('form')!.requestSubmit();
   await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  await store.reloadProviders();
+  expect(store.accountsOf('claude')).toEqual([
+    expect.objectContaining({ label: 'Claude', status: 'ok', isolationDir: expect.any(String) })
+  ]);
   query<HTMLButtonElement>('[data-testid=connect-use]').click();
 
   await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);

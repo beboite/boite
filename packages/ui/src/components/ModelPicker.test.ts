@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { mount, unmount } from 'svelte';
-import type { ModelInfo } from '@boite/contracts';
+import { flushSync, mount, unmount } from 'svelte';
+import type { Account, ModelInfo } from '@boite/contracts';
+import AccountSeats from './AccountSeats.svelte';
 import App from '../App.svelte';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
@@ -28,6 +29,18 @@ async function waitFor(check: () => boolean): Promise<void> {
 
 const rows = () => document.querySelectorAll('[data-testid=composer-picker-menu] [data-model]').length;
 const showAll = () => document.querySelector<HTMLButtonElement>('[data-testid=picker-show-all]');
+
+test('account chips never reveal the login email in their tooltip', () => {
+  const seats: Account[] = [
+    { id: 'work', providerId: 'claude', label: 'Work', identity: 'work@example.com', isolationDir: '/accounts/work', status: 'ok', createdAt: 0 },
+    { id: 'personal', providerId: 'claude', label: 'Personal', identity: 'personal@example.com', isolationDir: '/accounts/personal', status: 'unauthenticated', createdAt: 0 }
+  ];
+  running = mount(AccountSeats, { target: document.body, props: { shown: null, seats, shownAccountId: 'work', choice: null, locked: false, onpick: () => {} } });
+  flushSync();
+  const chips = [...document.querySelectorAll<HTMLButtonElement>('[data-seat]')];
+  expect(chips.map(chip => chip.title)).toEqual(['Work', 'Personal']);
+  expect(chips.map(chip => chip.textContent?.trim())).toEqual(['Work', 'Personal']);
+});
 
 test('a column of hundreds of models draws its first rows until asked for all', async () => {
   window.history.replaceState(null, '', '/?fake=1&open=recent');
