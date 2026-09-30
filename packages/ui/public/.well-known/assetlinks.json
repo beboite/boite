@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.boite.two",
+      "sha256_cert_fingerprints": [
+        "3C:F1:1E:0F:4A:9A:1A:9C:53:41:B3:6A:81:39:3C:2F:4B:EA:79:CD:74:49:DE:D9:35:94:88:9D:46:1C:37:26"
+      ]
+    }
+  }
+]

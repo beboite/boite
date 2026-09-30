@@ -109,7 +109,8 @@ and assertions when making the suite faster.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
-- [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.
+- [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):
+  pairing, the APK and deployment.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
 - [Performance](docs/performance.md): what a remote client is sent, startup

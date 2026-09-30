@@ -1,0 +1,136 @@
+name: android
+
+# The Android app: a Trusted Web Activity in apps/android that opens the core
+# at one host, vars.ANDROID_HOST. ci builds it unsigned to prove it compiles;
+# the nightly signs it, or takes the previous release's APK back when nothing
+# that goes into it changed (scripts/ci/android-apk.ts). docs/android.md.
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Sign the APK and reuse the previous release's when nothing changed.
+        type: boolean
+        default: false
+      version:
+        type: string
+        default: ''
+    secrets:
+      ANDROID_KEYSTORE:
+        description: Base64 of the PKCS12 keystore holding the key aliased boite.
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Sign the APK and reuse the previous release's when nothing changed.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # The reuse probe diffs apps/android against the previous release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - name: Choose the host and version
+        id: meta
+        env:
+          RELEASE: ${{ inputs.release }}
+          ANDROID_HOST: ${{ vars.ANDROID_HOST }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          host="$ANDROID_HOST"
+          if [[ -z "$host" ]]; then
+            if [[ "$RELEASE" == 'true' ]]; then
+              echo '::error::the repository variable ANDROID_HOST is unset: a released APK has to name the host it opens' >&2
+              exit 1
+            fi
+            host=boite.example.com
+          fi
+          version="${INPUT_VERSION:-$(jq -r .version package.json)}"
+          {
+            echo "host=$host"
+            echo "version=$version"
+            # Android installs an update only over a smaller versionCode, and
+            # main only grows.
+            echo "code=$(git rev-list --count HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/apk"
+      - name: Reuse the previous APK when nothing in it changed
+        id: probe
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ANDROID_HOST: ${{ steps.meta.outputs.host }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          bun scripts/ci/android-apk.ts reuse "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/apk"
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        if: steps.probe.outputs.reuse != 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        if: steps.probe.outputs.reuse != 'true'
+      - name: Build the APK
+        if: steps.probe.outputs.reuse != 'true'
+        working-directory: apps/android
+        env:
+          HOST: ${{ steps.meta.outputs.host }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          CODE: ${{ steps.meta.outputs.code }}
+        run: ./gradlew --no-daemon assembleRelease "-PboiteHost=$HOST" "-PboiteVersion=$VERSION" "-PboiteVersionCode=$CODE"
+      - name: Keep the unsigned APK
+        if: ${{ !inputs.release }}
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: cp apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/apk/boite-$VERSION-unsigned.apk"
+      - name: Sign it
+        if: inputs.release && steps.probe.outputs.reuse != 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # An unsigned APK is a file no phone installs: missing secrets fail the job.
+          if [[ -z "${KEYSTORE_B64:-}" || -z "${KEYSTORE_PASSWORD:-}" ]]; then
+            echo '::error::ANDROID_KEYSTORE or ANDROID_KEYSTORE_PASSWORD is unset: refusing to publish an unsigned APK' >&2
+            exit 1
+          fi
+          bt="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          ks="$RUNNER_TEMP/android.p12"
+          out="$RUNNER_TEMP/apk/boite-$VERSION.apk"
+          trap 'rm -f "$ks" "$RUNNER_TEMP/aligned.apk"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+          "$bt/zipalign" -f -p 4 apps/android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          # Passwords come from the environment, so neither lands in a process list.
+          "$bt/apksigner" sign --ks "$ks" --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias boite \
+            --out "$out" "$RUNNER_TEMP/aligned.apk"
+          # A TWA whose certificate is not the one assetlinks.json publishes
+          # opens with an address bar on every phone, and nothing else notices.
+          bun scripts/ci/android-apk.ts verify "$out"
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: ${{ inputs.release && 'android-apk' || 'android-apk-unsigned' }}
+          path: ${{ runner.temp }}/apk/*.apk
+          if-no-files-found: error
+          # An APK is a zip already.
+          compression-level: 0
+          retention-days: 7

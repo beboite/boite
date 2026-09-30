@@ -427,7 +427,7 @@ describe('server', () => {
   // Without `bun run build:ui` there is nothing to serve and nothing to assert;
   // the end to end suite builds the UI before it starts, and proves the same three.
   test.skipIf(!existsSync(UI_DIST))(
-    'the shell, the worker and a hashed asset carry the headers the PWA needs',
+    'the shell, the worker, a hashed asset and assetlinks.json carry what the PWA and the APK need',
     async () => {
       const index = await fetch(`${harness.url}/`);
       expect(index.status).toBe(200);
@@ -444,6 +444,14 @@ describe('server', () => {
       const manifest = await fetch(`${harness.url}/manifest.webmanifest`);
       expect(manifest.status).toBe(200);
       expect(manifest.headers.get('cache-control')).toBe('no-cache');
+
+      // Android reads it before opening the APK without an address bar
+      // (docs/android.md), and Vite only copies a dot directory on purpose.
+      const assetlinks = await fetch(`${harness.url}/.well-known/assetlinks.json`);
+      expect(assetlinks.status).toBe(200);
+      expect(assetlinks.headers.get('content-type')).toStartWith('application/json');
+      const statements = (await assetlinks.json()) as { target: { package_name: string } }[];
+      expect(statements[0]?.target.package_name).toBe('com.boite.two');
 
       // The hashed name is read out of the build rather than guessed.
       const hashed = /assets\/[A-Za-z0-9._-]+/.exec(html)?.[0];
