@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, type BigIntStats } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Core } from '../core.ts';
@@ -13,6 +13,12 @@ const SKIP = new Set(['.git', '.boite', '.agents', 'node_modules']);
 
 export interface FileEntry { hash: string; mode: number; link?: string }
 export type FileSnapshot = Record<string, FileEntry>;
+interface CachedFile { entry: FileEntry; metadata: string; size: number }
+export type SnapshotCache = Map<string, CachedFile>;
+
+function metadataOf(info: BigIntStats): string {
+  return [info.dev, info.ino, info.size, info.mode, info.mtimeNs, info.ctimeNs].join(':');
+}
 
 export function contains(root: string, path: string): boolean {
   const child = relative(resolve(root), resolve(path));
@@ -39,32 +45,35 @@ export async function checkedPath(root: string, name: string): Promise<string> {
 }
 
 /** One file at a time, bounded before allocation. Never follows a file symlink. */
-export async function readEntry(path: string): Promise<{ entry: FileEntry; bytes?: Buffer } | null> {
+export async function readEntry(path: string, cached?: CachedFile): Promise<(CachedFile & { bytes?: Buffer }) | null> {
   let info;
-  try { info = await lstat(path); } catch (error) {
+  try { info = await lstat(path, { bigint: true }); } catch (error) {
     if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
     throw error;
   }
   if (info.isDirectory()) return null;
+  const metadata = metadataOf(info);
+  if (cached?.metadata === metadata) return cached;
   if (info.isSymbolicLink()) {
     const link = await readlink(path);
-    return { entry: { hash: createHash('sha256').update(link).digest('hex'), mode: info.mode & 0o777, link } };
+    if (metadataOf(await lstat(path, { bigint: true })) !== metadata) throw new Error(`${path}: link changed while saving the checkpoint`);
+    return { entry: { hash: createHash('sha256').update(link).digest('hex'), mode: Number(info.mode) & 0o777, link }, metadata, size: Buffer.byteLength(link) };
   }
   if (!info.isFile()) throw new Error(`${path}: expected a regular file or symlink`);
-  if (info.size > FILE_BYTE_LIMIT) throw new Error(`${path}: file exceeds the 16 MiB checkpoint limit`);
+  if (info.size > BigInt(FILE_BYTE_LIMIT)) throw new Error(`${path}: file exceeds the 16 MiB checkpoint limit`);
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    const bytes = Buffer.alloc(FILE_BYTE_LIMIT + 1 > info.size ? info.size + 1 : FILE_BYTE_LIMIT + 1);
+    const bytes = Buffer.alloc(Number(info.size) + 1);
     let size = 0;
     while (size < bytes.length) {
       const read = await handle.read(bytes, size, bytes.length - size, null);
       if (read.bytesRead === 0) break;
       size += read.bytesRead;
     }
-    const after = await handle.stat();
-    if (size !== info.size || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs) throw new Error(`${path}: file changed while saving the checkpoint`);
+    const after = await handle.stat({ bigint: true });
+    if (size !== Number(info.size) || metadataOf(after) !== metadata) throw new Error(`${path}: file changed while saving the checkpoint`);
     const content = bytes.subarray(0, size);
-    return { entry: { hash: createHash('sha256').update(content).digest('hex'), mode: info.mode & 0o777 }, bytes: content };
+    return { entry: { hash: createHash('sha256').update(content).digest('hex'), mode: Number(info.mode) & 0o777 }, bytes: content, metadata, size };
   } finally { await handle.close(); }
 }
 
@@ -86,25 +95,28 @@ async function plainFiles(root: string): Promise<string[]> {
   return files;
 }
 
-export async function snapshot(core: Core, threadId: string, root: string, objects: string): Promise<FileSnapshot> {
+export async function snapshot(core: Core, threadId: string, root: string, objects: string, previous?: SnapshotCache): Promise<FileSnapshot> {
   if (contains(root, core.dataDir)) throw new Error('workspace contains the core data directory');
   const listed = await git(core, threadId, root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], 5000);
   const names = listed.code === 0 ? [...new Set(listed.stdout.split('\0').filter(Boolean))] : await plainFiles(root);
   if (names.length > FILE_LIMIT) throw new Error('workspace exceeds the 20000 file checkpoint limit');
   await mkdir(objects, { recursive: true, mode: 0o700 });
   const result: FileSnapshot = Object.create(null) as FileSnapshot;
+  const next: SnapshotCache = new Map();
   let bytes = 0;
   for (const name of names) {
-    const saved = await readEntry(await checkedPath(root, name));
+    const saved = await readEntry(await checkedPath(root, name), previous?.get(name));
     if (!saved) continue;
-    bytes += saved.bytes?.length ?? saved.entry.link!.length;
+    bytes += saved.size;
     if (bytes > BYTE_LIMIT) throw new Error('workspace exceeds the 128 MiB checkpoint limit');
     result[name] = saved.entry;
+    next.set(name, { entry: saved.entry, metadata: saved.metadata, size: saved.size });
     if (saved.bytes) {
       try { await writeFile(join(objects, saved.entry.hash), saved.bytes, { flag: 'wx', mode: 0o600 }); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     }
   }
+  if (previous) { previous.clear(); for (const [name, entry] of next) previous.set(name, entry); }
   return result;
 }
 
@@ -121,7 +133,7 @@ async function writeEntry(root: string, objects: string, name: string, entry: Fi
     let parent = dirname(path);
     while (parent !== root) {
       try { await rmdir(parent); }
-      catch (error) { if (['ENOTEMPTY', 'EEXIST', 'ENOENT'].includes((error as NodeJS.ErrnoException).code ?? '')) break; throw error; }
+      catch (error) { if (['ENOTEMPTY', 'EEXIST', 'ENOENT', 'EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')) break; throw error; }
       parent = dirname(parent);
     }
     return;

@@ -95,7 +95,9 @@ the rewind is pending still sends the replacement to the original thread on
 its owning machine.
 
 The core saves private file checkpoints before and after each conversation
-turn, for every driver. Editing restores the changes made by the removed
+turn, for every driver. Unchanged files reuse their saved hashes after checking
+size, mode, inode and nanosecond modification/change timestamps, with metadata
+retained for at most four thread folders. Editing restores the changes made by the removed
 turns before truncating their messages. It preserves unrelated files and
 refuses a conflict with outside edits before changing either files or history.
 Git projects include tracked files and non-ignored untracked files; HEAD and

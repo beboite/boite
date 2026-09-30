@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { ThreadRewind, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf, refused } from '../errors.ts';
-import { contains, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot } from './checkpoint-files.ts';
+import { contains, restoreFiles, same, snapshot, workspaceRoot, type FileChange, type FileSnapshot, type SnapshotCache } from './checkpoint-files.ts';
 
 type FileResult = NonNullable<ThreadRewind['files']>;
 interface Checkpoint { root: string; messages?: string[]; before?: FileSnapshot; after?: FileSnapshot; reason?: string }
@@ -13,6 +13,7 @@ interface Active { threadId: string; turnId: string; checkpoint: Checkpoint }
 export class CodeCheckpoints {
   private readonly active = new Map<string, Active>();
   private readonly restoring = new Set<string>();
+  private readonly previous = new Map<string, { root: string; files: SnapshotCache }>();
   private pruned: Promise<void> | undefined;
 
   constructor(private readonly core: Core) {
@@ -20,6 +21,16 @@ export class CodeCheckpoints {
   }
   private folder(threadId: string): string { return join(this.core.dataDir, 'checkpoints', threadId); }
   private objects(threadId: string): string { return join(this.folder(threadId), 'objects'); }
+
+  /** Reuse hashes only within the same object folder, with four bounded metadata maps. */
+  private cachedSnapshot(threadId: string, root: string): Promise<FileSnapshot> {
+    let cached = this.previous.get(threadId);
+    if (!cached || cached.root !== root) cached = { root, files: new Map() };
+    this.previous.delete(threadId);
+    this.previous.set(threadId, cached);
+    while (this.previous.size > 4) this.previous.delete(this.previous.keys().next().value!);
+    return snapshot(this.core, threadId, root, this.objects(threadId), cached.files);
+  }
 
   assertAvailable(cwd: string): void {
     if ([...this.restoring].some(root => contains(root, cwd) || contains(cwd, root))) {
@@ -48,7 +59,7 @@ export class CodeCheckpoints {
     try {
       this.pruned ??= this.prune();
       await this.pruned;
-      checkpoint.before = await snapshot(this.core, thread.id, root, this.objects(thread.id));
+      checkpoint.before = await this.cachedSnapshot(thread.id, root);
       await this.save(thread.id, turnId, checkpoint);
     } catch (error) { checkpoint.reason = messageOf(error); }
   }
@@ -63,7 +74,7 @@ export class CodeCheckpoints {
     const { turnId } = active;
     try {
       const { checkpoint, threadId } = active;
-      if (!checkpoint.reason) checkpoint.after = await snapshot(this.core, threadId, checkpoint.root, this.objects(threadId));
+      if (!checkpoint.reason) checkpoint.after = await this.cachedSnapshot(threadId, checkpoint.root);
       await this.save(threadId, turnId, checkpoint);
     } catch (error) {
       active.checkpoint.reason = messageOf(error);
@@ -74,7 +85,9 @@ export class CodeCheckpoints {
 
   /** Hold the workspace through both the file restoration and the journal cut. */
   async rewind<T>(thread: ThreadSummary, turnIds: string[], messageId: string, cut: (files: FileResult) => T): Promise<T> {
-    const root = await workspaceRoot(thread.cwd);
+    let root: string;
+    try { root = await workspaceRoot(thread.cwd); }
+    catch (error) { return cut({ status: 'unavailable', count: 0, reason: `the working directory is unavailable: ${messageOf(error)}` }); }
     this.assertAvailable(root);
     if ([...this.active.values()].some(active => contains(root, active.checkpoint.root) || contains(active.checkpoint.root, root))) {
       throw refused('another turn is working in this project; stop it before restoring files', { field: 'cwd', path: root, reason: 'turn-in-flight' });
@@ -129,7 +142,10 @@ export class CodeCheckpoints {
   }
 
   async discard(threadIds: string[]): Promise<void> {
-    for (const threadId of threadIds) await rm(this.folder(threadId), { recursive: true, force: true });
+    for (const threadId of threadIds) {
+      this.previous.delete(threadId);
+      await rm(this.folder(threadId), { recursive: true, force: true });
+    }
   }
 
   /** Deletions kept undoable in a session are purged by the journal on restart. */

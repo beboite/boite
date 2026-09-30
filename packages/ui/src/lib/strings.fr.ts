@@ -966,7 +966,7 @@ export const fr: Translation = {
 
   composer: {
     editing: 'Modification d’un message envoyé : l’envoi le remplace, avec tout ce qui suit',
-    editingQueued: 'Envoie ou retire les messages en attente avant de remplacer un message envoyé.',
+    editingQueued: 'Envoyez ou retirez les messages en attente avant de remplacer un message envoyé.',
     filesUnavailable: "Les messages ont été rembobinés, mais cette modification n'a pas de sauvegarde complète des fichiers. Le code n'a pas pu être restauré.",
     editingCancel: 'Arrêter la modification (Échap)',
     switchTitle: 'Passer une conversation de {tokens} jetons à {provider} ?',

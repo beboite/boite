@@ -1,6 +1,6 @@
-import { chmod, mkdir, readFile, stat, writeFile, rm, symlink, readlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, writeFile, rm, symlink, readlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints } from '../src/threads/code-checkpoints.ts';
@@ -123,6 +123,19 @@ test('a change made between the removed turns is preserved and refuses the rewin
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
 });
 
+test('cached checkpoints preserve an outside edit with the same size and restored modification time', async () => {
+  const path = join(cwd, 'app.ts');
+  await writeFile(path, 'before');
+  await run('keep');
+  const initial = await stat(path);
+  await writeFile(path, 'manual');
+  await utimes(path, initial.atime, initial.mtime);
+  change = async () => { await writeFile(path, 'agent!'); };
+  const messageId = await run('change');
+  expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(path, 'utf8')).toBe('manual');
+});
+
 test('legacy turns and oversized files report unavailable backups while preserving their files', async () => {
   await writeFile(join(cwd, 'app.ts'), 'initial');
   change = async () => { await writeFile(join(cwd, 'app.ts'), 'agent'); };
@@ -196,6 +209,28 @@ test('permanently removing a project removes its private file checkpoints', asyn
   await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
+test('project removal still reaches connected clients when checkpoint cleanup fails', async () => {
+  await run('save');
+  const projectId = h.core.threads.require(threadId).projectId!;
+  const observer = await h.connect();
+  const cleanup = spyOn(h.core.threads.codeCheckpoints, 'discard').mockRejectedValue(new Error('checkpoint locked'));
+  try {
+    const removed = observer.next('project.removed', project => project.projectId === projectId);
+    await client.call('projects.remove', { projectId });
+    expect((await removed).projectId).toBe(projectId);
+    expect((await observer.call('projects.list', {})).some(project => project.id === projectId)).toBe(false);
+  } finally { cleanup.mockRestore(); observer.close(); }
+});
+
+test('an unavailable working directory warns but still rewinds the messages', async () => {
+  const messageId = await run('save');
+  await rm(cwd, { recursive: true });
+  const result = await client.call('threads.rewind', { threadId, messageId });
+  expect(result.files?.status).toBe('unavailable');
+  expect(result.files?.reason).toContain('working directory');
+  expect(result.thread.messages).toEqual([]);
+});
+
 test('restoring can replace a file with its former directory and nested files', async () => {
   await mkdir(join(cwd, 'src'));
   await writeFile(join(cwd, 'src', 'app.ts'), 'before');
@@ -208,11 +243,32 @@ test('restoring can replace a file with its former directory and nested files', 
 test('Stop during checkpoint preparation prevents the provider from starting', async () => {
   let calls = 0;
   change = async () => { calls += 1; };
-  const turn = h.core.threads.startTurn(threadId, 'stop before start');
-  expect(h.core.threads.stopTurn(threadId)).toBe(true);
-  await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
-  expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
-  expect(calls).toBe(0);
+  const held = Promise.withResolvers<void>();
+  const preparation = spyOn(h.core.threads.codeCheckpoints, 'begin').mockReturnValue(held.promise);
+  try {
+    const turn = h.core.threads.startTurn(threadId, 'stop before start');
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'running');
+    expect(h.core.threads.stopTurn(threadId)).toBe(true);
+    held.resolve();
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    expect(calls).toBe(0);
+  } finally { held.resolve(); preparation.mockRestore(); }
+});
+
+test('rewinding a created file tolerates an empty parent directory that cannot be removed', async () => {
+  if (process.platform === 'win32') return;
+  change = async () => {
+    await mkdir(join(cwd, 'src'));
+    await writeFile(join(cwd, 'src', 'created.ts'), 'agent');
+  };
+  const messageId = await run('create');
+  await chmod(cwd, 0o555);
+  try {
+    expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
+    expect(await Bun.file(join(cwd, 'src', 'created.ts')).exists()).toBe(false);
+    expect(h.core.threads.get(threadId).messages).toEqual([]);
+  } finally { await chmod(cwd, 0o755); }
 });
 
 test('restoring a former file removes only the empty directories created in its place', async () => {
