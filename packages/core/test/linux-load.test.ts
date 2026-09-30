@@ -64,6 +64,12 @@ describe('the procfs parsers', () => {
     expect(residentBytes(status(null))).toBeNull();
   });
 
+  test('a process is charged its anonymous and shared memory, not the library pages every worker maps', () => {
+    // A rustc worker: 1.2 GB resident, of which 900 MB is the mapped compiler library.
+    const rustc = ['Name:\trustc', 'VmRSS:\t 1228800 kB', 'RssAnon:\t  307200 kB', 'RssFile:\t  917504 kB', 'RssShmem:\t    4096 kB', ''].join('\n');
+    expect(residentBytes(rustc)).toBe((307200 + 4096) * 1024);
+  });
+
   test('a start time is the boot time plus field 22 in ticks, and a gone process has none', () => {
     // Fields 3 to 21 as the kernel writes them, then starttime, then the rest cut short.
     const fields = ['S', '1', '42', '42', '0', '-1', '4194560', '100', '0', '0', '0', '7', '3', '0', '0', '20', '0', '1', '0', '12345', '99999'];

@@ -38,8 +38,25 @@ The agents run on the computer that holds your project.
 
 ## Get started
 
-boite is in beta. Download the Windows x64 installer from
-[GitHub Releases](https://github.com/beboite/boite/releases). Choose a regular
+boite is in beta. Download it from
+[GitHub Releases](https://github.com/beboite/boite/releases):
+
+| System | File |
+|---|---|
+| Windows x64 | `Boite_<version>_x64-setup.exe` |
+| macOS 13+, Apple Silicon | `Boite_<version>_aarch64.dmg` |
+| macOS 13+, Intel | `Boite_<version>_x64.dmg` |
+| Linux x64 | `Boite_<version>_amd64.deb` or `Boite_<version>_amd64.AppImage` |
+| Linux ARM64 | `Boite_<version>_arm64.deb` or `Boite_<version>_aarch64.AppImage` |
+
+A macOS release built with the project's Apple Developer ID is signed and
+notarized and opens like any downloaded app. One built without it is signed ad
+hoc: after dragging it to Applications, run `xattr -cr /Applications/Boite.app`
+once, or open it and allow it under System Settings, Privacy & Security. Linux packages need glibc 2.35 or newer (Ubuntu
+22.04, Debian 12, Fedora 36 and later) with WebKitGTK 4.1. An AppImage also
+needs FUSE 2 (`libfuse2`); make the file executable before starting it.
+
+Choose a regular
 release for Boite or a `nightly` prerelease for boite (de nuit). The nightly workflow
 publishes changed commits daily at 03:23 UTC after its checks pass.
 
@@ -48,10 +65,9 @@ settings lets you switch channels and shows download progress, release notes and
 the installed version. Updates are signed and download automatically; installing
 one asks before restarting. [Desktop updates](docs/updates.md) covers the details.
 
-Linux and macOS desktop packages are built and smoke-tested in CI on x64 and
-ARM64; their public installers and automatic updates are not published yet.
-The headless core runs on Linux and macOS too, with more limited process tracking
-than on Windows.
+On Linux and macOS, process tracking is more limited than on Windows and the
+resource caps, focus guard and audio mute are not available;
+[platform readiness](docs/portability.md) lists the differences.
 
 For a local build, install the Bun version named in `package.json`, then:
 

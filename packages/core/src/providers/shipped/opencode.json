@@ -29,7 +29,10 @@
     "linux": {
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
-      "executable": [{ "kind": "path", "value": "opencode" }],
+      "executable": [
+        { "kind": "path", "value": "opencode" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode" }
+      ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
       "close": { "processes": ["opencode"] }
@@ -37,7 +40,10 @@
     "macos": {
       "detect": {},
       "update": { "args": ["upgrade"], "latestNpm": "opencode-ai" },
-      "executable": [{ "kind": "path", "value": "opencode" }],
+      "executable": [
+        { "kind": "path", "value": "opencode" },
+        { "kind": "file", "value": "{home}/.opencode/bin/opencode" }
+      ],
       "launch": { "args": ["acp", "--port", "0"] },
       "isolation": { "XDG_DATA_HOME": "{isolationDir}", "XDG_CONFIG_HOME": "{isolationDir}" },
       "close": { "processes": ["opencode"] }

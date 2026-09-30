@@ -116,6 +116,10 @@ Boite through Windows' installed apps still removes its shortcuts and pins.
 The custom NSIS template and its upstream version are documented in
 `apps/shell/src-tauri/windows/VENDOR.md`.
 
+Linux and macOS have no installer hook. A .deb, AppImage or application
+replaced by hand while its core runs leaves that core running the deleted file
+until the next shell starts, which then replaces it as described below.
+
 When the new shell starts, it reads the version the running core reports on
 `/health`. For Windows split bundles it also compares the entry file's SHA-256
 with the hash captured by the core at startup. A previous bundle is replaced
@@ -135,8 +139,16 @@ checks again. Only the channel preference persists in `update-channel.json`.
 
 ## Scope
 
-Automatic desktop updates currently support packaged Windows x64 builds.
-Debug builds, Boite Dev, hidden test shells and browser clients cannot install
+Automatic desktop updates support the packages a release publishes: the
+Windows x64 installer, the macOS application bundle on Intel and Apple Silicon,
+and the Linux .deb and AppImage on x64 and ARM64. The Linux bundler stamps the
+package type into the executable, and `latest.json` names one payload per type
+(`linux-x86_64-deb`, `linux-x86_64-appimage` and their ARM64 twins), so an
+AppImage never downloads a .deb. A Linux executable with no stamped type, such
+as a bare `cargo build`, is not updatable. A .deb installs through `pkexec`,
+which asks for the administrator password; an AppImage replaces its own file,
+which must stay writable. The macOS update replaces the application bundle in
+place, so a copy still running from the mounted DMG cannot update. Debug builds, Boite Dev, hidden test shells and browser clients cannot install
 an update. The updater belongs to the local desktop, even while the UI displays
 a remote machine. [Agent updates](agent-updates.md) are separate, as are
 [server image updates](server.md).

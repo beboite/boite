@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2 } from '@lucide/svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
+  import { linuxShell } from '../lib/shell-platform';
   import { watchBrowserBounds } from '../lib/browser-bounds';
   import { openExternal } from '../lib/links';
   import { fill, strings } from '../lib/strings';
@@ -256,7 +257,7 @@
 
   <div class="slot" bind:this={slot} data-testid="browser-slot">
     {#if !browserBridge.paints}
-      <p class="muted note">{strings.browser.slotEmpty}</p>
+      <p class="muted note">{linuxShell() ? strings.browser.slotLinux : strings.browser.slotEmpty}</p>
     {/if}
   </div>
 </div>

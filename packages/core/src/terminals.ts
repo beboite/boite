@@ -41,7 +41,9 @@ export interface Shell {
 /**
  * `BOITE_TERMINAL_SHELL` when set, else PowerShell 7 when it is on the PATH,
  * the Windows PowerShell every Windows has, then cmd. `$SHELL` elsewhere, then
- * bash, then sh.
+ * bash, then sh. On macOS a login shell, as Terminal.app starts: zsh reads
+ * `/etc/zprofile` and `~/.zprofile` only then, and that is where Homebrew and
+ * most version managers put their PATH.
  */
 export function pickShell(
   platform: NodeJS.Platform = process.platform,
@@ -63,9 +65,10 @@ export function pickShell(
     if (exists(windowsPowerShell)) return { exe: windowsPowerShell, args: ['-NoLogo'], kind: 'powershell' };
     return { exe: env['ComSpec'] ?? win32.join(root, 'System32', 'cmd.exe'), args: [], kind: 'cmd' };
   }
+  const args = platform === 'darwin' ? ['-l'] : [];
   const named = env['SHELL'];
-  if (named !== undefined && named.length > 0 && exists(named)) return { exe: named, args: [], kind: 'posix' };
-  return { exe: exists('/bin/bash') ? '/bin/bash' : '/bin/sh', args: [], kind: 'posix' };
+  if (named !== undefined && named.length > 0 && exists(named)) return { exe: named, args, kind: 'posix' };
+  return { exe: exists('/bin/bash') ? '/bin/bash' : '/bin/sh', args, kind: 'posix' };
 }
 
 /** The line a user would type to run `argv` in this shell, quoted where it has to be. */
