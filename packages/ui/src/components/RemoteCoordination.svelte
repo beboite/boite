@@ -3,8 +3,9 @@
   import { Link2, RefreshCw, Unlink } from '@lucide/svelte';
   import { untrack } from 'svelte';
   import type { CoordinationPeer } from '@boite/contracts';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import { workspace, type Machine } from '../lib/workspace.svelte';
+  import { agentAutoLink, forgetUnlinked, linkMachines, rememberUnlinked } from '../lib/agent-links.svelte';
 
   let identities = $state<Record<string, CoordinationPeer>>({});
   let peers = $state<Record<string, CoordinationPeer[]>>({});
@@ -32,6 +33,8 @@
 
   $effect(() => {
     const key = machineKey;
+    // An automatic link made while this screen is open shows at once.
+    void agentAutoLink.version;
     untrack(() => {
       if (key) void refresh();
       else {
@@ -65,30 +68,13 @@
   async function link(a: Machine, b: Machine): Promise<void> {
     busy = `${a.id}\0${b.id}`;
     error = null;
-    let trustedA = false;
-    let trustedB = false;
-    let bIdentity: CoordinationPeer | null = null;
-    let aIdentity: CoordinationPeer | null = null;
-    let previousA: CoordinationPeer | undefined;
-    let previousB: CoordinationPeer | undefined;
     try {
-      const [resolvedA, resolvedB] = await Promise.all([a.store.coordinationIdentity(), b.store.coordinationIdentity()]);
-      aIdentity = resolvedA;
-      bIdentity = resolvedB;
-      previousA = (await a.store.coordinationPeers()).find(p => p.coreId === resolvedB.coreId);
-      previousB = (await b.store.coordinationPeers()).find(p => p.coreId === resolvedA.coreId);
-      await a.store.trustCoordinationPeer(bIdentity);
-      trustedA = true;
-      await b.store.trustCoordinationPeer(aIdentity);
-      trustedB = true;
-      await Promise.all([a.store.checkCoordinationPeer(bIdentity.coreId), b.store.checkCoordinationPeer(aIdentity.coreId)]);
+      const [left, right] = [identities[a.id], identities[b.id]];
+      if (left && right) forgetUnlinked(left.coreId, right.coreId);
+      await linkMachines(a, b);
       await refresh();
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
-      try {
-        if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); }
-        if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); }
-      } catch (rollback) { error += ` ${rollback instanceof Error ? rollback.message : String(rollback)}`; }
     } finally {
       busy = '';
     }
@@ -98,6 +84,9 @@
     busy = `${machine.id}\0${peer.coreId}`;
     error = null;
     try {
+      const own = identities[machine.id];
+      // Removed by hand: the automatic link does not put it back.
+      if (own) rememberUnlinked(own.coreId, peer.coreId);
       await machine.store.untrustCoordinationPeer(peer.coreId);
       await refresh();
     } catch (cause) {
@@ -122,7 +111,7 @@
     <div class="rows">
       {#each pairs as pair (`${pair.a.id}:${pair.b.id}`)}
         <div class="row" data-testid="agent-link-pair">
-          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : strings.machines.linkAgents}</small></span>
+          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : agentAutoLink.failureOf(pair.a, pair.b) ? fill(strings.machines.autoLinkFailed, { reason: agentAutoLink.failureOf(pair.a, pair.b)! }) : strings.machines.linkAgents}</small></span>
           <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} />{strings.machines.linkAgents}</button>
         </div>
       {/each}

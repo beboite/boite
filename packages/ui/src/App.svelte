@@ -33,6 +33,7 @@
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
   import { mobileOverlay } from './lib/mobile-history';
+  import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
@@ -136,6 +137,7 @@
   onMount(() => {
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
+    const stopAutoLink = agentAutoLink.start();
     let stopAppUpdater: () => void = () => undefined;
     let updateDelay: number | undefined;
     const updateFrame = typeof requestAnimationFrame === 'function'
@@ -170,6 +172,7 @@
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();
+      stopAutoLink();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
       if (updateDelay !== undefined) clearTimeout(updateDelay);

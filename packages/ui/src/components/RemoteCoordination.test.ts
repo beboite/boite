@@ -4,6 +4,7 @@ import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { workspace } from '../lib/workspace.svelte';
 import RemoteCoordination from './RemoteCoordination.svelte';
+import { agentAutoLink } from '../lib/agent-links.svelte';
 
 let component: ReturnType<typeof mount> | undefined;
 const opened: Store[] = [];
@@ -16,13 +17,15 @@ afterEach(async () => {
   workspace.machines = [];
   workspace.active = primary;
   component = undefined;
+  agentAutoLink.reset();
+  localStorage.removeItem('boite.agent-links.unlinked');
   document.body.innerHTML = '';
 });
 
-async function machine(id: string, name: string): Promise<Store> {
+async function machine(id: string, name: string, principal: 'owner' | 'session' = 'owner'): Promise<Store> {
   const target = new Store();
   target.machineId = id;
-  target.attach(new FakeClient({ delayMs: 0, coreId: `core-${id}`, coreName: name, publicUrl: `https://${id}.test` }));
+  target.attach(new FakeClient({ delayMs: 0, coreId: `core-${id}`, coreName: name, publicUrl: `https://${id}.test`, ...(principal === 'session' ? { principal } : {}) }));
   await target.connect();
   opened.push(target);
   return target;
@@ -76,4 +79,41 @@ test('a machine that becomes ready after mount refreshes its existing links', as
     expect(link?.disabled, document.body.textContent ?? '').toBe(true);
     expect(document.querySelectorAll('[data-testid="agent-peer"]')).toHaveLength(2);
   });
+});
+
+test('owner machines link by themselves, a paired device never does, and a removed link stays removed', async () => {
+  const first = await machine('first', 'First');
+  const second = await machine('second', 'Second');
+  const phone = await machine('phone', 'Phone', 'session');
+  expect(phone.owner).toBe(false);
+  workspace.machines = [{ id: 'first', label: 'First', store: first }, { id: 'second', label: 'Second', store: second }, { id: 'phone', label: 'Phone', store: phone }];
+  const stop = agentAutoLink.start();
+  try {
+    await vi.waitFor(async () => {
+      expect((await first.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-second']);
+      expect((await second.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-first']);
+    });
+    // The paired device holds no owner connection: nothing trusts it, and it trusts nothing.
+    expect((await first.coordinationPeers()).some(peer => peer.coreId === 'core-phone')).toBe(false);
+
+    workspace.active = first;
+    component = mount(RemoteCoordination, { target: document.body });
+    await vi.waitFor(() => { flushSync(); expect(document.querySelectorAll('[data-testid="agent-peer"]')).toHaveLength(2); });
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-testid="agent-peer"] button')) { button.click(); await settle(); }
+    await vi.waitFor(async () => { expect(await first.coordinationPeers()).toEqual([]); expect(await second.coordinationPeers()).toEqual([]); });
+
+    // Reconnecting both retries every pair, but not the one the user removed.
+    first.connection = 'connecting'; second.connection = 'connecting';
+    await settle();
+    first.connection = 'ready'; second.connection = 'ready';
+    await settle();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(await first.coordinationPeers()).toEqual([]);
+    expect(await second.coordinationPeers()).toEqual([]);
+
+    // Linking by hand clears the removal.
+    document.querySelector<HTMLButtonElement>('[data-testid="agent-link"]')!.click();
+    await vi.waitFor(async () => { expect((await first.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-second']); });
+    expect(localStorage.getItem('boite.agent-links.unlinked')).toBe('[]');
+  } finally { stop(); }
 });

@@ -248,7 +248,7 @@ export const fr: Translation = {
     linkConfirm: 'Se connecter', linkCancel: 'Annuler',
     browserOrigins: 'Origines navigateur autorisées',
     browserOriginsHint: "Pour un navigateur ou un téléphone qui regarde plusieurs machines, ajoutez sur chaque machine distante l'origine qui sert Boite. Une origine http(s) exacte par ligne. Les connexions de bureau n'ont besoin d'aucune origine en plus.",
-    agentLinks: 'Liens entre agents', agentLinksHint: 'Permettre aux agents de deux machines connectées en propriétaire de se trouver. Chaque cœur échange son adresse et sa clé publique de signature. Aucun jeton propriétaire ni clé privée ne sont partagés.',
+    agentLinks: 'Liens entre agents', agentLinksHint: 'Les machines connectées ici en propriétaire sont liées automatiquement : leurs agents peuvent se trouver, se lire et s’écrire. Chaque cœur échange son adresse et sa clé publique de signature. Aucun jeton propriétaire ni clé privée ne sont partagés. Un lien que vous retirez reste retiré jusqu’à ce que vous le refassiez.',
     agentLinksRefresh: 'Actualiser les liens', linkAgents: 'Relier les agents', linkedAgents: "Cœurs d'agents reliés", availableAgentLinks: 'Connexions disponibles',
     noAgentLinks: "Aucune autre machine connectée en propriétaire n'est disponible.", unlinkAgent: 'Révoquer sur cette machine',
     syncFrom: 'Synchroniser les réglages avec {source}', syncing: 'Copie des réglages',
@@ -263,6 +263,7 @@ export const fr: Translation = {
     syncStages: { settings: 'les réglages', keybindings: 'les raccourcis clavier', brain: 'les options du brain' },
     syncProviders: "À connecter sur cette machine : {providers}. Une connexion ne quitte jamais la machine où elle a été faite.",
     syncOpenProviders: 'Ouvrir ses fournisseurs',
+    autoLinkFailed: 'Liaison automatique impossible : {reason}',
     reciprocalLink: 'Confiance mutuelle', oneSidedLink: 'Confiance sur cette machine seulement', publicIdentityHint: "Définissez l'adresse HTTPS publique de chaque cœur dans les réglages généraux avant de relier des PC distincts. Les deux cœurs doivent pouvoir se joindre. Le HTTP local ne fonctionne que sur le même PC.",
   },
   app: {

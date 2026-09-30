@@ -239,7 +239,7 @@ export const strings = {
     linkConfirm: 'Connect', linkCancel: 'Cancel',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'For a browser or phone viewing several machines, add the origin that serves Boite on each remote machine. One exact http(s) origin per line. Desktop connections need no extra origin.',
-    agentLinks: 'Agent links', agentLinksHint: 'Let agents on two connected owner machines find each other. Each core exchanges its public signing key and address. No owner token or private key is shared.',
+    agentLinks: 'Agent links', agentLinksHint: 'Owner machines connected here are linked automatically so their agents can find, read and message each other. Each core exchanges its public signing key and address. No owner token or private key is shared. A link you remove stays removed until you link it again.',
     agentLinksRefresh: 'Refresh agent links', linkAgents: 'Link agents', linkedAgents: 'Linked agent cores', availableAgentLinks: 'Available connections',
     noAgentLinks: 'No other connected owner machine is available.', unlinkAgent: 'Revoke on this machine',
     syncFrom: 'Keep settings synchronized with {source}', syncing: 'Copying settings',
@@ -254,6 +254,7 @@ export const strings = {
     syncStages: { settings: 'the settings', keybindings: 'the keybindings', brain: 'the brain switches' },
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
+    autoLinkFailed: 'Not linked automatically: {reason}',
     reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
   },
   app: {
