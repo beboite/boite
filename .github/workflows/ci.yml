@@ -316,40 +316,14 @@ jobs:
 
   windows-probe:
     if: github.event_name == 'workflow_dispatch' && inputs.windows-probe
-    strategy:
-      fail-fast: false
-      matrix:
-        bun: ['1.4.1', '1.4.2', 'canary']
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        with:
-          bun-version: ${{ matrix.bun }}
-      - run: bun install --frozen-lockfile
-      - name: Compare runtime versions on unchanged application code
-        run: |
-          git restore --source=e83d3e1169b960da10b3e7a8721d103b005cde38 -- packages/core/src/platform/windows/jobs.ts packages/core/src/platform/windows/jobs-worker.ts packages/core/test/jobs-forget.test.ts
-          function Run-NativeProbe($label, $extra = @()) {
-            Write-Host "Native comparison: $label"
-            $out = Join-Path $env:RUNNER_TEMP "$label.out"
-            $err = Join-Path $env:RUNNER_TEMP "$label.err"
-            $proc = Start-Process (Get-Command bun).Source -ArgumentList (@('test', 'packages/core/test/thread-remove.test.ts') + $extra) -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
-            if (-not $proc.WaitForExit(30000)) {
-              Stop-Process -Id $proc.Id -Force
-              Write-Host 'Native subprocess exceeded 30 seconds'
-            } else { Write-Host "Native exit: $($proc.ExitCode)" }
-            Get-Content $out
-            Get-Content $err
-          }
-          for ($i = 1; $i -le 5; $i++) { Run-NativeProbe "original-$i" }
-          Run-NativeProbe 'paired-repeated' @('--test-name-pattern', 'paired', '--rerun-each=3')
-          Run-NativeProbe 'removal-repeated' @('--test-name-pattern', 'removal', '--rerun-each=3')
-          $env:BUN_JSC_useJIT = 'false'
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe "no-jit-$i" }
+      - uses: ./.github/actions/setup
+      - run: bun scripts/ci/windows-probe.ts
 
   required:
     name: CI required
