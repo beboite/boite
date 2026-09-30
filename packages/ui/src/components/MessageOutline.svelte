@@ -185,7 +185,9 @@
         aria-label={label} title={label} data-testid="outline-earlier"><ChevronUp size={14} /></button>
     {/if}
     <div class="track" class:sliding bind:this={track}>
-      {#each entries as entry, slot (`${entry.start}:${entry.end}`)}
+      <!-- A group is keyed by its side of the rail, not its range: the range moves with every
+           prompt a scroll passes, and a new key rebuilt both group buttons each time. -->
+      {#each entries as entry, slot (entry.end > entry.start ? (entry.start === 1 ? 'earlier' : 'later') : `${entry.start}`)}
         {@const index = entry.start}
         {@const message = prompts[index]!}
         {@const lensed = { offset: offsets[slot] ?? 0, size: unfold ? OPEN : frame.pitch, weight: weights[slot] ?? 0 }}
