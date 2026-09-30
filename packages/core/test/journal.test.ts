@@ -81,12 +81,13 @@ describe('journal', () => {
   });
   test('a schema 21 journal gains the project icon table and keeps its projects', () => {
     journal.putProject({ id: 'prj_old', name: 'old', path: dir, createdAt: 1 });
-    journal.db.exec('DROP TABLE project_icons; PRAGMA user_version = 21;');
+    journal.db.exec('DROP TABLE project_icons; ALTER TABLE threads DROP COLUMN branch_naming_pending; PRAGMA user_version = 21;');
     journal.close();
     journal = new Journal(file);
     expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     expect(journal.listProjects().map((p) => p.id)).toEqual(['prj_old']);
     expect(journal.projectIcons().size).toBe(0);
+    expect(journal.db.query("SELECT name FROM pragma_table_info('threads') WHERE name = 'branch_naming_pending'").get()).toEqual({ name: 'branch_naming_pending' });
     journal.putProjectIcon('prj_old', { kind: 'tech', id: 'go' }, 2);
     expect(journal.projectIcons().get('prj_old')).toEqual({ kind: 'tech', tech: 'go', version: null });
   });
@@ -255,10 +256,13 @@ describe('journal', () => {
     journal.append({ type: 'project.added', threadId: null, version: 1, payload: {} }, () => {
       journal.putProject({ id: 'prj_keep', name: 'keep', path: 'D:/keep', createdAt: 2 });
     });
+    journal.putThread({ id: 'thr_pending', projectId: 'prj_keep', title: 'keep', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, cwd: dir, branch: 'boite/wt-12345678', branchNamingPending: true, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 });
     journal.close();
 
     journal = new Journal(file);
     expect(journal.listProjects().map((project) => project.id)).toEqual(['prj_keep']);
     expect(journal.countEvents()).toBe(1);
+    expect(journal.getThread('thr_pending')?.branchNamingPending).toBe(true);
+    expect(journal.listThreads()[0]?.branchNamingPending).toBe(true);
   });
 });

@@ -201,16 +201,16 @@ export class ThreadStore {
     checkEffort(provider, account.id, model, params.effort ?? null);
     checkSpeed(provider, account.id, model, params.speed ?? null);
     const id = newId('thr_');
-    const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
+    const placed = await this.core.worktrees.add(id, project, params.worktree?.branch);
     try {
-      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending });
     } catch (error) {
       await this.core.worktrees.remove(id, project, placed);
       throw error;
     }
   }
 
-  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; parentThreadId?: ThreadId }): ThreadSummary {
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
 
     const now = Date.now();
@@ -241,6 +241,7 @@ export class ThreadStore {
       speed,
       cwd,
       branch: placed?.branch ?? null,
+      branchNamingPending: placed?.branchNamingPending ?? false,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
       unread: false,

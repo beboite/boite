@@ -5,7 +5,7 @@ import type { Core } from '../core.ts';
 import { getDriver, probedModelsOf, writesTitles } from '../drivers/index.ts';
 import { messageOf, refused } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
-import { parseAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
+import { cleanAgentBranch, parseAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
 import { saveThread, withLoad } from './records.ts';
 
 /** Who writes a title: a provider, the account it runs under, and the model. */
@@ -108,6 +108,7 @@ export class ThreadTitles {
       ? [{ kind: 'image' as const, mimeType: part.mimeType, data: part.data, name: part.alt }]
       : []);
     let generated: ReturnType<typeof parseAgentTitle> = null;
+    let branchSlug: string | null = null;
     if (writer !== null) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         if (!this.current(thread, automatic)) return this.latest(thread);
@@ -115,6 +116,7 @@ export class ThreadTitles {
           const raw = await getDriver(writer.provider.protocol).title!({
             thread, provider: writer.provider, account: writer.account,
             accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider),
+            nameBranch: thread.branchNamingPending === true,
             prompt, answer: answers.join('\n\n'), initial,
             attachments: writer.provider.capabilities.images ? attachments : [],
             model: writer.model,
@@ -122,6 +124,7 @@ export class ThreadTitles {
             log: (level, message) => this.core.log(level, message),
           });
           generated = raw === null ? null : parseAgentTitle(raw);
+          branchSlug = raw === null ? null : cleanAgentBranch(raw);
           if (generated === null) throw new Error('the agent wrote no usable title');
           break;
         } catch (error) {
@@ -133,6 +136,9 @@ export class ThreadTitles {
           }
         }
       }
+    }
+    if (generated !== null && branchSlug !== null && this.current(thread, automatic) !== null && thread.branchNamingPending) {
+      await this.nameWorktree(thread, branchSlug);
     }
     const current = this.current(thread, automatic);
     if (current === null) return this.latest(thread);
@@ -149,6 +155,24 @@ export class ThreadTitles {
       ...current, title: fallback || current.title, titleSource: fallback ? 'prompt' : current.titleSource,
       titleState: { version: (current.titleState?.version ?? 0) + 1, needsRefinement: false },
     }, 'thread.updated');
+  }
+
+  private async nameWorktree(thread: ThreadSummary, slug: string): Promise<void> {
+    const current = this.threads.require(thread.id);
+    if (!current.branchNamingPending || current.branch === null || current.cwd !== thread.cwd || current.branch !== thread.branch) return;
+    try {
+      const branch = await this.core.worktrees.nameBranch(thread.id, thread.cwd, current.branch, slug);
+      if (branch === null || this.core.journal.isClosed()) return;
+      // Delegated threads and forks can stand in the same checkout. Their
+      // branch badges must follow Git too, without changing a provider session.
+      for (const holder of this.core.journal.listThreads()) {
+        if (holder.cwd === thread.cwd && holder.branch === thread.branch) {
+          saveThread(this.core, { ...holder, branch, branchNamingPending: false }, 'thread.updated');
+        }
+      }
+    } catch (error) {
+      this.core.log('warn', `no branch name for thread ${thread.id}: ${messageOf(error)}`);
+    }
   }
 
   /** A title revision also protects renaming to the same text or away and back while a call runs. */

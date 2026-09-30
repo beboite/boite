@@ -131,14 +131,14 @@ export class ThreadMove {
     // A thread that had a worktree of its own gets one in the target, the way
     // `threads.create` does with `worktree: {}`; a target that is no repository
     // gives it the project folder instead.
-    const placed: PlacedWorktree | null = this.wantsWorktree(thread, target) ? await this.core.worktrees.add(threadId, target, thread.title) : null;
+    const placed: PlacedWorktree | null = this.wantsWorktree(thread, target) ? await this.core.worktrees.add(threadId, target) : null;
     try {
       // Git took time: a turn may have started or the project changed meanwhile.
       const now = this.threads.require(threadId);
       const again = this.check(now, projectId, stopBackground, phase);
       const cwd = placed?.path
         ?? (again.kind === 'drafts' ? makeDraftFolder(again.path, draftFolderName(now.title, new Date())) : again.path);
-      return this.write(now, again, cwd, placed?.branch ?? null, stopBackground === true, by);
+      return this.write(now, again, cwd, placed?.branch ?? null, stopBackground === true, by, placed?.namingPending ?? false);
     } catch (error) {
       if (placed !== null) await this.core.worktrees.remove(threadId, target, placed);
       throw error;
@@ -260,7 +260,7 @@ export class ThreadMove {
     return this.core.journal.listThreads(thread.projectId ?? undefined).filter((one) => one.parentThreadId === thread.id);
   }
 
-  private write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent'): ThreadSummary {
+  private write(thread: ThreadSummary, target: Project, cwd: string, branch: string | null, stopBackground: boolean, by: 'user' | 'agent', branchNamingPending: boolean): ThreadSummary {
     const source = this.core.journal.getProject(thread.projectId ?? '');
     const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
     const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
@@ -278,6 +278,7 @@ export class ThreadMove {
         if (holding) this.threads.agentState.noteBackground(one.id, []);
       }
       const next = this.moved(one, target.id, cwd, branch);
+      next.branchNamingPending = branchNamingPending;
       if (by === 'user') this.noteMove(one.id, { ...from, cwd: one.cwd }, to, branch);
       // The agent asked and knows where it goes: nothing waits for its next message.
       else this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${one.id}`);

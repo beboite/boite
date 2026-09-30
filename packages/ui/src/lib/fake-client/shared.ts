@@ -54,13 +54,8 @@ export function fakeDraftFolder(root: string, title: string, at: Date, taken: Re
 }
 
 /** Mirrors the core's per-project and shared storage for newly created worktrees. */
-export function fakeWorktree(projectPath: string, title: string, branch?: string, storage?: WorktreeStorage, projectId?: string): { branch: string; path: string } {
-  const slug =
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'thread';
+export function fakeWorktree(projectPath: string, _title: string, branch?: string, storage?: WorktreeStorage, projectId?: string): { branch: string; path: string; namingPending: boolean } {
+  const slug = `wt-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const root = storage?.mode === 'shared' ? storage.directory : projectPath;
   const separator = root.includes('\\') ? '\\' : '/';
   const repo = projectPath.split(/[\\/]/).filter(Boolean).pop() ?? 'repo';
@@ -71,6 +66,7 @@ export function fakeWorktree(projectPath: string, title: string, branch?: string
   const dir = branch === undefined ? slug : branch.replace(/^boite\//, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
   return {
     branch: branch ?? `boite/${slug}`,
+    namingPending: branch === undefined,
     path: [root.replace(/[\\/]+$/, ''), folder, dir].join(separator)
   };
 }

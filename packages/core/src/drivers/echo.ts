@@ -198,7 +198,10 @@ export const echoDriver: Driver = {
     };
   },
   title(ctx: TitleContext): Promise<string | null> {
-    return Promise.resolve(echoTitle(ctx.prompt));
+    const title = echoTitle(ctx.prompt);
+    if (title === null || !ctx.nameBranch) return Promise.resolve(title);
+    const slug = title.slice(TITLE_PREFIX.length).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '') || 'update';
+    return Promise.resolve(JSON.stringify({ title, needsRefinement: false, branch: slug }));
   },
 };
 

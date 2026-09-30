@@ -150,16 +150,16 @@ export class ThreadBranching {
 
     const id = newId('thr_');
     const title = `${source.title}${FORK_TITLE_SUFFIX}`;
-    const placed = worktree ? await this.core.worktrees.add(id, project, title) : null;
+    const placed = worktree ? await this.core.worktrees.add(id, project) : null;
     try {
-      return this.writeFork(source, target, rowid, { id, title, cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch });
+      return this.writeFork(source, target, rowid, { id, title, cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false });
     } catch (error) {
       if (placed !== null) await this.core.worktrees.remove(id, project, placed);
       throw error;
     }
   }
 
-  private writeFork(source: ThreadSummary, target: Message, rowid: number, placed: { id: ThreadId; title: string; cwd: string; branch: string | null }): ThreadSummary {
+  private writeFork(source: ThreadSummary, target: Message, rowid: number, placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }): ThreadSummary {
     const messages: Message[] = [];
     for (const message of this.core.journal.walkMessages(source.id)) {
       messages.push(message);
@@ -182,6 +182,7 @@ export class ThreadBranching {
       speed: source.speed ?? null,
       cwd: placed.cwd,
       branch: placed.branch,
+      branchNamingPending: placed.branchNamingPending,
       permissionMode: source.permissionMode,
       status: 'idle',
       unread: false,

@@ -7,7 +7,7 @@ import type { RpcEvents } from '@boite/contracts';
 import { echoDriver, echoTitle } from '../src/drivers/echo.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { TITLE_RETRY } from '../src/threads/retitle.ts';
-import { cleanAgentTitle, parseAgentTitle, titleFromPrompt, titleRequest } from '../src/titles.ts';
+import { cleanAgentBranch, cleanAgentTitle, parseAgentTitle, titleFromPrompt, titleRequest } from '../src/titles.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -48,6 +48,15 @@ describe('title rules', () => {
     expect(parseAgentTitle('{"title":12}')).toBeNull();
     expect(parseAgentTitle('{"title":"Unknown","needsRefinement":"true"}')).toBeNull();
     expect(parseAgentTitle('{broken')).toBeNull();
+  });
+
+  test('branch naming shares structured title output and rejects invalid slugs', () => {
+    expect(titleRequest('hello', '', true, true)).toContain('branch (string)');
+    expect(cleanAgentBranch('{"title":"Noms de branches","needsRefinement":false,"branch":"fix-worktree-names"}')).toBe('fix-worktree-names');
+    expect(cleanAgentBranch('Noms de branches\nBranch: fix-worktree-names')).toBe('fix-worktree-names');
+    for (const branch of ['../escape', '-bad', 'Two words', 'a'.repeat(41)]) {
+      expect(cleanAgentBranch(JSON.stringify({ title: 'Title', branch }))).toBeNull();
+    }
   });
 
   test('each provider writes titles on its small model, a dated id standing for its name', () => {

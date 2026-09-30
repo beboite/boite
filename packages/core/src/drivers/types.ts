@@ -255,6 +255,8 @@ export interface TitleContext {
   answer: string;
   /** Initial naming runs in parallel with the first turn; later calls can resolve its subject. */
   initial?: boolean;
+  /** Also request an English branch slug for an automatically named worktree. */
+  nameBranch?: boolean;
   /** Images from the first user message, omitted for a writer that cannot read them. */
   attachments?: ImageAttachment[];
   /**

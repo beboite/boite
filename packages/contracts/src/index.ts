@@ -657,6 +657,8 @@ export interface ThreadSummary {
    * in the project directory itself.
    */
   branch: string | null;
+  /** Only automatically created temporary branches may be named by the title model. */
+  branchNamingPending?: boolean;
   permissionMode: PermissionMode;
   status: ThreadStatus;
   /**
@@ -2398,7 +2400,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
       permissionMode?: PermissionMode;
       /**
        * Start the thread in a git worktree of the project on a branch of its
-       * own: `boite/<slug of the title>` unless `branch` names one. The core
+       * own: a short temporary `boite/wt-<id>` unless `branch` names one.
+       * The title model can name that temporary branch after the first turn;
+       * the working directory stays fixed when the branch is renamed. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.

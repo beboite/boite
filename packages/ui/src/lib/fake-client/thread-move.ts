@@ -93,11 +93,13 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
   const cwd = placed?.path
     ?? (target.kind === 'drafts' ? fakeDraftFolder(target.path, thread.title, new Date(ctx.now()), new Set([...ctx.threads.values()].map((one) => one.cwd))) : target.path);
   const branch = placed?.branch ?? null;
+  const branchNamingPending = placed?.namingPending ?? false;
   const source = ctx.projects.find((p) => p.id === thread.projectId);
   const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
   const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
   let answer = toSummary(thread);
   for (const one of familyOf(ctx, thread)) {
+    one.branchNamingPending = branchNamingPending;
     if ((one.background?.length ?? 0) > 0 && stopBackground === true) ctx.setBackground(one, []);
     // The core keeps only Codex's session, whose resume takes the new folder.
     const protocol = ctx.providers.find((p) => p.id === one.providerId)?.protocol;
