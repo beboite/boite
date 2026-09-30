@@ -35,13 +35,17 @@ function toy() {
   return { button, click, tick, finish, onerror };
 }
 
-test('the footer can drop a held rope during its shake', () => {
-  const { button, click } = toy();
+test('the footer can drop a held rope during its shake', async () => {
+  const { button, click, finish } = toy();
   click();
   expect(whip.held).toBe(true);
   expect(button.disabled).toBe(false);
+  expect(button.getAttribute("aria-busy")).toBe("true");
   click();
   expect(whip.held).toBe(false);
+  finish();
+  await vi.waitFor(() => expect(button.getAttribute("aria-busy")).toBe("false"));
+  expect(button.disabled).toBe(false);
 });
 
 test('a throw during a fall replaces the rope and stays held after the old fall would finish', async () => {

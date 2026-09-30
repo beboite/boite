@@ -738,8 +738,8 @@ shellTest('the Whip button moves the native window and restores its position', a
       const sample = await position();
       moved ||= sample.x !== origin.x || sample.y !== origin.y;
       await new Promise(resolve => setTimeout(resolve, 15));
-    } while (button.disabled && Date.now() < deadline);
-    if (button.disabled) throw new Error('Whip did not finish within five seconds');
+    } while (button.getAttribute('aria-busy') === 'true' && Date.now() < deadline);
+    if (button.getAttribute('aria-busy') === 'true') throw new Error('Whip did not finish within five seconds');
     return { origin, final: await position(), moved };
   })()`);
   expect(result.moved).toBe(true);
