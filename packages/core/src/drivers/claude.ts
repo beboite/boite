@@ -1,5 +1,6 @@
 import type { ThreadId } from '@boite/contracts';
 import { readClaudeModels } from './claude/models.ts';
+export { readClaudeQuota } from './claude/quota.ts';
 import { sessionKey } from './claude/query.ts';
 import type { ClaudeDeps } from './claude/query.ts';
 import { ClaudeSession } from './claude/session.ts';
