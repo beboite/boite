@@ -65,6 +65,11 @@ async function buildBundle(outDir: string): Promise<void> {
 }
 
 type Metrics = { name: string; value: number }[];
+/** What `--trace` reads from Chrome's trace events. */
+interface TraceEvent {
+  name: string; ph: string; ts: number; dur?: number; tid: number; pid: number;
+  args?: { name?: string; beginData?: { stackTrace?: { functionName: string }[] }; data?: { reason?: string; nodeName?: string } };
+}
 interface Measure { fps: number; p95: number; worst: number; longTasks: number; longMs: number; mainMs: number; scriptMs: number; layoutMs: number; styleMs: number; scrolled: number; keys: number[] }
 
 class Page {
@@ -273,10 +278,10 @@ async function main(): Promise<void> {
 
     const measure = async (): Promise<Measure> => {
       await page.evaluate(`(() => { window.__sc = ${SCROLLER}; window.__sc0 = window.__sc ? window.__sc.scrollTop : 0; window.__keys0 = window.__keys.length; })()`);
-      const traced: { name: string; ph: string; dur?: number; tid: number; pid: number; args?: { name?: string } }[] = [];
+      const traced: TraceEvent[] = [];
       let traceDone: Promise<void> | undefined;
       if (TRACE) {
-        page.events.set('Tracing.dataCollected', (params) => { traced.push(...(params['value'] as typeof traced)); });
+        page.events.set('Tracing.dataCollected', (params) => { traced.push(...(params['value'] as TraceEvent[])); });
         traceDone = new Promise((done) => page.events.set('Tracing.tracingComplete', () => done()));
         await page.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.stack', ...(process.env.BENCH_INVALIDATIONS ? ['disabled-by-default-devtools.timeline.invalidationTracking'] : []), 'blink', 'cc', 'v8.execute'] } });
       }
@@ -297,21 +302,22 @@ async function main(): Promise<void> {
         await traceDone;
         // Main-thread time by event name, each event's own duration minus its children's.
         const main = traced.find((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain');
-        const own = traced.filter((event) => main && event.pid === main.pid && event.tid === main.tid && event.ph === 'X' && typeof event.dur === 'number') as { name: string; ts: number; dur: number }[];
-        own.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+        const onMain = (event: TraceEvent) => main !== undefined && event.pid === main.pid && event.tid === main.tid && event.ph === 'X';
+        const own = traced.filter((event) => onMain(event) && typeof event.dur === 'number');
+        own.sort((a, b) => a.ts - b.ts || b.dur! - a.dur!);
         const stack: { end: number; name: string; child: number; dur: number }[] = [];
         const selfBy = new Map<string, number>();
         const close = (upTo: number) => { while (stack.length && stack.at(-1)!.end <= upTo) { const done = stack.pop()!; selfBy.set(done.name, (selfBy.get(done.name) ?? 0) + done.dur - done.child); if (stack.length) stack.at(-1)!.child += done.dur; } };
-        for (const event of own) { close(event.ts); stack.push({ end: event.ts + event.dur, name: event.name, child: 0, dur: event.dur }); }
+        for (const event of own) { close(event.ts); stack.push({ end: event.ts + event.dur!, name: event.name, child: 0, dur: event.dur! }); }
         close(Infinity);
         const top = [...selfBy].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([name, us]) => `${name} ${(us / 1000).toFixed(0)}`).join(', ');
         // Layouts counted, and those a script forced: the counts hold whatever else the machine runs.
-        const layouts = traced.filter((event) => main && event.pid === main.pid && event.tid === main.tid && event.name === 'Layout' && event.ph === 'X') as { args?: { beginData?: { stackTrace?: unknown } } }[];
-        const forcedLayouts = layouts.filter((event) => event.args?.beginData?.stackTrace) as { dur?: number; args: { beginData: { stackTrace: { functionName: string }[] } } }[];
+        const layouts = traced.filter((event) => onMain(event) && event.name === 'Layout');
+        const forcedLayouts = layouts.filter((event) => event.args?.beginData?.stackTrace);
         const forced = forcedLayouts.length;
         if (process.env.BENCH_INVALIDATIONS) {
           const by = new Map<string, number>();
-          for (const event of traced as { name: string; args?: { data?: { reason?: string; nodeName?: string } } }[]) {
+          for (const event of traced) {
             if (event.name !== 'LayoutInvalidationTracking' && event.name !== 'StyleRecalcInvalidationTracking' && event.name !== 'ScheduleStyleInvalidationTracking') continue;
             const key = `${event.name.replace('InvalidationTracking', '')}: ${event.args?.data?.reason ?? '?'} @ ${(event.args?.data?.nodeName ?? '?').slice(0, 60)}`;
             by.set(key, (by.get(key) ?? 0) + 1);
@@ -320,7 +326,7 @@ async function main(): Promise<void> {
         }
         if (process.env.BENCH_FORCED) {
           const by = new Map<string, [number, number]>();
-          for (const event of forcedLayouts) { const name = event.args.beginData.stackTrace.slice(0, 3).map((frame) => frame.functionName || '(anon)').join(' < '); const [n, ms] = by.get(name) ?? [0, 0]; by.set(name, [n + 1, ms + (event.dur ?? 0) / 1000]); }
+          for (const event of forcedLayouts) { const name = (event.args?.beginData?.stackTrace ?? []).slice(0, 3).map((frame) => frame.functionName || '(anon)').join(' < '); const [n, ms] = by.get(name) ?? [0, 0]; by.set(name, [n + 1, ms + (event.dur ?? 0) / 1000]); }
           for (const [name, [n, ms]] of [...by].sort((a, b) => b[1][1] - a[1][1]).slice(0, 8)) console.log(`    forced ${n}x ${ms.toFixed(0)} ms: ${name}`);
         }
         console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, keys ${keys.length}; ${top}`);
