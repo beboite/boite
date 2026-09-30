@@ -1,5 +1,5 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
-import { RpcErrorCode, type AgentLetter, type CoordinationConfig, type CoordinationView, type ThreadId } from '@boite/contracts';
+import { defaultCoordinationConfig, RpcErrorCode, type AgentLetter, type CoordinationConfig, type CoordinationView, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -15,7 +15,8 @@ export function unregisterCore(ctx: FakeContext): void {
 }
 
 function coordinationConfig(ctx: FakeContext, threadId: ThreadId): CoordinationConfig {
-  return ctx.coordination.get(threadId) ?? { mode: 'off', resources: '', remote: false, paused: false };
+  if (ctx.thread(threadId).agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
+  return ctx.coordination.get(threadId) ?? defaultCoordinationConfig();
 }
 
 function coordinationView(ctx: FakeContext, threadId: ThreadId): CoordinationView {
@@ -43,7 +44,8 @@ export function coordinationMethods(ctx: FakeContext) {
     },
     'collaboration.configure': async (params) => {
       const { threadId, config } = params;
-      ctx.thread(threadId);
+      const thread = ctx.thread(threadId);
+      if (thread.agentSessionId || thread.archived) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination requires an unarchived ordinary thread' });
       if (!['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
       }
@@ -55,7 +57,7 @@ export function coordinationMethods(ctx: FakeContext) {
       const { threadId } = params;
       const source = ctx.thread(threadId);
       const sourceConfig = coordinationConfig(ctx, threadId);
-      if (sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
+      if (source.archived || sourceConfig.mode === 'off') return { agents: [], unavailable: [] };
       const agents = [...ctx.threads.values()]
         .filter(thread => thread.id !== threadId && !thread.archived && (thread.projectId === source.projectId || sourceConfig.remote && coordinationConfig(ctx, thread.id).remote))
         .map(thread => {
@@ -86,7 +88,7 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.send': async (params) => {
       const source = ctx.thread(params.threadId);
       const config = coordinationConfig(ctx, source.id);
-      if (config.mode === 'off' || config.paused) {
+      if (source.archived || config.mode === 'off' || config.paused) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coordination is off or paused for this thread' });
       }
       const existing = ctx.letters.get(source.id)?.find(letter => letter.id === params.requestId);

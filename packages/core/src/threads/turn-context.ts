@@ -121,14 +121,16 @@ export class TurnContexts {
     carried.memory ??= this.threads.deferred.memory.take(threadId);
     carried.letters ??= operation === 'compact' ? '' : this.core.delegation.initialInput(threadId, turn.id);
     const deferred = carried.deferred;
-    const tail = operation === 'compact' ? '' : this.core.coordination.instructions(threadId) + this.core.delegation.instructions(threadId, prepared.prompt) + carried.letters;
+    const tail = operation === 'compact' ? '' : this.core.delegation.instructions(threadId, prepared.prompt) + carried.letters;
     const compose = (body: string, sessionId: string | null): string => {
       const inject = !((operation && sessionId !== null) || nativeCommandPrompt(body));
       // Echo treats "question" as a test directive, including in injected help.
-      const guide = inject && sessionId === null && this.core.brain.config().boiteGuide !== false
+      const guideEnabled = this.core.brain.config().boiteGuide !== false;
+      const coordinationGuide = inject && operation !== 'compact' && guideEnabled ? this.core.coordination.instructions(threadId) : '';
+      const guide = inject && sessionId === null && guideEnabled
         ? agentGuide(provider.protocol !== 'echo' && this.core.settings.get().asyncQuestions !== false) : '';
       const prefix = (inject ? this.core.brain.instructions(provider.id) : '') + guide;
-      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
+      return carried.memory + prefix + (prefix ? 'User request:\n' : '') + deferred + body + coordinationGuide + tail + this.threads.cards.askInstructions({ ...thread, sessionId }, provider, turn, body);
     };
     return {
       thread,
