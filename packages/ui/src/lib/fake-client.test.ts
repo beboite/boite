@@ -4,6 +4,23 @@ import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodN
 
 afterEach(() => vi.useRealTimers());
 
+test('rewinding a live follow-up keeps the turn belonging to earlier messages', async () => {
+  const client = new FakeClient({ delayMs: 5 });
+  await client.connect();
+  try {
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[tools] Keep reading' });
+    const params = { threadId: 't-trace', turnId: turn.id, prompt: 'Change direction', clientRequestId: 'rewind_follow_up' };
+    expect(await client.call('turns.steer', params)).toEqual({ accepted: true });
+    await client.settled();
+    const target = (await client.call('threads.get', { threadId: 't-trace' })).messages.at(-1)!;
+    const rewound = await client.call('threads.rewind', { threadId: 't-trace', messageId: target.id });
+    expect(rewound.thread.turns.some(item => item.id === turn.id)).toBe(true);
+    expect(rewound.thread.messages.filter(message => message.role === 'user' && message.turnId === turn.id)).toHaveLength(1);
+    // As on the core, the receipt for the removed input no longer acknowledges it.
+    expect(await client.call('turns.steer', params)).toEqual({ accepted: false });
+  } finally { client.close(); }
+});
+
 test('fake agent receives selected element context while the visible prompt stays compact', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
@@ -305,15 +322,15 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   const phone = new FakeClient({ delayMs: 0, principal: 'session', coreId: 'core-phone' });
   await Promise.all([first.connect(), second.connect(), phone.connect()]);
 
-  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('brief');
   await first.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'team', resources: 'UI', remote: true, paused: false } });
   expect((await first.call('collaboration.get', { threadId: 't-trace' })).config.resources).toBe('UI');
   await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: false, paused: false } });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).not.toContain('t-descriptors');
   await first.call('collaboration.configure', { threadId: 't-descriptors', config: { mode: 'brief', resources: 'Descriptors', remote: true, paused: false } });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents.map(agent => agent.threadId)).toContain('t-descriptors');
-  expect((await second.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
-  expect((await phone.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('off');
+  expect((await second.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('brief');
+  expect((await phone.call('collaboration.get', { threadId: 't-trace' })).config.mode).toBe('brief');
   await expect(phone.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: '', remote: false, paused: false } })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 
   const [a, b] = await Promise.all([first.call('collaboration.identity', {}), second.call('collaboration.identity', {})]);
@@ -327,6 +344,10 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
   await first.call('collaboration.untrust', { coreId: b.coreId });
   expect(await first.call('collaboration.peers', {})).toEqual([]);
+  await first.call('threads.archive', { threadId: 't-trace', archived: true });
+  expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toEqual([]);
+  await expect(first.call('collaboration.send', { threadId: 't-trace', to: { coreId: a.coreId, threadId: 't-descriptors' }, text: 'Archived sender', requestId: 'archived' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  await expect(first.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: '', remote: true, paused: false } })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   first.close(); second.close(); phone.close();
 });
 

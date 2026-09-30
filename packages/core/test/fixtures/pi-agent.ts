@@ -479,6 +479,7 @@ function handle(message: Record<string, unknown>): void {
     case 'steer': {
       if (!waitingAbort) { send({ id, type: 'response', command: 'steer', success: false, error: 'no active turn' }); return; }
       log(`steering ${textOf(message['message'])}`);
+      if (Array.isArray(message['images'])) for (const image of message['images']) log(`steer-image ${image.mimeType} ${image.data.length}`);
       send({ id, type: 'response', command: 'steer', success: true });
       return;
     }

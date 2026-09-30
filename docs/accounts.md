@@ -252,8 +252,10 @@ no account uses the default location, and the provider's default model and
 effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
-credentials file. Keychain-only Claude credentials are not supported. Codex quotas
-come from `account/rateLimits/read`, without starting a conversation.
+credentials file. For Keychain logins or expired tokens, its CLI reads usage
+with `skipBehaviors: true`, an empty prompt queue and no tools or hooks. That
+fallback may omit reset grants and paid usage details. Codex quotas come from
+`account/rateLimits/read`, without starting a conversation.
 
 These reads also collect banked resets. Claude requests `cedar_ember=1` on
 its GET usage request and counts eligible, usable, unpaused, unexpired grants

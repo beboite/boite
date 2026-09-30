@@ -3,6 +3,7 @@ import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { PullRequests } from '../pull-requests.ts';
+import { steerUser } from './user-steering.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -64,6 +65,10 @@ export function registerThreadMethods(core: Core): void {
     ctx.connection.subscriptions.delete(params.threadId);
     return { ok: true } as const;
   });
+  core.router.register('threads.focus', (params, ctx) => {
+    core.threads.focus.set(ctx.connection.id, params.threadId);
+    return { ok: true } as const;
+  });
   core.router.register('turns.start', async (params) => {
     await requireCwd(core, params.threadId);
     return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []);
@@ -72,6 +77,7 @@ export function registerThreadMethods(core: Core): void {
     core.activity.pauseAll(params.threadId);
     return { stopped: core.threads.stopTurn(params.threadId) };
   });
+  core.router.register('turns.steer', params => steerUser(core, core.threads, params));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });

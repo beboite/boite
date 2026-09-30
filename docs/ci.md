@@ -42,8 +42,8 @@ one stays open, which the nightly reservation and a manual release rely on.
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
 | `bench/`, `telemetry/`, `scripts/architecture/` | Type checks and UI tests: `bun run check` covers the benches and the telemetry Worker |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
-| Version tag | Complete checks, then a draft Windows release |
-| Nightly with an unpublished commit | Complete checks, signed nightly installer, development server image, prerelease |
+| Version tag | Complete checks, then a draft release for Windows, Linux and macOS |
+| Nightly with an unpublished commit | Complete checks, signed nightly installers for all three systems, development server image, prerelease |
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
@@ -60,13 +60,15 @@ Release and publication jobs finish instead of being interrupted
 halfway through an upload. Live-provider tests stay disabled.
 
 Linux and macOS run Rust tests, build Debian/AppImage packages and a macOS application
-bundle, then launch the installed shell outside the checkout with a minimal PATH.
+bundle and DMG, then launch the installed shell outside the checkout with a minimal PATH.
 The Debian install, extracted AppImage and signed macOS bundle each run the smoke
 test, which checks core startup, bundled UI serving, authenticated RPC and an
 echo turn with a fresh data directory. It does not exercise native desktop controls.
 The WebView2 shell end-to-end suite remains Windows-only.
 Portable desktop checks run on x64 and ARM64 for both Linux and macOS, the
-second architecture of each only after a merge and on a release.
+second architecture of each only after a merge and on a release. Linux uses
+the Ubuntu 22.04 runners: the packages they build are the ones a release
+publishes, and 22.04's glibc sets the oldest Linux they run on.
 Core changes run the core tests on all five runners before a merge: Windows,
 Linux x64 and ARM64, and macOS ARM64 and Intel. The portable desktop jobs do
 not repeat those tests after a merge.
@@ -364,8 +366,10 @@ A `v<version>` tag must match all package manifests, Cargo and the Tauri config.
 Alternatively, manually run `release` on the branch or commit to publish: it
 uses the version already in the manifests and creates its tag after the checks.
 Neither entry point increments the version automatically.
-The release workflow runs the complete CI and attaches the tested installer,
-its updater `.sig`, `latest.json` and `SHA256SUMS.txt` to a draft. A maintainer
+The release workflow runs the complete CI and attaches the tested Windows
+installer, the Linux .deb and AppImage (x64 and ARM64), the macOS DMG and
+updater archive (Intel and Apple Silicon), their updater `.sig` files,
+`latest.json` and `SHA256SUMS.txt` to a draft. A maintainer
 reviews and publishes that draft. The nightly publishes the same signed update
 artifacts as a prerelease after its checks pass.
 
@@ -373,8 +377,11 @@ Only release callers set the reusable CI's `sign-updates` input and inherit the
 `TAURI_SIGNING_PRIVATE_KEY` secret. Ordinary PR builds require no signing key.
 The build refuses an empty key when signing is requested. The Tauri updater
 overlay generates signatures without recompiling the tested installer in the
-publication job. `scripts/ci/updater-manifest.ts` requires exactly one installer
-and its signature, and binds its URL to the reserved version tag.
+publication job. `scripts/ci/updater-manifest.ts` requires exactly one signed
+payload for each of the seven updater targets, refuses unknown files and binds
+every URL to the reserved version tag. The Linux and macOS builds of an
+ordinary PR sign with a throwaway key so the same file set is checked on every
+run ([releasing](releasing.md#signed-update-artifacts)).
 
 Updater signatures authenticate the payload to Boite. They are separate from
 Windows Authenticode signing: the shell installer still has no Authenticode

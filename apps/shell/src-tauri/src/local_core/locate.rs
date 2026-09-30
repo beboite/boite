@@ -16,6 +16,15 @@ pub(super) struct CoreCommand {
     pub(super) working_directory: Option<PathBuf>,
 }
 
+impl CoreCommand {
+    pub(super) fn bundle_hash(&self) -> Option<String> {
+        use sha2::{Digest, Sha256};
+        let entry = self.args.iter().find(|arg| arg.ends_with(".js"))?;
+        let bytes = std::fs::read(entry).ok()?;
+        Some(Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+}
+
 fn data_dir(channel: Channel) -> Result<PathBuf, String> {
     match std::env::var("BOITE_DATA_DIR") {
         Ok(value) if !value.trim().is_empty() => Ok(PathBuf::from(value.trim())),
@@ -195,6 +204,19 @@ mod tests {
         assert!(super::bundle_args(&directory).is_empty());
         std::fs::write(directory.join("core").join("main.js"), "").unwrap();
         assert_eq!(super::bundle_args(&directory), vec![directory.join("core").join("main.js").display().to_string()]);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_installed_entry_bundle_hash_changes_with_its_content() {
+        let directory = std::env::temp_dir().join(format!("boite-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("main.js");
+        std::fs::write(&entry, "abc").unwrap();
+        let command = CoreCommand { program: "bun".to_string(), args: vec![entry.display().to_string()], working_directory: None };
+        assert_eq!(command.bundle_hash().as_deref(), Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        std::fs::write(&entry, "different").unwrap();
+        assert_ne!(command.bundle_hash().as_deref(), Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
         std::fs::remove_dir_all(directory).unwrap();
     }
 

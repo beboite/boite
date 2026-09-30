@@ -1,8 +1,9 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
-import { RETITLE_DELAY_MS } from './providers';
+import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
 import { announceProject, archiveProject } from './project-archive';
@@ -221,6 +222,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.title !== undefined && params.title.length > 0) {
         thread.title = params.title;
         thread.titleSource = 'user';
+        thread.titleState = { version: (thread.titleState?.version ?? 0) + 1, needsRefinement: false };
       }
       if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
       if (params.effort !== undefined) thread.effort = params.effort;
@@ -229,36 +231,7 @@ export function threadMethods(ctx: FakeContext) {
       if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       return ctx.touch(thread);
     },
-    'threads.retitle': async (params) => {
-      const thread = ctx.thread(params.threadId);
-      const first = thread.messages.find((message) => message.role === 'user');
-      if (first === undefined) {
-        throw new RpcFailure({
-          code: RpcErrorCode.Refused,
-          message: 'this thread has no prompt to write a title from',
-          data: { threadId: params.threadId }
-        });
-      }
-      if (ctx.retitling.has(thread.id)) {
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a title is already being written for this thread', data: { threadId: thread.id } });
-      }
-      // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
-      ctx.retitling.add(thread.id);
-      try {
-        await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
-      } finally {
-        ctx.retitling.delete(thread.id);
-      }
-      ctx.thread(thread.id);
-      const words = first.parts
-        .map((part) => (part.type === 'text' ? part.text : ''))
-        .join(' ')
-        .split(/\s+/)
-        .filter((word) => word.length > 0);
-      thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
-      thread.titleSource = 'agent';
-      return ctx.touch(thread);
-    },
+    'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
@@ -337,6 +310,15 @@ export function threadMethods(ctx: FakeContext) {
       ctx.bus.subscribed.delete(params.threadId);
       return { ok: true };
     },
+    'turns.steer': async params => steerUser(ctx, params),
+    'threads.focus': async (params) => {
+      if (params.threadId !== null && (typeof params.threadId !== 'string' || params.threadId.length === 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId must be a nonempty thread id or null', data: { field: 'threadId' } });
+      }
+      if (params.threadId !== null) ctx.thread(params.threadId);
+      ctx.bus.focusedThreadId = params.threadId;
+      return { ok: true };
+    },
     'turns.start': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       requireFakeCwd(ctx, ctx.thread(params.threadId));
@@ -408,7 +390,11 @@ export function threadMethods(ctx: FakeContext) {
         else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
       }
       const gone = new Set(removed.map((entry) => entry.turnId));
-      thread.turns = thread.turns.filter((turn) => !gone.has(turn.id));
+      const kept = new Set(thread.messages.map(entry => entry.turnId));
+      thread.turns = thread.turns.filter((turn) => kept.has(turn.id));
+      for (const [key, request] of ctx.turnRequests) {
+        if (key.startsWith(`${thread.id}:`) && gone.has(request.turn.id)) ctx.turnRequests.delete(key);
+      }
       thread.sessionId = null;
       thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       thread.context = null;

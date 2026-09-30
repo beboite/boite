@@ -3,7 +3,7 @@ import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import { titleRequest } from '../../titles.ts';
 import type { TitleContext } from '../types.ts';
-import { textOf } from './mapping.ts';
+import { imageInputsOf, textOf } from './mapping.ts';
 import type { CodexThreadOpened, CodexTurnRecord, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
@@ -90,7 +90,7 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
       });
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId: opened.thread.id,
-        input: [{ type: 'text', text: titleRequest(ctx.prompt, ctx.answer), text_elements: [] }],
+        input: [{ type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial), text_elements: [] }, ...imageInputsOf(ctx.attachments ?? [])],
         ...(model === null ? {} : { model }),
         effort: 'low',
       });

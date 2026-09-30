@@ -9,7 +9,7 @@ export type ComposerState = NonNullable<Store['composerStates'][string]>;
  * Sends the prompts already queued together, in order. New arrivals wait for
  * the following turn. A refusal restores the original entries and pauses them.
  */
-export async function drainQueue(store: Store, threadId: string, state: ComposerState): Promise<void> {
+export async function drainQueue(store: Store, threadId: string, state: ComposerState, turnId?: string): Promise<void> {
   if (state.sending || state.queued.length === 0) return;
   const entries = state.queued.splice(0);
   let text = '';
@@ -32,16 +32,17 @@ export async function drainQueue(store: Store, threadId: string, state: Composer
     }
   }
   state.sending = true;
-  let accepted = false;
+  let accepted: boolean | null = null;
   try {
-    accepted = await store.send(text, threadId, attachments, previewReferences);
+    accepted = turnId ? await store.steer(text, threadId, turnId, attachments, previewReferences)
+      : await store.send(text, threadId, attachments, previewReferences) || null;
   } finally {
     if (!accepted) {
       state.queued.unshift(...entries);
       // A lone refused prompt returns to the empty input. A batch keeps its
       // separate entries in the queue so they remain editable.
-      state.paused = true;
-      if (state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
+      state.paused = accepted === null;
+      if (accepted === null && state.queued.length === 1 && state.text.length === 0 && state.attachments.length === 0 && !state.previewReferences?.length) {
         const back = state.queued.shift()!;
         state.text = back.text;
         state.attachments = back.attachments;

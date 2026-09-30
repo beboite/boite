@@ -10,6 +10,7 @@ export class FakeBus {
   readonly subscribed = new Set<ThreadId>();
   /** `WsClient.#subscribed`'s mirror: the ids the client itself puts back after a reconnect. */
   readonly clientSubscribed = new Set<ThreadId>();
+  focusedThreadId: ThreadId | null = null;
   /** The calls the socket is holding, so `drop()` can reject them from underneath. */
   readonly pending = new Set<{ reject: (error: RpcFailure) => void }>();
 
@@ -34,6 +35,7 @@ export class FakeBus {
   }
 
   setState(state: ClientState): void {
+    if (state !== 'ready') this.focusedThreadId = null;
     if (this.state === state) return;
     this.state = state;
     for (const handler of this.stateHandlers) handler(state);

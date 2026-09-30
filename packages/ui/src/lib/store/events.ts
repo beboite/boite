@@ -101,6 +101,10 @@ export function listen(ctx: StoreContext, client: Client): void {
     void threads.removed(threadId).catch(error => ctx.fail(error));
   });
 
+  on('turn.toolCompleted', ({ threadId, turnId, boundary }) => {
+    if (s.openThread?.id === threadId || s.composerStates[threadId]?.queued.length) ctx.composer.inputBoundaries[threadId] = { turnId, boundary };
+  });
+
   on('turn.started', (turn) => threads.upsertTurn(turn.threadId, turn));
   on('turn.finished', (turn) => {
     threads.upsertTurn(turn.threadId, turn);

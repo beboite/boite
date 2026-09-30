@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { Ellipsis, Folder, FolderInput, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
+  import { Ellipsis, Folder, FolderInput, GitBranch, GitPullRequest, PencilLine, Pin } from '@lucide/svelte';
   import type { Project, ThreadSummary } from '@boite/contracts';
   import type { Machine } from '../lib/workspace.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -12,9 +12,10 @@
   import { focusOnMount } from '../lib/actions';
   import { strings } from '../lib/strings';
   import { lookupPullRequest } from '../lib/pull-request';
-  import { projectName } from '../lib/format';
+  import { agentLabel, projectName } from '../lib/format';
   import { hasUnsentDraft } from '../lib/composer-queue';
   import MachineIcon from './MachineIcon.svelte';
+  import ProviderLogo from './ProviderLogo.svelte';
   import ThreadState from './ThreadState.svelte';
   let {
     machine,
@@ -33,7 +34,7 @@
     hidden?: boolean;
     /** Off under the project's own header, where the folder line would only repeat it. */
     showProject?: boolean;
-    /** Off while only one machine is connected: every row would carry the same icon. */
+    /** Off while only one machine is connected, and under a project header, which already shows it. */
     showMachine?: boolean;
   } = $props();
   let owner = $derived(machine.store);
@@ -43,8 +44,10 @@
   let renaming = $state(false);
   let title = $state('');
   let pullRequest = $state<ThreadSummary['pullRequest']>(null);
-  /** Only a project or pull request needs a second line; the machine stays beside the title. */
+  /** Only a project or pull request needs a second line; the machine and the provider stay beside the title. */
   let meta = $derived(showProject || pullRequest !== null);
+  /** The logo tells the rows apart; its tooltip names the provider and the model. */
+  let agent = $derived(agentLabel(owner, thread));
   // A move asked for while the turn runs, until the turn ends and applies it.
   let pending = $derived(pendingLine(thread));
 
@@ -171,6 +174,9 @@
             <MachineIcon icon={machine.icon} os={owner.core?.os} />
           </span>
         {/if}
+        <span class="provider" data-testid="thread-provider" title={agent} aria-label={agent}>
+          <ProviderLogo providerId={thread.providerId} size={12} />
+        </span>
         <span class="title">{thread.title}</span>
         {#if draft}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}
         {#if thread.pinned}<Pin size={12} />{/if}
@@ -183,6 +189,8 @@
     {#if meta}
     <div class="metadata">
       {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
+      <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
+      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
@@ -319,6 +327,22 @@
   }
   .project-name {
     flex: 1;
+  }
+  /* Beside a branch, the project keeps its length up to half the line and the branch takes the rest. */
+  .project-name:has(+ .branch) {
+    flex: 0 0 auto;
+    max-width: 50%;
+  }
+  .metadata .branch {
+    flex: 0 1 auto;
+  }
+  .pr-link {
+    margin-left: auto;
+  }
+  .provider {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
   }
   .machine {
     display: inline-flex;

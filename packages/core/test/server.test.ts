@@ -257,6 +257,16 @@ describe('server', () => {
     expect(body.pid).toBe(process.pid);
   });
 
+  test('health and hello report the bundle loaded by this core run', async () => {
+    const bundled = await startTestCore({ bundleHash: 'loaded-bundle' });
+    try {
+      const body = await (await fetch(`${bundled.url}/health`)).json() as { bundleHash?: string };
+      expect(body.bundleHash).toBe('loaded-bundle');
+      const client = await bundled.connect();
+      expect(client.core.bundleHash).toBe('loaded-bundle');
+    } finally { await bundled.stop(); }
+  });
+
   test('shutdown takes a POST with the core token, and an embedded core says it cannot stop', async () => {
     const at = `${harness.url}/shutdown`;
     expect((await fetch(at)).status).toBe(405);

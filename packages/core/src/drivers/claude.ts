@@ -1,11 +1,12 @@
 import type { ThreadId } from '@boite/contracts';
 import { readClaudeModels } from './claude/models.ts';
+export { readClaudeQuota } from './claude/quota.ts';
 import { sessionKey } from './claude/query.ts';
 import type { ClaudeDeps } from './claude/query.ts';
 import { ClaudeSession } from './claude/session.ts';
 import { titleQuery } from './claude/title.ts';
 import { ClaudeTurn } from './claude/turn.ts';
-import type { Driver, ProbeContext, ProbeResult, TitleContext, TurnContext, TurnHandle } from './types.ts';
+import type { Driver, ProbeContext, ProbeResult, TitleContext, SessionContext, TurnContext, TurnHandle } from './types.ts';
 
 const MINUTE_MS = 60_000;
 
@@ -16,10 +17,11 @@ const MINUTE_MS = 60_000;
  */
 export function createClaudeDriver(deps: ClaudeDeps): Driver {
   const sessions = new Map<ThreadId, ClaudeSession>();
+  const viewed = new Set<ThreadId>();
   const probes = new Map<string, { providerId: string; accountId: string; result?: ProbeResult; pending: Promise<ProbeResult> }>();
 
   /** The thread's session, started if it has none and replaced if it cannot serve this turn. */
-  function acquire(ctx: TurnContext): ClaudeSession {
+  function acquire(ctx: SessionContext): ClaudeSession {
     const threadId = ctx.thread.id;
     const warmMs = Math.max(0, ctx.warmProcessMinutes) * MINUTE_MS;
     const key = sessionKey(ctx);
@@ -27,8 +29,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
     let session = sessions.get(threadId) ?? null;
     // A turn that resumes at an entry needs a CLI of its own: the running one
     // holds the whole session, the part a rewind removed included.
-    const cut = ctx.sessionId !== null && Boolean(ctx.resumeAt);
-    if (session !== null && (cut || !session.usable(key, warmMs))) {
+    if (session !== null && !session.usable(key, warmMs)) {
       sessions.delete(threadId);
       session.close(session.key === key ? null : 'the thread changed account, folder or bypass mode');
       session = null;
@@ -48,6 +49,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
         },
         ctx,
       );
+      if (viewed.has(threadId)) session.setViewed(true);
       sessions.set(threadId, session);
     }
     return session;
@@ -61,6 +63,12 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
 
   return {
     protocol: 'claude-sdk',
+    prepare: ctx => acquire(ctx).prepare(),
+    setViewed(threadId, active) {
+      if (active) viewed.add(threadId);
+      else viewed.delete(threadId);
+      sessions.get(threadId)?.setViewed(active);
+    },
     probe(ctx: ProbeContext): Promise<ProbeResult> {
       const key = ctx.provider.id + '::' + ctx.accountId;
       const previous = probes.get(key);
@@ -86,6 +94,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
       attach(turn);
       return {
         done: turn.done,
+        steerUser: (message, attachments) => turn.session?.steer(turn, message, attachments) ?? Promise.resolve(false),
         stop: (): void => {
           // The session that holds it, which is not always the one it started on.
           turn.session?.stopTurn(turn);
@@ -108,6 +117,7 @@ export function createClaudeDriver(deps: ClaudeDeps): Driver {
     shutdown(): void {
       const open = [...sessions.values()];
       sessions.clear();
+      viewed.clear();
       for (const session of open) session.close(null, 0);
     },
   };

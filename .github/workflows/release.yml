@@ -44,6 +44,12 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
     with:
       sign-updates: true
     permissions:
@@ -67,6 +73,11 @@ jobs:
         with:
           name: windows-installer
           path: artifacts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: desktop-bundle-*
+          merge-multiple: true
+          path: artifacts
       - name: Prepare release for review
         env:
           GH_TOKEN: ${{ github.token }}
@@ -79,7 +90,9 @@ jobs:
           bun scripts/ci/updater-manifest.ts artifacts
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
-          sha256sum ./*.exe > SHA256SUMS.txt
+          # updater-manifest.ts refused any file outside this set.
+          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz)
+          sha256sum "${installers[@]}" > SHA256SUMS.txt
           flags=()
           [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
           if [[ -n "$existing" ]]; then
@@ -89,11 +102,11 @@ jobs:
             else
               test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
             fi
-            gh release upload "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
           else
             # A manual dispatch creates the version tag only after all checks.
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
               test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
             fi
-            gh release create "$RELEASE_TAG" ./*.exe ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --draft --title "boite $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+            gh release create "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --draft --title "boite $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
           fi

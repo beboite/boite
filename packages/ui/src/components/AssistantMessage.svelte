@@ -29,13 +29,15 @@
     threadId,
     message,
     progress,
-    signedOut
+    signedOut,
+    showModel
   }: {
     store: Store;
     threadId: string;
     message: Message;
     progress: TurnProgress;
     signedOut: Account | null;
+    showModel: boolean;
   } = $props();
 
   function lastTextIndex(message: Message): number {
@@ -50,7 +52,7 @@
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
 </script>
 
-{#if message.role === 'assistant' && execution}
+{#if showModel && message.role === 'assistant' && execution}
   {@const model = store.modelsOf(execution.providerId, execution.accountId).find((model) => model.id === execution.model)}
   <div class="model-attribution" data-testid="message-model">
     {execution.model && isNamedModel(model ?? { id: execution.model, name: execution.model }) ? model?.name ?? execution.model : store.providerOf(execution.providerId)?.name}

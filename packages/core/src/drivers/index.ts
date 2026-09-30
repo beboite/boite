@@ -11,16 +11,17 @@ import { unavailable } from '../errors.ts';
 import { createAcpDriver } from './acp.ts';
 import { createClaudeDriver } from './claude.ts';
 import { echoDriver } from './echo.ts';
-import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, TurnContext, TurnHandle } from './types.ts';
+import type { Driver, ProbeContext, ProbeFilter, ProbeResult, TitleContext, SessionContext, TurnContext, TurnHandle } from './types.ts';
 
 /**
  * A driver whose module is imported on its first turn. The Claude and ACP
  * drivers load their SDK that way; the Codex one carries its own transport, so
  * the whole module is what stays out of core start.
  */
-function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean } = {}): Driver {
+function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { titles?: boolean; prepare?: boolean } = {}): Driver {
   let loaded: Driver | null = null;
   let loading: Promise<Driver> | null = null;
+  const viewed = new Set<ThreadId>();
   const ready = async (): Promise<Driver> => {
     if (loaded !== null) return loaded;
     // Concurrent first turns must share the driver and its warm-session registry.
@@ -33,10 +34,24 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { 
     ...(options.titles === true
       ? { title: async (ctx: TitleContext): Promise<string | null> => (await ready()).title?.(ctx) ?? null }
       : {}),
+    ...(options.prepare === true ? {
+      prepare: async (ctx: SessionContext): Promise<void> => {
+        const driver = await ready();
+        if (!viewed.has(ctx.thread.id)) return;
+        driver.setViewed?.(ctx.thread.id, true);
+        await driver.prepare?.(ctx);
+      },
+      setViewed: (threadId: ThreadId, active: boolean): void => {
+        if (active) viewed.add(threadId);
+        else viewed.delete(threadId);
+        loaded?.setViewed?.(threadId, active);
+      },
+    } : {}),
     startTurn(ctx: TurnContext): TurnHandle {
       let inner: TurnHandle | null = null;
       let stopped = false;
       const done = ready().then((driver) => {
+        if (viewed.has(ctx.thread.id)) driver.setViewed?.(ctx.thread.id, true);
         inner = driver.startTurn(ctx);
         if (stopped) inner.stop();
         return inner.done;
@@ -44,6 +59,7 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { 
       return {
         done,
         get steer() { return inner?.steer?.bind(inner); },
+        get steerUser() { return inner?.steerUser?.bind(inner); },
         stop: (): void => {
           stopped = true;
           inner?.stop();
@@ -65,9 +81,11 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { 
       loaded?.forgetProbes?.(filter);
     },
     releaseThread(threadId: ThreadId): void {
+      viewed.delete(threadId);
       loaded?.releaseThread?.(threadId);
     },
     shutdown(): void {
+      viewed.clear();
       loaded?.shutdown?.();
     },
   };
@@ -89,7 +107,7 @@ const DRIVERS = new Map<Protocol, Driver>([
   ],
   [
     'codex-appserver',
-    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true }),
+    lazyDriver('codex-appserver', () => import('./codex.ts').then((module) => module.createCodexDriver()), { titles: true, prepare: true }),
   ],
   ['muse', lazyDriver('muse', () => import('./muse.ts').then((module) => module.createMuseDriver()))],
   ['pi', lazyDriver('pi', () => import('./pi.ts').then((module) => module.createPiDriver()))],
@@ -169,6 +187,11 @@ export function forgetProbes(filter: ProbeFilter = {}): void {
 /** A thread that is archived or gone keeps no warm process: every driver drops it. */
 export function releaseThread(threadId: ThreadId): void {
   for (const driver of DRIVERS.values()) driver.releaseThread?.(threadId);
+}
+
+/** Viewing pins only existing sessions; it never loads an unsupported driver. */
+export function setThreadViewed(threadId: ThreadId, viewed: boolean): void {
+  for (const driver of DRIVERS.values()) driver.setViewed?.(threadId, viewed);
 }
 
 /** Core shutdown: what a driver kept between turns goes before the journal closes. */

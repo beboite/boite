@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CirclePause, CirclePlay, Network, RefreshCw } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import type { CoordinationConfig, CoordinationMode } from '@boite/contracts';
+  import { defaultCoordinationConfig, type CoordinationConfig, type CoordinationMode } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
@@ -10,7 +10,7 @@
    * conversation shows its own copy only while other agents can reach it.
    */
   let { store, threadId, embedded = false }: { store: Store; threadId: string; embedded?: boolean } = $props();
-  const fallback: CoordinationConfig = { mode: 'off', resources: '', remote: false, paused: false };
+  const fallback = defaultCoordinationConfig();
   let view = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   let config = $derived(view?.config ?? fallback);
   let summary = $derived(config.mode === 'brief' ? strings.coordination.summaryBrief : config.mode === 'team' ? strings.coordination.summaryTeam : strings.coordination.summaryOff);

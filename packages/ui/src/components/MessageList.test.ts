@@ -113,6 +113,35 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+test('one model label covers a turn split across text and separate attachments, and the next turn names its own model', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const owner = new Store();
+  owner.attach(client);
+  try {
+    await owner.connect();
+    await owner.open('t-trace');
+    const thread = owner.openThread!;
+    const first = thread.turns[0]!;
+    first.execution = { ...thread, providerId: 'codex', accountId: 'a-codex', model: 'gpt-6.1-sol', sessionGeneration: 0, selectionVersion: 0 };
+    thread.turns.push({ ...first, id: 'turn-next', execution: { ...first.execution, model: 'gpt-6-astra' } });
+    thread.messages = [
+      { id: 'm-intro', threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: 1, parts: [{ type: 'text', text: 'Here are the files.' }] },
+      ...['README.md', 'review-small.mp4', 'NOTES.md'].map((name, index): Message => ({
+        id: `m-file-${index}`, threadId: thread.id, turnId: first.id, role: 'assistant', state: 'complete', createdAt: index + 2,
+        parts: [{ type: 'file', name, mimeType: name.endsWith('.mp4') ? 'video/mp4' : 'text/markdown', data: 'ZmlsZQ==' }]
+      })),
+      { id: 'm-next', threadId: thread.id, turnId: 'turn-next', role: 'assistant', state: 'streaming', createdAt: 5, parts: [{ type: 'text', text: 'Next answer.\n\n' }] }
+    ];
+    running = mount(MessageList, { target: document.body, props: { store: owner, threadId: thread.id, messages: thread.messages } });
+    flushSync();
+    const labels = [...document.querySelectorAll('[data-testid=message-model]')];
+    expect(labels).toHaveLength(2);
+    expect(labels[0]!.closest('[data-mid]')?.getAttribute('data-mid')).toBe('m-intro');
+    expect(labels[1]!.textContent).toContain('gpt-6-astra');
+    expect(document.querySelectorAll('[data-mid^=m-file-]')).toHaveLength(3);
+  } finally { owner.detach(); client.close(); }
+});
+
 /**
  * Nothing in this component touches the store unless a permission part is
  * rendered or the list is paged: `messagesBefore` null is a thread whose first

@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
 import { MacMemory, residentMemory } from '../src/platform/macos-memory.ts';
 
-test('macOS decodes resident bytes, not the physical footprint or a peak', () => {
+test('macOS decodes the physical footprint, not the resident size that counts shared libraries', () => {
   const bytes = new Uint8Array(96);
   const view = new DataView(bytes.buffer);
-  view.setBigUint64(64, 256n * 1024n * 1024n, true);
-  view.setBigUint64(72, 123n, true);
+  view.setBigUint64(64, 900n * 1024n * 1024n, true);
+  view.setBigUint64(72, 256n * 1024n * 1024n, true);
+  view.setBigUint64(80, 123n, true);
   expect(residentMemory(bytes)).toBe(256 * 1024 ** 2);
 });
 

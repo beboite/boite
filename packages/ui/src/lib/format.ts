@@ -189,3 +189,18 @@ export function projectName(project: { name: string; kind?: 'drafts' } | null | 
   if (!project) return '';
   return project.kind === 'drafts' ? strings.drafts.name : project.name;
 }
+
+/**
+ * `Claude · Opus 5.5`: the provider's name, then the model's, as the owning
+ * machine lists them. A provider or model the machine no longer lists keeps
+ * its id, so a row still says what ran it.
+ */
+export function agentLabel(
+  owner: { providers: { id: string; name: string }[]; modelsOf(providerId: string, accountId: string | null): { id: string; name: string }[] },
+  thread: { providerId: string; accountId: string; model: string | null }
+): string {
+  const provider = owner.providers.find((entry) => entry.id === thread.providerId)?.name ?? thread.providerId;
+  if (!thread.model) return provider;
+  const model = owner.modelsOf(thread.providerId, thread.accountId).find((entry) => entry.id === thread.model)?.name ?? thread.model;
+  return `${provider} · ${model}`;
+}

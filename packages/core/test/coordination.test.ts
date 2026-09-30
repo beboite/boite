@@ -26,8 +26,11 @@ function send(h: TestCore, from: string, to: AgentAddress, text = 'May I restart
   return h.core.coordination.send({ threadId: from, to, text, requestId });
 }
 
-test('agents opt in, discover only this project, cannot impersonate another thread or configure permissions', async () => {
+test('agents communicate by default, respect explicit restrictions and cannot change permissions', async () => {
   const { h, owner, a, b } = await setup();
+  expect(h.core.coordination.get(a).config).toEqual({ mode: 'brief', resources: '', remote: true, paused: false });
+  expect((await h.core.coordination.directory(a)).agents.map(t => t.threadId)).toEqual([b]);
+  h.core.coordination.configure(a, { ...brief, mode: 'off' });
   expect(await h.core.coordination.directory(a)).toEqual({ agents: [], unavailable: [] });
   await expect(send(h, a, dest(h, b))).rejects.toThrow('disabled');
   enable(h, a, b);
@@ -51,6 +54,17 @@ test('agents opt in, discover only this project, cannot impersonate another thre
     expect((await h.core.coordination.directory(a)).agents.some(t => t.threadId === isolated.id)).toBe(false);
     await expect(send(h, a, dest(h, isolated.id))).rejects.toThrow('across projects');
   } finally { agent.close(); }
+});
+
+test('default discovery excludes archived threads and persistent agent sessions', async () => {
+  const { h, owner, a, b } = await setup();
+  h.core.threads.archive(b, true);
+  const resident = (await echoThread(h, owner, 'Persistent session')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(resident), projectId: null, agentSessionId: 'resident-test' });
+  expect((await h.core.coordination.directory(a)).agents).toEqual([]);
+  expect(h.core.coordination.get(resident).config.mode).toBe('off');
+  await expect(send(h, a, dest(h, resident))).rejects.toThrow('across projects');
+  await expect(send(h, resident, dest(h, a))).rejects.toThrow('disabled');
 });
 
 test('delivery wakes the recipient once, preserves system provenance and does not count as user input', async () => {
@@ -131,9 +145,9 @@ test('a running driver receives a steer once, and uncertain dispatch is never re
 
 test('two real cores exchange signed directory, message, reply and receipt without sharing owner tokens', async () => {
   const one = await setup(); const two = await setup();
-  for (const [h, id] of [[one.h, one.a], [two.h, two.b]] as const) h.core.coordination.configure(id, { ...brief, remote: true });
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
   expect(JSON.stringify(cardA)).not.toContain(one.h.token);
+  await expect(send(one.h, one.a, dest(two.h, two.b))).rejects.toThrow('not trusted');
   one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
   const directory = await one.h.core.coordination.directory(one.a);
   expect(directory.unavailable).toHaveLength(0);
@@ -185,13 +199,18 @@ test('federation rejects forged signatures, replay, sender substitution, clearte
   try {
     await expect(phone.call('collaboration.configure', { threadId: one.a, config: brief })).rejects.toThrow('owner');
     await expect(phone.call('collaboration.send', { threadId: one.a, to: dest(one.h, one.b), text: 'fake agent', requestId: 'device' })).rejects.toThrow('owner');
-    expect((await phone.call('collaboration.get', { threadId: one.a })).config.mode).toBe('off');
+    expect((await phone.call('collaboration.get', { threadId: one.a })).config.mode).toBe('brief');
   } finally { phone.close(); }
 });
 
-test('coordination survives restart paused, with its identity and no duplicate wake', async () => {
-  const { h, a, b } = await setup(); enable(h, a, b);
+test('restart pauses pending work while existing idle threads stay reachable and explicit opt-outs survive', async () => {
+  const { h, owner, a, b } = await setup(); enable(h, a, b);
   h.core.coordination.pause(b);
+  const c = (await echoThread(h, owner, 'Existing idle sender')).threadId;
+  const d = (await echoThread(h, owner, 'Disabled')).threadId;
+  const e = (await echoThread(h, owner, 'Existing idle recipient')).threadId;
+  h.core.coordination.configure(d, { ...brief, mode: 'off' });
+  h.core.coordination.configure(e, { ...brief, remote: true });
   const id = h.core.coordination.identity().coreId;
   await send(h, a, dest(h, b));
   await h.server.stop(); await h.core.close();
@@ -201,6 +220,12 @@ test('coordination survives restart paused, with its identity and no duplicate w
     expect(reopened.coordination.get(b).config.paused).toBe(true);
     expect(reopened.coordination.get(b).messages).toHaveLength(1);
     expect(reopened.coordination.get(b).wakes).toBe(0);
+    expect(reopened.coordination.get(c).config).toEqual({ mode: 'brief', resources: '', remote: true, paused: false });
+    expect(reopened.coordination.get(d).config.mode).toBe('off');
+    expect((await reopened.coordination.directory(c)).agents.map(t => t.threadId)).not.toContain(d);
+    const letter = await reopened.coordination.send({ threadId: c, to: reopened.coordination.get(e).self, text: 'Resume monitoring', requestId: 'after-restart' });
+    await waitFor(() => reopened.coordination.get(e).messages.find(m => m.id === letter.id)?.status === 'delivered');
+    expect(reopened.coordination.get(e).wakes).toBe(1);
   } finally { await reopened.close(); }
 });
 
@@ -233,11 +258,29 @@ test('an offline peer recovers before expiry without duplicate delivery', async 
 }, 14000);
 
 test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
-  const { h, a, b } = await setup(); enable(h, a, b);
+  const { h, a, b } = await setup();
   await send(h, a, dest(h, b));
   // The sweep runs every 2 s: 100 ms leaves it a 5 % chance to be the one that delivered.
   await new Promise(resolve => setTimeout(resolve, 100));
   expect(h.core.journal.listTurns(b).map(turn => turn.execution?.operation)).toEqual(['coordination']);
+});
+
+test('an idle monitoring thread accepts a default wake and keeps its background work', async () => {
+  const { h, a, b } = await setup();
+  let starts = 0;
+  restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    expect(ctx.thread.id).toBe(b);
+    if (++starts === 1) ctx.background?.([{ id: 'monitor-1', kind: 'monitor', description: 'Watch CI', toolId: null, startedAt: Date.now() }]);
+    return { done: Promise.resolve({ status: 'done', sessionId: 'monitor-session', usage: null }), stop() {} };
+  } }));
+  const initial = h.core.threads.startTurn(b, 'Monitor CI');
+  await waitFor(() => h.core.journal.getTurn(initial.id)?.status === 'done');
+  expect(h.core.threads.get(b).backgroundWork?.kinds).toEqual(['monitor']);
+  const letter = await send(h, a, dest(h, b), 'The deployment is ready');
+  await waitFor(() => h.core.coordination.get(b).messages.find(m => m.id === letter.id)?.status === 'delivered');
+  expect(starts).toBe(2);
+  expect(h.core.coordination.get(b).wakes).toBe(1);
+  expect(h.core.threads.get(b).backgroundWork?.kinds).toEqual(['monitor']);
 });
 
 test('the sweep reads pending letters through the status index and prunes settled old ones', async () => {

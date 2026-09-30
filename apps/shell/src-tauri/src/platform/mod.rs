@@ -21,11 +21,11 @@ pub(crate) mod dwm;
 #[cfg(windows)]
 pub(crate) mod windows;
 #[cfg(windows)]
-pub(crate) use windows::{alert, notify, prepare_command};
+pub(crate) use windows::{alert, before_webview, notify, prepare_command};
 #[cfg(not(windows))]
 mod posix;
 #[cfg(not(windows))]
-pub(crate) use posix::{alert, notify, prepare_command};
+pub(crate) use posix::{alert, before_webview, notify, prepare_command};
 
 pub(crate) mod appbars;
 

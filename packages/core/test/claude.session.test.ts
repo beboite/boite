@@ -21,6 +21,40 @@ import {
 useClaudeHarness();
 
 describe('claude driver', () => {
+  test('viewing initializes a prompt-free query and retains it across real turns at zero minutes', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-prepared')), answerEach('sess-prepared'));
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => queries.length === 1);
+    expect(calls[0]!.prompts).toEqual([]);
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(0);
+    expect(harness.core.journal.listMessages(threadId)).toHaveLength(0);
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect(calls[0]!.prompts).toEqual(['first', 'second']);
+    await client.call('threads.focus', { threadId: null });
+    await client.call('threads.focus', { threadId });
+    expect(await runTurn(client, threadId, 'back')).toBe('done');
+    expect(queries).toHaveLength(1);
+    await client.call('threads.archive', { threadId });
+    await waitFor(() => queries[0]!.closes > 0);
+  });
+
+  test('a prepared query applies the effort selected before the first prompt', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-prepared')), answerEach('sess-prepared'));
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => queries.length === 1);
+    await client.call('threads.update', { threadId, effort: 'high' });
+    expect(await runTurn(client, threadId, 'real prompt')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.setters).toContain('effortLevel high');
+    expect(calls[0]!.prompts).toHaveLength(1);
+  });
+
   /** One plain turn on a thread set to `effort`, so the test can read what the SDK got. */
   async function turnWithEffort(effort: string | null): Promise<{ options: Options; prompt: string }> {
     const client = await harness.connect();
@@ -390,4 +424,26 @@ test('with a brain, a new Claude session reads the Boite guide once and learns `
   expect(await runTurn(client, other, 'third')).toBe('done');
   expect(calls.at(-1)!.prompts[0]).toContain('boite where');
   expect(calls.at(-1)!.prompts[0]).not.toContain('boite ask');
+});
+
+
+test('user follow-ups enter the running Claude prompt stream without a second turn or interrupt', async () => {
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  scripted(fake => fake.emit(init('sess-steer')));
+  const turn = await client.call('turns.start', { threadId, prompt: 'Keep working' });
+  await waitFor(() => calls[0]?.prompts.length === 1);
+  const image = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aGVsbG8=', name: 'sample.png' };
+  expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Use this image', attachments: [image], clientRequestId: 'claude_steer_01' })).toEqual({ accepted: true });
+  await waitFor(() => calls[0]?.prompts.length === 2);
+  expect(JSON.parse(calls[0]!.prompts[1]!)).toEqual([
+    { type: 'text', text: 'Use this image' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.data } },
+  ]);
+  expect(queries[0]!.interrupts).toBe(0);
+  expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
+  const finished = client.next('turn.finished', record => record.id === turn.id);
+  queries[0]!.emit(assistant('sess-steer', [{ type: 'text', text: 'Follow-up applied' }]));
+  queries[0]!.emit(success('sess-steer'));
+  expect((await finished).status).toBe('done');
 });

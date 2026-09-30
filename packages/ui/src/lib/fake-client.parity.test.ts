@@ -49,6 +49,28 @@ test('a second retitle while the first is writing is refused, as threads/retitle
   expect(await code(client.call('threads.retitle', { threadId: 't-trace' }))).toBe('answered');
 });
 
+test('a first-turn title reaches the client while the answer is still running', async () => {
+  const client = await fake({ delayMs: 100, chunkSize: 16 });
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  const titled = new Promise<void>(resolve => client.on('thread.updated', summary => {
+    if (summary.id === thread.id && summary.titleSource === 'agent') resolve();
+  }));
+  await client.call('turns.start', { threadId: thread.id, prompt: 'fix the scheduler in the core' });
+  await titled;
+  expect(await client.call('threads.get', { threadId: thread.id })).toMatchObject({
+    title: 'Echo: fix the scheduler in the', status: 'running', titleState: { needsRefinement: false },
+  });
+  await client.call('turns.stop', { threadId: thread.id });
+});
+
+test('a same-text rename during regeneration is protected in the fake client too', async () => {
+  const client = await fake();
+  const before = await client.call('threads.get', { threadId: 't-trace' });
+  const writing = client.call('threads.retitle', { threadId: before.id });
+  await client.call('threads.update', { threadId: before.id, title: before.title });
+  expect(await writing).toMatchObject({ title: before.title, titleSource: 'user', titleState: { needsRefinement: false } });
+});
+
 test('archiving a thread closes its shell, as threads.ts archive', async () => {
   const client = await fake();
   const shell = await client.call('terminals.open', { threadId: 't-trace', cols: 80, rows: 24 });

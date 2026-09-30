@@ -29,14 +29,18 @@ Three portability regressions have dedicated coverage:
 | Area | Current behavior and consequence |
 |---|---|
 | Process ownership | Only direct agent children are tracked and stopped. Grandchildren can survive a stopped turn. A hard shell exit can leave its core running. See [trace](trace.md). |
-| Resource protection | CPU and memory caps, focus protection and audio muting are Windows-only. Enabling their settings adds no protection on POSIX. |
+| Resource protection | The CPU cap, focus protection and audio muting are Windows-only. The memory guard runs everywhere and stops the heaviest child tree of a thread past its share ([trace](trace.md)). |
+| Browser panel on Linux | Tauri packs a child webview into the window's GTK box, where it cannot be placed, so the Linux app shows no built-in browser; the panel offers the system browser instead. Windows and macOS are unaffected. |
+| Dictation on Linux | WebKitGTK ships with media capture off and Tauri answers no permission request, so the Linux app says dictation is unavailable. A browser client on the same core can dictate. |
+| macOS window | The window keeps the native frame and traffic lights over the title bar, and a menu bar with Edit items for copy and paste. Cmd+W and Cmd+Q belong to the page (`close-surface`, the held quit); Quit in the menu is a click. |
+| Environment | A desktop launch may have no locale: the core fills in a UTF-8 `LANG` when none of `LANG`, `LC_ALL` and `LC_CTYPE` is set. The macOS terminal starts a login shell, as Terminal.app does, so `~/.zprofile` (Homebrew) is read. An AppImage's runtime and GTK variables are removed from the core's environment, so agents run the system's GTK. On the NVIDIA proprietary driver the Linux shell sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`, unless the user set it either way, to avoid an empty window. |
 | Notifications | Native thread notifications are not implemented on Linux or macOS. A desktop toast is not guaranteed when a thread finishes out of sight. |
 | CLI discovery | Desktop startup adds common installation directories. It does not source shell configuration or discover arbitrary Node version-manager directories. A CLI available only in an interactive shell may remain unavailable. |
 | Provider installation | Install and login capabilities depend on each descriptor's OS profile. The bundled echo fixture does not prove a real provider's authentication or update command. See [providers](providers.md). |
-| Linux data directory | The current default is `~/.local/share/boite2`; it does not honor `XDG_DATA_HOME`. Use `BOITE_DATA_DIR` for a different location. Both shell and core must keep using the same directory. |
-| macOS distribution | CI uses ad-hoc signing. Developer ID signing, notarization and Gatekeeper testing remain release prerequisites. See [releasing](releasing.md). |
+| Linux data directory | The current default is `~/.local/share/boite2`, created and kept at mode 0700 because the journal holds every conversation; it does not honor `XDG_DATA_HOME`. Use `BOITE_DATA_DIR` for a different location. Both shell and core must keep using the same directory. |
+| macOS distribution | Releases are signed with a Developer ID and notarized once the Apple secrets exist; until then they are signed ad hoc, and Gatekeeper refuses the first start until the user clears the quarantine attribute or allows it in System Settings (README). See [releasing](releasing.md#signed-update-artifacts). |
 | Native webviews | Portable smoke tests fetch the UI over HTTP. They do not drive WebKitGTK or WKWebView interactions, clipboard, native dialogs, browser-panel navigation or tray behavior. |
-| Older systems | The current native matrix does not test the oldest supported macOS version or older Linux distributions. A successful current-runner build does not establish their compatibility. |
+| Older systems | Linux packages are built and smoke-tested on Ubuntu 22.04, so glibc 2.35 is their floor; older distributions cannot start them. No runner tests macOS 13, the declared minimum. |
 
 These gaps remain separate from Windows' WebView2 end-to-end coverage. The
 cross-platform core tests use fixtures and fresh data directories; live-provider

@@ -259,10 +259,23 @@ test('the sidebar floats a thread that waits on the user, in both views, and nam
   store.threads.find((t) => t.id === last)!.status = 'waiting';
   await waitFor(() => rowsOf()[0] === last);
   expect(document.querySelector('[data-testid=thread-project]')).toBeNull();
+  // Every row names its provider; a branch waits for a second line, which a project row lacks without a PR.
+  const branched = store.threadsOf(project.id).find((t) => !t.pullRequest)!;
+  branched.branch = 'boite/port-the-scheduler';
+  const providers = () => Array.from(document.querySelectorAll('[data-testid=thread-provider]'));
+  await waitFor(() => providers().length === document.querySelectorAll('[data-testid=thread-row]').length);
+  const provider = document.querySelector(`[data-thread-id="${branched.id}"] [data-testid=thread-provider]`)!;
+  expect(provider.getAttribute('title')).toContain(store.providers.find((p) => p.id === branched.providerId)!.name);
+  const card = () => document.querySelector(`[data-thread-id="${branched.id}"]`)!.closest('.thread')!;
+  expect(card().querySelector('[data-testid=thread-pr]')).toBeNull();
+  expect(card().querySelector('[data-testid=thread-branch]')).toBeNull();
+  // The seeded trace thread has a PR, so its second line carries its branch too.
+  for (const branch of document.querySelectorAll('[data-testid=thread-branch]')) expect(branch.closest('.thread')!.querySelector('[data-testid=thread-pr]')).not.toBeNull();
 
   workspace.view = 'recent';
   await waitFor(() => rows()[0] === last);
   expect(document.querySelectorAll('[data-testid=thread-project]').length).toBe(rows().length);
+  await waitFor(() => card().querySelector('[data-testid=thread-branch]')?.textContent === 'boite/port-the-scheduler');
 });
 
 test('an archive offers its way back for a moment: the toast button, or Ctrl+Z outside a field', async () => {

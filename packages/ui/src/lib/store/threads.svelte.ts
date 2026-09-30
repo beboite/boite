@@ -14,6 +14,9 @@ import { forgetArchivedThread } from '../archive-history';
 import { rightPanel } from '../right-panel.svelte';
 import { lastIndexById, mergeResumed, patchRow, resumeRequest, threadsByProject } from '../thread-rows';
 import type { StoreContext } from './context';
+import { RpcErrorCode } from '@boite/contracts';
+import { RpcFailure } from '../client';
+import { strings } from '../strings';
 
 /** What a rewind hands back to the composer: the removed message's content, and how the agent forgets it. */
 export type RewoundMessage = Omit<ThreadRewind, 'thread'>;
@@ -460,7 +463,9 @@ export class Threads {
       await this.removed(threadId);
       return true;
     } catch (error) {
-      this.ctx.fail(error);
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) {
+        this.ctx.store.error = strings.sidebar.deleteUnavailable;
+      } else this.ctx.fail(error);
       return false;
     }
   }

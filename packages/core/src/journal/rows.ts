@@ -26,6 +26,7 @@ export interface ThreadRow {
   agent_session_id?: string | null;
   title: string;
   title_source: string;
+  title_state?: string | null;
   provider_id: string;
   account_id: string;
   model: string | null;
@@ -116,6 +117,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     ...(row.agent_session_id ? { agentSessionId: row.agent_session_id } : {}),
     title: row.title,
     titleSource: row.title_source as ThreadSummary['titleSource'],
+    ...(row.title_state ? { titleState: parseJson<ThreadSummary['titleState']>(row.title_state, `threads.title_state of ${row.id}`) } : {}),
     providerId: row.provider_id,
     accountId: row.account_id,
     model: row.model,

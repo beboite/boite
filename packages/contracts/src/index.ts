@@ -664,6 +664,8 @@ export interface ThreadSummary {
   agentSessionId?: string;
   title: string;
   titleSource: TitleSource;
+  /** Durable title revision and whether the first answer should resolve a vague initial subject. Missing on older cores. */
+  titleState?: { version: number; needsRefinement: boolean };
   providerId: ProviderId;
   accountId: AccountId;
   model: string | null;
@@ -1512,6 +1514,8 @@ export interface CoreInfo {
   /** Display name reported by the execution host. */
   hostname?: string;
   version: string;
+  /** SHA-256 of the loaded JavaScript entry bundle, captured before serving requests. */
+  bundleHash?: string;
   protocolVersion: typeof PROTOCOL_VERSION;
   os: Os;
   /** The install this core belongs to. `--channel` on its command line decides. */
@@ -1807,6 +1811,10 @@ export interface CoordinationConfig {
   resources: string;
   remote: boolean;
   paused: boolean;
+}
+/** Default communication for ordinary threads; explicit owner settings take precedence. */
+export function defaultCoordinationConfig(): CoordinationConfig {
+  return { mode: 'brief', resources: '', remote: true, paused: false };
 }
 export interface AgentAddress { coreId: string; threadId: ThreadId }
 export interface AgentContact extends AgentAddress {
@@ -2481,9 +2489,13 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
+  /** The conversation visible on this connection; null releases its prepared agent. No turn is started. */
+  'threads.focus': { params: { threadId: ThreadId | null }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
+  'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**
@@ -2613,6 +2625,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
+  /** A small broadcast lets queued input advance even when its conversation is off screen. */
+  'turn.toolCompleted': { threadId: ThreadId; turnId: TurnId; boundary: string };
   'turn.finished': Turn;
 
   /** Subscribed threads only, from here to `permission.resolved`. */

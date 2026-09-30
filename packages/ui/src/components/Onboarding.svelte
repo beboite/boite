@@ -204,9 +204,9 @@
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }
   /* In the shell the scrim starts under the title bar, so the panel's room is that much shorter. */
-  .scrim.shell .panel { height: min(808px, calc(100dvh - 32px - var(--titlebar))); }
+  .scrim.shell .panel { height: min(560px, calc(100dvh - 32px - var(--titlebar))); }
   /* One height for every step, so Next stays under the pointer from one screen to the next; a longer step scrolls. */
-  .panel { display: flex; flex-direction: column; width: min(640px, 100%); height: min(808px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
+  .panel { display: flex; flex-direction: column; width: min(600px, 100%); height: min(560px, calc(100dvh - 32px)); background: var(--color-surface); border: 1px solid var(--color-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-e3); animation: pop var(--dur-3) var(--ease-out-quint); }
   .panel:focus, h1:focus { outline: none; }
   .panel.closing { animation: pop-out var(--dur-2) var(--ease-out-quint); }
   header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
@@ -260,6 +260,8 @@
   .dot::after { content: ''; position: absolute; width: 6px; height: 6px; left: 10px; top: 13px; border-radius: 999px; background: var(--color-edge); }
   .dot.on::after { background: var(--color-accent); width: 14px; left: 6px; }
   @media (max-width: 480px) {
+    .panel { height: min(640px, calc(100dvh - 32px)); }
+    .scrim.shell .panel { height: min(640px, calc(100dvh - 32px - var(--titlebar))); }
     .screen { padding: 8px 18px 18px; } .preference { flex-wrap: wrap; } .segmented { flex-basis: 100%; } .segmented button { flex: 1; }
     footer { padding: 12px; gap: 4px; } .dot { width: 20px; } .dot::after { left: 7px; } .dot.on::after { left: 3px; } .dot { height: var(--touch-target); } .dot::after { top: 19px; }
   }

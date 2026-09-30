@@ -45,6 +45,7 @@ import { readMemoryEvents } from './threads/memory-read.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
+import { ThreadFocus } from './threads/focus.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -73,6 +74,7 @@ export class ThreadStore {
   readonly runner: TurnRunner;
   /** Builds what a driver gets for a turn. */
   readonly contexts: TurnContexts;
+  readonly focus: ThreadFocus;
   /** Permission and question cards. */
   readonly cards: ThreadCards;
   /** Held asynchronous answers and wakes. */
@@ -90,6 +92,7 @@ export class ThreadStore {
   constructor(private readonly core: Core) {
     this.runner = new TurnRunner(core, this);
     this.contexts = new TurnContexts(core, this);
+    this.focus = new ThreadFocus(core);
     this.cards = new ThreadCards(core, this);
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
@@ -382,6 +385,7 @@ export class ThreadStore {
     if (params.title !== undefined && params.title.length > 0) {
       next.title = params.title;
       next.titleSource = 'user';
+      next.titleState = { version: (thread.titleState?.version ?? 0) + 1, needsRefinement: false };
     }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);
     const switched = account.id !== thread.accountId;

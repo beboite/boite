@@ -1,6 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure } from './errors.ts';
@@ -18,7 +19,6 @@ export const SWEEP_PROBES = [
 ] as const;
 const MAX_BODY = 262_144;
 const ROUTE = '/agent-messages';
-const initial = (): CoordinationConfig => ({ mode: 'off', resources: '', remote: false, paused: false });
 const limits = (mode: CoordinationConfig['mode']) => mode === 'team' ? { send: 40, wake: 12, receive: 100 } : { send: 6, wake: 2, receive: 20 };
 type Row = { data: string; fingerprint: string | null };
 type Envelope = { from: string; to: string; at: number; nonce: string; operation: 'directory' | 'deliver' | 'receipt'; payload: unknown };
@@ -82,10 +82,11 @@ export class Coordination {
   private swept = 0;
 
   constructor(private readonly core: Core) {
-    // A restart never resumes token-spending work without an owner action.
+    // A restart keeps idle contacts reachable, but never replays pending work automatically.
     for (const thread of core.journal.listThreads()) {
       const config = this.config(thread.id);
-      if (config.mode !== 'off' && !config.paused) this.saveConfig(thread.id, { ...config, paused: true });
+      const pending = core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND (status IN ('queued', 'received') OR (status = 'uncertain' AND json_extract(data, '$.error') = 'Queued for provider delivery')) LIMIT 1").get(thread.id);
+      if (config.mode !== 'off' && !config.paused && (pending || ['queued', 'running', 'waiting'].includes(thread.status))) this.saveConfig(thread.id, { ...config, paused: true });
     }
     // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
     this.off = core.bus.onAny((name, payload) => {
@@ -155,7 +156,13 @@ export class Coordination {
     }
     return { ok: true };
   }
-  config(threadId: string): CoordinationConfig { return (this.core.journal.getSetting(`coordination:${threadId}`) as CoordinationConfig | undefined) ?? initial(); }
+  config(threadId: string): CoordinationConfig {
+    const saved = this.core.journal.getSetting(`coordination:${threadId}`) as CoordinationConfig | undefined;
+    if (saved) return saved;
+    // Persistent identities have their own group and mission permissions.
+    if (this.core.journal.getThread(threadId)?.agentSessionId) return { ...defaultCoordinationConfig(), mode: 'off', remote: false };
+    return defaultCoordinationConfig();
+  }
   private saveConfig(threadId: string, config: CoordinationConfig): void {
     this.core.journal.setSetting(`coordination:${threadId}`, config);
     this.core.bus.emit('collaboration.changed', { threadId });
