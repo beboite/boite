@@ -294,6 +294,9 @@ answer. A probe that finds no executable, whose agent dies, or that passes twent
 seconds, thirty for pi, throws with the reason and caches nothing. One whose own account changed
 or whose descriptors were reloaded while it ran is refused as stale; another
 account changing does not touch it, and the UI asks again without a toast.
+Background discovery skips accounts known to be signed out or in error. A failed
+background read keeps the cached or descriptor models and logs its reason without
+a toast; an explicit model refresh or sending a prompt still reports failures.
 
 ## The UI streams, and stops streaming
 

@@ -32,7 +32,7 @@ export class Models {
   probeAttempts = new Set<string>();
   /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
   effortAttempts = new Set<string>();
-  probeRequests = new Map<string, Promise<void>>();
+  probeRequests = new Map<string, { request: Promise<void>; reportFailure: boolean }>();
   probeEpoch = 0;
   /** The keys a probe is running for, so the picker can say it is reading. */
   probingModels = $state<string[]>([]);
@@ -126,13 +126,19 @@ export class Models {
     const client = this.ctx.client;
     const key = probeKey(providerId, accountId);
     const existing = this.probeRequests.get(key);
-    if (existing) return existing;
+    if (existing) {
+      // A refresh can join automatic discovery while its agent is still answering.
+      if (refresh) existing.reportFailure = true;
+      return existing.request;
+    }
     if (!client || !this.ctx.store.owner || (!refresh && this.probeAttempts.has(key))) return Promise.resolve();
+    const account = this.ctx.store.accountOf(accountId);
+    if (!refresh && (account?.status === 'unauthenticated' || account?.status === 'error')) return Promise.resolve();
     this.probeAttempts.add(key);
     const epoch = this.probeEpoch;
     this.probingModels = [...this.probingModels, key];
-    let request!: Promise<void>;
-    request = (async () => {
+    const pending = { request: Promise.resolve(), reportFailure: refresh };
+    pending.request = (async () => {
       try {
         const { models } = await client.call('providers.probe', { providerId, accountId, ...(refresh ? { refresh: true } : {}) });
         if (client !== this.ctx.client || epoch !== this.probeEpoch) return;
@@ -143,17 +149,20 @@ export class Models {
         // The account or the descriptors changed while the agent answered: the
         // core refused a stale list, and the next look asks again.
         if (epoch !== this.probeEpoch) this.probeAttempts.delete(key);
-        else this.ctx.fail(error);
+        else if (pending.reportFailure) this.ctx.fail(error);
+        // Discovery also runs when the composer mounts, before any user action.
+        // An agent may still need a login even when its descriptor has no auth check.
+        else console.warn('background model discovery failed', error);
       }
       finally {
-        if (this.probeRequests.get(key) === request) {
+        if (this.probeRequests.get(key) === pending) {
           this.probeRequests.delete(key);
           this.probingModels = this.probingModels.filter(entry => entry !== key);
         }
       }
     })();
-    this.probeRequests.set(key, request);
-    return request;
+    this.probeRequests.set(key, pending);
+    return pending.request;
   }
 
   defaultModelOf(provider: ProviderSummary, accountId?: string): string | null {
