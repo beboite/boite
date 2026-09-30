@@ -94,7 +94,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',

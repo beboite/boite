@@ -40,6 +40,7 @@ test('agent deliverables and file links open in chat on desktop and paired phone
     await client.call('turns.start', { threadId: thread.id, prompt: `Your deliverable is attached below. Read [project notes](<${notesLink}:2>), [the capture](<${pictureLink}>), [the PDF](handoff.pdf), or https://example.com/review.` });
     await done;
     await client.call('artifacts.publish', { threadId: thread.id, path: 'handoff.pdf' });
+    await client.call('artifacts.publish', { threadId: thread.id, path: 'tests/e2e/.artifacts/preview.png' });
     for (const mobile of [false, true]) {
       page = await BrowserPage.launch({ url: mobile ? await mintPairing(core) : pairingUrlOf(core) });
       await page.waitFor('document.querySelector("[data-testid=status-connection]")?.dataset.state === "ready"');
@@ -52,6 +53,13 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       const downloaded = await page.evaluate<string>('fetch(document.querySelector("[data-testid=artifact-download]").href).then(r => r.text())');
       expect(downloaded).toBe(pdf.toString());
       expect(await page.evaluate(`document.querySelector('[data-testid=text-part] a[href="https://example.com/review"]') !== null`)).toBe(true);
+      // An attached picture opens full size from its name, over the whole window.
+      await page.evaluate('Array.from(document.querySelectorAll("[data-testid=artifact-launch]")).find(b => b.textContent.includes("preview.png")).click()');
+      await page.waitFor('document.querySelector("[data-testid=image-viewer] img")?.naturalWidth === 192');
+      await page.evaluate('Promise.all(document.getAnimations().map(a => a.finished.catch(() => {})))');
+      await page.screenshot(join(import.meta.dir, '.artifacts', `artifacts-viewer-${mobile ? 'phone' : 'desktop'}.png`));
+      await page.click('[data-testid=image-viewer-close]');
+      await page.waitFor('document.querySelector("[data-testid=image-viewer]") === null');
       await page.click(`a[data-file-path=${JSON.stringify(notesPath)}]`);
       await page.waitFor(mobile ? 'document.querySelector("[data-testid=chat-file] [role=alert]")' : 'document.querySelector("[data-testid=artifact-content] pre")');
       expect(await page.text('[data-testid=chat-file]')).toContain(mobile ? 'owner connection' : 'Ready for review.');
@@ -62,7 +70,7 @@ test('agent deliverables and file links open in chat on desktop and paired phone
         await page.waitFor('Array.from(document.querySelectorAll("[data-testid=artifact-content] img")).some(img => img.complete && img.naturalWidth > 0)');
         expect(await page.evaluate('document.querySelector("[data-testid=artifact-content] img").naturalWidth')).toBe(192);
         await page.screenshot(join(import.meta.dir, '.artifacts', 'artifacts-image-desktop.png'));
-        await page.evaluate('Array.from(document.querySelectorAll("[data-testid=artifact-preview]")).at(-1).click()');
+        await page.evaluate('Array.from(document.querySelectorAll("[data-testid=chat-file]")).find(card => card.textContent.includes("handoff.pdf")).querySelector("[data-testid=artifact-preview]").click()');
         await page.waitFor('document.querySelector("[data-testid=artifact-content] iframe")');
         // Chromium's PDF viewer paints asynchronously after the frame has loaded.
         await Bun.sleep(1500);
