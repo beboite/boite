@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
 import { threadTerminalId } from '../src/terminals.ts';
@@ -68,7 +68,9 @@ test('removal stops the family and hides it until undo, preserving history and p
   expect(harness.core.procs.liveCount(keptId)).toBeGreaterThan(0);
   expect(harness.core.journal.getThread(keptId)).not.toBeNull();
   expect(existsSync(marker)).toBe(true);
-  await expect(client.call('threads.get', { threadId })).rejects.toThrow('unknown thread');
+  await expect(await client.call('threads.get', { threadId }).catch(error => error)).toMatchObject({
+    rpc: { code: RpcErrorCode.NotFound, message: `unknown thread ${threadId}`, data: { threadId } },
+  });
   expect((await client.call('threads.list', { includeArchived: true })).some(t => t.id === threadId || t.id === childId)).toBe(false);
   expect((await client.call('threads.deleted', {})).map(t => t.id)).toEqual([threadId]);
   const history = harness.core.journal.listMessages(threadId);
@@ -90,12 +92,21 @@ test('a paired device cannot delete conversations and agent sessions stay manage
   const session = harness.core.sessions.exchange(grant, { name: 'phone', version: 'test' });
   const device = await connect(harness.url, session.token);
   try {
-    for (const method of ['threads.remove', 'threads.restore'] as const) await expect(device.call(method, { threadId })).rejects.toThrow();
-    await expect(device.call('threads.deleted', {})).rejects.toThrow();
+    // Match the RPC refusal directly: Bun's rejects matcher crashes on Windows
+    // when these Error objects follow the family-removal scenario. A successful
+    // response has no rpc error and fails the same assertion.
+    for (const method of ['threads.remove', 'threads.restore', 'threads.deleted'] as const) {
+      await expect(await device.call(method, method === 'threads.deleted' ? {} : { threadId }).catch(error => error)).toMatchObject({
+        rpc: { code: RpcErrorCode.Refused, message: `${method} is for the owner only`, data: { method, principal: 'session' } },
+      });
+    }
   }
   finally { device.close(); }
   const thread = harness.core.threads.require(threadId);
   harness.core.journal.putThread({ ...thread, agentSessionId: 'session-owned-by-agent' });
-  await expect(client.call('threads.remove', { threadId })).rejects.toThrow('persistent agent sessions');
+  await expect(await client.call('threads.remove', { threadId }).catch(error => error)).toMatchObject({
+    rpc: { code: RpcErrorCode.Refused, message: expect.stringContaining('persistent agent sessions'),
+      data: { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' } },
+  });
   expect(harness.core.journal.getThread(threadId)).not.toBeNull();
 });
