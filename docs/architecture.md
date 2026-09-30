@@ -126,9 +126,17 @@ Independent conversations start immediately, including those on the same
 account. Boite imposes no global or per-account turn count. Old saved launch
 limits are ignored. A turn can remain `queued` while its account is being
 configured or its team is paused. Each conversation accepts one in-flight turn.
-A process exists only while a turn runs, unless `warmProcessMinutes` lets a
-driver keep its own one for the next turn. Process CPU and memory guards remain
-independent of turn admission.
+A visible Claude or Codex conversation prepares its native process and session
+before a prompt is sent. Each owner or paired-device connection names one visible
+conversation through `threads.focus`; event subscriptions alone prepare nothing.
+Hidden pages, phone navigation and switching machines release that focus. The
+last viewer leaving starts a 30-second idle grace, extended by a longer
+`warmProcessMinutes` setting. Viewed sessions stay ready across completed turns,
+including when that setting is zero. Preparation submits no prompt, creates no
+turn or message, and uses the same traced spawns, account isolation and install
+leases as execution. Failures are logged and a later prompt can start normally.
+Other drivers retain their existing post-turn lifecycle. Process CPU and memory
+guards remain independent of turn admission.
 
 ## Delegation shares the scheduler
 

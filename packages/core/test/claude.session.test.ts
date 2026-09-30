@@ -21,6 +21,40 @@ import {
 useClaudeHarness();
 
 describe('claude driver', () => {
+  test('viewing initializes a prompt-free query and retains it across real turns at zero minutes', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-prepared')), answerEach('sess-prepared'));
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => queries.length === 1);
+    expect(calls[0]!.prompts).toEqual([]);
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(0);
+    expect(harness.core.journal.listMessages(threadId)).toHaveLength(0);
+    expect(await runTurn(client, threadId, 'first')).toBe('done');
+    expect(await runTurn(client, threadId, 'second')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect(calls[0]!.prompts).toEqual(['first', 'second']);
+    await client.call('threads.focus', { threadId: null });
+    await client.call('threads.focus', { threadId });
+    expect(await runTurn(client, threadId, 'back')).toBe('done');
+    expect(queries).toHaveLength(1);
+    await client.call('threads.archive', { threadId });
+    await waitFor(() => queries[0]!.closes > 0);
+  });
+
+  test('a prepared query applies the effort selected before the first prompt', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    scripted(fake => fake.emit(init('sess-prepared')), answerEach('sess-prepared'));
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => queries.length === 1);
+    await client.call('threads.update', { threadId, effort: 'high' });
+    expect(await runTurn(client, threadId, 'real prompt')).toBe('done');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.setters).toContain('effortLevel high');
+    expect(calls[0]!.prompts).toHaveLength(1);
+  });
+
   /** One plain turn on a thread set to `effort`, so the test can read what the SDK got. */
   async function turnWithEffort(effort: string | null): Promise<{ options: Options; prompt: string }> {
     const client = await harness.connect();

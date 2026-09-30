@@ -442,6 +442,7 @@ export function startServer(options: ServerOptions): RunningServer {
       drain(socket) { socket.data.connection.drain(); },
 
       close(socket) {
+        core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
         core.speech.cancel(socket.data.connection.id);
         clearTimeout(helloTimers.get(socket.data.connection));

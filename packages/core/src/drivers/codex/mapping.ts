@@ -1,5 +1,5 @@
 import type { ImageAttachment, NativeAgentUpdate, QuestionAnswer, QuestionOption, ToolStatus, Usage } from '@boite/contracts';
-import type { TurnContext } from '../types.ts';
+import type { SessionContext, TurnContext } from '../types.ts';
 import type { CodexItem, CodexQuestion, CodexThreadOpened, CodexTokenUsage, ToolView } from './protocol.ts';
 import { AGENT_OWN_MODEL, COMMAND_TOOL_NAME, FILE_CHANGE_TOOL_NAME, SLEEP_TOOL_NAME } from './protocol.ts';
 
@@ -178,7 +178,7 @@ export function servedOf(opened: CodexThreadOpened): { model: string | null; pro
  * descriptor's way of saying "whatever Codex is configured on", and Codex has
  * no model by that name, so it never reaches the wire.
  */
-export function modelOf(ctx: TurnContext): string | null {
+export function modelOf(ctx: SessionContext): string | null {
   const model = ctx.thread.model;
   if (model === null || model === AGENT_OWN_MODEL) return null;
   return model;
@@ -202,9 +202,10 @@ export function imageInputsOf(attachments: ImageAttachment[]): { type: 'image'; 
  * has no call that changes it on a live thread, so a change there is the one
  * thing that still drops the process.
  */
-export function sessionKey(ctx: TurnContext): string {
+export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
     cwd: ctx.thread.cwd,
+    generation: ctx.thread.sessionGeneration ?? 0,
     permissionMode: ctx.thread.permissionMode,
     accountId: ctx.account.id,
     providerId: ctx.provider.id,

@@ -2457,6 +2457,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
+  /** The conversation visible on this connection; null releases its prepared agent. No turn is started. */
+  'threads.focus': { params: { threadId: ThreadId | null }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };

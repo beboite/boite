@@ -3,13 +3,14 @@ import type { BackgroundTask } from '@boite/contracts';
 import { messageOf, unavailable } from '../../errors.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { TurnContext } from '../types.ts';
+import type { SessionContext } from '../types.ts';
 import { hookReport } from './hooks.ts';
 import { backgroundKind, commandsOf, restoredCost, subagentOf } from './mapping.ts';
 import { toolGate } from './permissions.ts';
 import { childEnv, liveSetup, PromptQueue, STDERR_MAX } from './query.ts';
 import type { ClaudeDeps, LiveSetup } from './query.ts';
 import type { ClaudeTurn } from './turn.ts';
+import { SessionRetention } from '../session-retention.ts';
 
 /** How long `stop()` lets the CLI end its turn before the abort signal takes it. */
 const STOP_GRACE_MS = 3_000;
@@ -47,6 +48,7 @@ export interface SessionHooks {
  * query-start option and therefore a new query (`sessionKey`).
  */
 export class ClaudeSession {
+  private readonly retention = new SessionRetention();
   private readonly abortController = new AbortController();
   private readonly prompts = new PromptQueue();
   private readonly timers = new Set<Timer>();
@@ -67,7 +69,7 @@ export class ClaudeSession {
   private linger: Timer | null = null;
 
   private query: Query | null = null;
-  private ctx: TurnContext;
+  private ctx: SessionContext;
   private sessionId: string | null;
   private idle: Timer | null = null;
   private started = false;
@@ -91,7 +93,7 @@ export class ClaudeSession {
     private warmMs: number,
     private readonly deps: ClaudeDeps,
     private readonly hooks: SessionHooks,
-    ctx: TurnContext,
+    ctx: SessionContext,
   ) {
     this.ctx = ctx;
     this.sessionId = ctx.sessionId;
@@ -107,7 +109,22 @@ export class ClaudeSession {
    * setting says: starting another would kill what it runs.
    */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && ((warmMs > 0 && this.warmMs > 0) || this.holding());
+    return !this.ended && !this.closing && this.key === key && (this.retention.reusable(warmMs, this.warmMs) || this.holding());
+  }
+
+  setViewed(viewed: boolean): void {
+    this.retention.setViewed(viewed);
+    this.clearIdle();
+    if (!viewed) this.afterTurns();
+  }
+
+  prepare(): Promise<void> {
+    if (!this.started) {
+      this.started = true;
+      this.applied = liveSetup(this.ctx.thread);
+      void this.run();
+    }
+    return this.ready;
   }
 
   /** Background work, or output of the CLI's own that no turn took yet: the CLI must stay. */
@@ -280,12 +297,12 @@ export class ClaudeSession {
 
   // -- the query ------------------------------------------------------------
 
-  private async run(first: ClaudeTurn): Promise<void> {
+  private async run(first?: ClaudeTurn): Promise<void> {
     try {
-      const options = this.options(first.ctx);
+      const options = this.options(this.ctx);
       const queryFn = await this.deps.loadQuery();
       // Loading the SDK is the first await of the session, so a stop can land here.
-      if (!first.isStopped && !this.closing) {
+      if (!first?.isStopped && !this.closing) {
         this.query = queryFn({ prompt: this.prompts.stream(), options });
         // The next turn's setters have something to talk to from here on.
         this.markReady();
@@ -351,7 +368,8 @@ export class ClaudeSession {
   private afterTurns(): void {
     if (this.closing || this.ended || this.waiting.length > 0) return;
     if (this.background.length > 0 || this.woken) return;
-    if (this.warmMs > 0) this.armIdle();
+    if (this.retention.viewed) return;
+    if (this.retention.idleMs(this.warmMs) > 0) this.armIdle();
     else this.close(null);
   }
 
@@ -466,7 +484,7 @@ export class ClaudeSession {
     this.idle = setTimeout(() => {
       this.idle = null;
       this.close(null);
-    }, this.warmMs);
+    }, this.retention.idleMs(this.warmMs));
     this.idle.unref?.();
   }
 
@@ -485,7 +503,7 @@ export class ClaudeSession {
     this.timers.add(timer);
   }
 
-  private options(ctx: TurnContext): Options {
+  private options(ctx: SessionContext): Options {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
