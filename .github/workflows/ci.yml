@@ -325,11 +325,14 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Repeat the native shutdown scenarios
         run: |
-          function Run-NativeProbe($file, $label) {
+          function Run-NativeProbe($file, $label, $pattern = '') {
             Write-Host "Native comparison: $label / $file"
             $out = Join-Path $env:RUNNER_TEMP "$label-$file.out"
             $err = Join-Path $env:RUNNER_TEMP "$label-$file.err"
-            $proc = Start-Process (Get-Command bun).Source -ArgumentList @('test', "packages/core/test/$file.test.ts") -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+
+            $arguments = @('test', "packages/core/test/$file.test.ts")
+            if ($pattern) { $arguments += @('--test-name-pattern', $pattern) }
+            $proc = Start-Process (Get-Command bun).Source -ArgumentList $arguments -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
             if (-not $proc.WaitForExit(30000)) {
               Stop-Process -Id $proc.Id -Force
               Write-Host 'Native subprocess exceeded 30 seconds'
@@ -339,20 +342,23 @@ jobs:
           }
           $jobsPath = 'packages/core/src/platform/windows/jobs.ts'
           $originalJobs = Get-Content $jobsPath -Raw
-          $procsPath = 'packages/core/src/procs.ts'
-          $originalProcs = Get-Content $procsPath -Raw
+          $memoryPath = 'packages/core/src/platform/windows/memory.ts'
+          $originalMemory = Get-Content $memoryPath -Raw
+          $journalPath = 'packages/core/src/journal.ts'
+          $originalJournal = Get-Content $journalPath -Raw
           for ($i = 1; $i -le 3; $i++) {
-            Run-NativeProbe 'thread-remove' "buffers-$i"
+            Run-NativeProbe 'thread-remove' "only-remove-$i" 'removal'
+            Run-NativeProbe 'thread-remove' "only-paired-$i" 'paired'
           }
+          Set-Content $memoryPath ($originalMemory.Replace('kernel32 ??= loadKernel32();', 'return null;'))
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-memory-ffi-$i" }
           Set-Content $jobsPath ($originalJobs.Replace('function ensureNative(): Native | null {', 'function ensureNative(): Native | null { return null;'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-ffi-$i" }
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-native-ffi-$i" }
           Set-Content $jobsPath $originalJobs
-          Set-Content $procsPath ($originalProcs.Replace('const usage = entry.usage();', 'const usage = null;'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-usage-$i" }
-          Set-Content $jobsPath ($originalJobs.Replace('function ensureNative(): Native | null {', 'function ensureNative(): Native | null { return null;'))
-          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-ffi-no-usage-$i" }
-          Set-Content $jobsPath $originalJobs
-          Set-Content $procsPath $originalProcs
+          Set-Content $memoryPath $originalMemory
+          Set-Content $journalPath ($originalJournal.Replace('this.db.close(false);', '/* diagnostic: keep sqlite open */'))
+          for ($i = 1; $i -le 3; $i++) { Run-NativeProbe 'thread-remove' "no-sqlite-close-$i" }
+          Set-Content $journalPath $originalJournal
 
   required:
     name: CI required
