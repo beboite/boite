@@ -39,7 +39,7 @@
           {#if windows.length}
             <span class="meters" class:stale>
               {#each windows as limit (`${limit.accountId}:${limit.id}`)}
-                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-busy={loading && !completed.includes(limit.accountId)} class:low={limit.usedPercent >= 80} class:empty={limit.usedPercent >= 100} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
+                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-busy={loading && !completed.includes(limit.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
               {/each}
             </span>
             <span class="caption">{stale ? strings.quotas.stale : resets.length ? reset(Math.min(...resets)) : strings.quotas.noReset}</span>
@@ -58,7 +58,7 @@
               <div class="window" class:low={limit.usedPercent >= 80}>
                 <span class="window-name">{quotaWindowName(limit.label)}</span>
                 <span class="window-left">{left(limit.usedPercent)}</span>
-                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:empty={limit.usedPercent >= 100}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
+                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:drained={limit.usedPercent >= 100}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
                 {#if limit.resetsAt}<span class="caption">{reset(limit.resetsAt)}</span>{/if}
               </div>
             {/each}
@@ -91,7 +91,7 @@
   .track { flex: 1; width: 0; min-width: 0; height: 4px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .track.low .fill { background: var(--color-live); }
-  .track.empty { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
+  .track.drained { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
   .summary :global(svg:last-child) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
   .expanded .summary > :global(svg) { transform: rotate(180deg); }
   /* Unfolded, each window is a name, what is left, its bar and its reset, lined up under the logo's column. */
