@@ -67,11 +67,14 @@
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
       <span class="text" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span>
-      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" aria-describedby="{uid}-memory-protection-hint" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={(event) => void store.saveSettings({memoryProtection: event.currentTarget.checked})} />
+      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" aria-describedby="{uid}-memory-protection-hint" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
+        const input = event.currentTarget;
+        if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
+      }} />
     </label>
     <p class="hint memory-explanation" id="{uid}-memory-protection-hint">{strings.settings.memoryProtectionHint}</p>
     <p class="hint memory-explanation">{strings.settings.memoryAutoHint}</p>
-    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve}); }}>
+    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
       <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
       <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
         {#if memoryEnabled && store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}
