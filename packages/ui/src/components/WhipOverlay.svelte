@@ -40,7 +40,7 @@
       pointerY = e.clientY;
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || !rope) return;
+      if (event.key !== 'Escape' || !rope || !whip.held) return;
       whip.held = false;
       event.preventDefault();
       event.stopImmediatePropagation();

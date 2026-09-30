@@ -11,6 +11,7 @@ phone navigation. Throw it to pick up the animated rope from Boite Legacy:
 it follows the pointer, cracks on a fast flick, and falls off screen on a click.
 On a phone, drag the rope with a finger and release to drop it. Escape also drops it.
 The footer control remains available to drop or rethrow while the previous rope falls.
+After release, Escape resumes its usual app action.
 The opening arc uses unstretched links and fits the available side of the screen.
 The physics and canvas load only when the experiment is enabled; the animation
 loop and audio context close when it is turned off.

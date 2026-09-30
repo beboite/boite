@@ -35,7 +35,7 @@ function toy() {
   return { button, click, tick, finish, onerror };
 }
 
-test('the footer can drop a held rope during its shake', async () => {
+test('the footer can drop during its shake and restore Escape shortcuts', async () => {
   const { button, click, finish } = toy();
   click();
   expect(whip.held).toBe(true);
@@ -43,6 +43,14 @@ test('the footer can drop a held rope during its shake', async () => {
   expect(button.getAttribute("aria-busy")).toBe("true");
   click();
   expect(whip.held).toBe(false);
+  const shortcut = vi.fn();
+  window.addEventListener('keydown', shortcut);
+  try {
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    flushSync(() => { window.dispatchEvent(escape); });
+    expect(shortcut).toHaveBeenCalledOnce();
+    expect(escape.defaultPrevented).toBe(false);
+  } finally { window.removeEventListener('keydown', shortcut); }
   finish();
   await vi.waitFor(() => expect(button.getAttribute("aria-busy")).toBe("false"));
   expect(button.disabled).toBe(false);

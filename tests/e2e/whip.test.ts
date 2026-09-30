@@ -77,6 +77,11 @@ async function rethrowFromControl() {
   await settled();
   await page.click(button);
   await page.waitFor(`document.querySelector('${button}').getAttribute('aria-pressed') === 'false'`);
+  expect(await page.evaluate(`(() => {
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(event);
+    return !event.defaultPrevented;
+  })()`)).toBe(true);
   // Real pointer clicks must reach the control above the falling canvas.
   expect(await page.evaluate(`!!document.querySelector('[data-testid=whip-canvas]')`)).toBe(true);
   await page.click(button);
