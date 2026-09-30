@@ -106,7 +106,8 @@ test('seven screens fit both languages and widths, without leaving the tour', as
         if (step !== 'profile' && step !== 'privacy') {
           expect(await page.evaluate(`(() => {
             const scene = document.querySelector('[data-testid=onboarding-scene]');
-            return scene.querySelector('.controls').getBoundingClientRect().top >= scene.querySelector('.stage').getBoundingClientRect().bottom;
+            const controls = scene.querySelector('.controls');
+            return getComputedStyle(controls).display === 'none' || controls.getBoundingClientRect().top >= scene.querySelector('.stage').getBoundingClientRect().bottom;
           })()`)).toBe(true);
         }
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
@@ -128,6 +129,7 @@ test('seven screens fit both languages and widths, without leaving the tour', as
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click('[data-testid=onboarding-dot-agents]');
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).length`)).toBe(0);
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid=onboarding-scene] .controls')).display`)).toBe('none');
   await capture('tour-reduced-motion.png');
 }, 120_000);
 
