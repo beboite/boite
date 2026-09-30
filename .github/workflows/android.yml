@@ -114,7 +114,7 @@ jobs:
             echo '::error::ANDROID_KEYSTORE or ANDROID_KEYSTORE_PASSWORD is unset: refusing to publish an unsigned APK' >&2
             exit 1
           fi
-          bt="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          bt=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
           ks="$RUNNER_TEMP/android.p12"
           out="$RUNNER_TEMP/apk/boite-$VERSION.apk"
           trap 'rm -f "$ks" "$RUNNER_TEMP/aligned.apk"' EXIT
