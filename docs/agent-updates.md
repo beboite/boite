@@ -76,6 +76,17 @@ package starts its binary through a Node script that sets
 Codex installation method` without it. The Windows descriptor runs that binary
 directly, so its two npm candidates set the variable themselves.
 
+An agent installed by npm on Linux or macOS updates through `npm install -g`,
+which writes under npm's configured prefix. That prefix is not always the one
+holding the copy Boite runs: Codex under `/opt/boite` with a system npm whose
+prefix is `/usr` would install a second copy in `/usr/lib/node_modules` and
+leave the old one first on PATH. When the program resolves into
+`<prefix>/lib/node_modules`, the core runs its updater with `npm_config_prefix`
+set to that prefix. Before it runs, the core checks that its user can write the
+package's parent directory and `<prefix>/bin`. When it cannot, the update fails
+at once with the prefix and the directory it cannot write, without running the
+updater.
+
 `latestNpm` and `latestArgs` exclude each other. With neither, the installed
 version is listed, no update is announced and `Run its updater` stays on the
 row. Claude, Codex, OpenCode, Grok and pi ship with a block that names its
@@ -93,10 +104,11 @@ A check reads two agents at a time. Its readings land in
 `<dataDir>/harness-versions.json`, so a restart shows the last reading and its
 notices without running any agent. At start the core reads each managed agent
 again, which spawns nothing, so a Boite build that pins a newer release offers
-it at once; a kept row whose agent is gone or changed route is dropped. An
-agent that updates itself keeps its kept reading until the next check. The
-first automatic check comes ten minutes
-after start, or six hours after the kept reading when that is later, and waits
+it at once; a kept row whose agent is gone, changed route or now resolves to
+another program is dropped. An agent that updates itself keeps its kept reading until
+the next check. The first automatic check comes ten minutes after start, or six
+hours after the kept reading when that is later, unless a row was dropped
+because its program moved, which brings the check back to ten minutes, and waits
 ten more minutes while any turn is queued, running or waiting. A check started
 from the card counts: the timer does not read again within six hours of it.
 
@@ -122,7 +134,10 @@ notice at once, without waiting for the next check.
   the descriptor pins, since a Boite release may pin an older, working one.
 - An updater that exits with zero and leaves the version unchanged while a
   newer release is known is reported as failed, with the version it still
-  reports. With no newer release known, the same run reads `Up to date`.
+  reports and the last line of its output that names a failure or a skip.
+  `opencode upgrade` exits with zero on every failure, so that line is the
+  only reason it gives. With no newer release known, the same run reads
+  `Up to date`.
 - Skips live in `<dataDir>/harness-updates.json`. An unreadable file skips
   nothing and says so in the core log.
 - The methods are owner-only. A paired phone neither sees nor starts an update.
@@ -139,12 +154,13 @@ hours, and updates each agent whose newest release it can read once none of
 its turns is in flight. Turn it on
 from Settings, Providers while that machine is the selected one. On Linux and
 macOS the shipped agents have no managed release, so they update through the
-self route, as the user the core runs as: an agent installed system-wide by
-root fails with its updater's own permission error, which the notice shows.
+self route, as the user the core runs as. An npm install that user cannot write,
+such as one root made under `/usr` or `/opt`, fails without running its
+updater and names the directory. Another updater fails with its own permission
+error, which the notice shows.
 
-For an npm install that fails with `EACCES` or `EPERM`, install the agent under
-the core user's own prefix. Run these commands as that user, then place
-`$HOME/.local/bin` before the system agent directory in the core service's
+To fix that, install the agent under the core user's own prefix. Run these
+commands as that user, then place `$HOME/.local/bin` before the system agent directory in the core service's
 `PATH`:
 
 ```sh
@@ -154,7 +170,9 @@ npm install -g @anthropic-ai/claude-code @openai/codex
 "$HOME/.local/bin/codex" --version
 ```
 
-Restart the core after its active turns finish, then check for updates again.
+Restart the core after its active turns finish. The reading kept from the old
+copy is dropped, since the program moved, and the check runs ten minutes after
+start; `Check for updates` reads at once.
 Installing a second copy without changing the service's `PATH` leaves the old
 copy selected. A remote core owns these installations even when the notice is
 displayed by a desktop client.

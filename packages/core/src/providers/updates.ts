@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
@@ -6,6 +7,7 @@ import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
 import { notFound, refused } from '../errors.ts';
 import type { InstallOutcome } from './install.ts';
+import { npmInstallOf, unwritableDir } from './npm.ts';
 import { profileFor, resolveCommand } from './resolve.ts';
 import { forgetWhich } from './which.ts';
 
@@ -72,12 +74,16 @@ interface Entry {
   state: HarnessUpdate['state'];
   message: string | null;
   checkedAt: number | null;
+  /** The program this reading came from. Null in a reading kept by an older build. */
+  program: string | null;
 }
 
 interface Target {
   descriptor: ProviderDescriptor;
   profile: OsProfile;
   route: HarnessUpdate['route'];
+  /** The program the route resolves to now, as a person would recognise it. */
+  program: string;
 }
 
 /** Reads a stream to its end, keeping its last OUTPUT_MAX_BYTES, so a chatty program never blocks on a full pipe. */
@@ -104,6 +110,21 @@ function failureSummary(stdout: string, stderr: string): string | undefined {
   return output.find((line) => /\berror:|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
 }
 
+/**
+ * Why an updater that exited with zero left its version where it was, in its
+ * own words. `opencode upgrade` reports every failure and every skip this way,
+ * through a prompt library whose frame falls back to ASCII letters (`x`, `o`)
+ * when its output is not a Unicode terminal, and closes with `Done`.
+ */
+function stuckReason(output: string): string | undefined {
+  const lines = stripVTControlCharacters(output).split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/^[xoT]\s{2,}/, '').trim())
+    .filter((line) => /[\p{L}\p{N}]/u.test(line) && !/^done\.?$/i.test(line));
+  // An errno such as EBUSY or EPERM counts in capitals only: `exit` is no error code.
+  const reason = lines.findLast((line) => /fail|error|skipped|unknown|denied|cannot|could not|unable/i.test(line) || /\bE[A-Z]{3,}\b/.test(line)) ?? lines.at(-1);
+  return reason?.slice(0, 300);
+}
+
 async function npmLatest(name: string): Promise<string> {
   const response = await fetch(`https://registry.npmjs.org/${name.replaceAll('/', '%2F')}/latest`, {
     signal: AbortSignal.timeout(VERSION_TIMEOUT_MS),
@@ -113,6 +134,45 @@ async function npmLatest(name: string): Promise<string> {
   const body = (await response.json()) as { version?: unknown };
   if (typeof body.version !== 'string') throw new Error(`the npm registry named no version for ${name}`);
   return body.version;
+}
+
+/**
+ * Which copy of an agent a reading belongs to: the program with its links
+ * followed, so `~/.local/bin/claude` moved from an npm install to a native one
+ * is another program even though its path did not change.
+ */
+function programIdentity(program: string): string {
+  try {
+    return realpathSync(program);
+  } catch {
+    return program;
+  }
+}
+
+/** The account the core runs as, for a message about what it may write. */
+function whoRuns(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return 'the core\'s user';
+  }
+}
+
+/**
+ * The environment an agent's own program runs under here. An npm install is
+ * updated by `npm install -g`, which writes under npm's configured prefix: it
+ * is pointed at the prefix the running copy lives in, whatever the user's npm
+ * configuration names, so the updater replaces the copy Boite runs.
+ */
+function updaterEnv(program: string, updateEnv: Record<string, string>): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  const install = npmInstallOf(program);
+  for (const [key, value] of Object.entries(process.env)) {
+    if (install !== null && key.toLowerCase() === 'npm_config_prefix') continue;
+    env[key] = value;
+  }
+  if (install !== null) env['npm_config_prefix'] = install.prefix;
+  return { ...env, ...updateEnv };
 }
 
 /**
@@ -154,17 +214,26 @@ export class HarnessUpdates {
    * Brings the readings kept from the last run up to this build without
    * spawning anything. A managed row is read again at once, since its read is
    * the release on disk and the version this Boite pins, and a new build may
-   * pin a newer one. A row whose provider lost its route, or took another, is
-   * dropped. A 'self' row keeps its reading until the scheduled check, which
-   * has to run the agent to read it.
+   * pin a newer one. A row whose provider lost its route, took another, or now
+   * resolves to another program is dropped. A 'self' row keeps its reading
+   * until the scheduled check, which has to run the agent to read it. A 'self'
+   * row dropped because its program moved leaves nothing to show for that
+   * agent, so the last check stops counting: the first one comes at the usual
+   * ten minutes rather than up to six hours later.
    */
   refreshRestored(): void {
     let changed = false;
+    let moved = false;
     for (const [id, entry] of [...this.entries]) {
       if (entry.state === 'updating' || entry.state === 'checking') continue;
-      if (this.targetOf(id)?.route !== entry.route) {
+      const target = this.targetOf(id);
+      if (target?.route !== entry.route) {
         this.entries.delete(id);
         changed = true;
+      } else if (entry.program !== null && target.program !== entry.program) {
+        this.entries.delete(id);
+        changed = true;
+        moved ||= entry.route === 'self';
       }
     }
     for (const summary of this.core.providers.list().loaded) {
@@ -175,9 +244,10 @@ export class HarnessUpdates {
       if (target?.route !== 'managed' || previous?.state === 'updating' || previous?.state === 'checking') continue;
       const read = this.readManaged(target);
       if (previous !== undefined && previous.current === read.current && previous.latest === read.latest) continue;
-      this.entries.set(id, { route: 'managed', ...read, state: 'idle', message: null, checkedAt: Date.now() });
+      this.entries.set(id, { route: 'managed', ...read, state: 'idle', message: null, checkedAt: Date.now(), program: target.program });
       changed = true;
     }
+    if (moved) this.lastCheckAt = null;
     if (!changed) return;
     this.writeReadings();
     this.emit();
@@ -221,8 +291,9 @@ export class HarnessUpdates {
     // would be written over as idle, and a second updater could then start.
     if (this.checking !== null) await this.checking.catch(() => {});
     let entry = this.entries.get(providerId);
-    // A reading kept from before a restart may name a route this machine no longer takes.
-    if (entry === undefined || entry.route !== target.route) {
+    // A reading kept from before a restart may name a route this machine no longer
+    // takes, or a program PATH no longer finds.
+    if (entry === undefined || entry.route !== target.route || (entry.program !== null && entry.program !== target.program)) {
       await this.check();
       entry = this.entries.get(providerId);
     }
@@ -333,9 +404,9 @@ export class HarnessUpdates {
       this.core.providers.installs.installedVersion(providerId) !== null &&
       command !== null &&
       inside(managedDir, resolve(command.executable));
-    if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed' };
+    if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed', program: programIdentity(command.shown) };
     // A download in flight belongs to the install card, not to this list.
-    if (profile.update !== undefined && command !== null) return { descriptor, profile, route: 'self' };
+    if (profile.update !== undefined && command !== null) return { descriptor, profile, route: 'self', program: programIdentity(command.shown) };
     return null;
   }
 
@@ -357,6 +428,7 @@ export class HarnessUpdates {
         state: 'checking',
         message: null,
         checkedAt: previous?.checkedAt ?? null,
+        program: target.program,
       });
     }
     this.emit();
@@ -368,7 +440,7 @@ export class HarnessUpdates {
         try {
           const read = await this.read(target);
           if (this.entries.get(id)?.state === 'updating') continue;
-          this.entries.set(id, { route: target.route, ...read, state: 'idle', message: null, checkedAt: Date.now() });
+          this.entries.set(id, { route: target.route, ...read, state: 'idle', message: null, checkedAt: Date.now(), program: target.program });
         } catch (error) {
           const previous = this.entries.get(id);
           if (previous?.state === 'updating') continue;
@@ -379,6 +451,7 @@ export class HarnessUpdates {
             state: 'failed',
             message: error instanceof Error ? error.message : String(error),
             checkedAt: Date.now(),
+            program: target.program,
           });
         }
       }
@@ -424,7 +497,7 @@ export class HarnessUpdates {
     if (command === null) throw new Error(`${target.descriptor.name} is not on this machine any more`);
     const spawned = this.core.procs.spawnPiped(updateThreadId(target.descriptor.id), command.executable, [...command.prefix, ...args], {
       cwd: this.core.dataDir,
-      env: { ...process.env, ...command.updateEnv },
+      env: updaterEnv(command.shown, command.updateEnv),
     });
     spawned.proc.stdin.end();
     const readers = [spawned.proc.stdout.getReader(), spawned.proc.stderr.getReader()] as const;
@@ -461,13 +534,18 @@ export class HarnessUpdates {
   private async runUpdate(target: Target, before: Entry): Promise<void> {
     const id = target.descriptor.id;
     try {
+      let said = '';
       if (target.route === 'managed') await this.runManaged(target);
-      else await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+      else {
+        this.assertWritable(target);
+        said = await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+      }
       // An updater may have moved the program on PATH.
       forgetWhich();
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
+      const reason = stuck ? stuckReason(said) : undefined;
       // An updater that checks by itself and exits cleanly has just named its
       // newest release: the one it now reports, moved or not. Without this the
       // row would offer the same run again, as if nothing had happened.
@@ -476,18 +554,35 @@ export class HarnessUpdates {
         route: target.route,
         ...confirmed,
         state: stuck ? 'failed' : 'idle',
-        message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}` : null,
+        message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}${reason === undefined ? '' : `: ${reason}`}` : null,
         checkedAt: Date.now(),
+        program: this.targetOf(id)?.program ?? target.program,
       });
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
       forgetWhich();
       this.core.bus.emit('providers.updated', this.core.providers.list());
     } catch (error) {
-      this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now() });
+      this.entries.set(id, { ...before, state: 'failed', message: error instanceof Error ? error.message : String(error), checkedAt: Date.now(), program: target.program });
     }
     this.writeReadings();
     this.emit();
+  }
+
+  /**
+   * Refuses, before anything runs, an npm install this user cannot replace: a
+   * copy root installed system-wide would otherwise run its updater for nothing
+   * and bury the one fact that matters in npm's output.
+   */
+  private assertWritable(target: Target): void {
+    const install = npmInstallOf(target.program);
+    const denied = install === null ? null : unwritableDir(install);
+    if (install === null || denied === null) return;
+    const user = whoRuns();
+    throw new Error(
+      `${target.descriptor.name} is installed under ${install.prefix}, and ${user} cannot write ${denied}, so its updater cannot replace it. ` +
+        `Install it under an npm prefix ${user} owns and put that prefix's bin directory first on the core's PATH.`,
+    );
   }
 
   /**
@@ -628,6 +723,7 @@ export class HarnessUpdates {
           state: failed ? 'failed' : 'idle',
           message: failed ? text(raw['message']) : null,
           checkedAt: typeof raw['checkedAt'] === 'number' ? raw['checkedAt'] : null,
+          program: text(raw['program']),
         });
       }
     } catch (error) {

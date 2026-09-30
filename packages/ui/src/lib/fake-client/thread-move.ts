@@ -93,11 +93,13 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
   const cwd = placed?.path
     ?? (target.kind === 'drafts' ? fakeDraftFolder(target.path, thread.title, new Date(ctx.now()), new Set([...ctx.threads.values()].map((one) => one.cwd))) : target.path);
   const branch = placed?.branch ?? null;
+  const branchNamingPending = placed?.namingPending ?? false;
   const source = ctx.projects.find((p) => p.id === thread.projectId);
   const from: MoveEnd = { projectId: thread.projectId ?? '', name: source?.name ?? thread.projectId ?? '', cwd: thread.cwd };
   const to: MoveEnd = { projectId: target.id, name: target.name, cwd };
   let answer = toSummary(thread);
   for (const one of familyOf(ctx, thread)) {
+    one.branchNamingPending = branchNamingPending;
     if ((one.background?.length ?? 0) > 0 && stopBackground === true) ctx.setBackground(one, []);
     // The core keeps only Codex's session, whose resume takes the new folder.
     const protocol = ctx.providers.find((p) => p.id === one.providerId)?.protocol;
@@ -131,9 +133,9 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
 }
 
 /** A project named by id, by name (any case) or by its folder, as the core resolves `agent.move.project`. */
-function resolveProject(ctx: FakeContext, threadId: ThreadId, query: string): Project {
+export function resolveProject(ctx: FakeContext, threadId: ThreadId, query: string, method = 'agent.move'): Project {
   const expected = 'the id, name or absolute folder of a project added to Boite';
-  if (typeof query !== 'string' || query.trim().length === 0) throw refuse('agent.move.project must name a project', { threadId, field: 'project', expected });
+  if (typeof query !== 'string' || query.trim().length === 0) throw refuse(`${method}.project must name a project`, { threadId, field: 'project', expected });
   const wanted = query.trim();
   const fold = (text: string): string => text.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
   const byId = ctx.projects.find((p) => p.id === wanted);
@@ -218,6 +220,10 @@ export function threadMoveMethods(ctx: FakeContext) {
       }
       forgetWaiting(ctx, thread);
       return announce(ctx, thread);
+    },
+    'agent.projects': async (params) => {
+      const own = ctx.thread(params.threadId).projectId;
+      return ctx.projects.filter((p) => p.archived !== true).map((p) => ({ id: p.id, name: p.name, path: p.path, repository: p.repository === true, drafts: p.kind === 'drafts', current: p.id === own }));
     },
     'agent.move': async (params): Promise<AgentMove> => {
       const { threadId } = params;

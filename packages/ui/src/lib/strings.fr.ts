@@ -425,6 +425,7 @@ export const fr: Translation = {
     projectMenu: 'Actions du projet',
     copyPath: 'Copier le chemin',
     manageProject: 'Gérer le projet',
+    worktreeDefault: 'Worktree par défaut',
     backToProjectMenu: 'Retour',
     viewArchivedThreads: 'Voir les conversations archivées',
     copied: 'Copié',
@@ -468,11 +469,9 @@ export const fr: Translation = {
     delete: 'Supprimer',
     deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
     deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
-    archiveTitle: 'Archiver cette conversation ?',
     archivedToast: '« {title} » archivée',
     undo: 'Annuler',
     undoHint: 'Annuler (Ctrl+Z)',
-    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Conversations archivées, dans les Réglages, ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 
@@ -756,6 +755,9 @@ export const fr: Translation = {
     moveShow: "Voir ce qui a été dit à l'agent",
     moveHide: "Masquer ce qui a été dit à l'agent",
     movedByAgent: "Déplacé par l'agent vers {project}",
+    startedByAgent: "Lancé par l'agent de {title} dans {project}",
+    agentStartedThread: "L'agent a lancé {title} dans {project}",
+    openLinkedThread: 'Ouvrir ce thread',
     hookBlocked: 'Un hook a bloqué ce message',
     hookStopped: 'Un hook a arrêté le tour',
     hookSays: '{label} : {message}',
@@ -973,6 +975,7 @@ export const fr: Translation = {
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
     placeholderNew: 'Que voulez-vous faire ?',
+    placeholderOffline: '{machine} est hors ligne : les messages attendent ici et partent à sa reconnexion',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé après le prochain outil, ou à la fin du tour',
@@ -1624,8 +1627,9 @@ export const fr: Translation = {
   experiments: {
     whip: {
       title: 'Fouet',
-      hint: 'Un bouton en bas à gauche secoue la fenêtre Boite à chaque coup. Dans un navigateur ou une fenêtre maximisée, il secoue toute l’interface. Respecte la réduction des animations',
-      action: 'Fouetter'
+      hint: 'Un fouet animé suit le pointeur ou le doigt. Un geste vif le fait claquer, un clic ou un appui le lâche. L’icône se trouve avec les commandes du bas. Respecte la réduction des animations',
+      action: 'Sortir le fouet',
+      drop: 'Lâcher le fouet'
     },
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
@@ -1684,6 +1688,7 @@ export const fr: Translation = {
     unsupported: "Ce fournisseur n'expose pas ses quotas d'abonnement ici.",
     disabled: 'Le suivi des quotas est désactivé pour ce compte.',
     loading: 'Lecture des limites du fournisseur',
+    slowHint: "Antigravity peut mettre jusqu'à deux minutes à répondre.",
     tracked: 'Comptes suivis',
     trackedHint: "Boite lit les limites des comptes activés ici. Un compte désactivé n'est jamais interrogé.",
     providers: 'Gérer les fournisseurs',

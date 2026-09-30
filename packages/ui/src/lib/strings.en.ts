@@ -419,6 +419,7 @@ export const strings = {
     projectMenu: 'Project actions',
     copyPath: 'Copy path',
     manageProject: 'Manage project',
+    worktreeDefault: 'Worktree by default',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     copied: 'Copied',
@@ -469,12 +470,10 @@ export const strings = {
     delete: 'Delete',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
-    archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
     archivedToast: 'Archived "{title}"',
     undo: 'Undo',
     undoHint: 'Undo (Ctrl+Z)',
-    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 
@@ -792,6 +791,11 @@ export const strings = {
     moveHide: 'Hide what the agent was told',
     /** A line of the timeline: the agent moved its own thread with `boite thread move`. */
     movedByAgent: 'Moved by the agent to {project}',
+    /** Above the first prompt of a thread another thread's agent started with `boite thread new`. */
+    startedByAgent: 'Started by the agent of {title} in {project}',
+    /** A line of the starting thread's timeline: its agent started another thread. */
+    agentStartedThread: 'The agent started {title} in {project}',
+    openLinkedThread: 'Open this thread',
     /** One of the user's own hooks ended the turn (`part.type === 'hook'`). */
     hookBlocked: 'A hook blocked this message',
     hookStopped: 'A hook stopped the turn',
@@ -1022,6 +1026,7 @@ export const strings = {
     placeholderNoProject: 'Message the agent',
     /** A new conversation, before anything is sent. */
     placeholderNew: 'What do you want to do?',
+    placeholderOffline: '{machine} is offline: messages wait here and go out when it reconnects',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent after the next tool, or when the turn ends',
@@ -1690,8 +1695,9 @@ export const strings = {
   experiments: {
     whip: {
       title: 'Whip',
-      hint: 'A button at the bottom left shakes the Boite window with each hit. In a browser or maximized window, it shakes the whole interface. Respects reduced motion',
-      action: 'Whip'
+      hint: 'An animated whip follows your pointer or finger. Flick to crack it, click or tap to let go. The icon sits with the bottom controls. Respects reduced motion',
+      action: 'Throw the whip',
+      drop: 'Drop the whip'
     },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },
@@ -1752,6 +1758,7 @@ export const strings = {
     unsupported: 'This provider does not expose subscription quotas here.',
     disabled: 'Quota monitoring is off for this account.',
     loading: 'Reading provider limits',
+    slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite reads the limits of the accounts switched on here. An account switched off is never asked.',
     providers: 'Manage providers',

@@ -37,7 +37,7 @@
     onpick: (patch: PickPatch) => void;
   } = $props();
 
-  /** Past this many models the column stops being a plain scroll and gets a search field. */
+  /** Long lists get prefix groups and a bounded first page. */
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
@@ -47,7 +47,7 @@
   let menu = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
-  /** What the model column is filtered on; empty while the list is short. */
+  /** Filters model names and ids, including legacy entries. */
   let modelQuery = $state('');
   /** The provider whose column is shown: the choice's until another tile is clicked. */
   let shownProviderId = $state<string | null>(null);
@@ -94,6 +94,8 @@
   });
   let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
+  /** No answer yet for this instance: the descriptor's list would be replaced once it lands. */
+  let pending = $derived(shown ? store.modelsPending(shown.id, shownAccountId) : false);
 
   async function refreshModels() {
     if (favoritesOpen) {
@@ -108,8 +110,8 @@
   }
 
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
-  // core reads it from one short-lived agent process the first time the picker
-  // shows that instance, and the answer stands for the rest of the session.
+  // core reads it from one short-lived agent process. Reopening also refreshes
+  // a catalog whose cached answer has expired.
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
@@ -152,9 +154,9 @@
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
 
   // An ACP agent can list hundreds of models (OpenCode answered 534 here), and a
-  // plain scroll is useless at that length: past twelve the column gets a search
-  // field and the matches are grouped by the `provider/` prefix of their id.
-  let searchable = $derived(shownModels.length > SEARCH_FROM);
+  // plain scroll is useless at that length: group by the `provider/` prefix.
+  let grouped = $derived(shownModels.length > SEARCH_FROM);
+  let searchable = $derived(!favoritesOpen && !needsInstall);
   let words = $derived(
     searchable ? modelQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0) : []
   );
@@ -165,17 +167,17 @@
     return words.every((word) => hay.includes(word));
   }
 
-  /** The descriptor's default: on an ACP provider it is "let the agent choose", so it never filters out. */
+  /** A matching default stays above long lists; filtering never changes the selection. */
   let pinnedModel = $derived.by((): ModelInfo | null => {
-    if (!searchable || !shown) return null;
+    if (!grouped || !shown) return null;
     const id = store.defaultModelOf(shown);
-    return shownModels.find((m) => m.id === id) ?? null;
+    return shownModels.find((m) => m.id === id && matches(m)) ?? null;
   });
 
   let filteredCurrent = $derived(
-    searchable ? currentModels.filter((m) => m.id !== pinnedModel?.id && matches(m)) : currentModels
+    (words.length ? shownModels : currentModels).filter((m) => m.id !== pinnedModel?.id && matches(m))
   );
-  let filteredLegacy = $derived(searchable ? legacyModels.filter(matches) : legacyModels);
+  let filteredLegacy = $derived(words.length ? [] : legacyModels);
 
   // Nothing typed on a long list: its first rows, the current model and a show-all row.
   let expandedFor = $state<string | null>(null);
@@ -186,9 +188,9 @@
     return shown !== null && choice?.providerId === shown.id && choice?.model === model.id;
   }
 
-  // A column that opens on a long list is a column you are about to type in.
+  // Desktop can type immediately. Phones keep their keyboard closed until tapped.
   $effect(() => {
-    if (!popover.open || !searchable) return;
+    if (!popover.open || !searchable || window.matchMedia('(max-width: 720px)').matches) return;
     searchBox?.focus();
   });
 
@@ -381,9 +383,17 @@
               {strings.composer.installInSettings}
             </button>
           {/if}
+        {:else if pending}
+          <!-- The first answer is on its way: the descriptor's list would jump
+               to another one, so the column holds placeholders until it lands.
+               The reading line comes first, where a short phone column still shows it. -->
+          <p class="none subtle probing first" data-testid="picker-probing">{strings.composer.probing}</p>
+          <div class="skeletons" aria-hidden="true">
+            {#each [0, 1, 2] as index (index)}<span class="skeleton"></span>{/each}
+          </div>
         {:else}
-          {#if searchable}
-            <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
+          <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
+          {#if grouped}
             {#if pinnedModel}
               {@render modelRow(pinnedModel)}
             {/if}
@@ -398,13 +408,13 @@
             {#if capped}
               <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}>{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</button>
             {/if}
-            {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
-              <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
-            {/if}
           {:else}
-            {#each currentModels as model (model.id)}
+            {#each filteredCurrent as model (model.id)}
               {@render modelRow(model)}
             {/each}
+          {/if}
+          {#if !pinnedModel && filteredCurrent.length === 0 && modelQuery.trim() !== ''}
+            <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
           {/if}
 
           {#if filteredLegacy.length > 0}
@@ -433,7 +443,7 @@
       </div>
     </div>
   {/if}
-  {#if popover.shown && legacy.shown && !favoritesOpen && filteredLegacy.length > 0}
+  {#if popover.shown && legacy.shown && !favoritesOpen && !pending && filteredLegacy.length > 0}
     <div class="popover legacy-menu" class:closing={legacy.closing} role="menu" tabindex="-1" data-testid="picker-legacy-menu" aria-label={strings.composer.legacyModels} use:legacy.attach onanimationend={legacy.end} use:floating={{ anchor: () => menu ?? null, side: 'right' }} {onkeydown}>
       <div class="column models">
         <div class="head"><button type="button" class="icon small legacy-back" aria-label={strings.settings.back} onclick={() => legacy.hide()}><ChevronRight size={14} style="transform: rotate(180deg)" /></button><span class="provider-name">{strings.composer.legacyModels}</span></div>
@@ -660,11 +670,28 @@
     font-size: var(--text-sm);
   }
 
-  /* The agent is being asked for its models; the descriptor's stay above. */
+  /* The agent is being asked for its models; on a refresh the listed ones stay above. */
   p.probing {
     margin-top: 2px;
     font-size: var(--text-sm);
   }
+  p.probing.first { margin: 0 0 4px; }
+
+  /* Placeholder rows while the first answer is read, the size of a model row. */
+  .skeletons { display: flex; flex-direction: column; gap: 1px; }
+  .skeleton {
+    display: block;
+    min-height: var(--row);
+    margin: 0 8px;
+    border-radius: var(--radius-sm);
+    background: var(--color-hover);
+    animation: skeleton-pulse calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
+  }
+  .skeleton:nth-child(2) { margin-right: 25%; }
+  .skeleton:nth-child(3) { margin-right: 40%; }
+  @keyframes skeleton-pulse { to { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+  :global(html[data-motion='reduced']) .skeleton { animation: none; }
 
   @media (max-width: 720px) {
     .popover {

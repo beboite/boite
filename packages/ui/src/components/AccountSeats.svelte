@@ -40,7 +40,7 @@
   function seatTitle(seat: Account): string {
     if (seatHeld(seat)) return strings.composer.lockedHint;
     const reason = seatReason(seat);
-    return reason === null ? (seat.identity ?? seat.label) : `${seat.label}, ${reason}`;
+    return reason === null ? seat.label : `${seat.label}, ${reason}`;
   }
 
   function pickSeat(seat: Account) {

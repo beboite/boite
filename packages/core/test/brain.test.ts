@@ -164,6 +164,14 @@ test('detects instructions, YAML skills and both plugin manifests; reports malfo
   expect(result.problems).toEqual([]);
 });
 
+test('a skill folder is not searched for further skills, however deep its assets go', () => {
+  file(join(root, 'skills/video/SKILL.md'), '---\nname: video\ndescription: Render videos.\n---\n');
+  file(join(root, 'skills/video/assets/corpus/tier-3/remotion/src/components/scenes/deep/SKILL.md'), '---\nname: fixture\ndescription: A test fixture.\n---\n');
+  const result = scanBrain(root);
+  expect(result.entries.map(e => e.name)).toEqual(['video']);
+  expect(result.problems).toEqual([]);
+});
+
 test('junction cycles are bounded and outside catalog links are refused without reading their files', () => {
   mkdirSync(join(root, 'skills'));
   symlinkSync(root, join(root, 'skills/cycle'), process.platform === 'win32' ? 'junction' : 'dir');

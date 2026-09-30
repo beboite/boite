@@ -32,6 +32,10 @@ export const USAGE = `usage: boite <command> [args] [--json]
   where                          this thread, project, cwd, branch
   thread move <project>          move this thread to another project (name,
                                  id or folder) when this turn ends
+  thread new <project> <brief>   start a thread in a project; its first answer
+                                 comes back as an agent message
+                                 (--worktree, --title <title>)
+  projects                       the projects the owner added
   attach <file>                  publish a file in chat, up to 5 MB (experimental)
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
@@ -107,10 +111,12 @@ interface Parsed {
   dataDir: string | undefined;
   channel: Channel;
   requestId?: string;
+  worktree: boolean;
+  title?: string;
 }
 
 function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, thread: undefined, dataDir: undefined, channel: 'stable' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const next = (): string => {
@@ -122,6 +128,8 @@ function parse(argv: string[]): Parsed {
     if (arg === '--json') parsed.json = true;
     else if (arg === '--request-id') parsed.requestId = next();
     else if (arg === '--multiple') parsed.multiple = true;
+    else if (arg === '--worktree') parsed.worktree = true;
+    else if (arg === '--title') parsed.title = next();
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -318,8 +326,30 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       );
       return;
     }
+    case 'projects': {
+      const projects = await client.call('agent.projects', { threadId });
+      print(projects.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.path}${p.current ? ' (this thread)' : ''}${p.repository ? '' : ' no-git'}${p.drafts ? ' drafts' : ''}`), projects);
+      return;
+    }
     case 'thread': {
-      const action = want(0, 'move');
+      const action = want(0, 'move or new');
+      if (action === 'new') {
+        const project = want(1, 'a project name, id or folder (boite projects lists them)');
+        const prompt = rest.slice(2).join(' ').trim();
+        if (prompt.length === 0) throw new Usage('thread new needs a brief after the project');
+        const spawned = await client.call('agent.spawn', {
+          threadId, project, prompt, requestId: parsed.requestId ?? crypto.randomUUID(),
+          ...(parsed.title === undefined ? {} : { title: parsed.title }), ...(parsed.worktree ? { worktree: true } : {}),
+        });
+        print([
+          `thread: ${spawned.thread.id}`, `title: ${spawned.thread.title}`, `project: ${spawned.project}`, `cwd: ${spawned.thread.cwd}`,
+          ...(spawned.thread.branch ? [`branch: ${spawned.thread.branch}`] : []),
+          `agent: ${spawned.thread.providerId} ${spawned.thread.model ?? 'default'}`,
+          `address: ${spawned.address.coreId}/${spawned.address.threadId}`,
+          'Its first answer comes back to you as an agent message; do not poll. boite agents send <address> <text> steers it.',
+        ], spawned);
+        return;
+      }
       if (action !== 'move') throw new Usage(`thread: unknown action ${action}`);
       const project = rest.slice(1).join(' ').trim();
       if (project.length === 0) throw new Usage('thread move needs a project name, id or folder');

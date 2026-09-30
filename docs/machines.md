@@ -170,6 +170,17 @@ alone, even if two of those 200 came from one branch. At most two commands run a
 runs through the process registry under `pull-request:<threadId>`. Cards in a
 folded project wait for the unfold before they ask.
 
+When a machine drops, its cards stay listed, greyed, and still open. The client
+asks nothing of the core then: it shows the timeline it last read for that
+thread, or an empty one for a thread it never opened. Sending in such a thread
+puts the prompt in the thread's queue, which the device keeps with the unsent
+drafts, and the composer says the machine is offline. When the machine is back,
+the reconnect reopens the thread, reads its team, workflows and coordination,
+and the queue goes out as one turn, or waits behind a turn the core was still
+running. A new thread needs the core, so a
+draft keeps its text until the machine returns. A machine offline since the app
+started has no cards to open: the client keeps no copy of the thread list.
+
 A lookup the user did not ask for fails quietly, and once `gh` is missing or
 signed out the core stops starting it. The thread menu's refresh reads the
 repository again, tries `gh` again, and shows a missing `gh`, an

@@ -149,6 +149,8 @@ export class TurnRunner {
     // A move the agent asked for during the turn happens now that no process
     // works in the old folder, before any wake or held answer starts the next.
     await this.threads.moves.applyWaiting(threadId);
+    // A thread an agent started answers it before a failure pauses its coordination.
+    await this.threads.spawns.finished(finished);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
     const woke = this.threads.deferred.pendingWakes.get(threadId);

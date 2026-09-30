@@ -36,7 +36,10 @@
         </div>
       </header>
       {#each group.rows as row (row.accountId)}
-        <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={loading && !completed.includes(row.accountId)}>
+        {@const pending = loading && !completed.includes(row.accountId)}
+        <!-- Bars without a fresh answer: the last good reading, kept after a failure or before a re-read. -->
+        {@const stale = row.windows.length > 0 && (row.error !== null || row.status === 'unavailable')}
+        <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={pending} class:stale>
           {#if group.rows.length > 1}<h3>{row.label}</h3>{/if}
           {#each row.windows as limit (limit.id)}
             {@const left = remaining(limit.usedPercent)}
@@ -52,7 +55,13 @@
             </div>
           {/each}
           <QuotaExtras {row} />
-          {#if row.windows.length === 0 && !row.error}<p class="muted">{strings.quotas.unavailable}</p>{/if}
+          {#if stale}<small data-testid="usage-limit-stale">{row.checkedAt === null ? strings.quotas.stale : `${strings.quotas.stale} · ${weekdayTime(row.checkedAt)}`}</small>{/if}
+          {#if row.windows.length === 0 && !row.error}
+            {#if pending}
+              <p class="muted" role="status" data-testid="usage-limit-loading">{strings.quotas.loading}</p>
+              {#if row.providerId === 'antigravity'}<small>{strings.quotas.slowHint}</small>{/if}
+            {:else}<p class="muted">{strings.quotas.unavailable}</p>{/if}
+          {/if}
           {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
         </article>
       {/each}
@@ -88,6 +97,8 @@
   .error { color: var(--color-danger); font-size: var(--text-sm); }
   /* The reading on screen is the previous one until the new one lands. */
   article[aria-busy='true'] .track { filter: saturate(0.15); }
+  /* Dimmed like the tray's stale meters: a reading, but not a fresh one. */
+  article.stale .track { opacity: 0.45; }
   @media (prefers-reduced-motion: reduce) {
     .track, .fill { transition: none; }
   }

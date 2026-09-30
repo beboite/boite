@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AccountQuota } from '@boite/contracts';
+import { SvelteMap } from 'svelte/reactivity';
 import type { Store } from '../lib/store.svelte';
+import { strings } from '../lib/strings';
 import LimitsPage from './LimitsPage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -80,4 +82,50 @@ test('a device is told where the limits are read, and asks for none', async () =
   expect(document.querySelector('[data-testid="usage-limits-owner"]')).not.toBeNull();
   expect(document.querySelector('[data-testid="limits-refresh"]')).toBeNull();
   expect(call).not.toHaveBeenCalled();
+});
+
+test('the read waits for the socket, a failure shows with a retry, and a kept reading reads as stale', async () => {
+  const pending: { resolve(rows: AccountQuota[]): void; reject(error: Error): void }[] = [];
+  const call = vi.fn(async () => new Promise<AccountQuota[]>((resolve, reject) => { pending.push({ resolve, reject }); }));
+  const state = new SvelteMap([['connection', 'connecting']]);
+  const store = { client: { call, on: () => () => {} }, owner: true, endpointUrl: 'socket-core', get connection() { return state.get('connection'); } } as unknown as Store;
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await settle();
+  // A call now would be refused with "not connected" and never asked again.
+  expect(call).not.toHaveBeenCalled();
+  state.set('connection', 'ready');
+  await settle();
+  expect(call).toHaveBeenCalledTimes(1);
+
+  pending[0]!.reject(new Error('socket dropped'));
+  await settle();
+  expect(document.querySelector('[data-testid="limits-error"]')!.textContent).toContain('socket dropped');
+  expect(document.querySelector('[data-testid="limits-empty"]')).toBeNull();
+
+  document.querySelector<HTMLButtonElement>('[data-testid="limits-retry"]')!.click();
+  await settle();
+  const stale = { ...quota('Claude'), accountId: 'claude', status: 'unavailable', checkedAt: Date.UTC(2026, 8, 30, 9), error: 'Claude quota requests are rate limited. Retrying in five minutes.' } satisfies AccountQuota;
+  const agy = { ...quota('Antigravity'), accountId: 'quota:antigravity-cli', providerId: 'antigravity', status: 'unavailable', windows: [] } satisfies AccountQuota;
+  pending[1]!.resolve([stale, agy]);
+  await settle();
+  expect(document.querySelector('[data-testid="limits-error"]')).toBeNull();
+  const [claudeCard, agyCard] = [...document.querySelectorAll<HTMLElement>('[data-testid="usage-limit-account"]')];
+  expect(claudeCard!.classList.contains('stale')).toBe(true);
+  expect(claudeCard!.querySelector('[data-testid="usage-limit-stale"]')!.textContent).toContain(strings.quotas.stale);
+  expect(claudeCard!.textContent).toContain('rate limited');
+  expect(agyCard!.textContent).toContain(strings.quotas.unavailable);
+
+  // While a read runs, a row with nothing yet says it is being read, not that there is nothing.
+  document.querySelector<HTMLButtonElement>('[data-testid="limits-refresh"]')!.click();
+  await settle();
+  expect(agyCard!.textContent).toContain(strings.quotas.loading);
+  expect(agyCard!.textContent).toContain(strings.quotas.slowHint);
+  expect(agyCard!.textContent).not.toContain(strings.quotas.unavailable);
+
+  // A reconnect reads again.
+  state.set('connection', 'connecting');
+  await settle();
+  state.set('connection', 'ready');
+  await settle();
+  expect(call).toHaveBeenCalledTimes(4);
 });

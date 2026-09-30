@@ -70,6 +70,8 @@ export const AGENT_METHODS: ReadonlyMap<RpcMethodName, string> = new Map<RpcMeth
   ['collaboration.directory', 'opted-in contacts in this project and explicitly trusted machines'],
   ['collaboration.send', 'authenticated delivery as this thread to a separately authorized recipient'],
   ['agent.where', 'the thread, its project, its working directory and its branch: what the CLI prints first'],
+  ['agent.projects', 'the names and folders of the projects the owner added, so it can name one to delegation.spawn or agent.move; reading them opens nothing'],
+  ['agent.spawn', 'a new top-level thread in a project the owner added, on its own model, account and permission mode, within its communication settings and an hourly budget; a thread an agent started cannot start another until the user writes in it'],
   ['agent.move', 'its own thread into a project the owner already registered, applied when its turn ends; never another thread, never a folder the owner did not add'],
   ['panel.open', 'showing the user a file, a diff or a page instead of pasting it into the transcript'],
   ['questions.ask', 'a question card on its own thread that it does not wait on; the answer comes back as a message'],

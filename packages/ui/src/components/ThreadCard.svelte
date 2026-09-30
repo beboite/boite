@@ -106,7 +106,7 @@
         },
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+        { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),
@@ -148,6 +148,7 @@
     class:unread={thread.unread}
     class:pinned={thread.pinned}
     class:meta
+    class:offline={owner.connection !== 'ready'}
     class:dragging={threadDrag.current?.threadId === thread.id && threadDrag.current.machineId === machine.id}
     draggable={!thread.parentThreadId && !moveBlocked(owner, thread.id)}
     ondragstart={dragStart}
@@ -222,6 +223,11 @@
   }
   .thread.dragging {
     opacity: 0.5;
+  }
+  /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
+  .thread.offline .row,
+  .thread.offline .metadata {
+    opacity: 0.55;
   }
   .row {
     display: flex;

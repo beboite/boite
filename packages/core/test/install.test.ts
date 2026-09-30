@@ -237,6 +237,36 @@ afterEach(async () => {
 });
 
 describe('managed installs', () => {
+  test('installing a signed-out provider leaves one account after guided sign-in and reload', async () => {
+    await loadDescriptor(goodInstall());
+    const provider = harness.core.providers.require('managed');
+    provider.auth = { kind: 'oauth-cli', session: ['.credentials.json'] };
+    provider.login = { command: [process.execPath, join(import.meta.dir, '../src/providers/shipped/echo-login.ts')] };
+    // A fresh CLI directory, independent of any real login on this machine.
+    const own = join(harness.dataDir, 'own-cli');
+    for (const profile of Object.values(provider.profiles)) {
+      if (profile) profile.isolation = { MANAGED_HOME: '{isolationDir}', BOITE_ECHO_CONFIG_DIR: '{isolationDir}' };
+    }
+    writeFileSync(join(harness.dataDir, 'providers', 'managed.json'), JSON.stringify(provider));
+    const defaultLocation = harness.core.accounts.defaultLocation.bind(harness.core.accounts);
+    harness.core.accounts.defaultLocation = entry => entry.id === 'managed' ? own : defaultLocation(entry);
+    const client = await harness.connect();
+    const installed = client.next('providers.installProgress', state => state.providerId === 'managed' && state.state === 'installed');
+    await client.call('providers.install', { providerId: 'managed' });
+    await installed;
+    expect((await client.call('accounts.list', {})).filter(account => account.providerId === 'managed')).toEqual([]);
+    const account = await client.call('accounts.add', { providerId: 'managed', label: 'Managed' });
+    const prompt = client.next('account.login', event => event.accountId === account.id && event.url?.includes('/login') === true);
+    await client.call('accounts.login', { accountId: account.id });
+    await prompt;
+    const connected = client.next('accounts.updated', entry => entry.id === account.id && entry.status === 'ok');
+    await client.call('accounts.loginInput', { accountId: account.id, text: 'test-code' });
+    await connected;
+    await client.call('providers.reload', {});
+    expect((await client.call('accounts.list', {})).filter(entry => entry.providerId === 'managed')).toEqual([{ ...account, status: 'ok' }]);
+    expect(existsSync(join(own, '.credentials.json'))).toBe(false);
+  });
+
   test('an archive for another architecture is refused before download', async () => {
     const arch = process.arch === 'arm64' ? 'x64' : 'arm64';
     await loadDescriptor({ ...goodInstall(), arch });

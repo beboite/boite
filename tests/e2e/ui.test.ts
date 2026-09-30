@@ -548,23 +548,23 @@ test(
     await clickWhenEnabled(testid('composer-send'));
 
     await page.waitFor(`${textOf('thread-branch')} === 'boite/worktree-thread'`, 30_000);
-    // The turn is over in a blink and the echo agent's title lands right behind it.
     await page.waitFor(`${textOf('thread-title')} === 'Echo: worktree thread'`);
-    const worktree = join(worktreesDir, 'worktree-thread');
-    expect(existsSync(join(worktree, '.git'))).toBe(true);
-    expect(existsSync(join(worktree, 'src', 'lib', 'store.ts'))).toBe(true);
-    expect(await page.evaluate<string>(`document.querySelector('${testid('thread-branch')}').title`)).toContain(worktree);
-    await page.screenshot(WORKTREE_SCREENSHOT);
-    // The chip is a draft's: the thread has no such choice left.
-    expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('composer-worktree')}')`)).toBe(false);
-
-    // The tests after this one count on the first thread being the open one:
-    // the worktree thread is archived and the first row opened again.
     const client = await connect(core.url, core.token);
     try {
       const threads = await client.call('threads.list', {});
       const created = threads.find((entry) => entry.branch === 'boite/worktree-thread');
       if (created === undefined) throw new Error('the worktree thread is not listed');
+      // Git renames the branch while the original short checkout path stays put.
+      const worktree = created.cwd;
+      expect(basename(worktree)).toMatch(/^wt-[a-z0-9]{8}$/);
+      expect(worktree).toBe(join(worktreesDir, basename(worktree)));
+      expect(existsSync(join(worktree, '.git'))).toBe(true);
+      expect(existsSync(join(worktree, 'src', 'lib', 'store.ts'))).toBe(true);
+      expect(await page.evaluate<string>(`document.querySelector('${testid('thread-branch')}').title`)).toContain(worktree);
+      await page.screenshot(WORKTREE_SCREENSHOT);
+      // The chip is a draft's: the thread has no such choice left.
+      expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('composer-worktree')}')`)).toBe(false);
+      // Restore the first thread for the following scenarios.
       await client.call('threads.archive', { threadId: created.id, archived: true });
     } finally {
       client.close();

@@ -124,8 +124,8 @@ test('a worktree thread gets a new worktree in a repository target, and an archi
   const client = await fake();
   await client.call('projects.archive', { projectId: 'p-notes', archived: true });
   const moved = await client.call('threads.move', { threadId: 't-trace', projectId: 'p-notes' });
-  expect(moved.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\finish-the-trace-tab');
-  expect(moved.branch).toBe('boite/finish-the-trace-tab');
+  expect(moved.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+  expect(moved.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${moved.branch!.slice(6)}`);
   expect((await client.call('projects.list', {})).find((p) => p.id === 'p-notes')?.archived ?? false).toBe(false);
 });
 

@@ -28,8 +28,12 @@ itself.
   an account whose provider reports no limit, or whose monitoring is off, is
   named once under "Not monitored".
 - The tab reads the quotas itself and follows `quotas.updated`, so opening it
-  costs one call and no history. Its own refresh button asks the providers
-  again.
+  costs one call and no history. It reads once the connection is ready and
+  again after a reconnect. Its own refresh button asks the providers again. A
+  failed `quotas.list` shows its reason with a retry button.
+- A switch in "Tracked accounts" changes that account alone: `quotas.configure`
+  answers and broadcasts every other account's reading unchanged, and the tab
+  reads again whether the switch went on or off.
 - Providers refresh independently, with up to two accounts per provider in
   flight. Each `quotas.progress` event carries the request ID and one account's
   result; the final response retains the account order. Both events and calls
@@ -38,6 +42,15 @@ itself.
   account is pending. Each answer updates its bars and restores their colour
   with a transition. A slow provider does not hold up the others. Cache and
   failure backoff still apply to refreshes.
+- The core keeps each account's last successful reading apart from that cache.
+  A read that fails, even after an account or provider change cleared the
+  cache, returns those windows with the error: the tab dims them and labels
+  them "Last successful reading" with its time. The reading is dropped only
+  when it stops belonging to the account: removed, switched off, signed in
+  under another identity, or its saved login switched by a plugin.
+- An account with nothing read yet says it is being read while a read runs.
+  Antigravity adds that it can take up to two minutes, the time `agy` may take
+  to answer `/usage`.
 
 Provider colours come from `--series-1` to `--series-8` in `app.css`, with a
 light and a dark set. The order is fixed (Claude, Codex, OpenCode, Grok,

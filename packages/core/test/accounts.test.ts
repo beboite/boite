@@ -114,6 +114,33 @@ describe('accounts', () => {
     expect(echo?.status).toBe('ok');
   });
 
+  test('reload adopts an existing CLI login while terminal sign-in keeps its default account', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const provider = harness.core.providers.require(providerId);
+    for (const profile of Object.values(provider.profiles)) {
+      if (profile) profile.executable = [{ kind: 'path', value: 'bun' }];
+    }
+    const own = join(harness.dataDir, 'own-cli');
+    const defaultLocation = harness.core.accounts.defaultLocation.bind(harness.core.accounts);
+    harness.core.accounts.defaultLocation = entry => entry.id === providerId ? own : defaultLocation(entry);
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(account => account.providerId === providerId)).toEqual([]);
+    provider.login!.terminal = true;
+    harness.core.accounts.ensureDefaults();
+    const account = harness.core.accounts.list().find(entry => entry.providerId === providerId)!;
+    expect(account).toMatchObject({ label: 'Default', isolationDir: null, status: 'unauthenticated' });
+    await client.call('accounts.remove', { accountId: account.id });
+    provider.login!.terminal = false;
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, '.credentials.json'), '{}');
+    harness.core.accounts.ensureDefaults();
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([
+      expect.objectContaining({ label: 'Default', isolationDir: null, status: 'ok' })
+    ]);
+  });
+
   test('the default opencode account reads its own login, an isolated one reads unauthenticated', async () => {
     const client = await harness.connect();
     const isolated = await client.call('accounts.add', {

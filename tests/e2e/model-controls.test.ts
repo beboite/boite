@@ -18,6 +18,60 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
+test.each([1440, 390])('search finds legacy and OpenCode models without changing provider defaults at %ipx', async width => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+  await page.navigate(url);
+  await page.click(width < 720 ? '[data-testid=mobile-new]' : '[data-testid=new-thread]');
+  const defaults = await page.evaluate(`JSON.stringify(globalThis.__boiteTest.workspace.active.modelDefaults)`);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.waitFor(`document.querySelector('[data-testid=picker-search]') && document.querySelector('[data-testid=picker-legacy]')`);
+  if (width < 720) expect(await page.evaluate(`document.activeElement !== document.querySelector('[data-testid=picker-search]')`)).toBe(true);
+  await page.type('[data-testid=picker-search]', 'opus 4.8');
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] [data-model="claude-opus-4-8"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=picker-legacy]') === null`)).toBe(true);
+  await capture(`picker-search-legacy-${width}.png`);
+  await page.click('[data-provider=opencode]');
+  await page.waitFor(`document.querySelector('[data-model="openrouter/anthropic/claude-sonnet-4-5"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=picker-search]').value`)).toBe('');
+  await page.type('[data-testid=picker-search]', 'openrouter sonnet');
+  await page.waitFor(`document.querySelectorAll('[data-testid=composer-picker-menu] [data-model]').length === 1`);
+  await capture(`picker-search-opencode-${width}.png`);
+  await page.click('[data-model="openrouter/anthropic/claude-sonnet-4-5"]');
+  await page.waitFor(`!document.querySelector('[data-testid=composer-picker-menu]')`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.defaultChoice().model`)).toBe('openrouter/anthropic/claude-sonnet-4-5');
+  expect(await page.evaluate(`JSON.stringify(globalThis.__boiteTest.workspace.active.modelDefaults)`)).toBe(defaults);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+}, 30_000);
+
+test.each([1440, 390])('catalogs without legacy metadata keep new models in the main list at %ipx', async width => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
+  await page.navigate(url);
+  await page.click('[data-testid=composer-picker]');
+  await page.click('[data-provider=claude]');
+  await page.waitFor(`!document.querySelector('[data-testid=picker-probing]')`);
+  await page.evaluate(`(() => {
+    const s = globalThis.__boiteTest.workspace.active;
+    const accountId = s.accountsOf('claude')[0].id;
+    const models = s.modelsOf('claude', accountId).filter(model => !model.legacy);
+    s.probedModels = {...s.probedModels, ['claude::' + accountId]: models};
+  })()`);
+  await page.waitFor(`!document.querySelector('[data-testid=picker-legacy]') && document.querySelector('[data-model="claude-fable-5-1"]')`);
+  await page.evaluate(`(() => {
+    const s = globalThis.__boiteTest.workspace.active;
+    const accountId = s.accountsOf('claude')[0].id;
+    const models = s.modelsOf('claude', accountId);
+    const next = {...models.find(model => model.id === 'claude-fable-5-1'), id: 'claude-fable-6', name: 'Fable 6'};
+    s.probedModels = {...s.probedModels, ['claude::' + accountId]: [...models, next]};
+  })()`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-picker-menu] [data-model="claude-fable-6"]')`);
+  expect(await page.evaluate(`document.querySelector('[data-testid=picker-legacy]') === null`)).toBe(true);
+  await capture(`picker-no-legacy-${width}.png`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+}, 30_000);
+
 test.each([1440, 390])('provider switching keeps the picker frame still at %ipx', async (width) => {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
   await page.navigate(url);

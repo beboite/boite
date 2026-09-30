@@ -9,6 +9,7 @@ export interface ProjectRow {
   created_at: number;
   /** Absent from a row read before schema 21. */
   archived?: number;
+  worktree_default?: number;
 }
 
 /** A row of `project_icons` without its bytes. */
@@ -34,6 +35,7 @@ export interface ThreadRow {
   speed: string | null;
   cwd: string;
   branch: string | null;
+  branch_naming_pending?: number;
   permission_mode: string;
   status: string;
   unread: number;
@@ -105,7 +107,7 @@ export function parseJson<T>(text: string, location: string): T {
 }
 
 export function toProject(row: ProjectRow): Project {
-  return { id: row.id, name: row.name, path: row.path, createdAt: row.created_at, ...(row.archived ? { archived: true } : {}) };
+  return { id: row.id, name: row.name, path: row.path, createdAt: row.created_at, ...(row.archived ? { archived: true } : {}), ...(row.worktree_default ? { worktreeDefault: true } : {}) };
 }
 
 export function toThread(row: ThreadRow): ThreadSummary {
@@ -125,6 +127,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     speed: row.speed,
     cwd: row.cwd,
     branch: row.branch,
+    branchNamingPending: row.branch_naming_pending === 1,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,

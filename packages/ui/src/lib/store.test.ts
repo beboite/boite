@@ -639,7 +639,7 @@ describe('Store', () => {
     expect(store.draft?.worktree).toBe(false);
     store.setDraftWorktree(true);
     store.setDraftProject('p-notes');
-    expect(store.draft).toEqual({ projectId: 'p-notes', worktree: true });
+    expect(store.draft).toMatchObject({ projectId: 'p-notes', worktree: true });
 
     const spy = vi.spyOn(client, 'call');
     await store.submit('Fix the login', {
@@ -651,7 +651,7 @@ describe('Store', () => {
     });
     const create = spy.mock.calls.find(([method]) => method === 'threads.create');
     expect(create?.[1]).toMatchObject({ projectId: 'p-notes', title: 'Fix the login', worktree: {} });
-    expect(store.openThread?.branch).toBe('boite/fix-the-login');
+    expect(store.openThread?.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
     expect(store.draft).toBeNull();
 
     // The next draft starts with the switch off: a worktree is a decision each time.
@@ -809,13 +809,41 @@ describe('Store', () => {
       if (method === 'providers.probe') await gate;
       return original(method, params);
     });
-    const request = store.probeModels('opencode', 'a-opencode', true);
+    const request = store.probeModels('opencode', 'a-opencode');
     expect(store.isProbing('opencode', 'a-opencode')).toBe(true);
+    // A cached answer is an answer: the picker keeps it rather than reading again.
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
     expect(store.modelsOf('opencode', 'a-opencode')).toEqual(expected);
-    const second = store.probeModels('opencode', 'a-opencode', true);
+    const second = store.probeModels('opencode', 'a-opencode');
     expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
     release(); await Promise.all([request, second]);
     expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
+  });
+
+  test('opening a stale catalog refreshes its models without changing saved defaults', async () => {
+    const { store, client } = await ready();
+    const original = client.call.bind(client);
+    let reads = 0;
+    const calls = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+      if (method === 'providers.probe') return Promise.resolve({ models: [++reads === 1
+        ? { id: 'vendor/old-model', name: 'Old model', legacy: true }
+        : { id: 'vendor/new-model', name: 'New model' }], probedAt: Date.now() }) as never;
+      return original(method, params);
+    });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const defaults = { ...store.modelDefaults };
+    await store.probeModels('opencode', 'a-opencode');
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
+    expect(store.modelsOf('opencode', 'a-opencode')[0]?.legacy).toBe(true);
+    clock.mockReturnValue(now + 5 * 60_000);
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls).toHaveBeenLastCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
+    expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(2);
+    expect(store.modelsOf('opencode', 'a-opencode')).toEqual([{ id: 'vendor/new-model', name: 'New model' }]);
+    expect(store.modelDefaults).toEqual(defaults);
+    clock.mockRestore();
   });
 
   test('failed probes wait for manual retry instead of looping', async () => {
@@ -828,6 +856,8 @@ describe('Store', () => {
     expect(store.error).toBeNull();
     expect(store.modelsOf('opencode', 'a-opencode')).toEqual(models);
     expect(store.isProbing('opencode', 'a-opencode')).toBe(false);
+    // Nothing answered, so the descriptor's list stands instead of a reading state forever.
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
     await store.probeModels('opencode', 'a-opencode', true);
     expect(calls).toHaveBeenCalledTimes(2);
     expect(store.error).toBe('agent offline');
@@ -885,9 +915,15 @@ describe('Store', () => {
     const { store, client } = await ready();
     expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
     expect(store.probedModels).toEqual({});
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
 
     // Straight through the client: what a second shell's probe looks like here.
+    // This store's own first probe is pending until either answer lands.
+    const own = store.probeModels('opencode', 'a-opencode');
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(true);
     await client.call('providers.probe', { providerId: 'opencode', accountId: 'a-opencode' });
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
+    await own;
 
     expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
     const probed = store.modelsOf('opencode', 'a-opencode').map((m) => m.id);

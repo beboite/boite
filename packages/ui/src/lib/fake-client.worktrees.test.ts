@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
 
@@ -23,13 +23,23 @@ test('new worktrees follow storage settings while existing ones keep their paths
   const client = await fake();
   const create = (projectId: string, title: string) => client.call('threads.create', { projectId, title, providerId: 'echo', accountId: 'a-echo', worktree: {} });
   const before = await create('p-boite', 'Before');
-  expect(before.cwd).toBe('C:\\src\\boite\\.boite\\worktrees\\before');
+  expect(before.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+  expect(before.cwd).toBe(`C:\\src\\boite\\.boite\\worktrees\\${before.branch!.slice(6)}`);
   await client.call('settings.set', { worktreeStorage: { mode: 'shared', directory: 'D:\\Worktrees' } });
   const after = await create('p-boite', 'After');
-  expect(after.cwd).toBe('D:\\Worktrees\\boite-p-boite\\after');
+  expect(after.cwd).toBe(`D:\\Worktrees\\boite-p-boite\\${after.branch!.slice(6)}`);
   expect((await client.call('threads.list', {})).find(t => t.id === before.id)?.cwd).toBe(before.cwd);
   await client.call('settings.set', { worktreeStorage: { mode: 'project', directory: 'D:\\Worktrees' } });
-  expect((await create('p-notes', 'Back')).cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\back');
+  const back = await create('p-notes', 'Back');
+  expect(back.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${back.branch!.slice(6)}`);
+  await client.call('turns.start', { threadId: before.id, prompt: 'Fix worktree names' });
+  await client.settled();
+  await vi.waitFor(async () => {
+    expect((await client.call('threads.list', {})).find(thread => thread.id === before.id)?.branch).toBe('boite/fix-worktree-names');
+  });
+  const named = (await client.call('threads.list', {})).find(thread => thread.id === before.id)!;
+  expect(named).toMatchObject({ branch: 'boite/fix-worktree-names', cwd: before.cwd, branchNamingPending: false });
+  expect((await client.call('worktrees.list', { projectId: 'p-boite' })).find(entry => entry.path === before.cwd)?.branch).toBe(named.branch);
 });
 
 test('the seeded repository lists every kind of worktree, main checkout left out', async () => {

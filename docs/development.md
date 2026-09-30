@@ -157,12 +157,28 @@ later answer, and a project on a share whose host is gone never blocks the core
 (a synchronous check there froze it for 21 s). A check with no clear answer
 keeps the last one. The core checks every project at start and on
 `projects.add`; before any check has answered, the field is left out, and a
-client that gets no field keeps the chip. On, the first send passes
+client that gets no field keeps the chip.
+
+Owners can toggle Worktree by default in a project's Manage project menu.
+The core persists `Project.worktreeDefault` through `projects.setWorktreeDefault`
+and broadcasts `project.updated`, so all connected clients use the same default.
+New drafts use the project's default. Moving a draft uses the target's default
+unless the composer switch was chosen explicitly. Restored drafts keep their
+choice. The composer switch only changes that draft. Enabling the preference requires a Git repository other than Drafts.
+On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
-before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
-`-3` when the name is taken, or the `branch` the call names), the directory
-defaults to `<project>/.boite/worktrees/<slug>`. Settings > General > Worktrees
-offers a shared folder instead, with `<project-name>-<project-id>/<slug>`
+before writing the thread: the branch is a short temporary `boite/wt-<id>`
+(or the `branch` the call names), and the directory defaults to
+`<project>/.boite/worktrees/wt-<id>`. When the title model names the conversation
+while its first turn runs, that same call also proposes an English branch
+slug such as `fix-worktree-names`. Git renames the temporary branch to
+`boite/<slug>` (`-2`, `-3` when taken), keeping the directory, commits and session.
+Explicit branch names, existing threads and branches already renamed, with an
+upstream or known remote-tracking ref, are left alone. Invalid model output or
+a failed call leaves the temporary name usable; `threads.retitle` can try again. The pending flag is
+persisted in journal schema 26 so a restart does not lose the naming request.
+Settings > General > Worktrees offers a shared folder instead, with
+`<project-name>-<project-id>/wt-<id>`
 under it so repositories with the same name stay separate. On a phone, owners
 reach the same setting through Settings > Worktrees. `settings.worktreeStorage`
 stores `{ mode: 'project', directory: null }` by default or
@@ -212,9 +228,8 @@ next `turns.start` or `threads.compact` is refused with the missing folder in
 the message and `field: 'cwd'`; nothing recreates the worktree.
 
 Archiving stops the thread's running turn, its pending questions and its child
-agents, so the sidebar menu, the header and the palette ask first when the thread
-is working, waits on an answer or has a live child agent. An idle thread archives
-at once. Settings > General > Archived threads (on a phone, Settings > Archived
+agents. The sidebar menu, the header and the palette archive at once, without a
+confirmation, and offer Undo in a toast. Settings > General > Archived threads (on a phone, Settings > Archived
 threads) lists the archived conversations and restores one to the sidebar;
 stopped work does not resume. The General page reads the list only on its
 button. The palette's Archived threads command and each project's `...` menu

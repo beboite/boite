@@ -227,13 +227,18 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => store.openThread !== null && store.draft === null);
-  expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\fix-the-login');
+  const branch = store.openThread!.branch!;
+  expect(branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+  expect(store.openThread?.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${branch.slice(6)}`);
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
-  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
-  expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
+  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe(branch);
+  expect(query('[data-testid=thread-branch]').title).toContain(branch.slice(6));
   // The chip went with the draft.
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+  const cwd = store.openThread!.cwd;
+  await waitFor(() => store.openThread?.turns.some(turn => turn.status === 'done') === true);
+  await waitFor(() => query('[data-testid=thread-branch]').textContent?.trim() === 'boite/fix-the-login');
+  expect(store.openThread?.cwd).toBe(cwd);
 });
 
 test('a draft on a folder that is not a repository offers no worktree switch', async () => {
@@ -274,6 +279,10 @@ test('a machine with no AI offers to connect one, and the composer keeps its tex
   code.dispatchEvent(new Event('input', { bubbles: true }));
   code.closest('form')!.requestSubmit();
   await waitFor(() => document.querySelector('[data-testid=connect-use]') !== null, 20_000);
+  await store.reloadProviders();
+  expect(store.accountsOf('claude')).toEqual([
+    expect.objectContaining({ label: 'Claude', status: 'ok', isolationDir: expect.any(String) })
+  ]);
   query<HTMLButtonElement>('[data-testid=connect-use]').click();
 
   await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
@@ -463,12 +472,17 @@ test('past twelve models the column gets a search field, prefix groups and keybo
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  // Claude lists ten models: short enough to stay a plain list.
-  expect(document.querySelector('[data-testid=picker-search]')).toBeNull();
+  // Search is available even on the shorter Claude list.
+  expect(document.querySelector('[data-testid=picker-search]')).not.toBeNull();
+  await type(query<HTMLInputElement>('[data-testid=picker-search]'), 'opus 4.8');
+  await waitFor(() => shownModels().length === 1);
+  expect(shownModels()).toEqual(['claude-opus-4-8']);
+  expect(document.querySelector('[data-testid=picker-legacy]')).toBeNull();
 
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
   await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
+  await waitFor(() => shownModels().length === 22);
   expect(shownModels().length).toBe(22);
   expect(groupLabels().sort()).toEqual(['anthropic', 'nvidia', 'openai', 'opencode', 'openrouter']);
   // The column opens on a long list, so the field already has the caret.
@@ -569,17 +583,17 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Move to project', 'Archive', 'Delete']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path', 'Move to project', 'Archive', 'Delete']);
+  expect(query('[data-testid=context-menu] [data-value=copy]').getAttribute('title')).toBe('C:\\src\\boite');
   // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
   expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
-  // t-bench waits on a permission: archiving it would drop that card, so the app asks first.
-  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
-  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  // t-bench waits on a permission: it still archives at once, with no dialog.
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
+  expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
 });
 
 test('a permission left pending is read back on connect and answered from its card', async () => {
@@ -2267,7 +2281,10 @@ test('the desktop still has every one of them', async () => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  const preference = query<HTMLButtonElement>('[data-value=worktree-default]');
+  expect(preference.getAttribute('role')).toBe('menuitemcheckbox');
+  expect(preference.getAttribute('aria-checked')).toBe('false');
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);

@@ -118,7 +118,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
       const at = ctx.now();
       const title = params.title !== undefined && params.title.length > 0 ? params.title : 'New thread';
-      // The core's own placement: a branch named after the title, the
+      // The core's own placement: a short temporary branch and the
       // worktree in the configured storage. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch, ctx.settings.worktreeStorage, project.id);
@@ -139,6 +139,7 @@ export function threadMethods(ctx: FakeContext) {
         speed: params.speed ?? null,
         cwd: placed?.path ?? draftFolder ?? (params.cwd || project.path),
         branch: placed?.branch ?? null,
+        branchNamingPending: placed?.namingPending ?? false,
         permissionMode: params.permissionMode ?? 'default',
         status: 'idle',
         unread: false,
@@ -446,7 +447,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread: Thread = {
         id, projectId: source.projectId, title, titleSource: source.titleSource,
         providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
-        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, permissionMode: source.permissionMode,
+        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
         status: 'idle', unread: false, archived: false, pinned: false,
         sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
         createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,

@@ -114,8 +114,12 @@ function inventory(given: string): Inventory {
     visited.add(actual);
     note(dir);
     const skill = join(dir, 'SKILL.md');
-    if (probe(skill)) add('skill', skill);
+    const isSkill = probe(skill);
+    if (isSkill) add('skill', skill);
     for (const file of PLUGIN_FILES) if (probe(join(dir, file))) add('plugin', join(dir, file));
+    // What sits under a skill is its own scripts and assets, never another
+    // skill: a test corpus there would eat the depth and directory bounds.
+    if (isSkill) return;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (['.git', 'node_modules', '.secrets', '.claude-plugin', '.codex-plugin'].includes(entry.name)) continue;
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;

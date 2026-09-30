@@ -1,16 +1,19 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { whip } from '../lib/whip.svelte';
   import { strings } from '../lib/strings';
 
-  let { onerror }: { onerror: (error: unknown) => void } = $props();
+  let { onerror, mobile = false }: { onerror: (error: unknown) => void; mobile?: boolean } = $props();
   let hitting = $state(false);
   let animation: Animation | undefined;
   let disposed = false;
 
   onDestroy(() => { disposed = true; animation?.cancel(); });
 
-  async function hit() {
+  async function hit(event: MouseEvent) {
+    if (whip.held) { whip.held = false; return; }
     if (hitting || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    whip.throw(event.clientX || window.innerWidth / 2, event.clientY || window.innerHeight / 2);
     hitting = true;
     try {
       if (window.__TAURI_INTERNALS__) {
@@ -42,34 +45,21 @@
   }
 </script>
 
-<button type="button" class="whip" data-testid="whip-button" disabled={hitting}
-  title={strings.experiments.whip.hint} onclick={hit}>
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+<button type="button" class="ghost icon whip" class:active={whip.held}
+  data-testid={mobile ? 'whip-button-mobile' : 'whip-button'} disabled={hitting && !whip.held}
+  title={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
+  aria-label={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
+  aria-pressed={whip.held} aria-busy={hitting} onclick={hit}>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="m3 20 5-5 3 3-5 5zM10 16c-3-5-1-12 4-12 6 0 8 7 3 8-3 1-5-2-2-4 3-2 7 1 6 5" />
   </svg>
-  <span>{strings.experiments.whip.action}</span>
 </button>
 
 <style>
-  .whip {
-    position: fixed;
-    left: max(12px, env(safe-area-inset-left));
-    bottom: 64px;
-    z-index: 10;
-    height: var(--touch-target);
-    min-width: var(--touch-target);
-    gap: 8px;
-    padding: 0 12px;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-edge);
-    box-shadow: var(--shadow-e2);
-    font-size: var(--text-sm);
-  }
-  .whip:hover { background: var(--color-surface-3); }
+  .whip { position: relative; z-index: calc(var(--z-whip) + 1); flex: none; color: var(--color-muted-foreground); }
+  .whip.active { color: var(--color-foreground); background: var(--color-surface-2); }
   @media (max-width: 720px) {
-    .whip { bottom: calc(70px + env(safe-area-inset-bottom)); }
-    :global(html[data-keyboard='open']) .whip { bottom: 12px; }
+    .whip { width: var(--touch-target); height: var(--touch-target); }
   }
 </style>

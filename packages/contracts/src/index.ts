@@ -530,6 +530,8 @@ export interface Project {
   name: string;
   path: string;
   createdAt: Timestamp;
+  /** Precheck Worktree in new drafts. An absent value means off; existing drafts keep their choice. */
+  worktreeDefault?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent from a core older than this
@@ -679,6 +681,8 @@ export interface ThreadSummary {
    * in the project directory itself.
    */
   branch: string | null;
+  /** Only automatically created temporary branches may be named by the title model. */
+  branchNamingPending?: boolean;
   permissionMode: PermissionMode;
   status: ThreadStatus;
   /**
@@ -938,7 +942,7 @@ export interface PendingMove {
 }
 
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice }
+  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -1566,6 +1570,42 @@ export interface AgentWhere {
   model: string;
 }
 
+/** One project of `agent.projects`: what an agent names in `delegate spawn --project` or `thread move`. */
+export interface AgentProject {
+  id: ProjectId;
+  name: string;
+  path: string;
+  /** The folder holds a `.git`: `--worktree` works there. */
+  repository: boolean;
+  /** The drafts project, where a thread gets a new folder of its own. */
+  drafts: boolean;
+  /** The calling thread's own project. */
+  current: boolean;
+}
+
+/**
+ * One end of `agent.spawn`. On the new thread's first prompt as `startedBy`
+ * (the thread whose agent started it), and on a system line of the starting
+ * thread as `started` (the thread it started).
+ */
+export interface ThreadLink {
+  threadId: ThreadId;
+  title: string;
+  projectId: ProjectId;
+  /** The project's name when the link was made. */
+  project: string;
+}
+
+/** What `agent.spawn` answers: the new thread, its first turn and how to reach its agent. */
+export interface AgentSpawn {
+  thread: ThreadSummary;
+  turnId: TurnId;
+  /** Its address for `collaboration.send`. */
+  address: AgentAddress;
+  /** The project's name. */
+  project: string;
+}
+
 /** What `agent.move` answers: where the thread goes, and when. */
 export interface AgentMove {
   threadId: ThreadId;
@@ -2131,6 +2171,24 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'agent.move': { params: { threadId: ThreadId; project: string }; result: AgentMove };
   /**
+   * The unarchived projects the owner added, the caller's own marked
+   * `current`: the names `delegation.spawn` and `agent.move` accept.
+   */
+  'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
+  /**
+   * The agent starts a new top-level thread in a project the owner added
+   * (id, name or absolute folder), on its own provider, account, model,
+   * effort and permission mode, and sends `prompt` as the first message,
+   * marked `startedBy`. `worktree` puts it on a new branch of its own. The
+   * new thread's first answer returns to the caller as an agent message.
+   * Refused when the caller's coordination is off or paused, across projects
+   * when it is restricted to its own, past an hourly budget (3 in Brief, 12 in
+   * Team), for a delegated child or a persistent agent session, and for a
+   * thread an agent started until the user has written in it. `requestId`
+   * makes a retry return the same thread.
+   */
+  'agent.spawn': { params: { threadId: ThreadId; project: string; prompt: string; title?: string; worktree?: boolean; requestId: string }; result: AgentSpawn };
+  /**
    * Show something in the thread's right panel. Every client subscribed to the
    * thread receives `panel.requested`; `shown` says whether one was. The core
    * checks a path exists inside the working directory and a url is http(s),
@@ -2187,6 +2245,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * Refused on the drafts project, which a thread with no folder lands in.
    */
   'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
+  /** Owner only. Persist a project's default for new drafts and broadcast project.updated. Enabling requires a Git repository. */
+  'projects.setWorktreeDefault': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /**
    * The image of a project whose `icon.kind` is `image`, as a `data:` URL for
    * an `<img>` (an SVG drawn that way runs no script and loads nothing), at
@@ -2364,7 +2424,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
       permissionMode?: PermissionMode;
       /**
        * Start the thread in a git worktree of the project on a branch of its
-       * own: `boite/<slug of the title>` unless `branch` names one. The core
+       * own: a short temporary `boite/wt-<id>` unless `branch` names one.
+       * The title model can name that temporary branch after the first turn;
+       * the working directory stays fixed when the branch is renamed. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.

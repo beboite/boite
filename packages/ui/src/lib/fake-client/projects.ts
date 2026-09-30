@@ -14,6 +14,18 @@ export function projectMethods(ctx: FakeContext) {
     'projects.list': async (params) => {
       return ctx.projects.map((project) => describedProject(ctx, project));
     },
+    'projects.setWorktreeDefault': async (params) => {
+      const project = ctx.projects.find(p => p.id === params.projectId);
+      if (!project) throw ctx.notFound('project', params.projectId);
+      if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setWorktreeDefault.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
+      if (params.enabled && (project.kind === 'drafts' || project.repository === false)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setWorktreeDefault.projectId must name a Git repository', data: { field: 'projectId', projectId: project.id, expected: 'a Git repository other than the drafts project' } });
+      if ((project.worktreeDefault === true) !== params.enabled) {
+        if (params.enabled) project.worktreeDefault = true;
+        else delete project.worktreeDefault;
+        ctx.emit('project.updated', describedProject(ctx, project));
+      }
+      return describedProject(ctx, project);
+    },
     'projects.archive': async (params) => archiveProject(ctx, params.projectId, params.archived ?? true),
     'projects.browse': async (params) => {
       const { path = '/workspace' } = params;

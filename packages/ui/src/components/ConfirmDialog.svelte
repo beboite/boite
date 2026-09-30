@@ -132,7 +132,6 @@
     align-items: center;
     justify-content: center;
     background: var(--color-scrim);
-    backdrop-filter: blur(4px);
     animation: fade var(--dur-2) var(--ease-out-quint);
   }
 

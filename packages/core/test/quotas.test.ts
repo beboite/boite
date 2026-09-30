@@ -1,4 +1,5 @@
 import { afterEach, expect, test, spyOn } from 'bun:test';
+import type { AccountQuota } from '@boite/contracts';
 import { QuotaStore, claudeQuotaWindows, codexQuotaWindows } from '../src/quotas.ts';
 import { claudeQuotaDetails, codexQuotaDetails, museQuotaReading } from '../src/quota-details.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -158,10 +159,22 @@ test('quota readers share concurrent work and disabling persists without startin
   expect(calls).toBe(supported);
   expect(first).toEqual(second);
   await store.list(true); expect(calls).toBe(supported);
-  await store.configure(existing.id, false); expect(calls).toBe(supported);
+  // Switching one account off leaves every other reading in the answer and the broadcast.
+  const other = harness.core.accounts.add({ providerId: 'claude', label: 'Other' });
+  await store.list();
+  let broadcast: AccountQuota[] = [];
+  const off = harness.core.bus.onAny((name, payload) => { if (name === 'quotas.updated') broadcast = payload as AccountQuota[]; });
+  const before = calls;
+  const configured = await store.configure(existing.id, false); off();
+  expect(calls).toBe(before);
+  for (const rows of [configured, broadcast]) {
+    const row = rows.find((q) => q.accountId === other.id)!;
+    expect([row.status, row.windows.map((w) => w.usedPercent), row.error]).toEqual(['ready', [20], null]);
+    expect(rows.find((q) => q.accountId === existing.id)?.status).toBe('disabled');
+  }
   const restored = new QuotaStore(harness.core, async () => { throw new Error('fixture offline'); });
   expect((await restored.list()).find((q) => q.accountId === existing.id)?.status).toBe('disabled');
-  expect(await store.configure(existing.id, true)).toContainEqual(expect.objectContaining({ accountId: existing.id, enabled: true }));
+  expect(await store.configure(existing.id, true)).toContainEqual(expect.objectContaining({ accountId: existing.id, enabled: true, windows: [] }));
 });
 test('unsupported providers do not run a reader and failures are backed off', async () => {
   harness = await startTestCore();
@@ -172,6 +185,35 @@ test('unsupported providers do not run a reader and failures are backed off', as
   expect(first.find((row) => row.providerId === 'echo')?.status).toBe('unsupported');
   await store.list(true); expect(calls).toBe(count);
   expect(first.filter((row) => row.error).every((row) => row.checkedAt === null && row.windows.length === 0)).toBe(true);
+});
+
+test('a failed read after an invalidation shows the last good reading as stale until the login changes hands', async () => {
+  harness = await startTestCore();
+  const account = harness.core.accounts.add({ providerId: 'claude', label: 'Default' });
+  let failure: string | null = null;
+  const store = new QuotaStore(harness.core, async () => {
+    if (failure) throw new Error(failure);
+    return { windows: [{ id: 'five_hour', label: '5 hours', usedPercent: 40, resetsAt: null }],
+      resetCredits: { availableCount: 2, nextExpiresAt: null },
+      credits: { kind: 'budget' as const, enabled: true, remaining: 75, limit: 100, unlimited: false } };
+  });
+  const good = (await store.list()).find((q) => q.accountId === account.id)!;
+  expect(good.status).toBe('ready');
+  // An agent update check announces providers.updated and clears the cache.
+  harness.core.bus.emit('providers.updated', harness.core.providers.list());
+  failure = 'Claude quota requests are rate limited. Retrying in five minutes.';
+  const stale = (await store.list()).find((q) => q.accountId === account.id)!;
+  expect(stale).toMatchObject({ status: 'unavailable', windows: good.windows, checkedAt: good.checkedAt, error: failure,
+    resetCredits: good.resetCredits, credits: good.credits });
+  // Signed in as someone else: the old reading is not theirs.
+  const [first, second] = [{ ...account, identity: 'a@example.com' }, { ...account, identity: 'b@example.com' }];
+  harness.core.bus.emit('accounts.updated', first);
+  expect((await store.list()).find((q) => q.accountId === account.id)?.windows).toEqual(good.windows);
+  harness.core.bus.emit('accounts.updated', second);
+  const changed = (await store.list()).find((q) => q.accountId === account.id)!;
+  expect(changed).toMatchObject({ windows: [], checkedAt: null, error: failure });
+  expect(changed.resetCredits).toBeUndefined();
+  expect(changed.credits).toBeUndefined();
 });
 
 test('the standalone Antigravity source is opt-in, persists and never borrows an ACP account', async () => {

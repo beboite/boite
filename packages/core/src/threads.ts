@@ -6,6 +6,7 @@ import type {
   AccountId,
   Attachment,
   PreviewReference,
+  ThreadLink,
   ImageMimeType,
   Message,
   MessageId,
@@ -36,6 +37,7 @@ import { ThreadBranching } from './threads/branching.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
+import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
 import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -86,6 +88,8 @@ export class ThreadStore {
   readonly branching: ThreadBranching;
   /** `threads.move`. */
   readonly moves: ThreadMove;
+  /** `agent.spawn`. */
+  readonly spawns: ThreadSpawns;
   private readonly recovery: ThreadRecovery;
   private readonly removing = new Set<ThreadId>();
 
@@ -99,6 +103,7 @@ export class ThreadStore {
     this.titles = new ThreadTitles(core, this);
     this.branching = new ThreadBranching(core, this);
     this.moves = new ThreadMove(core, this);
+    this.spawns = new ThreadSpawns(core, this);
     this.recovery = new ThreadRecovery(core);
   }
 
@@ -196,16 +201,16 @@ export class ThreadStore {
     checkEffort(provider, account.id, model, params.effort ?? null);
     checkSpeed(provider, account.id, model, params.speed ?? null);
     const id = newId('thr_');
-    const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
+    const placed = await this.core.worktrees.add(id, project, params.worktree?.branch);
     try {
-      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending });
     } catch (error) {
       await this.core.worktrees.remove(id, project, placed);
       throw error;
     }
   }
 
-  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; parentThreadId?: ThreadId }): ThreadSummary {
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
 
     const now = Date.now();
@@ -236,6 +241,7 @@ export class ThreadStore {
       speed,
       cwd,
       branch: placed?.branch ?? null,
+      branchNamingPending: placed?.branchNamingPending ?? false,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
       unread: false,
@@ -553,7 +559,7 @@ export class ThreadStore {
     return this.moves.userMove(threadId, projectId, stopBackground);
   }
 
-  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string): Turn {
+  startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
     if (thread.agentSessionId && operation !== 'compact') {
@@ -623,7 +629,7 @@ export class ThreadStore {
       turnId: turn.id,
       role: systemOperation(operation) ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
