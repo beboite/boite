@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentSpawn } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -11,13 +11,13 @@ const cores: TestCore[] = [];
 const restores: (() => void)[] = [];
 afterEach(async () => { for (const h of cores.splice(0)) await h.stop(); for (const restore of restores.splice(0)) restore(); });
 
-/** An echo driver that records every prompt and answers at once with the brief's first line. */
+/** An echo driver that records every prompt and answers at once with its folder's name, free of separators a JSON prompt would escape. */
 function answering(): Map<string, string[]> {
   const prompts = new Map<string, string[]>();
   restores.push(setDriver('echo', { protocol: 'echo', startTurn(ctx: TurnContext) {
     prompts.set(ctx.thread.id, [...(prompts.get(ctx.thread.id) ?? []), ctx.prompt]);
     const id = ctx.emit.startMessage('assistant');
-    ctx.emit.part(id, 0, { type: 'text', text: `Done in ${ctx.thread.cwd}` });
+    ctx.emit.part(id, 0, { type: 'text', text: `Done in ${basename(ctx.thread.cwd)}` });
     ctx.emit.complete(id, 'complete');
     const result: TurnResult = { status: 'done', sessionId: `session:${ctx.thread.id}`, usage: null };
     return { done: Promise.resolve(result), stop() {} };
@@ -70,8 +70,8 @@ test('an agent starts a real thread in another project, which answers it back as
   // Its answer comes back once, as a forwarded message the starter's agent receives.
   await waitFor(() => h.core.coordination.get(threadId).messages.some(m => m.from.threadId === spawned.thread.id));
   const letter = h.core.coordination.get(threadId).messages.find(m => m.from.threadId === spawned.thread.id)!;
-  expect(letter.text).toBe(`Release notes 2.4: done\nDone in ${notesPath}`);
-  await waitFor(() => (prompts.get(threadId) ?? []).some(p => p.includes(`Done in ${notesPath}`)));
+  expect(letter.text).toBe('Release notes 2.4: done\nDone in notes');
+  await waitFor(() => (prompts.get(threadId) ?? []).some(p => p.includes('Done in notes')));
 
   const again = await cli(['thread', 'new', 'notes', 'Write the 2.4 release notes', '--title', 'Release notes 2.4', '--request-id', 'notes-1', '--json']);
   expect((JSON.parse(again.out) as AgentSpawn).thread.id).toBe(spawned.thread.id);
