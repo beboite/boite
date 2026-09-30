@@ -427,18 +427,27 @@ describe('harness updates', () => {
     }
   });
 
-  test.skipIf(process.platform === 'win32')('a kept reading of a program PATH no longer finds is dropped, and read at the usual first check', async () => {
-    const { client } = await start('npm');
+  test.skipIf(process.platform === 'win32')('a kept reading of another copy of the agent is dropped, and read at the usual first check', async () => {
+    let layout!: ReturnType<typeof npmLayout>;
+    const { client } = await start('npm', 'update', undefined, (dataDir) => {
+      layout = npmLayout(dataDir);
+      return { kind: 'file', value: layout.link };
+    });
     expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ current: '1.0.0', latest: '1.1.0' });
-    // The core now finds another copy of the agent, such as one moved first on its PATH.
-    const { link } = npmLayout(harness!.dataDir);
-    writeDescriptor(harness!.dataDir, 'npm', 'update', undefined, { kind: 'file', value: link });
+    // The same path now leads to another copy, as `claude install` does to a link npm made.
+    const native = join(harness!.dataDir, 'native-agent');
+    writeFileSync(native, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    chmodSync(native, 0o755);
+    rmSync(layout.link);
+    symlinkSync(native, layout.link);
 
     const second = new Core({ dataDir: harness!.dataDir, token: newToken() });
     try {
-      expect(second.updates.refreshRestored()).toBe(true);
+      second.updates.refreshRestored();
       expect(await second.updates.list()).toEqual([]);
       expect(second.procs.liveCount('update:update-fake')).toBe(0);
+      // The check a moment ago read the other copy: it no longer holds off the next one.
+      expect(second.updates.firstDelay()).toBe(10 * 60 * 1000);
     } finally {
       await second.close();
     }

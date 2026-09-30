@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -121,6 +121,19 @@ async function npmLatest(name: string): Promise<string> {
   return body.version;
 }
 
+/**
+ * Which copy of an agent a reading belongs to: the program with its links
+ * followed, so `~/.local/bin/claude` moved from an npm install to a native one
+ * is another program even though its path did not change.
+ */
+function programIdentity(program: string): string {
+  try {
+    return realpathSync(program);
+  } catch {
+    return program;
+  }
+}
+
 /** The account the core runs as, for a message about what it may write. */
 function whoRuns(): string {
   try {
@@ -178,10 +191,8 @@ export class HarnessUpdates {
    * to read, so it runs no CLI and asks no registry. A unit test core never arms it.
    */
   start(): void {
-    // A kept reading of a program that is no longer the one PATH finds says nothing
-    // about the one that runs now: it is read at the usual first check, not hours later.
-    const moved = this.refreshRestored();
-    this.schedule(moved ? FIRST_CHECK_MS : this.firstDelay());
+    this.refreshRestored();
+    this.schedule(this.firstDelay());
   }
 
   /**
@@ -190,10 +201,12 @@ export class HarnessUpdates {
    * the release on disk and the version this Boite pins, and a new build may
    * pin a newer one. A row whose provider lost its route, took another, or now
    * resolves to another program is dropped. A 'self' row keeps its reading
-   * until the scheduled check, which has to run the agent to read it. Returns
-   * true when a 'self' row was dropped because its program moved.
+   * until the scheduled check, which has to run the agent to read it. A 'self'
+   * row dropped because its program moved leaves nothing to show for that
+   * agent, so the last check stops counting: the first one comes at the usual
+   * ten minutes rather than up to six hours later.
    */
-  refreshRestored(): boolean {
+  refreshRestored(): void {
     let changed = false;
     let moved = false;
     for (const [id, entry] of [...this.entries]) {
@@ -219,11 +232,10 @@ export class HarnessUpdates {
       this.entries.set(id, { route: 'managed', ...read, state: 'idle', message: null, checkedAt: Date.now(), program: target.program });
       changed = true;
     }
-    if (changed) {
-      this.writeReadings();
-      this.emit();
-    }
-    return moved;
+    if (moved) this.lastCheckAt = null;
+    if (!changed) return;
+    this.writeReadings();
+    this.emit();
   }
 
   /** How long after start the first automatic check waits: ten minutes, or until the kept reading is six hours old. */
@@ -377,9 +389,9 @@ export class HarnessUpdates {
       this.core.providers.installs.installedVersion(providerId) !== null &&
       command !== null &&
       inside(managedDir, resolve(command.executable));
-    if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed', program: command.shown };
+    if (runsManaged && profile.install !== undefined) return { descriptor, profile, route: 'managed', program: programIdentity(command.shown) };
     // A download in flight belongs to the install card, not to this list.
-    if (profile.update !== undefined && command !== null) return { descriptor, profile, route: 'self', program: command.shown };
+    if (profile.update !== undefined && command !== null) return { descriptor, profile, route: 'self', program: programIdentity(command.shown) };
     return null;
   }
 
@@ -527,7 +539,7 @@ export class HarnessUpdates {
         state: stuck ? 'failed' : 'idle',
         message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}` : null,
         checkedAt: Date.now(),
-        program: resolveCommand(target.profile)?.shown ?? target.program,
+        program: this.targetOf(id)?.program ?? target.program,
       });
       // A new release may list other models, and the path may have moved.
       forgetProbes({ providerId: id });
