@@ -157,7 +157,15 @@ later answer, and a project on a share whose host is gone never blocks the core
 (a synchronous check there froze it for 21 s). A check with no clear answer
 keeps the last one. The core checks every project at start and on
 `projects.add`; before any check has answered, the field is left out, and a
-client that gets no field keeps the chip. On, the first send passes
+client that gets no field keeps the chip.
+
+Owners can toggle Worktree by default in a project's Manage project menu.
+The core persists `Project.worktreeDefault` through `projects.setWorktreeDefault`
+and broadcasts `project.updated`, so all connected clients use the same default.
+New drafts use the project's default. Moving a draft uses the target's default
+unless the composer switch was chosen explicitly. Restored drafts keep their
+choice. The composer switch only changes that draft. Enabling the preference requires a Git repository other than Drafts.
+On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
 before writing the thread: the branch is a short temporary `boite/wt-<id>`
 (or the `branch` the call names), and the directory defaults to
@@ -168,7 +176,7 @@ slug such as `fix-worktree-names`. Git renames the temporary branch to
 Explicit branch names, existing threads and branches already renamed, with an
 upstream or known remote-tracking ref, are left alone. Invalid model output or
 a failed call leaves the temporary name usable; `threads.retitle` can try again. The pending flag is
-persisted in journal schema 25 so a restart does not lose the naming request.
+persisted in journal schema 26 so a restart does not lose the naming request.
 Settings > General > Worktrees offers a shared folder instead, with
 `<project-name>-<project-id>/wt-<id>`
 under it so repositories with the same name stay separate. On a phone, owners

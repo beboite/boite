@@ -16,6 +16,8 @@ export interface MenuItem {
   projectTile?: { project: Project; store: Store };
   status?: { tone: 'success' | 'warning' | 'danger'; label: string };
   active?: boolean;
+  /** A persistent toggle, announced and drawn as a checkbox in the context menu. */
+  checked?: boolean;
   hideActiveMark?: boolean;
   icon?: 'settings';
   danger?: boolean;

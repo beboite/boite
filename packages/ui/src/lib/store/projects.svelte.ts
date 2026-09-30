@@ -267,6 +267,17 @@ export class Projects {
     }
   }
 
+  async setProjectWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<void> {
+    const client = this.ctx.client;
+    if (!client) return;
+    try {
+      const project = await client.call('projects.setWorktreeDefault', { projectId, enabled });
+      if (this.ctx.client === client) this.upsertProject(project);
+    } catch (error) {
+      this.ctx.fail(error);
+    }
+  }
+
   /** A project as the core now answers it, from this client's call or another's `project.updated`. */
   upsertProject(project: Project): void {
     const index = this.projects.findIndex((p) => p.id === project.id);
@@ -336,7 +347,7 @@ export class Projects {
     // The drafts folder is no repository: the worktree switch does not follow the draft there.
     const drafts = target === null || project?.kind === 'drafts';
     this.ctx.drafts.forget(draft.projectId);
-    this.draft = { projectId: target, worktree: drafts ? false : draft.worktree };
+    this.draft = { ...draft, projectId: target, worktree: drafts || project?.repository === false ? false : draft.worktreeExplicit ? draft.worktree : project?.worktreeDefault === true };
     if (target === null) return;
     this.rememberProject(target);
     this.collapsedProjects = this.collapsedProjects.filter((id) => id !== target);
@@ -345,7 +356,7 @@ export class Projects {
   /** The draft's worktree switch: on, the first send asks the core for a branch and a worktree. */
   setDraftWorktree(worktree: boolean): void {
     const draft = this.draft;
-    if (!draft || draft.worktree === worktree) return;
-    this.draft = { ...draft, worktree };
+    if (!draft) return;
+    this.draft = { ...draft, worktree, worktreeExplicit: true };
   }
 }

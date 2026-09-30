@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { currentOs, homePath } from '../paths.ts';
 import { which } from './which.ts';
 
@@ -131,6 +131,53 @@ export function resolveNpm(spec: string): NpmCommand | null {
     const executable = scriptRuntime(root);
     if (executable === null) return null;
     return { executable, script };
+  }
+  return null;
+}
+
+/** Where a global npm install put a program: the prefix its updater must install into, and what it replaces. */
+export interface NpmInstall {
+  /** The `--prefix` npm used, `/usr` for `/usr/lib/node_modules`. */
+  prefix: string;
+  /** The package's own directory under `<prefix>/lib/node_modules`. */
+  packageDir: string;
+}
+
+/**
+ * The global npm install a program belongs to, read from where its links lead.
+ * An agent's updater runs `npm install -g`, which writes under npm's configured
+ * prefix, not necessarily where the running copy lives: a copy under
+ * `/opt/agents` updated with npm's `/usr` prefix lands beside it and PATH keeps
+ * the old one. Only the Unix layout `<prefix>/lib/node_modules` is recognised;
+ * pnpm, Bun and the Windows prefix put their packages elsewhere and are left to
+ * their own configuration.
+ */
+export function npmInstallOf(program: string): NpmInstall | null {
+  if (currentOs() === 'windows') return null;
+  const real = realpathOr(program);
+  const marker = `${sep}lib${sep}node_modules${sep}`;
+  const at = real.indexOf(marker);
+  if (at < 0) return null;
+  const prefix = at === 0 ? sep : real.slice(0, at);
+  const [first = '', second = ''] = real.slice(at + marker.length).split(sep);
+  if (first === '' || (first.startsWith('@') && second === '')) return null;
+  const root = join(prefix, 'lib', 'node_modules');
+  return { prefix, packageDir: first.startsWith('@') ? join(root, first, second) : join(root, first) };
+}
+
+/**
+ * The first directory `npm install -g` must write to replace this install and
+ * that this user cannot write, or null. npm swaps the package inside its parent
+ * directory and relinks it under `<prefix>/bin`.
+ */
+export function unwritableDir(install: NpmInstall): string | null {
+  const bin = join(install.prefix, 'bin');
+  for (const dir of [dirname(install.packageDir), ...(existsSync(bin) ? [bin] : [])]) {
+    try {
+      accessSync(dir, constants.W_OK);
+    } catch {
+      return dir;
+    }
   }
   return null;
 }
