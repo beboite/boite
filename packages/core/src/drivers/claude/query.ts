@@ -1,6 +1,6 @@
 import type { EffortLevel, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageAttachment, PermissionMode } from '@boite/contracts';
-import type { TurnContext } from '../types.ts';
+import type { SessionContext } from '../types.ts';
 
 export const STDERR_MAX = 400;
 
@@ -115,9 +115,11 @@ export class PromptQueue {
  * opened with it keeps the skip even after the mode moves away. Hence one
  * boolean rather than the mode itself: the four other modes still cross freely.
  */
-export function sessionKey(ctx: TurnContext): string {
+export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
     cwd: ctx.thread.cwd,
+    generation: ctx.thread.sessionGeneration ?? 0,
+    resumeAt: ctx.resumeAt ?? null,
     accountId: ctx.account.id,
     env: ctx.accountEnv,
     speed: ctx.thread.speed ?? null,

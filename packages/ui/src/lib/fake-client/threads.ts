@@ -337,6 +337,14 @@ export function threadMethods(ctx: FakeContext) {
       ctx.bus.subscribed.delete(params.threadId);
       return { ok: true };
     },
+    'threads.focus': async (params) => {
+      if (params.threadId !== null && (typeof params.threadId !== 'string' || params.threadId.length === 0)) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId must be a nonempty thread id or null', data: { field: 'threadId' } });
+      }
+      if (params.threadId !== null) ctx.thread(params.threadId);
+      ctx.bus.focusedThreadId = params.threadId;
+      return { ok: true };
+    },
     'turns.start': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       requireFakeCwd(ctx, ctx.thread(params.threadId));

@@ -78,6 +78,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.markRead',
   'threads.subscribe',
   'threads.unsubscribe',
+  // A paired phone may prepare the conversation it is viewing, with the same
+  // account and permissions as its next prompt, without starting a turn.
+  'threads.focus',
   'turns.start',
   'turns.stop',
   // The point of carrying the phone: answering the agent from anywhere.

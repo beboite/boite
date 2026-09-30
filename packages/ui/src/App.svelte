@@ -34,11 +34,13 @@
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
   import { mobileOverlay } from './lib/mobile-history';
+  import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
   let appRoot = $state<HTMLDivElement | undefined>(undefined);
   let mobileScreen = $state<'chat' | 'threads' | 'activity'>('chat');
+  let documentVisible = $state(!document.hidden);
   // What the first screen does not draw stays out of the first chunk: the right
   // panel and its six surfaces, the palette and the two dialogs were a third of
   // it. Each loads the moment it is asked for, and the rest once the app has
@@ -144,6 +146,7 @@
       }
     };
     const visibility = () => {
+      documentVisible = !document.hidden;
       if (document.hidden) hidden = true;
       else if (hidden) { hidden = false; resume(); }
     };
@@ -446,6 +449,8 @@
 </script>
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
+
+<ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
 
 <div class="app" class:shell={inShell} class:ready={store.booted} class:whip-enabled={store.booted && experimentOn('whip')} class:phone-chat={!inShell && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} bind:screen={mobileScreen} />{/if}
