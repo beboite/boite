@@ -136,11 +136,24 @@ fn a_same_version_core_without_the_installed_bundle_is_replaced() {
     let mut state = state(&directory, "2.0.0", fake_command(&directory, "2.0.0", "serve"), false, Duration::from_secs(30));
     state.launch.bundle_hash = Some("installed".to_string());
     let outcome = resolve_core(&state);
-    let old_status = old.wait().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let old_status = loop {
+        match old.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
+            Ok(None) => break Err("the previous core did not exit within five seconds".to_string()),
+            Err(error) => break Err(format!("waiting for the previous core failed: {error}")),
+        }
+    };
+    if old_status.is_err() {
+        let _ = old.kill();
+        let _ = old.try_wait();
+    }
     state.kill_child();
+    std::fs::remove_dir_all(directory).unwrap();
+    let old_status = old_status.expect("the previous core exits after replacement");
     assert_ne!(outcome.expect("a same-version reinstall replaces the previous core").1, Some(old_pid));
     assert_eq!(old_status.code(), Some(0));
-    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
