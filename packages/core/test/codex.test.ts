@@ -236,8 +236,10 @@ describe('codex driver', () => {
     const threadId = await codexThread(client);
     process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
     process.env['CODEX_FAKE_INIT_ERROR'] = 'startup failed without a retryable SQLite error';
+    const failed = client.next('core.log', entry => entry.message.includes('preparing the visible conversation failed'));
     await client.call('threads.focus', { threadId });
     await waitFor(() => countLines('initialize') === 1);
+    await failed;
     await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
     expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
     delete process.env['CODEX_FAKE_INIT_ERROR'];
@@ -275,6 +277,7 @@ describe('codex driver', () => {
     const client = await startCore();
     const threadId = await codexThread(client);
     process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
     const procs = harness!.core.procs;
     const spawn = procs.spawnChild.bind(procs);
     const launches: number[] = [];

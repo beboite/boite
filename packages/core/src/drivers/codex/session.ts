@@ -448,7 +448,7 @@ export class CodexSession {
     try {
       await Promise.race([
         this.processClosed,
-        this.active?.stopped,
+        ...(this.active === null ? [] : [this.active.stopped]),
         new Promise<void>(resolve => { timer = setTimeout(resolve, SQLITE_INIT_CLOSE_MS); }),
       ]);
     } finally {
