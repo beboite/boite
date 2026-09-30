@@ -1654,6 +1654,10 @@ export const fr: Translation = {
     bankedResets: '{count} resets en réserve',
     resetExpires: 'Prochain reset expirant {time}',
     budgetRemaining: 'Budget mensuel restant',
+    budgetCompact: 'Budget mensuel',
+    creditCompact: 'Crédits',
+    windowWeeklyCompact: 'Semaine',
+    windowMonthlyCompact: 'Mois',
     creditRemaining: 'Crédits restants',
     creditBalance: '{count} crédits',
 

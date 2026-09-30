@@ -1720,6 +1720,10 @@ export const strings = {
     bankedResets: '{count} banked resets',
     resetExpires: 'Next reset expires {time}',
     budgetRemaining: 'Monthly budget remaining',
+    budgetCompact: 'Monthly budget',
+    creditCompact: 'Credits',
+    windowWeeklyCompact: 'Week',
+    windowMonthlyCompact: 'Month',
     creditRemaining: 'Credits remaining',
     creditBalance: '{count} credits',
 

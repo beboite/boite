@@ -23,7 +23,7 @@
             {#if limit.resetsAt}<small>{strings.quotas.resets.replace('{time}', date(limit.resetsAt))}</small>{/if}
           </div>
         {/each}
-        <QuotaExtras {row} />
+        <QuotaExtras {row} {compact} />
         {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
         {#if row.checkedAt}<small>{row.status === 'ready' ? (row.source === 'observation' ? strings.quotas.observed : strings.quotas.checked).replace('{time}', row.source === 'observation' ? exactTime(row.checkedAt) : date(row.checkedAt)) : `${strings.quotas.stale} · ${date(row.checkedAt)}`}</small>
         {:else if !row.error}<p class="muted">{strings.quotas.unavailable}</p>{/if}
