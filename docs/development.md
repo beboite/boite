@@ -129,6 +129,11 @@ threads first, then a thread waiting on the user, then running, queued and faile
 ones, then the rest by the user's last message. Under a project's header a row
 leaves out the project name; Recent shows it.
 
+A thread row shows a GitHub PR only for the branch associated with that thread.
+Conversations in a shared project folder have no branch of their own and do not
+inherit the checkout's current PR. Moving a thread clears its previous PR and
+reads the new branch, discarding replies for the old checkout.
+
 The sidebar footer counts authenticated machine connections. Remembered cores
 use separate sockets without thread subscriptions; failed connections retry
 every thirty seconds. The menu names disconnected machines and opens connection

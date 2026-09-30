@@ -52,22 +52,35 @@
   let pending = $derived(pendingLine(thread));
 
   let prLoading = $state(false);
+  let prRevision = 0;
   async function refreshPr(manual = false) {
-    if (!owner.client || prLoading) return;
+    const client = owner.client;
+    if (!client || !thread.branch || thread.branch === 'HEAD' || prLoading) return;
+    const revision = prRevision;
+    const requestedOwner = owner;
     prLoading = true;
     try {
-      const result = await lookupPullRequest(owner.client, thread.id, manual);
+      const result = await lookupPullRequest(client, thread.id, manual, JSON.stringify([thread.cwd, thread.branch]));
+      if (revision !== prRevision) return;
       pullRequest = result.supported ? result.pullRequest : null;
-      if (!result.supported && manual) owner.error = strings.errors.pullRequestUnsupported;
+      if (!result.supported && manual) requestedOwner.error = strings.errors.pullRequestUnsupported;
     } catch (error) {
       // A lookup the user did not ask for fails quietly: no gh, no network, no banner.
-      if (manual) owner.error = error instanceof Error ? error.message : String(error);
+      if (revision === prRevision && manual) requestedOwner.error = error instanceof Error ? error.message : String(error);
     } finally {
-      prLoading = false;
+      if (revision === prRevision) prLoading = false;
     }
   }
   $effect(() => {
-    if (owner.connection === 'ready' && !hidden) untrack(() => void refreshPr());
+    // A move or a different owning connection invalidates the old checkout's answer.
+    const identity = { client: owner.client, id: thread.id, cwd: thread.cwd, branch: thread.branch };
+    const ready = owner.connection === 'ready' && !hidden;
+    untrack(() => {
+      pullRequest = null;
+      prLoading = false;
+      if (ready && identity.client) void refreshPr();
+    });
+    return () => { prRevision++; };
   });
   function rename() {
     title = thread.title;
@@ -105,7 +118,7 @@
           disabled: owner.retitling.includes(thread.id)
         },
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-        { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
+        { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading || !thread.branch || thread.branch === 'HEAD' },
         { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),

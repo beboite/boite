@@ -121,6 +121,7 @@ function move(ctx: FakeContext, threadId: ThreadId, projectId: string, stopBackg
     one.projectId = target.id;
     one.cwd = cwd;
     one.branch = branch;
+    one.pullRequest = null;
     const summary = ctx.touch(one);
     if (one.id === thread.id) answer = summary;
   }

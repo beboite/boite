@@ -44,6 +44,19 @@ test('only a refresh the user asked for tells the core to read the repository ag
   expect(call.mock.calls.map(args => args[1])).toEqual([{threadId:'one'},{threadId:'one',refresh:true}]);
 });
 
+test('a moved thread does not reuse the pending read for its old checkout', async () => {
+  let release!: (value: null) => void;
+  const pending = new Promise<null>(resolve => { release = resolve; });
+  const call = vi.fn().mockResolvedValueOnce(null).mockReturnValueOnce(pending).mockResolvedValueOnce(null);
+  const client = { call } as unknown as Client;
+  await lookupPullRequest(client, 'probe');
+  const old = lookupPullRequest(client, 'one', false, 'old-checkout');
+  try {
+    expect(await lookupPullRequest(client, 'one', false, 'new-checkout')).toEqual({ supported: true, pullRequest: null });
+    expect(call).toHaveBeenCalledTimes(3);
+  } finally { release(null); await old; }
+});
+
 test('a thousand sidebar lookups share duplicates, leave RPC capacity and prioritize manual refresh', async () => {
   const gates: (() => void)[] = [];
   let active = 0, maximum = 0, released = false;
