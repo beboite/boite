@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { echoThread, removeDir, startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import { newId } from '../src/ids.ts';
-import { lockDataDir, parseFlags, resolveHost } from '../src/main.ts';
+import { lockDataDir, parseFlags, prepareDataDir, resolveHost, withUtf8Locale } from '../src/main.ts';
 import { dataDirName, defaultDataDir, resolveDataDir } from '../src/paths.ts';
 import { processPlatform } from '../src/platform/index.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
@@ -258,6 +258,18 @@ describe('the bind address', () => {
   });
 });
 
+test('a core started without a locale gives its agents UTF-8, and keeps any locale it was given', () => {
+  const bare: Record<string, string | undefined> = {};
+  withUtf8Locale(bare, 'darwin');
+  expect(bare['LANG']).toBe('en_US.UTF-8');
+  const chosen: Record<string, string | undefined> = { LC_ALL: 'fr_FR.UTF-8' };
+  withUtf8Locale(chosen, 'linux');
+  expect(chosen['LANG']).toBeUndefined();
+  const windows: Record<string, string | undefined> = {};
+  withUtf8Locale(windows, 'win32');
+  expect(windows).toEqual({});
+});
+
 describe('the data directory lock', () => {
   // A pid nothing holds: high enough that no live process wears it here, and
   // `alive()` says so on both platforms.
@@ -320,6 +332,24 @@ describe('the data directory lock', () => {
     const lockedAt = Date.parse('2026-09-27T03:29:39Z');
     writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: lockedAt }), 'utf8');
     const release = lockDataDir(dir, () => Date.parse('2026-09-27T11:35:07Z'));
+    expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
+    release();
+  });
+
+  test.skipIf(process.platform === 'win32')('the data directory is private to its owner, an existing one included', () => {
+    chmodSync(dir, 0o755);
+    prepareDataDir(dir);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    const fresh = join(dir, 'fresh', 'boite2');
+    prepareDataDir(fresh);
+    expect(statSync(fresh).mode & 0o777).toBe(0o700);
+  });
+
+  test('a lock written before the last boot is taken over even when no start time can be read', () => {
+    // macOS: startedAt is null, and after a power cut the dead core's pid is worn by a daemon.
+    const file = join(dir, 'core.lock');
+    writeFileSync(file, JSON.stringify({ pid: process.ppid, startedAt: Date.parse('2026-09-27T03:29:39Z') }), 'utf8');
+    const release = lockDataDir(dir, () => null, () => Date.parse('2026-09-27T08:00:00Z'));
     expect(JSON.parse(readFileSync(file, 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid });
     release();
   });

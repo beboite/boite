@@ -110,6 +110,7 @@ Protection page under Settings keeps its wider resource table.
 
 Two settings turn the jobs into limits. Both are Windows only, both are ignored
 elsewhere, and both apply to jobs that already exist as well as to new ones.
+The memory guard is separate and also runs on Linux and macOS (see below).
 
 - `agentCpuCapPercent`: a hard ceiling for every agent process together, as a
   percentage of the whole machine, applied as the global job's CPU rate control.
@@ -251,11 +252,20 @@ exit; it does not discover grandchildren or poll a process group. Bun supplies
 exit usage for its own subprocesses, while the Node spawn path has no exit
 usage off Windows. The reported `poll` mode denotes this limited fallback.
 
-On Linux the thread load is read from procfs every second: CPU time from each
-registered child's `/proc/<pid>/stat` (in the kernel's fixed 100 ticks a
-second) and resident memory from the `VmRSS` line of its `/proc/<pid>/status`.
-It counts the direct children only, not what they started. macOS has no
-procfs, so its gauge still reads 0% and 0 B while a process runs.
+On Linux the thread load is read from procfs every second, over each
+registered child and every process it started: CPU time from
+`/proc/<pid>/stat` (in the kernel's fixed 100 ticks a second) and memory from
+`/proc/<pid>/status`. Memory is `RssAnon` plus `RssShmem`, what the process
+holds for itself. `VmRSS` also counts the library pages every process maps,
+so sixteen compiler workers each counted the same compiler and a build crossed
+the memory guard's cap with a fraction of it in use; it remains the fallback
+on kernels older than 4.5. macOS has no procfs: its gauge reads each direct
+child's physical footprint through `proc_pid_rusage`, the figure Activity
+Monitor shows as Memory, and CPU stays at 0%.
+
+The memory guard acts on these figures on Linux and macOS too: a thread past
+its share has its heaviest child process tree stopped, as on Windows. The CPU
+cap, the focus guard and the audio mute remain Windows-only.
 
 Nothing hides that. `TraceCapability` carries the operating system, a `mode` of
 `events`, `poll` or `none`, and a note saying why, and every client reads it

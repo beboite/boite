@@ -72,10 +72,22 @@ export function linuxStartedAt(pid: number, read: ProcRead = readProc): number |
   return Number(boot[1]) * 1000 + Math.round((ticks * 1000) / USER_HZ);
 }
 
-/** VmRSS of a status file in bytes, or null when the line is missing (a zombie has none). */
+/**
+ * The memory a process holds for itself, in bytes: its anonymous and shared
+ * memory pages, RssAnon plus RssShmem. VmRSS also counts the file pages every
+ * process maps, so sixteen rustc workers each counted the same compiler
+ * library and a build crossed the memory guard's cap with a fraction of it in
+ * use. VmRSS remains the fallback for kernels older than 4.5. Null when the
+ * lines are missing (a zombie has none).
+ */
 export function residentBytes(status: string): number | null {
-  const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status);
-  return match === null ? null : Number(match[1]) * 1024;
+  const kb = (field: string) => {
+    const match = new RegExp(`^${field}:\\s+(\\d+)\\s+kB$`, 'm').exec(status);
+    return match === null ? null : Number(match[1]) * 1024;
+  };
+  const anonymous = kb('RssAnon');
+  if (anonymous !== null) return anonymous + (kb('RssShmem') ?? 0);
+  return kb('VmRSS');
 }
 
 function pidsIn(text: string): number[] {

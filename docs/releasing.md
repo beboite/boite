@@ -191,20 +191,36 @@ share the regular WebView2 profile.
 Release and nightly callers enable `BOITE_SIGN_UPDATES=1` and provide
 `TAURI_SIGNING_PRIVATE_KEY` through the CI secret. The Tauri wrapper adds
 `tauri.updater.conf.json`, which enables `createUpdaterArtifacts`, and refuses
-signing without a key. Normal local builds and PR verification remain unsigned.
+signing without a key. Normal local builds and the Windows PR build remain
+unsigned. The Linux and macOS CI builds always sign: a PR or main push uses a
+throwaway key generated on the runner, so every run proves the payloads and
+signatures a release will need; only release callers use the real key.
 
 The public verification key is in `tauri.conf.json`. Keep the matching private
 key backed up outside the repository: replacing the public key strands clients
 that only trust the old one. No private key belongs in an artifact or Git.
 
-The Windows build uploads the installer and its `.sig`. Publication creates
-`latest.json` with the exact version, publication date, release notes, signature
-and immutable release download URL. Stable releases remain drafts until reviewed;
+The Windows build uploads the installer and its `.sig`. Each Linux and macOS
+runner collects its packages with `scripts/ci/desktop-bundles.ts` into a
+`desktop-bundle-<runner>` artifact: the .deb and AppImage with their `.sig` on
+Linux, the DMG and the updater archive `Boite.app.tar.gz` with its `.sig` on
+macOS. That archive has the same name on both Mac architectures, so the script
+renames it after the DMG beside it (`Boite_<version>_aarch64.app.tar.gz`). It
+fails the runner when a payload or a signature is missing or when a file of
+another architecture is present. Publication gathers every artifact, and
+`scripts/ci/updater-manifest.ts` creates `latest.json` with the exact version,
+publication date, release notes, and one signature and immutable release
+download URL per updater target. It refuses a release missing any of the seven
+targets or holding a file it does not know. The DMGs are manual downloads that
+the updater never fetches. `SHA256SUMS.txt` covers every installer. Stable releases remain drafts until reviewed;
 nightlies publish automatically. Neither a draft nor an unsigned older release
 is offered by the desktop updater.
 
-These are Tauri updater signatures, not Windows Authenticode signatures. Public
-Linux and macOS update payloads are not published by these workflows yet.
+These are Tauri updater signatures, not Windows Authenticode signatures or
+Apple Developer ID signatures. The macOS application is signed ad hoc and not
+notarized, so Gatekeeper asks once before the first start (README). Linux
+packages are built on Ubuntu 22.04, whose glibc 2.35 is the oldest a user can
+run them on.
 
 ## What the installer holds
 

@@ -9,11 +9,16 @@
   import type { Store } from '../lib/store.svelte';
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
+  import { isMac } from '../lib/keybindings';
   import ProjectTile from './ProjectTile.svelte';
 
   let { store }: { store: Store } = $props();
 
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
+  /** macOS draws its own traffic lights over the bar's left end, and no caption buttons are drawn here. */
+  const macShell = inShell && isMac();
+  /** The room the traffic lights take beyond the bar's usual 8 px of padding. */
+  const lights = macShell ? 72 : 0;
   const mobile = new MediaQuery('(max-width: 720px)');
   let expanded = $derived(mobile.current ? store.sidebarOpen : !store.sidebarCollapsed);
   function toggleSidebar() {
@@ -105,7 +110,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<header style:--project-width={`${store.sidebarCollapsed ? 156 : store.sidebarWidth - 40}px`} class="titlebar" class:browser={!inShell} {onmousedown} data-testid="titlebar">
+<header style:--project-width={`${Math.max(0, (store.sidebarCollapsed ? 156 : store.sidebarWidth - 40) - lights)}px`} class="titlebar" class:browser={!inShell} class:mac={macShell} {onmousedown} data-testid="titlebar">
   {#if store.page === 'chat' && store.booted}
     <button type="button" class="ghost icon sidebar-toggle"
       aria-label={expanded ? strings.sidebar.collapse : strings.sidebar.expand}
@@ -130,7 +135,7 @@
   {#if dev}
     <span class="channel" title={strings.app.channelDevTitle} data-testid="titlebar-channel">{strings.app.channelDev}</span>
   {/if}
-  {#if inShell}
+  {#if inShell && !macShell}
   <!-- Windows' caption buttons: 46 px wide, the bar's full height, no gap and
        flush with the edge, so a throw into the top right corner lands on Close. -->
   <div class="controls" data-testid="titlebar-controls">
@@ -176,6 +181,8 @@
 
   /* In the shell the caption buttons end the bar at its edge. */
   .titlebar.browser { padding-right: 8px; }
+  /* macOS: the traffic lights, 16 px in and about 52 px wide, then the usual gap. */
+  .titlebar.mac { padding-left: 80px; padding-right: 8px; }
   .sidebar-toggle { flex: none; }
   .project-heading {
     display: flex;

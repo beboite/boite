@@ -1,4 +1,5 @@
 import { SPEECH_MAX_SECONDS } from '@boite/contracts';
+import { linuxShell } from './shell-platform';
 import { strings } from './strings';
 import workletUrl from './speech-worklet.js?url';
 
@@ -42,6 +43,8 @@ export class SpeechRecorder {
   private deadline: ReturnType<typeof setTimeout> | null = null;
 
   async start(level: (value: number, seconds: number) => void, ended: () => void): Promise<void> {
+    // WebKitGTK ships with media capture off and denies every request Tauri leaves unanswered.
+    if (linuxShell()) throw new Error(strings.speech.linux);
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error(strings.speech.https);
     try {
       // Create/resume inside the gesture, including Safari's user activation window.

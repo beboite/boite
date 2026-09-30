@@ -155,7 +155,7 @@ pub(crate) fn build_main_window<R: Runtime>(
             .inner_size(MAIN_SIZE.0, MAIN_SIZE.1)
             .min_inner_size(MAIN_MIN_SIZE.0, MAIN_MIN_SIZE.1)
             .resizable(true)
-            .decorations(false)
+            .decorations(cfg!(target_os = "macos"))
             .visible(false)
             .focused(!hidden())
             .skip_taskbar(hidden())
@@ -180,6 +180,14 @@ pub(crate) fn build_main_window<R: Runtime>(
         if !undecorated_shadow(build) {
             builder = builder.shadow(false);
         }
+    }
+    // macOS keeps its own frame, corners and traffic lights, drawn over the
+    // top of the page: the title bar leaves them room (`TitleBar.svelte`) and
+    // they sit centred in its 44 px, where the Windows caption buttons were.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true)
+            .traffic_light_position(tauri::LogicalPosition::new(16.0, 16.0));
     }
     builder = match work_area(app) {
         Some(area) => {
@@ -283,4 +291,35 @@ mod tests {
         assert!(reveal.anyway());
         assert!(!reveal.painted() && !reveal.due());
     }
+}
+
+/// The id of the macOS menu's Quit item.
+#[cfg(target_os = "macos")]
+const MENU_QUIT: &str = "boite-menu-quit";
+
+/// The macOS menu bar. Tauri's default one binds Cmd+W to Close Window, which
+/// quits Boite when the window does not close to the tray, and Cmd+Q to an
+/// immediate quit: both keys belong to the page (`close-surface` and the held
+/// quit). This keeps the Edit items WKWebView needs for copy and paste, and the
+/// application menu, with Quit on a click only.
+#[cfg(target_os = "macos")]
+pub(crate) fn install_macos_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem as Item, Submenu};
+    let name = app.package_info().name.clone();
+    let quit = MenuItem::with_id(app, MENU_QUIT, format!("Quit {name}"), true, None::<&str>)?;
+    let application = Submenu::with_items(app, &name, true, &[
+        &Item::about(app, None, None)?, &Item::separator(app)?, &Item::services(app, None)?, &Item::separator(app)?,
+        &Item::hide(app, None)?, &Item::hide_others(app, None)?, &Item::show_all(app, None)?, &Item::separator(app)?,
+        &quit,
+    ])?;
+    let edit = Submenu::with_items(app, "Edit", true, &[
+        &Item::undo(app, None)?, &Item::redo(app, None)?, &Item::separator(app)?,
+        &Item::cut(app, None)?, &Item::copy(app, None)?, &Item::paste(app, None)?, &Item::select_all(app, None)?,
+    ])?;
+    let window = Submenu::with_items(app, "Window", true, &[
+        &Item::minimize(app, None)?, &Item::maximize(app, None)?, &Item::separator(app)?, &Item::fullscreen(app, None)?,
+    ])?;
+    app.set_menu(Menu::with_items(app, &[&application, &edit, &window])?)?;
+    app.on_menu_event(|app, event| if event.id().as_ref() == MENU_QUIT { crate::tray::quit(app) });
+    Ok(())
 }

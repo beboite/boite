@@ -176,6 +176,7 @@ export const strings = {
     setUp: 'Set up dictation', tryAgain: 'Try again',
     update: 'Update engine', updateHint: 'A faster engine is available, 8 MB.',
     https: 'Microphone access needs HTTPS or localhost. Open the secure pairing link for this core.',
+    linux: 'Dictation is not available in the Linux app yet: its webview does not grant the microphone. Open Boite in a browser to dictate.',
     denied: 'Microphone permission was denied. Allow it in your browser or system settings, then try again.',
     noMicrophone: 'No microphone was found. Connect one and try again.', microphoneBusy: 'The microphone is unavailable. Check whether another app is using it.',
     silence: 'No speech was detected. Try again closer to the microphone.', failed: 'Could not record audio. Try again.',
@@ -284,7 +285,7 @@ export const strings = {
     hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
-    unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
+    unsupported: 'Automatic app updates are available in installed builds: the Windows x64 installer, the macOS app, and the Linux .deb or AppImage.',
     channel: 'Release channel',
     stable: 'Boite',
     nightly: 'Boite Nightly',
@@ -1217,7 +1218,8 @@ export const strings = {
     reload: 'Reload',
     urlPlaceholder: 'Search or enter URL',
     openExternal: 'Open in the system browser',
-    slotEmpty: 'The page opens here once the shell provides the webview'
+    slotEmpty: 'The page opens here once the shell provides the webview',
+    slotLinux: 'The built-in browser is not available in the Linux app yet. Open the page in your own browser.'
   },
 
   terminal: {

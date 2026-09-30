@@ -24,6 +24,9 @@ pub(crate) fn toast_app_id(exe_dir: &Path, identifier: &str) -> String {
 
 /// A message box, the only thing a process with no window and no console can
 /// still show. It blocks until the user closes it.
+/// WebView2 needs nothing set before its first webview.
+pub(crate) fn before_webview() {}
+
 pub(crate) fn alert(title: &str, text: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
     let wide = |value: &str| value.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();

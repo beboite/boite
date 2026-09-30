@@ -185,6 +185,7 @@ export const fr: Translation = {
     setUp: 'Configurer la dictée', tryAgain: 'Réessayer',
     update: 'Mettre à jour le moteur', updateHint: 'Un moteur plus rapide est disponible, 8 Mo.',
     https: 'L\'accès au micro demande HTTPS ou localhost. Ouvrez le lien d\'appairage sécurisé de ce cœur.',
+    linux: 'La dictée n\'est pas encore disponible dans l\'app Linux : sa vue web ne donne pas accès au micro. Ouvrez Boite dans un navigateur pour dicter.',
     denied: 'L\'accès au micro a été refusé. Autorisez-le dans les réglages du navigateur ou du système, puis réessayez.',
     noMicrophone: 'Aucun micro trouvé. Branchez-en un et réessayez.', microphoneBusy: 'Le micro est indisponible. Vérifiez qu\'une autre application ne l\'utilise pas.',
     silence: 'Aucune parole détectée. Réessayez plus près du micro.', failed: 'Enregistrement impossible. Réessayez.',
@@ -291,7 +292,7 @@ export const fr: Translation = {
     hideReminder: 'Masquer le rappel',
     heading: "Mises à jour de l'application",
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
-    unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
+    unsupported: 'Les mises à jour automatiques sont disponibles dans les versions installées : l’installateur Windows x64, l’app macOS et le .deb ou l’AppImage Linux.',
     channel: 'Canal de publication',
     stable: 'Boite',
     nightly: 'Boite Nightly',
@@ -1158,7 +1159,8 @@ export const fr: Translation = {
     reload: 'Recharger',
     urlPlaceholder: 'Rechercher ou saisir une URL',
     openExternal: 'Ouvrir dans le navigateur du système',
-    slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web"
+    slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web",
+    slotLinux: "Le navigateur intégré n'est pas encore disponible dans l'app Linux. Ouvrez la page dans votre navigateur."
   },
 
   terminal: {

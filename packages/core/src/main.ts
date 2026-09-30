@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { uptime } from 'node:os';
 import { join } from 'node:path';
 import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
 import { processIo, runCli } from './cli.ts';
@@ -148,6 +149,16 @@ function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: num
 }
 
 /**
+ * The journal holds every conversation and the push private key. Under the
+ * usual umask a Linux home directory would leave it readable by any local
+ * account, so the directory is the owner's alone, an existing install included.
+ */
+export function prepareDataDir(dataDir: string): void {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') chmodSync(dataDir, 0o700);
+}
+
+/**
  * One core per data directory, taken before the journal is opened.
  *
  * Two cores on one directory is not a rare accident: `bun run dev:core` reads
@@ -162,11 +173,13 @@ function startedAfter(pid: number, lockedAt: number | null, startedAt: (pid: num
  * the lock, in a reboot say, leaves its pid to whatever asks next: a browser
  * tab held the pid of a dead core and kept every later core from starting. A
  * holder that started after the lock was written is not the core that wrote it.
- * Where `startedAt` cannot say (macOS), a live pid still holds the lock.
+ * Nor is any process when the lock predates the last boot: that is the only
+ * test macOS can make, since `startedAt` cannot read a start time there.
  */
 export function lockDataDir(
   dataDir: string,
   startedAt: (pid: number) => number | null = processPlatform.startedAt,
+  bootedAt: () => number = () => Date.now() - uptime() * 1000,
 ): () => void {
   const file = join(dataDir, 'core.lock');
   const release = (): void => {
@@ -193,7 +206,8 @@ export function lockDataDir(
       } catch {
         holder = null;
       }
-      if (holder !== null && holder !== process.pid && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
+      const beforeBoot = lockedAt !== null && lockedAt < bootedAt() - LOCK_CLOCK_MARGIN_MS;
+      if (holder !== null && holder !== process.pid && !beforeBoot && alive(holder) && !startedAfter(holder, lockedAt, startedAt)) {
         throw new Error(
           `another core is already running on ${dataDir} (pid ${holder}). Close it, or start this one with --data-dir on a directory of its own.`,
         );
@@ -266,7 +280,19 @@ function refuseToStart(error: unknown): never {
   process.exit(1);
 }
 
+/**
+ * An app started from Finder, the Dock or a desktop launcher may get no locale
+ * at all: launchd sets none. Agents, their tools and the terminal then run in
+ * the C locale, which prints accented file names as `?` and breaks line
+ * editing. A UTF-8 locale is filled in only when none of the three is set.
+ */
+export function withUtf8Locale(env: Record<string, string | undefined>, platform: NodeJS.Platform): void {
+  if (platform === 'win32' || env['LANG'] || env['LC_ALL'] || env['LC_CTYPE']) return;
+  env['LANG'] = platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
+}
+
 export function main(argv: string[]): void {
+  withUtf8Locale(process.env, process.platform);
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
     // The exit code is set and the process left to end on its own: `process.exit`
@@ -305,7 +331,7 @@ export function main(argv: string[]): void {
   try {
     flags = parseFlags(argv);
     dataDir = resolveDataDir(flags.dataDir, flags.channel);
-    mkdirSync(dataDir, { recursive: true });
+    prepareDataDir(dataDir);
     // Before the journal is opened, because opening it is already a write.
     unlock = lockDataDir(dataDir);
   } catch (error) {

@@ -68,7 +68,11 @@ async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> 
   const directory = env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude');
   let credentials: ObjectValue;
   try { credentials = object(JSON.parse(await readFile(join(directory, '.credentials.json'), 'utf8'))); }
-  catch { throw new Error('Claude login could not be read. Connect an account in Providers.'); }
+  catch {
+    // Claude Code keeps a macOS login in the Keychain, where reading it would raise a system prompt.
+    if (process.platform === 'darwin') throw new Error('Claude keeps its macOS login in the Keychain, so Boite cannot read its quota.');
+    throw new Error('Claude login could not be read. Connect an account in Providers.');
+  }
   const token = object(credentials['claudeAiOauth'])['accessToken'];
   if (typeof token !== 'string' || !token) throw new Error('This Claude account has no subscription login. Connect it in Providers.');
   let response: Response;
