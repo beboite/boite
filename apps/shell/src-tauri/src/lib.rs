@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
+mod attachments;
 mod browser;
 mod channel;
 mod closing;
@@ -130,6 +131,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
             local_files::open_local_file,
+            attachments::save_attachment,
             window::shell_ready,
             whip::whip_window,
             tray::quit_shell,
