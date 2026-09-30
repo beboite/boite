@@ -363,12 +363,15 @@ test('an answer the running turn refuses to take is held for the next prompt', a
     await client.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
     await waitFor(() => steers === 1);
 
+    expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Deploy now?\n\nyes']);
+
     const next = client.next('turn.finished', (turn) => turn.threadId === threadId && turn.status === 'done', 10000);
     finish!();
     await next;
     await waitFor(() => harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').length === 2, 10000);
     const prompts = harness.core.journal.listMessages(threadId).filter((m) => m.role === 'user').map((m) => (m.parts[0]?.type === 'text' ? m.parts[0].text : ''));
     expect(prompts).toEqual(['hello', '> Deploy now?\n\nyes']);
+    expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual([]);
   } finally {
     restore();
   }

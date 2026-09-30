@@ -45,6 +45,7 @@ test('an async answer reaches a running Claude turn at its next PostToolUse, not
   await client.call('turns.start', { threadId, prompt: 'Migrate the schema' });
   await waitFor(() => !!calls[0]?.prompts.length);
   harness.core.threads.deferred.deliverAnswer(threadId, '> Which database?\n\nSQLite');
+  expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Which database?\n\nSQLite']);
   const hook = calls[0]!.options.hooks!.PostToolUse![0]!.hooks[0]!;
   const input = { hook_event_name: 'PostToolUse' as const, session_id: 'answer-session', transcript_path: '', cwd: harness.dataDir, tool_use_id: 'read-1', tool_name: 'Read', tool_input: {}, tool_response: 'file content' };
   // A subagent's tool call is its own conversation: the answer waits for the main agent.
@@ -55,6 +56,11 @@ test('an async answer reaches a running Claude turn at its next PostToolUse, not
   expect(result).toContain('Which database?');
   expect(result).toContain('SQLite');
   expect(harness.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
+  const delivered = await client.call('threads.get', { threadId });
+  expect(delivered.pendingAnswers).toEqual([]);
+  expect(delivered.messages.filter(message => message.role === 'user').map(message => message.parts[0])).toEqual([
+    { type: 'text', text: 'Migrate the schema' }, { type: 'text', text: '> Which database?\n\nSQLite' }
+  ]);
   const again = await hook(input, 'read-2', { signal: new AbortController().signal });
   expect(JSON.stringify(again)).not.toContain('SQLite');
   await client.call('turns.stop', { threadId });

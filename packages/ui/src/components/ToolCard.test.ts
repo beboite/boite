@@ -38,6 +38,16 @@ function openCard(input: unknown): void {
   flushSync();
 }
 
+test('a command stays a folded, stable line while its arguments stream', () => {
+  const props = { name: 'Bash', input: {}, inputText: '{"command":"gi', output: null, status: 'running' as const };
+  running = mount(ToolCard, { target: document.body, props });
+  flushSync();
+  const toggle = query<HTMLButtonElement>('[data-testid=tool-toggle]');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('[data-testid=tool-input]')).toBeNull();
+  expect(toggle.querySelector('.line')!.textContent).toBe('Running a command');
+});
+
 test('an expanded input past six lines opens cut, and Show all opens the rest', () => {
   openCard(LONG_INPUT);
 

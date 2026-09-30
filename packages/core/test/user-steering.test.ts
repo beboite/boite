@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { setThreadStatus } from '../src/threads/records.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
-import { echoThread, startTestCore, type TestCore } from './harness.ts';
+import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
 let h: TestCore;
 let restore: (() => void) | undefined;
@@ -23,6 +23,7 @@ async function running() {
   const started = owner.next('turn.started', turn => turn.threadId === threadId);
   const turn = await owner.call('turns.start', { threadId, prompt: 'Keep working' });
   await started;
+  await waitFor(() => h.core.threads.runner.handles.has(threadId));
   return { owner, threadId, turn, inputs, context: () => ctx, finish: () => finish({ status: 'done', sessionId: 'native-session', usage: null, checkpoint: { sessionId: 'native-session', entry: 'after-follow-up' } }) };
 }
 
@@ -46,6 +47,49 @@ test('a tool boundary reaches an unsubscribed client and follow-ups join the run
   expect(h.core.threads.require(threadId).status).toBe('running');
   const conflicting = await owner.call('turns.steer', { ...params, prompt: 'Different content' }).catch(error => error);
   expect(conflicting.message).toContain('different content');
+});
+
+test('an async question answer is visible while steering and becomes one user message on acceptance', async () => {
+  const { owner, threadId, turn } = await running();
+  let accept!: (accepted: boolean) => void;
+  h.core.threads.runner.handles.get(threadId)!.steer = () => new Promise(resolve => { accept = resolve; });
+  const { questionId } = await owner.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser', 'Renderer'] });
+  await owner.call('questions.answer', { threadId, questionId, optionIds: ['1'], text: 'Check it first.' });
+  const pending = await owner.call('threads.get', { threadId });
+  expect(pending.pendingAnswers).toEqual(['> Which file?\n\nParser\nCheck it first.']);
+  expect(h.core.threads.deferred.takeForRunningTurn(threadId)).toBeNull();
+  accept(true);
+  await Bun.sleep(0);
+  const after = await owner.call('threads.get', { threadId });
+  expect(after.pendingAnswers).toEqual([]);
+  expect(after.messages.filter(message => message.role === 'user')).toHaveLength(2);
+  expect(after.messages.at(-1)).toMatchObject({ role: 'user', turnId: turn.id, parts: [{ type: 'text', text: '> Which file?\n\nParser\nCheck it first.' }] });
+  await expect(owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] })).rejects.toThrow('unknown question');
+});
+
+test('an answer held after Stop precedes the next manual prompt without replacing it', async () => {
+  const { owner, threadId, turn } = await running();
+  h.core.threads.runner.handles.get(threadId)!.steer = async () => false;
+  const { questionId } = await owner.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser'] });
+  await owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
+  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
+  const stopped = owner.next('turn.finished', item => item.id === turn.id);
+  await owner.call('turns.stop', { threadId }); await stopped;
+  await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  const prompts: string[] = [];
+  restore?.();
+  restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+    prompts.push(ctx.prompt);
+    return { done: Promise.resolve({ status: 'done', sessionId: null, usage: null }), stop() {} };
+  } });
+  const finished = owner.next('turn.finished', item => item.threadId === threadId && item.id !== turn.id);
+  await owner.call('turns.start', { threadId, prompt: 'Continue tomorrow' }); await finished;
+  expect(prompts[0]).toContain('> Which file?\n\nParser');
+  expect(prompts[0]).toContain('Continue tomorrow');
+  const messages = h.core.journal.listMessages(threadId).filter(message => message.role === 'user');
+  expect(messages.map(message => message.parts[0])).toEqual([
+    { type: 'text', text: 'Keep working' }, { type: 'text', text: '> Which file?\n\nParser' }, { type: 'text', text: 'Continue tomorrow' }
+  ]);
 });
 
 test('blocking requests, stale targets and unsupported drivers hold input without stopping or journaling it', async () => {

@@ -39,7 +39,7 @@ import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
-import { SYSTEM_LABEL, systemOperation } from './threads/operations.ts';
+import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
@@ -647,6 +647,7 @@ export class ThreadStore {
         this.core.journal.append({ type: 'turn.queued', threadId, version: 1, payload: turn }, () => {
           reservation = this.core.delegation.prepareTurnReservation(threadId, operation);
           this.core.journal.putTurn(turn);
+          if (!operation && !nativeCommandPrompt(prompt)) this.deferred.recordHeldBeforePrompt(threadId, turn.id, now);
           this.core.journal.putMessage(message);
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
           if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);

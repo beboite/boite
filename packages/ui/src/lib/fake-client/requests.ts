@@ -155,9 +155,13 @@ function holdAnswer(ctx: FakeContext, thread: Thread, prompt: string): void {
   const held = ctx.heldAnswers.get(thread.id);
   if (held) {
     held.push(prompt);
+    thread.pendingAnswers = [...held];
+    ctx.touch(thread);
     return;
   }
   ctx.heldAnswers.set(thread.id, [prompt]);
+  thread.pendingAnswers = [prompt];
+  ctx.touch(thread);
   void flushAnswers(ctx, thread);
 }
 
@@ -167,6 +171,8 @@ async function flushAnswers(ctx: FakeContext, thread: Thread): Promise<void> {
   }
   const held = ctx.heldAnswers.get(thread.id) ?? [];
   ctx.heldAnswers.delete(thread.id);
+  thread.pendingAnswers = [];
+  ctx.touch(thread);
   if (held.length > 0 && !thread.archived) ctx.startTurn(thread.id, held.join('\n\n'));
 }
 

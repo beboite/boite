@@ -695,6 +695,12 @@
   }
 }}>
   <ThreadActivity {store} />
+  {#if store.openThread?.pendingAnswers?.length}
+    <div data-testid="question-queued">
+      <ComposerQueue queued={store.openThread.pendingAnswers.map(text => ({ text, attachments: [] }))}
+        disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
+    </div>
+  {/if}
   {#if composer && composer.queued.length > 0}
     <ComposerQueue queued={composer.queued}
       disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
