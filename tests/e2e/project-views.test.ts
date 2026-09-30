@@ -53,6 +53,46 @@ test('recent view filters one owning project and creates its draft', async () =>
   await page.waitFor(`!document.querySelector('${id('palette-input')}')`);
 }, 20_000);
 
+test('copy path stays readable with a long working directory in conversation menus', async () => {
+  await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
+  await page.navigate(url);
+  await page.waitFor(`globalThis.__boiteTest?.workspace.active.openThread`);
+  const cwd = await page.evaluate<string>(`(() => {
+    const cwd = '/workspace/projects/a-long-project-name/worktrees/a-long-conversation-branch/packages/client';
+    const s = globalThis.__boiteTest.workspace.active;
+    s.openThread.cwd = cwd;
+    s.threads = s.threads.map(t => ({...t, cwd}));
+    return cwd;
+  })()`);
+  await page.send('Browser.grantPermissions', { origin: new URL(url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  for (const opener of ['thread-row', 'thread-title', 'thread-menu-trigger']) {
+    const phone = opener === 'thread-menu-trigger';
+    await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 360 : 1300, height: phone ? 800 : 850, deviceScaleFactor: 1, mobile: phone });
+    if (phone) await page.click(id(opener));
+    else await page.evaluate(`(() => {
+      const { workspace } = globalThis.__boiteTest;
+      const owner = workspace.active;
+      const machine = workspace.machines.find(m => m.store === owner);
+      const target = '${opener}' === 'thread-row'
+        ? Array.from(document.querySelectorAll('${id('thread-row')}')).find(e => e.dataset.machineId === machine.id && e.dataset.threadId === owner.openThread.id)
+        : document.querySelector('${id(opener)}');
+      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }));
+    })()`);
+    const menu = id(phone ? 'thread-menu-trigger-menu' : 'context-menu');
+    const copy = `${menu} [data-value=copy]`;
+    await page.waitFor(`document.querySelector('${copy}')`);
+    await capture(`copy-path-${opener}.png`);
+    expect(await page.evaluate(`(() => { const e = document.querySelector('${copy}'); return e.scrollWidth <= e.clientWidth; })()`)).toBe(true);
+    expect(await page.evaluate(`document.querySelector('${copy}').textContent.trim()`)).toBe('Copier le chemin');
+    await page.click(copy);
+    await page.waitFor(`!document.querySelector('${menu}')`);
+    expect(await page.evaluate(`navigator.clipboard.readText()`)).toBe(cwd);
+  }
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+}, 20_000);
+
 test('projects follow user activity, then keep a dragged custom order after reload', async () => {
   await page.click(id('view-projects'));
   await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.machines[1].store; s.threads = s.threads.map(t => t.projectId === 'p-notes' ? {...t, lastUserMessageAt: Date.now() + 1000} : t); })()`);
