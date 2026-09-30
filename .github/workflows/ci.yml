@@ -5,12 +5,20 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      windows-probe:
+        type: boolean
+        default: false
+        description: Run the Windows native shutdown reproductions only.
   workflow_call:
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         description: Required only when sign-updates is enabled.
         required: false
     inputs:
+      windows-probe:
+        type: boolean
+        default: false
       force:
         type: boolean
         default: true
@@ -39,6 +47,7 @@ env:
 
 jobs:
   changes:
+    if: ${{ !inputs.windows-probe }}
     runs-on: ubuntu-24.04
     outputs:
       core: ${{ steps.filter.outputs.core }}
@@ -305,9 +314,30 @@ jobs:
       packages: write
     uses: ./.github/workflows/server.yml
 
+  windows-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.windows-probe
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Repeat the native shutdown scenarios
+        run: |
+          $failures = 0
+          for ($i = 1; $i -le 10; $i++) {
+            foreach ($file in @('jobs-forget', 'thread-remove')) {
+              Write-Host "Native repetition $i / $file"
+              bun test "packages/core/test/$file.test.ts"
+              if ($LASTEXITCODE -ne 0) { $failures++ }
+            }
+          }
+          if ($failures -gt 0) { throw "$failures native reproductions failed" }
+
   required:
     name: CI required
-    if: always()
+    if: always() && !inputs.windows-probe
     needs: [changes, core, web, desktop, e2e, desktop-portable, server]
     runs-on: ubuntu-24.04
     steps:

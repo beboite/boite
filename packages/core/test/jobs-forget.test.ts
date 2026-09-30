@@ -108,10 +108,14 @@ describeWindows('thread jobs of forgotten threads', () => {
     // Bun owns a process handle until the exited subprocess is collected.
     // Collect those wrappers before comparing kernel counts; a leaked native
     // Job Object cannot be reclaimed by Bun's garbage collector.
-    await waitFor(() => {
-      Bun.gc(true);
-      return handleCount() - handlesBefore < SPAWNS / 2;
-    }, 5000);
+    try {
+      await waitFor(() => {
+        Bun.gc(true);
+        return handleCount() - handlesBefore < SPAWNS / 2;
+      }, 5000);
+    } catch (cause) {
+      throw new Error(`native handles before=${handlesBefore}, after=${handleCount()}, jobs=${threadJobCount()}`, { cause });
+    }
     // Preserve the kernel assertion: one leaked Job Object per id still fails.
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
