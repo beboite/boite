@@ -498,8 +498,11 @@ export class ClaudeSession {
       turn.settle();
     }
     // Between turns nobody is listening, so the reason goes to the core log.
+    // A CLI Boite asked to end (a stop, an idle or archived session) may exit
+    // on the error result it wrote for the interrupt, which the SDK then
+    // reports as the exit's cause: that is the end Boite asked for.
     if (reason !== null && left.length === 0) {
-      this.ctx.log('error', `the warm claude session ended: ${reason}`);
+      this.ctx.log(this.closing ? 'info' : 'error', `the warm claude session ended: ${reason}`);
     }
     this.hooks.ended(this);
   }
