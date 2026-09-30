@@ -101,6 +101,12 @@ The runner prints full per-file output and fails on any nonzero exit. The old
 reused-worker runner took 189 s serially, 35 s with 16 workers and 53 s with
 4 workers on 2026-09-25; those timings do not describe the fresh-process runner.
 
+Thread-removal tests check rejected RPC errors with `catch` and
+`toMatchObject`, including their code, message and data. Bun 1.4.2 on Windows
+can crash after these scenarios when `.rejects` matchers are used, including
+`.rejects.toMatchObject`. A successful response has no RPC error and fails
+the explicit assertion; the ownership and deletion checks remain enforced.
+
 Process-wide kernel handle assertions run in a dedicated child through
 `procs.spawn`: a reused test worker can retain handles from earlier files.
 The child still checks the real handle count and Job Object cleanup.
