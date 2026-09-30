@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { ArrowDown } from '@lucide/svelte';
   import type { AgentLetter, Message, MoveNotice } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
@@ -97,6 +97,8 @@
 
   /** How often the bottom message's height is allowed to speak to the pin. */
   const TAIL_GAP_MS = 100;
+  /** How long a scroll must rest before the reading anchor is read again. */
+  const ANCHOR_SETTLE_MS = 120;
 
   let viewport = $state<HTMLDivElement | undefined>(undefined);
   let pinned = $state(savedReading?.pinned ?? true);
@@ -139,6 +141,17 @@
     if (Math.abs(delta) > 1) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
   }
   function releaseAnchor() { restoringAnchor = false; }
+  /**
+   * A scroll remembers what is being read once it settles, not on every event:
+   * finding the anchor reads the layout of each rendered message, and doing it
+   * per event made a fast scroll lay the page out twice a frame. A pointer or a
+   * key, which can navigate away at once, still remembers it immediately.
+   */
+  let anchorTimer = 0;
+  function rememberAnchorSoon() {
+    clearTimeout(anchorTimer);
+    anchorTimer = window.setTimeout(() => { anchorTimer = 0; rememberAnchor(); }, ANCHOR_SETTLE_MS);
+  }
   onMount(() => {
     // Capture the settled layout before a navigation click removes this list.
     document.addEventListener('pointerdown', rememberAnchor, true);
@@ -150,6 +163,7 @@
   });
   let restoredReading = false;
   onDestroy(() => {
+    if (anchorTimer) { clearTimeout(anchorTimer); anchorTimer = 0; rememberAnchor(); }
     if (!viewport || !store.readingPositions) return;
     store.readingPositions.delete(threadId);
     store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor });
@@ -261,7 +275,9 @@
       }
       const id = node.dataset['mid'];
       if (!id) continue;
-      const next = Math.round(node.offsetHeight) + GAP;
+      // The observer already measured the box; reading `offsetHeight` again
+      // would lay out, mid-scroll, whatever the window just mounted.
+      const next = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? node.offsetHeight) + GAP;
       const previous = heights.get(id) ?? ESTIMATE;
       if (previous === next) continue;
       heights.set(id, next);
@@ -310,8 +326,11 @@
    */
   function track(node: HTMLElement, id: string): { destroy(): void } {
     node.dataset['mid'] = id;
-    if (risen.has(id)) node.style.animation = 'none';
-    else risen.add(id);
+    // A message rises as it arrives at the bottom being watched. One that a
+    // scroll up the history brings into the window is already there: rising
+    // then animated every message a fast scroll crossed.
+    if (risen.has(id) || !pinned) node.style.animation = 'none';
+    risen.add(id);
     boxes?.observe(node);
     return {
       destroy() {
@@ -371,7 +390,7 @@
     if (navigationTarget) return;
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
-    void tick().then(rememberAnchor);
+    rememberAnchorSoon();
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
     if (pinned) markSeen();

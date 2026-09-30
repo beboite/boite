@@ -91,7 +91,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="prose" data-testid="text-part" bind:this={host} onclick={follow}>
+<div class="prose" class:live data-testid="text-part" bind:this={host} onclick={follow}>
   {#each blocks as block, index (index)}
     <div class="paragraph" data-testid="paragraph">{@html renderMarkdown(block, rich)}</div>
   {/each}
@@ -267,7 +267,10 @@
   }
 
   .paragraph + .paragraph { margin-top: 12px; }
-  .paragraph { animation: paragraph-in var(--dur-3) var(--ease-out-quint); }
+  /* Only a paragraph the answer is writing now eases in. One mounted from the
+     history, as a scroll brings its message back into the window, is already
+     there: animating it made every scroll restyle each paragraph it reached. */
+  .live .paragraph { animation: paragraph-in var(--dur-3) var(--ease-out-quint); }
   @keyframes paragraph-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
-  @media (prefers-reduced-motion: reduce) { .paragraph { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .live .paragraph { animation: none; } }
 </style>
