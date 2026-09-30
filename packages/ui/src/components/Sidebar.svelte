@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WhipButton from './WhipButton.svelte';
   import { Bot, ChevronRight, Ellipsis, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
@@ -250,6 +251,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
     {/if}
+  {#if experimentOn('whip')}<WhipButton onerror={error => { store.error = error instanceof Error ? error.message : String(error); }} />{/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
     <button
       class="ghost icon"
