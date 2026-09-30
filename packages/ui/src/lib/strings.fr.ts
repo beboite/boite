@@ -977,6 +977,7 @@ export const fr: Translation = {
     placeholder: 'Message à {provider} dans {project}',
     placeholderNoProject: "Message à l'agent",
     placeholderNew: 'Que voulez-vous faire ?',
+    placeholderOffline: '{machine} est hors ligne : les messages attendent ici et partent à sa reconnexion',
     send: 'Envoyer',
     stop: 'Arrêter',
     queued: 'Envoyé après le prochain outil, ou à la fin du tour',
