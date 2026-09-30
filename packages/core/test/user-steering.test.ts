@@ -80,7 +80,7 @@ test('an answer held after Stop precedes the next manual prompt without replacin
   await waitFor(() => !h.core.threads.runner.steering.has(threadId));
   await Bun.sleep(0);
   expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
-  expect(h.core.threads.withLoad(h.core.threads.require(threadId)).pendingAnswers).toEqual(['> Which file?\n\nParser']);
+  expect((await owner.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Which file?\n\nParser']);
   const prompts: string[] = [];
   restore?.();
   restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
