@@ -86,7 +86,7 @@ test('delivery wakes the recipient once, preserves system provenance and does no
 // The delivery wait allows 8 seconds; the test must also allow setup and teardown.
 }, 12000);
 
-test('idempotency, size limits, reply provenance and outgoing budgets are enforced in the core', async () => {
+test('idempotency, size limits and reply provenance are enforced in the core, with no hourly budget', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.coordination.pause(b);
   const first = await send(h, a, dest(h, b), 'One', 'same');
@@ -94,9 +94,10 @@ test('idempotency, size limits, reply provenance and outgoing budgets are enforc
   await expect(send(h, a, dest(h, b), 'Changed', 'same')).rejects.toThrow('different content');
   await expect(send(h, a, dest(h, b), 'x'.repeat(4001))).rejects.toThrow('4000');
   await expect(h.core.coordination.send({ threadId: a, to: dest(h, b), text: 'Fake reply', replyTo: first.id, requestId: 'bad-reply' })).rejects.toThrow('incoming');
-  for (let i = 0; i < 5; i++) await send(h, a, dest(h, b), `Message ${i}`);
-  await expect(send(h, a, dest(h, b))).rejects.toThrow('budget');
-  expect(h.core.coordination.get(b).messages).toHaveLength(6);
+  // More than the old Brief budgets allowed (6 sent, 20 received an hour).
+  for (let i = 0; i < 24; i++) await send(h, a, dest(h, b), `Message ${i}`);
+  expect(h.core.coordination.get(b).messages).toHaveLength(25);
+  expect(h.core.coordination.get(a)).toMatchObject({ sent: 25, sendLimit: null, wakeLimit: null });
   expect(h.core.coordination.get(b).wakes).toBe(0);
 });
 
@@ -172,7 +173,7 @@ test('signed peer errors expose validation messages but hide unexpected implemen
   };
   const invalid = await request('invalid');
   expect(invalid.status).toBe(400);
-  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver or receipt' });
+  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver, receipt, search or read' });
   const failure = spyOn(two.h.core.journal, 'listThreads').mockImplementation(() => { throw new Error('database failure at /private/workspace/journal.sqlite'); });
   try {
     const response = await request('directory');
@@ -229,9 +230,9 @@ test('restart pauses pending work while existing idle threads stay reachable and
   } finally { await reopened.close(); }
 });
 
-test('wake limits keep messages pending, and expired messages never wake a provider', async () => {
+test('a paused recipient keeps messages pending, and expired messages never wake a provider', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
-  for (let i = 0; i < 2; i++) h.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(b, Date.now());
+  h.core.coordination.pause(b);
   const letter = await send(h, a, dest(h, b));
   await new Promise(resolve => setTimeout(resolve, 2200));
   expect(h.core.journal.listTurns(b)).toHaveLength(0);
@@ -323,3 +324,69 @@ test('an uncertain letter does not keep the sweep awake, and leaves the journal 
   expect(ids).toContain(stuck.id);
   expect(ids).not.toContain(old.id);
 });
+
+function say(h: TestCore, threadId: string, role: 'user' | 'assistant', text: string, at = Date.now()) {
+  h.core.journal.putMessage({ id: crypto.randomUUID(), threadId, turnId: 'history', role, state: 'complete', createdAt: at, parts: [{ type: 'text', text }, ...(role === 'assistant' ? [{ type: 'tool' as const, toolId: 't1', name: 'Bash', input: {}, status: 'done' as const, output: 'secret tool output' }] : [])] as never });
+}
+
+test('directory lists the most recently active first and describes each contact', async () => {
+  const { h, a, b } = await setup();
+  const c = (await echoThread(h, await h.connect(), 'Newest')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(b), updatedAt: Date.now() + 60_000 });
+  const agents = (await h.core.coordination.directory(a)).agents;
+  expect(agents.map(t => t.threadId)).toEqual([b, c]);
+  expect(agents[0]).toMatchObject({ title: 'Deployment', agent: expect.stringContaining('echo'), branch: null });
+  expect(typeof agents[0]?.project).toBe('string');
+});
+
+test('search finds a contact by words of its chat, fields or both, and reading returns text and tool names only', async () => {
+  const { h, a, b } = await setup();
+  say(h, b, 'user', 'the login page shows a blank screen after the redirect', 1000);
+  say(h, b, 'assistant', 'I changed the OAuth callback in auth.ts', 2000);
+  const found = await h.core.coordination.search(a, 'blank deployment');
+  expect(found.matches.map(m => m.threadId)).toEqual([b]);
+  expect(found.matches[0]?.matched).toEqual(['title', 'chat']);
+  expect(found.matches[0]?.excerpts[0]).toContain('blank screen');
+  expect((await h.core.coordination.search(a, 'blank nowhere')).matches).toEqual([]);
+  // A tool's output is not chat.
+  expect((await h.core.coordination.search(a, 'secret')).matches).toEqual([]);
+  const read = await h.core.coordination.read(a, dest(h, b), 1);
+  expect(read.entries.map(e => [e.role, e.text, e.tools])).toEqual([['assistant', 'I changed the OAuth callback in auth.ts', ['Bash']]]);
+  expect(read.more).toBe(true);
+  const older = await h.core.coordination.read(a, dest(h, b), 5, read.entries[0]!.at);
+  expect(older.entries.map(e => e.text)).toEqual(['the login page shows a blank screen after the redirect']);
+  expect(older.more).toBe(false);
+  expect(JSON.stringify(read)).not.toContain('secret tool output');
+  h.core.coordination.configure(b, { ...brief, mode: 'off' });
+  await expect(h.core.coordination.read(a, dest(h, b))).rejects.toThrow('not a contact');
+});
+
+test('a waiting agent takes its answer directly, and the recipient is not woken for it', async () => {
+  const { h, a, b } = await setup();
+  const waiting = h.core.coordination.wait(a, dest(h, b), 5000);
+  const answer = await send(h, b, dest(h, a), 'Done, you can restart.');
+  const { letters } = await waiting;
+  expect(letters.map(l => [l.id, l.status])).toEqual([[answer.id, 'delivered']]);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  // The answer reached the agent through its tool output only: no wake turn, no injected copy.
+  expect(h.core.journal.listTurns(a)).toHaveLength(0);
+  const prompts = h.core.journal.listMessages(a).filter(m => m.role === 'system').map(m => JSON.stringify(m.parts));
+  expect(prompts.some(p => p.includes('Done, you can restart.'))).toBe(false);
+  expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
+});
+
+test('two linked cores search and read each other\'s agents through signed requests', async () => {
+  const one = await setup(); const two = await setup();
+  const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
+  one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
+  say(two.h, two.b, 'user', 'the nightly backup to the NAS failed again');
+  const found = await one.h.core.coordination.search(one.a, 'nas backup');
+  expect(found.unavailable).toEqual([]);
+  const remote = found.matches.find(m => m.coreId === cardB.coreId);
+  expect(remote).toMatchObject({ threadId: two.b, machine: cardB.name, matched: ['chat'] });
+  const read = await one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b });
+  expect(read.contact.threadId).toBe(two.b);
+  expect(read.entries.map(e => e.text)).toEqual(['the nightly backup to the NAS failed again']);
+  two.h.core.coordination.configure(two.b, { ...brief, remote: false });
+  await expect(one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b })).rejects.toThrow('not a thread open to other machines');
+}, 25000);

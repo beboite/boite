@@ -52,7 +52,7 @@ test('a signed message from another core appears as a forwarded bubble and survi
     };
     await checkBubble();
     await page.click('[data-testid=coordination-panel] > summary');
-    await page.waitFor('document.querySelector("[data-testid=coordination-mode-brief]").getAttribute("aria-checked") === "true"');
+    await page.waitFor('document.querySelector("[data-testid=coordination-mode-on]").getAttribute("aria-checked") === "true"');
     await page.waitFor('document.querySelector("[data-testid=coordination-panel]").open && document.querySelector("[data-testid=coordination-panel]").getBoundingClientRect().height > 150');
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores.png'));

@@ -1839,6 +1839,37 @@ export interface AgentContact extends AgentAddress {
   resources: string;
   status: ThreadStatus;
   mode: CoordinationMode;
+  /** The project's name. Missing on older cores. */
+  project?: string;
+  /** Provider and model, as `claude claude-opus-5-5`. Missing on older cores. */
+  agent?: string;
+  /** The worktree branch the thread works on, when it has one. Missing on older cores. */
+  branch?: string | null;
+  /** Last activity: a message, a turn or a change of state. Missing on older cores. */
+  activeAt?: Timestamp;
+}
+/** A contact whose title, project, branch, model, resources or chat matched a search. */
+export interface AgentMatch extends AgentContact {
+  /** Which fields matched, best first. */
+  matched: ('title' | 'project' | 'branch' | 'agent' | 'resources' | 'chat')[];
+  /** Up to three short excerpts of the chat around a match. */
+  excerpts: string[];
+}
+/** One entry of another agent's conversation as `collaboration.read` returns it. */
+export interface AgentTranscriptEntry {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  at: Timestamp;
+  /** Text only, cut at 4,000 characters. */
+  text: string;
+  /** The tools the agent called in this message, by name, in order. */
+  tools: string[];
+}
+export interface AgentTranscript {
+  contact: AgentContact;
+  entries: AgentTranscriptEntry[];
+  /** Older entries exist before the first one returned; pass its `at` as `before`. */
+  more: boolean;
 }
 export interface AgentLetter {
   /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
@@ -1861,9 +1892,11 @@ export interface CoordinationView {
   config: CoordinationConfig;
   messages: AgentLetter[];
   sent: number;
-  sendLimit: number;
+  /** Null: no limit. Older cores send a number. */
+  sendLimit: number | null;
   wakes: number;
-  wakeLimit: number;
+  /** Null: no limit. Older cores send a number. */
+  wakeLimit: number | null;
 }
 
 /** Owner-selected routes. Agents name a profile, never arbitrary credentials or permissions. */
@@ -2047,6 +2080,15 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
   'collaboration.send': { params: { threadId: ThreadId; to: AgentAddress; text: string; replyTo?: string; requestId: string }; result: AgentLetter };
+  /** Contacts on this core and linked cores whose title, project, branch, model, resources or chat contain every word of `query`. */
+  'collaboration.search': { params: { threadId: ThreadId; query: string }; result: { matches: AgentMatch[]; unavailable: string[] } };
+  /** Another contact's conversation, newest `limit` entries (default 30, at most 100) before `before`. */
+  'collaboration.read': { params: { threadId: ThreadId; target: AgentAddress; limit?: number; before?: Timestamp }; result: AgentTranscript };
+  /**
+   * Waits up to `timeoutMs` (at most 300,000) for incoming messages, from `from` only when given,
+   * and hands them over as delivered: they are not injected into the turn a second time.
+   */
+  'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };

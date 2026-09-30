@@ -19,6 +19,7 @@ import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
+import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 
 export interface CliIo {
   out(text: string): void;
@@ -51,10 +52,16 @@ export const USAGE = `usage: boite <command> [args] [--json]
   todo list                      the project's todo list
   todo add <text>                add a card for the user
   todo claim <id>                mark a card finished, awaiting the user
-  agents list                    authorized agents and shared resources
-  agents inbox                   agent messages, provenance and delivery state
-  agents send <core>/<thread> <text>
+  agents list                    other agents here and on linked machines
+  agents find <words>            locate agents by words of their chat, title,
+                                 project, branch or model
+  agents read <agent>            its conversation (--last <n>, --before <ms>)
+  agents send <agent> <text>     message it; --wait blocks for its answer
   agents reply <message-id> <text>
+  agents log <agent>             what you and that agent said to each other
+  agents wait [agent]            the next message (--timeout <s>, default 90)
+  agents inbox                   every exchange and its delivery state
+                                 <agent>: <thread-id>, <machine>/<thread-id>
   agent context|inbox|missions   this persistent agent's authorized context
   agent send <ids|-> <text>      post to its group or direct conversation
   agent reply <message-id> <text>
@@ -113,10 +120,19 @@ interface Parsed {
   requestId?: string;
   worktree: boolean;
   title?: string;
+  wait: boolean;
+  timeout?: number;
+  last?: number;
+  before?: number;
 }
 
 function parse(argv: string[]): Parsed {
-  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const parsed: Parsed = { positional: [], json: false, multiple: false, worktree: false, wait: false, thread: undefined, dataDir: undefined, channel: 'stable' };
+  const number = (flag: string, raw: string): number => {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) throw new Usage(`${flag} needs a number, got ${raw}`);
+    return value;
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
     const next = (): string => {
@@ -130,6 +146,10 @@ function parse(argv: string[]): Parsed {
     else if (arg === '--multiple') parsed.multiple = true;
     else if (arg === '--worktree') parsed.worktree = true;
     else if (arg === '--title') parsed.title = next();
+    else if (arg === '--wait') parsed.wait = true;
+    else if (arg === '--timeout') parsed.timeout = number(arg, next());
+    else if (arg === '--last') parsed.last = number(arg, next());
+    else if (arg === '--before') parsed.before = number(arg, next());
     else if (arg === '--thread') parsed.thread = next();
     else if (arg === '--data-dir') parsed.dataDir = next();
     else if (arg === '--channel') {
@@ -279,31 +299,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
       return;
     }
     case 'agents': {
-      const action = want(0, 'list, inbox, send or reply');
-      if (action === 'list') {
-        const result = await client.call('collaboration.directory', { threadId });
-        print([...result.agents.map(a => `${a.coreId}/${a.threadId} ${JSON.stringify(a.title)} machine=${JSON.stringify(a.machine)} ${a.status} resources=${JSON.stringify(a.resources)}`), ...result.unavailable.map(name => `unavailable: ${JSON.stringify(name)}`)], result);
-      } else if (action === 'inbox') {
-        const result = await client.call('collaboration.get', { threadId });
-        print([`mode: ${result.config.mode}${result.config.paused ? ' (paused)' : ''}`, `budget: ${result.sent}/${result.sendLimit} sent this hour`, ...result.messages.map(m => `${m.id} ${m.status} from=${JSON.stringify(m.from)} to=${JSON.stringify(m.to)} text=${JSON.stringify(m.text)}${m.error ? ` error=${JSON.stringify(m.error)}` : ''}`)], result);
-      } else if (action === 'send' || action === 'reply') {
-        const target = want(1, 'a recipient or incoming message id');
-        const body = rest.slice(2).join(' ');
-        if (!body) throw new Usage('agents send/reply needs message text');
-        let to: { coreId: string; threadId: string };
-        if (action === 'reply') {
-          const view = await client.call('collaboration.get', { threadId });
-          const letter = view.messages.find(m => m.id === target && m.to.coreId === view.self.coreId && m.to.threadId === threadId);
-          if (!letter) throw new Usage('reply needs an incoming message id from agents inbox');
-          to = { coreId: letter.from.coreId, threadId: letter.from.threadId };
-        } else {
-          const [coreId, targetThreadId, extra] = target.split('/');
-          if (!coreId || !targetThreadId || extra) throw new Usage('recipient must be <core-id>/<thread-id> from agents list');
-          to = { coreId, threadId: targetThreadId };
-        }
-        const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: parsed.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
-        print([`id: ${letter.id}`, `status: ${letter.status}`, 'Delivery is not consent. Wait for an explicit reply before a disruptive action.', ...(letter.error ? [`error: ${letter.error}`] : [])], letter);
-      } else throw new Usage('agents expects list, inbox, send or reply');
+      try {
+        await agentsCommand(client, threadId, rest, { ...(parsed.requestId === undefined ? {} : { requestId: parsed.requestId }), wait: parsed.wait, ...(parsed.timeout === undefined ? {} : { timeout: parsed.timeout }), ...(parsed.last === undefined ? {} : { last: parsed.last }), ...(parsed.before === undefined ? {} : { before: parsed.before }) }, print);
+      } catch (error) {
+        if (error instanceof AgentsUsage) throw new Usage(error.message);
+        throw error;
+      }
       return;
     }
     case 'workflow': {
@@ -476,7 +477,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   try {
     const target = targetOf(parsed, io.env);
     try {
-      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION } });
+      // An agent waiting for an answer holds its call up to five minutes.
+      const waits = parsed.positional[0] === 'agents' && (parsed.wait || parsed.positional[1] === 'wait');
+      client = await connect(target.url, target.token, { client: { name: 'cli', version: CORE_VERSION }, ...(waits ? { requestTimeoutMs: (WAIT_MAX_S + 30) * 1000 } : {}) });
     } catch (error) {
       throw new Error(`no core answers at ${target.url}: ${(error as Error).message}`);
     }

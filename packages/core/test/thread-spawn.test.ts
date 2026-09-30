@@ -78,7 +78,7 @@ test('an agent starts a real thread in another project, which answers it back as
   expect(h.core.journal.listThreads(notes.id)).toHaveLength(1);
 });
 
-test('starting threads stays within communication settings, the hourly budget and one agent generation', async () => {
+test('starting threads stays within communication settings and one agent generation, with no hourly budget', async () => {
   answering(); const { h, owner, threadId, notes, cli } = await setup();
   const config = h.core.coordination.config(threadId);
   await owner.call('collaboration.configure', { threadId, config: { ...config, remote: false } });
@@ -91,10 +91,8 @@ test('starting threads stays within communication settings, the hourly budget an
   expect((await cli(['thread', 'new', 'nowhere', 'Anything'])).err).toContain('no project nowhere in Boite');
 
   const ids: string[] = [];
-  for (const brief of ['One', 'Two', 'Three']) ids.push((JSON.parse((await cli(['thread', 'new', notes.id, brief, '--json'])).out) as AgentSpawn).thread.id);
-  const over = await cli(['thread', 'new', notes.id, 'Four']);
-  expect(over.code).toBe(1);
-  expect(over.err).toContain('3 threads started in the last hour, the brief limit');
+  for (const brief of ['One', 'Two', 'Three', 'Four']) ids.push((JSON.parse((await cli(['thread', 'new', notes.id, brief, '--json'])).out) as AgentSpawn).thread.id);
+  expect(new Set(ids).size).toBe(4);
 
   // A thread an agent started starts none of its own until the user writes in it.
   const child = ids[0]!;
