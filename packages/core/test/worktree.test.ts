@@ -61,8 +61,17 @@ async function echoAccount(): Promise<string> {
 describe('a thread in its own worktree', () => {
   test('one title call names the temporary branch while the first turn runs without moving files or losing commits', async () => {
     let titleCalls = 0;
+    const releaseTurn = Promise.withResolvers<void>();
     const restore = setDriver('echo', {
       ...echoDriver,
+      startTurn: ctx => {
+        const handle = echoDriver.startTurn(ctx);
+        return {
+          ...handle,
+          done: handle.done.then(async result => { await releaseTurn.promise; return result; }),
+          stop: () => { releaseTurn.resolve(); handle.stop(); },
+        };
+      },
       title: async ctx => {
         titleCalls += 1;
         expect(ctx.initial).toBe(true);
@@ -84,9 +93,10 @@ describe('a thread in its own worktree', () => {
       await client.call('threads.subscribe', { threadId: thread.id });
       const finished = client.next('turn.finished', row => row.threadId === thread.id, 5000);
       const named = client.next('thread.updated', row => row.id === thread.id && row.branch === 'boite/fix-worktree-names-2' && row.titleSource === 'agent', 5000);
-      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree naming [sleep:1000]' });
+      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree naming' });
       expect(await named).toMatchObject({ title: 'Noms de worktrees', cwd: thread.cwd, branchNamingPending: false });
       expect((await client.call('threads.get', { threadId: thread.id })).status).toBe('running');
+      releaseTurn.resolve();
       expect((await finished).status).toBe('done');
       expect(titleCalls).toBe(1);
       expect(git(thread.cwd, 'branch', '--show-current').trim()).toBe('boite/fix-worktree-names-2');
@@ -95,7 +105,7 @@ describe('a thread in its own worktree', () => {
       expect(existsSync(thread.cwd)).toBe(true);
       expect(git(project.path, 'branch', '--list', thread.branch!).trim()).toBe('');
       expect((await client.call('worktrees.list', { projectId: project.id })).find(row => row.path === thread.cwd)?.branch).toBe('boite/fix-worktree-names-2');
-    } finally { restore(); }
+    } finally { releaseTurn.resolve(); restore(); }
   });
 
   test('automatic naming preserves explicitly chosen branches, including temporary-looking names', async () => {
