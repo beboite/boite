@@ -69,6 +69,15 @@ describeWindows('thread jobs of forgotten threads', () => {
       expect(code, stdout + stderr).toBe(0);
       return;
     }
+    const ids: string[] = [];
+    const waitForState = async (label: string, predicate: () => boolean): Promise<void> => {
+      try { await waitFor(predicate, 5000); }
+      catch (cause) {
+        const pending = ['warm-up', ...ids].map(id => ({ id, live: procs.liveCount(id), job: processPlatform.sample(id) }))
+          .filter(entry => entry.live > 0 || entry.job !== null);
+        throw new Error(`${label}: ${threadJobCount()} thread jobs; ${JSON.stringify(pending)}`, { cause });
+      }
+    };
     // One warm-up spawn builds the global job, the port and the Worker, which
     // stay for the life of the core and are not what this measures.
     // Drain both output pipes before counting native handles. An exited Bun
@@ -82,21 +91,20 @@ describeWindows('thread jobs of forgotten threads', () => {
       ]);
     };
     await exitQuietly('warm-up');
-    await waitFor(() => threadJobCount() === 0, 5000);
+    await waitForState('warm-up job was not forgotten', () => threadJobCount() === 0);
     const jobsBefore = threadJobCount();
     Bun.gc(true);
     const handlesBefore = handleCount();
 
-    const ids: string[] = [];
     for (let index = 0; index < SPAWNS; index += 1) {
       const id = `plugin:fetch:${index}`;
       ids.push(id);
       await exitQuietly(id);
     }
     expect(threadJobCount()).toBeGreaterThan(jobsBefore);
-    await waitFor(() => ids.every((id) => procs.liveCount(id) === 0), 5000);
+    await waitForState('minted processes remain live', () => ids.every((id) => procs.liveCount(id) === 0));
 
-    await waitFor(() => threadJobCount() === jobsBefore, 5000);
+    await waitForState('minted jobs were not forgotten', () => threadJobCount() === jobsBefore);
     // Bun owns a process handle until the exited subprocess is collected.
     // Collect those wrappers before comparing kernel counts; a leaked native
     // Job Object cannot be reclaimed by Bun's garbage collector.

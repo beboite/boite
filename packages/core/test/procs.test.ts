@@ -130,6 +130,14 @@ describe('procs', () => {
     const running = await echoThread(harness, client, 'runs a process');
     const done = await echoThread(harness, client, 'ran one, now done');
     const idle = await echoThread(harness, client, 'never ran one');
+    // Windows may also report native descendants. The retained trace must match
+    // all starts observed for this thread, including its explicitly spawned root.
+    const started = new Set<number>();
+    const off = harness.core.bus.onAny((name, payload) => {
+      if (name === 'process.started' && (payload as { threadId: string }).threadId === done.threadId) {
+        started.add((payload as { pid: number }).pid);
+      }
+    });
     const quick = process.platform === 'win32' ? ['cmd', ['/c', 'exit 0']] as const : ['true', []] as const;
     const completed = harness.core.procs.spawn(done.threadId, quick[0], [...quick[1]]);
     await completed.exited;
@@ -152,6 +160,9 @@ describe('procs', () => {
     }
     // The trace still has what exited.
     const trace = await client.call('trace.get', { threadId: done.threadId });
+    off();
+    expect(trace.map(record => record.pid).sort()).toEqual([...started].sort());
+    expect(trace.filter(record => record.pid === completed.record.pid)).toHaveLength(1);
     expect(trace.find(record => record.pid === completed.record.pid)?.exitedAt).toBeNumber();
     // Windows can also report a console child; every recorded process must be finished.
     expect(trace.every(record => record.exitedAt !== null)).toBe(true);

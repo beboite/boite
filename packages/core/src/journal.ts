@@ -417,32 +417,38 @@ export class Journal {
   }
 
   getMessage(messageId: string): Message | null {
+    this.flushDeltas();
     const open = this.stream.openCopy(messageId);
     if (open !== undefined) return open;
     const row = this.db.query('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | null;
     return row === null ? null : toMessage(row);
   }
 
+  /** Held parts for a selected live message, without reading or writing its stored JSON. */
+  streamingMessage(messageId: string): Message | undefined {
+    return this.stream.openCopy(messageId);
+  }
+
   listMessages(threadId: string): Message[] {
-    this.persistMessages();
+    this.flushDeltas();
     const rows = this.db
       .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid')
       .all(threadId) as MessageRow[];
-    return rows.map(toMessage);
+    return rows.map((row) => this.currentMessage(row));
   }
 
   lastUserMessage(threadId: string, turnId: string): Message | null {
-    this.persistMessages();
+    this.flushDeltas();
     const row = this.db.query("SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? AND role = 'user' ORDER BY rowid DESC LIMIT 1")
       .get(threadId, turnId) as MessageRow | null;
-    return row === null ? null : toMessage(row);
+    return row === null ? null : this.currentMessage(row);
   }
 
   *walkTurnMessages(threadId: string, turnId: string): Iterable<Message> {
-    this.persistMessages();
+    this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND turn_id = ? ORDER BY rowid');
     try {
-      for (const row of statement.iterate(threadId, turnId)) yield toMessage(row as MessageRow);
+      for (const row of statement.iterate(threadId, turnId)) yield this.currentMessage(row as MessageRow);
     } finally { statement.finalize(); }
   }
 
@@ -450,10 +456,10 @@ export class Journal {
   *walkMessages(threadId: string): Iterable<Message> {
     // A caller may stop at its current turn. Do not leave a partially consumed
     // cached statement for the next continuation to reuse.
-    this.persistMessages();
+    this.flushDeltas();
     const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid');
     try {
-      for (const row of statement.iterate(threadId)) yield toMessage(row as MessageRow);
+      for (const row of statement.iterate(threadId)) yield this.currentMessage(row as MessageRow);
     } finally { statement.finalize(); }
   }
 
@@ -482,7 +488,6 @@ export class Journal {
     // Subscribers have already received buffered deltas. A reload must not replace
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
-    this.persistMessages();
     const limit = Math.max(1, Math.trunc(options.limit));
     // One row past the page is what says whether anything is left behind it.
     const rows =
@@ -496,7 +501,7 @@ export class Journal {
     const older = rows.length > limit;
     const page = (older ? rows.slice(0, limit) : rows).reverse();
     return {
-      messages: page.map(toMessage),
+      messages: page.map((row) => this.currentMessage(row)),
       before: older ? (page[0]?.id ?? null) : null,
     };
   }
@@ -504,11 +509,10 @@ export class Journal {
   /** That message and what was written after it, oldest first, or null when that is more than `limit`. */
   listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
     this.flushDeltas();
-    this.persistMessages();
     const rows = this.db
       .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
       .all(threadId, fromRowid, limit + 1) as MessageRow[];
-    return rows.length > limit ? null : rows.map(toMessage);
+    return rows.length > limit ? null : rows.map((row) => this.currentMessage(row));
   }
 
   /**
@@ -527,7 +531,6 @@ export class Journal {
   /** The ids of the message at `fromRowid`, of every later one, and of their turns, oldest first. */
   messageIdsFrom(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
     this.flushDeltas();
-    this.persistMessages();
     const rows = this.db
       .query('SELECT id, turn_id FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid')
       .all(threadId, fromRowid) as { id: string; turn_id: string }[];
@@ -536,6 +539,11 @@ export class Journal {
 
   setMessagePart(messageId: string, partIndex: number, part: MessagePart): void {
     this.stream.setMessagePart(messageId, partIndex, part);
+  }
+
+  /** Only selected rows need current parts; reads leave the persistence timer alone. */
+  private currentMessage(row: MessageRow): Message {
+    return this.stream.openCopy(row.id) ?? toMessage(row);
   }
 
   setMessageState(messageId: string, state: Message['state']): void {

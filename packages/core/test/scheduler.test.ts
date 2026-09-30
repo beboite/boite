@@ -210,7 +210,9 @@ describe('scheduler', () => {
   test('turns.stop removes a queued turn', async () => {
     const client = await harness.connect();
     const threads = await threeThreads(client);
-    for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
+    for (const threadId of threads.slice(0, 2)) {
+      await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
+    }
     holdAccountTurns(harness);
     await client.call('turns.start', { threadId: threads[2] ?? '', prompt: '[sleep:60000]' });
 

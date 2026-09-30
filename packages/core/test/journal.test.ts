@@ -37,6 +37,21 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('an existing journal indexes newest process traces without sorting its whole history', () => {
+    journal.db.exec('DROP INDEX IF EXISTS processes_by_started');
+    journal.close();
+    journal = new Journal(file);
+    for (const [pid, at] of [[100, 3], [101, 1], [100, 5], [102, 2]] as const) {
+      journal.putProcess({ threadId: 'trace', pid, parentPid: null, exe: 'agent', commandLine: null,
+        startedAt: at, exitedAt: at + 1, exitCode: 0, cpuMs: 1, peakMemoryBytes: 1, ioBytes: null });
+    }
+    expect(journal.listProcesses('trace', 2).map(record => record.startedAt)).toEqual([5, 3]);
+    const plan = journal.db.query('EXPLAIN QUERY PLAN SELECT * FROM processes WHERE thread_id = ? ORDER BY started_at DESC LIMIT ?')
+      .all('trace', 2) as { detail: string }[];
+    expect(plan.some(row => row.detail.includes('USE TEMP B-TREE'))).toBe(false);
+    expect(plan.some(row => row.detail.includes('processes_by_started'))).toBe(true);
+  });
+
   test('a history snapshot includes deltas already delivered to subscribers', () => {
     journal.putMessage(sampleMessage('streaming-snapshot'));
     journal.appendDelta('thr_test', 'streaming-snapshot', 0, 'already delivered');

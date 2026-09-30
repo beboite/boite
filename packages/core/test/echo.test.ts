@@ -582,19 +582,34 @@ describe('echo driver', () => {
     const text = assistant?.parts.map((part) => (part.type === 'text' ? part.text : '')).join('') ?? '';
     expect(text).toContain('hello');
 
+    await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 10000);
     const trace = await client.call('trace.get', { threadId });
-    const traced = trace.filter(record => record.pid === root.pid);
-    expect(traced).toHaveLength(1);
-    expect(traced[0]?.exitCode).toBe(0);
+    // Native tracing also reports real descendants. Every captured start must
+    // have exactly one completed trace row, with the direct child identified separately.
+    const startedPids = started.map(record => record.pid).sort((a, b) => a - b);
+    expect(new Set(startedPids).size).toBe(startedPids.length);
+    expect(trace.map(record => record.pid).sort((a, b) => a - b)).toEqual(startedPids);
+    const rootTrace = trace.find(record => record.pid === root.pid)!;
+    expect(trace.filter(record => record.pid === root.pid)).toHaveLength(1);
+    for (const record of trace) {
+      expect(record.exitedAt).not.toBeNull();
+      if (record.pid === root.pid) {
+        expect(record.exitCode).toBe(0);
+      } else {
+        // Native descendants can finish without an available exit status.
+        expect(record.exitCode === null || record.exitCode === 0).toBe(true);
+      }
+      expect(record.parentPid === process.pid || startedPids.includes(record.parentPid ?? -1)).toBe(true);
+    }
     // The child wrote `hello` into a pipe, so WriteTransferCount is above zero
     // wherever Job Objects read the counters. Elsewhere the poll path measures
     // nothing and the field stays null.
     if (process.platform === 'win32') {
-      expect(traced[0]?.ioBytes).toBeGreaterThan(0);
+      expect(rootTrace.ioBytes).toBeGreaterThan(0);
     } else {
-      expect(traced[0]?.ioBytes).toBeNull();
+      expect(rootTrace.ioBytes).toBeNull();
     }
-    expect(exitEvent.ioBytes).toBe(traced[0]?.ioBytes ?? null);
+    expect(exitEvent.ioBytes).toBe(rootTrace.ioBytes);
   });
 
   test('an error directive fails the turn loudly', async () => {

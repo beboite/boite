@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { DelegationConfig } from '@boite/contracts';
+import type { DelegationConfig, Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -43,6 +43,70 @@ async function setup(patch: Partial<DelegationConfig> = {}) {
   return { h, owner, threadId, config, spawn };
 }
 
+test('load ticks keep team snapshots quiet while semantic changes notify every subscribed member once', async () => {
+  scripted();
+  const { h, threadId, spawn } = await setup();
+  const children = await Promise.all([spawn('one'), spawn('two'), spawn('three')]);
+  await Bun.sleep(0);
+  const changed: string[] = [];
+  const off = h.core.bus.onAny((name, payload) => {
+    if (name === 'delegation.changed') changed.push((payload as { threadId: string }).threadId);
+  });
+  try {
+    for (const child of children) {
+      const thread = h.core.threads.require(child.thread.id);
+      h.core.bus.emit('thread.updated', { ...thread, load: { processes: 8, cpuPercent: 25, memoryBytes: 100_000_000 } });
+    }
+    await Bun.sleep(0);
+    expect(changed).toEqual([]);
+    for (const child of children) {
+      const thread = { ...h.core.threads.require(child.thread.id), title: 'Updated task title' };
+      h.core.journal.putThread(thread);
+      h.core.bus.emit('thread.updated', thread);
+    }
+    await Bun.sleep(0);
+    expect(changed.sort()).toEqual([threadId, ...children.map(child => child.thread.id)].sort());
+    expect(h.core.delegation.get(threadId).agents.every(agent => agent.thread.title === 'Updated task title')).toBe(true);
+  } finally { off(); }
+});
+
+test('rolled-back child notifications preserve team snapshots and stopped admission', async () => {
+  scripted();
+  const { h, threadId, spawn } = await setup();
+  const childId = (await spawn('rollback-child', 'Check rollback notifications')).thread.id;
+  await Bun.sleep(0);
+  const child = h.core.threads.require(childId);
+  const changed: string[] = [];
+  const off = h.core.bus.onCommitted((name, payload) => {
+    if (name === 'delegation.changed') changed.push((payload as { threadId: string }).threadId);
+  });
+  const admission = { id: 'turn_rollback_probe', threadId: childId } as Turn;
+  const updated = { ...child, title: 'Committed after rollback' };
+  try {
+    expect(h.core.delegation.prepareTurn(admission)).toBe(true);
+    // Abort after listeners have seen both events, rather than before the row write.
+    expect(() => h.core.bus.afterCommit(() => h.core.journal.db.transaction(() => {
+      h.core.journal.putThread(updated);
+      h.core.bus.emit('thread.updated', updated);
+      h.core.bus.emit('turn.finished', { ...admission, status: 'error', error: 'Aborted completion' });
+      throw new Error('forced notification rollback');
+    })())).toThrow('forced notification rollback');
+    await Bun.sleep(0);
+    expect(h.core.threads.require(childId).title).toBe(child.title);
+    expect(changed).toEqual([]);
+    expect(h.core.delegation.prepareTurn(admission)).toBe(true);
+
+    // The same summary must still notify when it is subsequently committed.
+    h.core.bus.afterCommit(() => h.core.journal.db.transaction(() => {
+      h.core.journal.putThread(updated);
+      h.core.bus.emit('thread.updated', updated);
+    })());
+    await Bun.sleep(0);
+    expect(changed.sort()).toEqual([threadId, childId].sort());
+    expect(h.core.delegation.get(threadId).agents[0]?.thread.title).toBe(updated.title);
+  } finally { off(); }
+});
+
 test('disabled workflows are explained to every driver instead of silently falling back to native agents', async () => {
   const runs = scripted();
   const { h, owner, threadId } = await setup({ enabled: false, profiles: [] });
@@ -63,7 +127,30 @@ test('native results survive message pagination and restart without using delega
   await waitFor(() => runs.has(threadId));
   const run = runs.get(threadId)!;
   const changed = owner.next('delegation.changed', event => event.threadId === threadId);
+  const unrelatedId = 'native-unrelated-stream';
+  h.core.journal.putMessage({ id: unrelatedId, threadId: 'unrelated-thread', turnId: 'unrelated-turn', role: 'assistant', state: 'streaming', createdAt: Date.now(), parts: [] });
+  h.core.journal.appendDelta('unrelated-thread', unrelatedId, 0, 'Unrelated streamed text');
   const id = run.ctx.emit.startMessage('assistant');
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
+  const rawParts = (messageId: string) => (h.core.journal.db.query('SELECT parts FROM messages WHERE id = ?').get(messageId) as { parts: string }).parts;
+  // A Team read must show live tools without persisting this or other streams.
+  expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', status: 'running' });
+  expect(rawParts(id)).toBe('[]');
+  expect(rawParts(unrelatedId)).toBe('[]');
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
+  expect(h.core.delegation.get(threadId).nativeAgents[0]).toMatchObject({ task: 'Review parsing', result: 'Checked', status: 'done' });
+  expect(rawParts(id)).toBe('[]');
+  expect(rawParts(unrelatedId)).toBe('[]');
+  h.core.journal.persistMessages();
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
+  expect(JSON.parse(rawParts(unrelatedId))).toEqual([{ type: 'text', text: 'Unrelated streamed text' }]);
+  // A stale persisted tool cannot override its newer live update in the merge.
+  run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: null, status: 'running' });
+  const live = h.core.delegation.get(threadId).nativeAgents;
+  expect(live).toHaveLength(1);
+  expect(live[0]).toMatchObject({ status: 'running' });
+  expect(live[0]?.result).toBeUndefined();
+  expect(JSON.parse(rawParts(id))[0]).toMatchObject({ output: 'Checked', status: 'done' });
   run.ctx.emit.part(id, 0, { type: 'tool', toolId: 'native-review', name: 'Agent', input: { prompt: 'Review parsing', model: 'reviewer' }, output: 'Checked', status: 'done' });
   run.ctx.emit.complete(id, 'complete');
   await changed;

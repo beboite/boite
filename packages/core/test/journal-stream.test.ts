@@ -34,6 +34,42 @@ afterEach(() => {
 });
 
 describe('journal streaming', () => {
+  test('reading one thread returns current parts without writing any streaming rows', () => {
+    journal.putMessage(streaming('msg_read', 'trn_read'));
+    journal.putMessage({ ...streaming('msg_other', 'trn_other'), threadId: 'thr_other' });
+    journal.putMessage({ ...streaming('msg_user', 'trn_read'), role: 'user', state: 'complete', parts: [{ type: 'text', text: 'request' }] });
+    let current = 'current';
+    const rowid = journal.messageRowid('thr_test', 'msg_read')!;
+    const readers = [
+      () => journal.getMessage('msg_read'),
+      () => journal.listMessages('thr_test')[0],
+      () => journal.listMessagePage('thr_test', { limit: 10 }).messages[0],
+      () => journal.listMessagesFrom('thr_test', rowid, 10)?.[0],
+      () => [...journal.walkMessages('thr_test')][0],
+      () => [...journal.walkTurnMessages('thr_test', 'trn_read')][0],
+    ];
+    const read = (): void => {
+      for (const reader of readers) {
+        journal.appendDelta('thr_test', 'msg_read', 0, ' next');
+        current += ' next';
+        expect(reader()?.parts).toEqual([{ type: 'text', text: current }]);
+      }
+      expect(journal.lastUserMessage('thr_test', 'trn_read')?.parts).toEqual([{ type: 'text', text: 'request' }]);
+      expect(journal.messageIdsFrom('thr_test', rowid).messageIds).toEqual(['msg_read', 'msg_user']);
+    };
+    journal.appendDelta('thr_test', 'msg_read', 0, 'current');
+    journal.appendDelta('thr_other', 'msg_other', 0, 'unrelated');
+    read();
+    expect(storedParts('msg_read')).toEqual([]);
+    expect(storedParts('msg_other')).toEqual([]);
+    // Read overlays cannot consume dirty state, even under an aborted transaction.
+    expect(() => journal.db.transaction(() => { read(); throw new Error('conflict'); })()).toThrow('conflict');
+    journal.close();
+    journal = new Journal(file);
+    expect(storedParts('msg_read')).toEqual([{ type: 'text', text: current }]);
+    expect(storedParts('msg_other')).toEqual([{ type: 'text', text: 'unrelated' }]);
+  });
+
   test('a delta flush costs the same on a 2 MB message as on an empty one', () => {
     journal.putMessage(streaming('msg_big'));
     let index = 0;
@@ -62,7 +98,8 @@ describe('journal streaming', () => {
     const page = journal.listMessagePage('thr_test', { limit: 10 }).messages;
     expect(page[0]?.parts.map((part) => part.type)).toEqual(['text', 'tool', 'text']);
     expect(page[0]?.parts[2]).toEqual({ type: 'text', text: 'after' });
-    // The row itself caught up, so raw SQL readers see it too.
+    // Explicit persistence also makes the current parts available to raw SQL readers.
+    journal.persistMessages();
     expect(storedParts('msg_live').length).toBe(3);
   });
 
@@ -105,7 +142,7 @@ describe('journal streaming', () => {
     expect(storedParts('msg_other')).toEqual([]);
   });
 
-  test('a failed write of streaming parts is tried again, not forgotten', () => {
+  test('a failed write of streaming parts is tried again, not forgotten', async () => {
     journal.putMessage(streaming('msg_retry'));
     journal.appendDelta('thr_test', 'msg_retry', 0, 'must land');
     journal.flushDeltas();
@@ -114,6 +151,28 @@ describe('journal streaming', () => {
     journal.db.exec('DROP TRIGGER fail_parts');
     journal.persistMessages();
     expect(storedParts('msg_retry')).toEqual([{ type: 'text', text: 'must land' }]);
+
+    const errors: string[] = [];
+    journal.close();
+    journal = new Journal(file, { onError: (message) => errors.push(message) });
+    journal.putMessage(streaming('msg_background_retry'));
+    journal.appendDelta('thr_test', 'msg_background_retry', 0, 'quiet stream');
+    journal.flushDeltas();
+    journal.db.exec("CREATE TRIGGER fail_parts BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT, 'forced'); END");
+    try {
+      const deadline = performance.now() + 2_000;
+      while (errors.length === 0 && performance.now() < deadline) await Bun.sleep(25);
+      expect(errors.some((message) => message.includes('journal message write: forced'))).toBe(true);
+      expect(storedParts('msg_background_retry')).toEqual([]);
+    } finally { journal.db.exec('DROP TRIGGER fail_parts'); }
+
+    // Only transcript reads follow recovery: an idle stream must persist without another mutation.
+    const deadline = performance.now() + 2_500;
+    while (storedParts('msg_background_retry').length === 0 && performance.now() < deadline) {
+      expect(journal.listMessagePage('thr_test', { limit: 10 }).messages.at(-1)?.parts).toEqual([{ type: 'text', text: 'quiet stream' }]);
+      await Bun.sleep(25);
+    }
+    expect(storedParts('msg_background_retry')).toEqual([{ type: 'text', text: 'quiet stream' }]);
   });
 
   test('a write that an outer transaction rolls back does not lose the streamed parts', () => {

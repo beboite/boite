@@ -50,6 +50,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   on('thread.created', (summary) => threads.upsertThread(summary));
   on('thread.updated', (summary) => {
     threads.upsertThread(summary);
+    ctx.delegation.patchThread(summary);
     const open = s.openThread;
     if (open && open.id === summary.id) Object.assign(open, summary);
     // Archived from another client: nothing here can show it again.

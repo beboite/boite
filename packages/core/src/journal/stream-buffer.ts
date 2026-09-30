@@ -32,7 +32,7 @@ interface OpenMessage {
 /**
  * The streaming write path: text deltas coalesced for 16 ms, and the parts of
  * each message still streaming held in memory and written to its row on a
- * timer. The journal calls it before every read of messages.
+ * timer. Reads overlay held messages onto their selected rows without writing.
  */
 export class StreamBuffer {
   private readonly deltas = new Map<string, PendingDelta>();
@@ -200,8 +200,12 @@ export class StreamBuffer {
       try {
         this.persistMessages();
       } catch (error) {
-        // The parts stay dirty in memory: the next change or read writes them again.
+        // A quiet stream must retry too; failed writes retain their dirty parts.
         this.onError(`journal message write: ${messageOfError(error)}`);
+        if ([...this.open.values()].some((entry) => entry.dirty)) {
+          this.persistDelay = Math.min(PERSIST_MAX_MS, this.persistDelay * 2);
+          this.armPersistTimer();
+        }
       }
     }, this.persistDelay);
     this.persistTimer.unref?.();

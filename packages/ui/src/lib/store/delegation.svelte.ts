@@ -7,12 +7,61 @@ import type {
   DelegationConfig,
   DelegationView,
   Thread,
-  ThreadId
+  ThreadId,
+  ThreadSummary
 } from '@boite/contracts';
 import type { Client } from '../client';
+import { untrack } from 'svelte';
 import { strings } from '../strings';
-import { mergeResumed, resumeRequest } from '../thread-rows';
+import { mergeResumed, patchRow, resumeRequest } from '../thread-rows';
 import type { StoreContext } from './context';
+
+interface RefreshJob {
+  client: Client;
+  threadId: ThreadId;
+  epoch: string;
+  revision: number;
+  directory: boolean;
+  waiters: { revision: number; resolve: () => void }[];
+}
+
+/** Each caller waits for its own read, not for a stream of events to become quiet. */
+class ViewRefresh {
+  private job: RefreshJob | null = null;
+
+  request(client: Client, threadId: ThreadId, epoch: string, directory: boolean, current: () => boolean,
+    read: (directory: boolean, latest: () => boolean) => Promise<void>): Promise<void> {
+    let job = this.job;
+    const fresh = !job || job.client !== client || job.threadId !== threadId || job.epoch !== epoch;
+    if (fresh) this.job = job = { client, threadId, epoch, revision: 0, directory: false, waiters: [] };
+    const active = job!;
+    active.directory ||= directory;
+    const revision = ++active.revision;
+    const answer = new Promise<void>(resolve => active.waiters.push({ revision, resolve }));
+    // Reads kicked off by a component effect must not subscribe that effect to the view.
+    if (fresh) untrack(() => { void this.run(active, current, read); });
+    return answer;
+  }
+
+  private async run(job: RefreshJob, current: () => boolean,
+    read: (directory: boolean, latest: () => boolean) => Promise<void>): Promise<void> {
+    try {
+      while (current()) {
+        const revision = job.revision;
+        const directory = job.directory;
+        job.directory = false;
+        await read(directory, () => job.revision === revision);
+        const covered = job.waiters.filter(waiter => waiter.revision <= revision);
+        job.waiters = job.waiters.filter(waiter => waiter.revision > revision);
+        for (const waiter of covered) waiter.resolve();
+        if (job.revision === revision) break;
+      }
+    } finally {
+      for (const waiter of job.waiters) waiter.resolve();
+      if (this.job === job) this.job = null;
+    }
+  }
+}
 
 /** The open thread's native coordination with other agents, and its bounded child team. */
 export class Delegation {
@@ -35,6 +84,9 @@ export class Delegation {
   delegationConfigureEpoch = 0;
   /** The one child transcript shown in Agents, beside the normal open-thread subscription. */
   delegationSubscribedThreadId: ThreadId | null = null;
+  private readonly coordinationRefresh = new ViewRefresh();
+  private readonly delegationRefresh = new ViewRefresh();
+  private teamRead: { client: Client; threadId: ThreadId; updates: Map<ThreadId, ThreadSummary> } | null = null;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -42,24 +94,27 @@ export class Delegation {
     const s = this.ctx.store;
     const client = this.ctx.client;
     if (!client || !threadId) return;
-    const epoch = ++this.coordinationEpoch;
-    const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.coordinationEpoch === epoch;
-    if (this.coordination?.self.threadId !== threadId) { this.coordination = null; this.coordinationDirectory = null; }
-    this.coordinationLoading = true;
-    this.coordinationError = null;
-    try {
-      const view = await client.call('collaboration.get', { threadId });
-      if (!current()) return;
-      this.coordination = view;
-      if (withDirectory) {
-        const directory = await client.call('collaboration.directory', { threadId });
-        if (current()) this.coordinationDirectory = directory;
+    const epoch = this.coordinationEpoch;
+    const generation = this.ctx.threads.openGeneration;
+    const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.coordinationEpoch === epoch && this.ctx.threads.openGeneration === generation;
+    await this.coordinationRefresh.request(client, threadId, `${epoch}:${generation}`, withDirectory, current, async (directory) => {
+      if (this.coordination?.self.threadId !== threadId) { this.coordination = null; this.coordinationDirectory = null; }
+      this.coordinationLoading = true;
+      this.coordinationError = null;
+      try {
+        const view = await client.call('collaboration.get', { threadId });
+        if (!current()) return;
+        this.coordination = view;
+        if (directory) {
+          const agents = await client.call('collaboration.directory', { threadId });
+          if (current()) this.coordinationDirectory = agents;
+        }
+      } catch (error) {
+        if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
+      } finally {
+        if (current()) this.coordinationLoading = false;
       }
-    } catch (error) {
-      if (current()) this.coordinationError = error instanceof Error ? error.message : String(error);
-    } finally {
-      if (current()) this.coordinationLoading = false;
-    }
+    });
   }
 
   async configureCoordination(config: CoordinationConfig): Promise<void> {
@@ -67,15 +122,21 @@ export class Delegation {
     const client = this.ctx.client;
     const threadId = s.openThread?.id;
     if (!client || !threadId || !s.owner || this.coordinationSaving) return;
+    const generation = this.ctx.threads.openGeneration;
+    const epoch = ++this.coordinationEpoch;
     this.coordinationSaving = true;
     this.coordinationError = null;
     try {
-      await client.call('collaboration.configure', { threadId, config });
-      if (this.ctx.client === client && s.openThread?.id === threadId) await s.loadCoordination(threadId);
+      const view = await client.call('collaboration.configure', { threadId, config });
+      if (this.ctx.client === client && s.openThread?.id === threadId && this.ctx.threads.openGeneration === generation) {
+        this.coordination = view;
+        // The mutation already returned the saved view. Directory refresh need not hold the controls locked.
+        void s.loadCoordination(threadId);
+      }
     } catch (error) {
       if (this.ctx.client === client && s.openThread?.id === threadId) this.coordinationError = error instanceof Error ? error.message : String(error);
     } finally {
-      if (this.ctx.client === client) this.coordinationSaving = false;
+      if (this.ctx.client === client && this.coordinationEpoch === epoch) this.coordinationSaving = false;
     }
   }
 
@@ -83,27 +144,47 @@ export class Delegation {
     const s = this.ctx.store;
     const client = this.ctx.client;
     if (!client || !threadId) return;
-    const epoch = ++this.delegationEpoch;
-    const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.delegationEpoch === epoch;
-    this.delegationLoading = true;
-    this.delegationError = null;
-    try {
-      const view = await client.call('delegation.get', { threadId });
-      if (!current()) return;
-      this.delegation = view;
-      const selected = this.delegationSelectedAgentId;
-      // A workflow step is shown the same way but is not a member of the team.
-      if (selected && !view.agents.some(agent => agent.thread.id === selected) && !s.isWorkflowStep(selected)) {
-        await s.selectDelegatedAgent(null);
-      } else if (selected && this.delegationThread?.id === selected) {
-        const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;
-        if (summary) Object.assign(this.delegationThread, summary);
+    const epoch = this.delegationEpoch;
+    const generation = this.ctx.threads.openGeneration;
+    const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.delegationEpoch === epoch && this.ctx.threads.openGeneration === generation;
+    await this.delegationRefresh.request(client, threadId, `${epoch}:${generation}`, false, current, async (_directory, latest) => {
+      this.delegationLoading = true;
+      this.delegationError = null;
+      const pending = { client, threadId, updates: new Map<ThreadId, ThreadSummary>() };
+      this.teamRead = pending;
+      try {
+        const view = await client.call('delegation.get', { threadId });
+        if (!current()) return;
+        for (const agent of view.agents) {
+          const summary = pending.updates.get(agent.thread.id);
+          if (summary) patchRow(agent.thread, summary);
+        }
+        this.delegation = view;
+        const selected = this.delegationSelectedAgentId;
+        // A superseded read must not dismiss a child added while it was in flight.
+        if (latest() && selected && !view.agents.some(agent => agent.thread.id === selected) && !s.isWorkflowStep(selected)) {
+          await s.selectDelegatedAgent(null);
+        } else if (selected && this.delegationThread?.id === selected) {
+          const summary = view.agents.find(agent => agent.thread.id === selected)?.thread;
+          if (summary) Object.assign(this.delegationThread, summary);
+        }
+      } catch (error) {
+        if (current()) this.delegationError = this.ctx.reason(error);
+      } finally {
+        if (this.teamRead === pending) this.teamRead = null;
+        if (current()) this.delegationLoading = false;
       }
-    } catch (error) {
-      if (current()) this.delegationError = this.ctx.reason(error);
-    } finally {
-      if (current()) this.delegationLoading = false;
-    }
+    });
+  }
+
+  /** Load-only changes update team rows without fetching the team's messages again. */
+  patchThread(summary: ThreadSummary): void {
+    const agent = this.delegation?.agents.find(agent => agent.thread.id === summary.id);
+    if (agent) patchRow(agent.thread, summary);
+    const pending = this.teamRead;
+    const open = this.ctx.store.openThread;
+    if (pending?.client === this.ctx.client && pending?.threadId === open?.id &&
+      summary.parentThreadId === (open?.parentThreadId ?? open?.id)) pending.updates.set(summary.id, summary);
   }
 
   #delegationRootId(): ThreadId | null {
