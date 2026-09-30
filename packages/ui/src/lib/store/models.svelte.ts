@@ -12,6 +12,8 @@ export function probeKey(providerId: ProviderId, accountId: string): string {
   return `${providerId}::${accountId}`;
 }
 
+const MODEL_CATALOG_MAX_AGE_MS = 5 * 60_000;
+
 /**
  * What the composer runs on: the remembered choice, the per-provider model
  * defaults, the favorites, and what each agent answered `providers.probe` with.
@@ -30,6 +32,7 @@ export class Models {
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
   probeAttempts = new Set<string>();
+  probeTimes = new Map<string, number>();
   /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
   effortAttempts = new Set<string>();
   probeRequests = new Map<string, { request: Promise<void>; reportFailure: boolean }>();
@@ -128,8 +131,8 @@ export class Models {
   }
 
   /**
-   * Ask the agent what it can run. Once per instance per session: the answer
-   * stays until the core reloads its descriptors or the account changes.
+   * Ask the agent what it can run. Reopening after five minutes forces a fresh
+   * catalog; cached rows stay visible while it reads, including after a failure.
    */
   probeModels(providerId: ProviderId, accountId: string, refresh = false): Promise<void> {
     const client = this.ctx.client;
@@ -140,16 +143,20 @@ export class Models {
       if (refresh) existing.reportFailure = true;
       return existing.request;
     }
-    if (!client || !this.ctx.store.owner || (!refresh && this.probeAttempts.has(key))) return Promise.resolve();
+    const attempted = this.probeAttempts.has(key);
+    const stale = attempted && Date.now() - (this.probeTimes.get(key) ?? 0) >= MODEL_CATALOG_MAX_AGE_MS;
+    if (!client || !this.ctx.store.owner || (!refresh && attempted && !stale)) return Promise.resolve();
     const account = this.ctx.store.accountOf(accountId);
     if (!refresh && (account?.status === 'unauthenticated' || account?.status === 'error')) return Promise.resolve();
     this.probeAttempts.add(key);
+    this.probeTimes.set(key, Date.now());
+    const force = refresh || stale || (!attempted && this.probedModels[key] !== undefined);
     const epoch = this.probeEpoch;
     this.probingModels = [...this.probingModels, key];
     const pending = { request: Promise.resolve(), reportFailure: refresh };
     pending.request = (async () => {
       try {
-        const { models } = await client.call('providers.probe', { providerId, accountId, ...(refresh ? { refresh: true } : {}) });
+        const { models } = await client.call('providers.probe', { providerId, accountId, ...(force ? { refresh: true } : {}) });
         if (client !== this.ctx.client || epoch !== this.probeEpoch) return;
         this.probedModels = { ...this.probedModels, [key]: models };
         this.saveModels();
@@ -317,6 +324,7 @@ export class Models {
   dropProbes(accountId: string): void {
     this.probeEpoch++;
     for (const key of this.probeAttempts) if (key.endsWith(`::${accountId}`)) this.probeAttempts.delete(key);
+    for (const key of this.probeTimes.keys()) if (key.endsWith(`::${accountId}`)) this.probeTimes.delete(key);
     const suffix = `::${accountId}`;
     const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));
     if (kept.length !== Object.keys(this.probedModels).length) {

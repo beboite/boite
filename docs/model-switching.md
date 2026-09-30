@@ -42,8 +42,16 @@ directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
 With no cached list, the column shows placeholder rows and the reading line until
 the first answer lands, and the descriptor's list if that answer fails.
+Reopening the picker after five minutes refreshes that account's catalog, and a
+catalog restored from storage is also revalidated. These reads replace the
+displayed models and their legacy flags without changing per-provider defaults.
 The refresh button forces a new probe; concurrent requests share one
-operation. A failed refresh keeps the visible list and waits for a manual retry.
+operation. A failed read keeps the visible list and backs off for five minutes;
+the refresh button can retry immediately.
+Each provider column has a compact search field matching names and ids. Search
+includes legacy models directly in the main results, without opening a submenu.
+Long lists retain prefix groups and a bounded first page; search reaches every
+model. Desktop focuses the field when opened, while phones wait for a tap.
 The menu floats without changing the page layout. It prefers the space below the
 composer and flips above when needed. On desktop, provider logos sit in a
 narrow left column, with names in tooltips. On phones, they form a horizontal
@@ -56,10 +64,15 @@ cannot offset or clip them. Pointer-click checks cover both materials.
 Favorites use a single row; an inline account label only distinguishes the same
 model starred on different accounts.
 
-Claude aliases use their resolved id and versioned name. Default aliases are
+Claude aliases use their resolved id and versioned native name, with descriptor
+names only as a fallback. Default aliases are
 filtered before deduplication so they cannot hide the named Opus row or its Fast
-capability. Known legacy descriptor ids stay available; capabilities absent from
-native discovery remain absent instead of inheriting another model's settings.
+capability. Native discovery replaces the descriptor list rather than adding
+older descriptor ids. Models without an explicit legacy classification stay in
+the main list, including models found on a manual refresh; the legacy submenu
+appears only when the list contains explicitly classified legacy entries.
+Capabilities absent from native discovery remain absent instead of inheriting
+another model's settings.
 
 The lightning button beside the effort chip cycles through the model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or

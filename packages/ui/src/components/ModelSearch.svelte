@@ -3,7 +3,7 @@
   import { strings } from '../lib/strings';
 
   /**
-   * The search field over a long model column, kept in place while the rows
+   * The search field over the model column, kept in place while the rows
    * scroll under it. `input` is bound so the picker's arrows can come back to it.
    */
   let {
@@ -18,6 +18,9 @@
     <input
       bind:this={input}
       bind:value
+      type="search"
+      autocomplete="off"
+      autocapitalize="off"
       placeholder={strings.composer.searchModels}
       aria-label={strings.composer.searchModels}
       data-testid="picker-search"
@@ -42,11 +45,11 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: var(--control);
+    height: var(--control-sm);
     padding: 0 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    background: var(--color-surface);
+    background: transparent;
     color: var(--color-subtle);
     transition: border-color var(--dur-2) var(--ease-out-quint);
   }
@@ -69,5 +72,9 @@
 
   .search input:focus {
     outline: none;
+  }
+
+  @media (max-width: 720px) {
+    .search { height: var(--control-touch); }
   }
 </style>

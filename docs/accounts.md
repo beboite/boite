@@ -77,6 +77,13 @@ An account whose `isolationDir` is null runs on the provider's own default
 location, which is the user's real CLI login. It is not a lesser account: it is
 usually the one with the subscription, and reading it is the point.
 
+Startup, provider reloads and managed installs adopt that account when a CLI
+login exists. If its session files are absent and Boite can run a piped login,
+they leave account creation to guided sign-in, which creates one isolated
+account named after the provider. No signed-out `Default` account is added
+beside it. Terminal logins retain the default account, and a provider whose
+login can live outside session files retains its account with unknown status.
+
 Reading it correctly needs one thing the descriptor does not say, which is what
 the isolation variable means when nobody sets it. The core carries those
 defaults: the XDG pair resolve under `~/.local/share` and `~/.config`,
@@ -108,6 +115,7 @@ account, while keeping its ID, login directory and thread references.
 
 Settings shows the chosen account label and its email separately. Emails stay
 blurred until hovered, focused from the keyboard or tapped on a phone.
+The model picker's account chips and their tooltips show the chosen label only.
 
 ## The login flow
 

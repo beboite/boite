@@ -37,7 +37,7 @@
     onpick: (patch: PickPatch) => void;
   } = $props();
 
-  /** Past this many models the column stops being a plain scroll and gets a search field. */
+  /** Long lists get prefix groups and a bounded first page. */
   const SEARCH_FROM = 12;
 
   const popover = new Closing();
@@ -47,7 +47,7 @@
   let menu = $state<HTMLDivElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let searchBox = $state<HTMLInputElement | undefined>(undefined);
-  /** What the model column is filtered on; empty while the list is short. */
+  /** Filters model names and ids, including legacy entries. */
   let modelQuery = $state('');
   /** The provider whose column is shown: the choice's until another tile is clicked. */
   let shownProviderId = $state<string | null>(null);
@@ -110,8 +110,8 @@
   }
 
   // An ACP agent owns its model list, so the descriptor cannot carry it: the
-  // core reads it from one short-lived agent process the first time the picker
-  // shows that instance, and the answer stands for the rest of the session.
+  // core reads it from one short-lived agent process. Reopening also refreshes
+  // a catalog whose cached answer has expired.
   // Nothing is asked of a provider whose executable is not on the machine.
   $effect(() => {
     if (!popover.open || favoritesOpen || !shown || needsInstall) return;
@@ -154,9 +154,9 @@
   let legacyModels = $derived(shownModels.filter((m) => m.legacy));
 
   // An ACP agent can list hundreds of models (OpenCode answered 534 here), and a
-  // plain scroll is useless at that length: past twelve the column gets a search
-  // field and the matches are grouped by the `provider/` prefix of their id.
-  let searchable = $derived(shownModels.length > SEARCH_FROM);
+  // plain scroll is useless at that length: group by the `provider/` prefix.
+  let grouped = $derived(shownModels.length > SEARCH_FROM);
+  let searchable = $derived(!favoritesOpen && !needsInstall);
   let words = $derived(
     searchable ? modelQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0) : []
   );
@@ -167,17 +167,17 @@
     return words.every((word) => hay.includes(word));
   }
 
-  /** The descriptor's default: on an ACP provider it is "let the agent choose", so it never filters out. */
+  /** A matching default stays above long lists; filtering never changes the selection. */
   let pinnedModel = $derived.by((): ModelInfo | null => {
-    if (!searchable || !shown) return null;
+    if (!grouped || !shown) return null;
     const id = store.defaultModelOf(shown);
-    return shownModels.find((m) => m.id === id) ?? null;
+    return shownModels.find((m) => m.id === id && matches(m)) ?? null;
   });
 
   let filteredCurrent = $derived(
-    searchable ? currentModels.filter((m) => m.id !== pinnedModel?.id && matches(m)) : currentModels
+    (words.length ? shownModels : currentModels).filter((m) => m.id !== pinnedModel?.id && matches(m))
   );
-  let filteredLegacy = $derived(searchable ? legacyModels.filter(matches) : legacyModels);
+  let filteredLegacy = $derived(words.length ? [] : legacyModels);
 
   // Nothing typed on a long list: its first rows, the current model and a show-all row.
   let expandedFor = $state<string | null>(null);
@@ -188,9 +188,9 @@
     return shown !== null && choice?.providerId === shown.id && choice?.model === model.id;
   }
 
-  // A column that opens on a long list is a column you are about to type in.
+  // Desktop can type immediately. Phones keep their keyboard closed until tapped.
   $effect(() => {
-    if (!popover.open || !searchable) return;
+    if (!popover.open || !searchable || window.matchMedia('(max-width: 720px)').matches) return;
     searchBox?.focus();
   });
 
@@ -392,8 +392,8 @@
             {#each [0, 1, 2] as index (index)}<span class="skeleton"></span>{/each}
           </div>
         {:else}
-          {#if searchable}
-            <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
+          <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
+          {#if grouped}
             {#if pinnedModel}
               {@render modelRow(pinnedModel)}
             {/if}
@@ -408,13 +408,13 @@
             {#if capped}
               <button type="button" class="row fold small" data-row data-testid="picker-show-all" onclick={() => { expandedFor = shown?.id ?? null; searchBox?.focus(); }}>{fill(strings.composer.showAllModels, { count: String(filteredCurrent.length) })}</button>
             {/if}
-            {#if groups.length === 0 && filteredLegacy.length === 0 && modelQuery.trim() !== ''}
-              <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
-            {/if}
           {:else}
-            {#each currentModels as model (model.id)}
+            {#each filteredCurrent as model (model.id)}
               {@render modelRow(model)}
             {/each}
+          {/if}
+          {#if !pinnedModel && filteredCurrent.length === 0 && modelQuery.trim() !== ''}
+            <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
           {/if}
 
           {#if filteredLegacy.length > 0}

@@ -111,6 +111,7 @@ export class Store {
     this.probedModels = {};
     ctx.models.probeEpoch++;
     ctx.models.probeAttempts.clear();
+    ctx.models.probeTimes.clear();
     ctx.models.effortAttempts.clear();
     ctx.models.probeRequests.clear();
     this.probingModels = [];

@@ -809,15 +809,41 @@ describe('Store', () => {
       if (method === 'providers.probe') await gate;
       return original(method, params);
     });
-    const request = store.probeModels('opencode', 'a-opencode', true);
+    const request = store.probeModels('opencode', 'a-opencode');
     expect(store.isProbing('opencode', 'a-opencode')).toBe(true);
     // A cached answer is an answer: the picker keeps it rather than reading again.
     expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
     expect(store.modelsOf('opencode', 'a-opencode')).toEqual(expected);
-    const second = store.probeModels('opencode', 'a-opencode', true);
+    const second = store.probeModels('opencode', 'a-opencode');
     expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
     release(); await Promise.all([request, second]);
     expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
+  });
+
+  test('opening a stale catalog refreshes its models without changing saved defaults', async () => {
+    const { store, client } = await ready();
+    const original = client.call.bind(client);
+    let reads = 0;
+    const calls = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+      if (method === 'providers.probe') return Promise.resolve({ models: [++reads === 1
+        ? { id: 'vendor/old-model', name: 'Old model', legacy: true }
+        : { id: 'vendor/new-model', name: 'New model' }], probedAt: Date.now() }) as never;
+      return original(method, params);
+    });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const defaults = { ...store.modelDefaults };
+    await store.probeModels('opencode', 'a-opencode');
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(1);
+    expect(store.modelsOf('opencode', 'a-opencode')[0]?.legacy).toBe(true);
+    clock.mockReturnValue(now + 5 * 60_000);
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls).toHaveBeenLastCalledWith('providers.probe', { providerId: 'opencode', accountId: 'a-opencode', refresh: true });
+    expect(calls.mock.calls.filter(([method]) => method === 'providers.probe')).toHaveLength(2);
+    expect(store.modelsOf('opencode', 'a-opencode')).toEqual([{ id: 'vendor/new-model', name: 'New model' }]);
+    expect(store.modelDefaults).toEqual(defaults);
+    clock.mockRestore();
   });
 
   test('failed probes wait for manual retry instead of looping', async () => {
