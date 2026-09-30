@@ -64,7 +64,7 @@ test('a column of hundreds of models draws its first rows until asked for all', 
   document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   document.querySelector<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]')!.click();
-  await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null && rows() > 0);
+  await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null && showAll() !== null && rows() > 0);
 
   // The pinned default, if any, sits above the first rows.
   expect(rows()).toBeLessThanOrEqual(FIRST_MODELS + 2);
