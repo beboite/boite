@@ -6,6 +6,7 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
+  import { rewindComposerEdit } from '../lib/composer-edit';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
@@ -374,16 +375,7 @@
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
     const editedThread = state.editing ? inputStore.openThread : null;
-    // An edited message: the thread goes back to before it, then this goes out
-    // in its place. A refusal is shown and the text stays in the box.
-    if (state.editing) {
-      if (state.queued.length) { inputStore.error = strings.composer.editingQueued; return; }
-      state.sending = true;
-      const rewound = await inputStore.rewind(state.editing, inputKey);
-      state.sending = false;
-      if (!rewound) return;
-      state.editing = null;
-    }
+    if (!await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
