@@ -86,6 +86,8 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await page.click('[data-testid="coordination-panel"] > summary');
   await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')?.hasAttribute('open')`);
   await page.click('.options > summary');
-  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-budget"]')?.textContent ?? ''`)).toContain('40 sends');
+  const budget = await page.evaluate<string>(`document.querySelector('[data-testid="coordination-budget"]')?.textContent ?? ''`);
+  expect(budget).toContain('sent this hour');
+  expect(budget).not.toContain(' of ');
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="coordination-contact"]').length`)).toBeGreaterThan(0);
 }, 30_000);
