@@ -1,8 +1,10 @@
-import type { ThreadId } from '@boite/contracts';
+import type { Message, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
 import { MemoryNotices } from './memory-notices.ts';
+import { newId } from '../ids.ts';
+import { withLoad } from './records.ts';
 
 /**
  * What reaches an agent outside a prompt the user typed: answers to
@@ -31,40 +33,68 @@ export class DeferredInput {
    */
   deliverAnswer(threadId: ThreadId, text: string): void {
     if (this.enqueueResident(threadId, text)) return;
+    this.defer(threadId, text);
     const handle = this.threads.runner.handles.get(threadId);
     if (handle?.steer && !this.threads.runner.steering.has(threadId)) {
+      const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
       this.threads.runner.steering.add(threadId);
-      const hold = () => {
-        this.defer(threadId, text);
-        // The turn may have ended while the steer was out, after its end looked for held answers.
-        if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
-      };
       void handle.steer(text)
-        .then(submitted => { if (!submitted) hold(); })
+        .then(submitted => {
+          if (this.core.stopping) return;
+          if (!submitted) return;
+          if (turnId) this.recordAnswer(threadId, turnId, text);
+          const held = this.deferredAnswers.get(threadId) ?? [];
+          const index = held.indexOf(text);
+          if (index >= 0) held.splice(index, 1);
+          if (!held.length) this.deferredAnswers.delete(threadId);
+          this.changed(threadId);
+        })
         .catch(error => {
+          if (this.core.stopping) return;
           this.core.log('warn', `thread ${threadId}: steering an async answer failed, it waits for the next turn: ${messageOf(error)}`);
-          hold();
         })
         .finally(() => {
           this.threads.runner.steering.delete(threadId);
+          if (this.core.stopping) return;
+          if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
           void this.memory.flushRunning(threadId);
         });
       return;
     }
-    this.defer(threadId, text);
     if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
   }
 
   private defer(threadId: ThreadId, text: string): void {
     this.deferredAnswers.set(threadId, [...(this.deferredAnswers.get(threadId) ?? []), text]);
+    this.changed(threadId);
+  }
+
+  private changed(threadId: ThreadId): void {
+    const thread = this.core.journal.getThread(threadId);
+    if (thread) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
+  }
+
+  private recordAnswer(threadId: ThreadId, turnId: string, text: string, createdAt = Date.now()): void {
+    const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt, parts: [{ type: 'text', text }] };
+    this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
+    this.core.bus.emit('message.started', message);
+    this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+  }
+
+  /** Journal held answers before the manual prompt that will carry them. */
+  recordHeldBeforePrompt(threadId: ThreadId, turnId: string, promptAt: number): void {
+    if (this.threads.runner.steering.has(threadId)) return;
+    const held = this.deferredAnswers.get(threadId);
+    if (held?.length) this.recordAnswer(threadId, turnId, held.join('\n\n'), promptAt - 1);
   }
 
   /** The held answers as one prompt, when the thread can take one. */
   flushDeferred(threadId: ThreadId): void {
+    if (this.core.stopping) return;
     const held = this.deferredAnswers.get(threadId);
     const thread = this.core.journal.getThread(threadId);
     if (held === undefined || thread === null || thread.archived) return;
-    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId)) return;
+    if (['queued', 'running', 'waiting'].includes(thread.status) || this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
     this.deferredAnswers.delete(threadId);
     try {
       this.threads.startTurn(threadId, held.join('\n\n'));
@@ -73,6 +103,7 @@ export class DeferredInput {
       this.deferredAnswers.set(threadId, held);
       this.core.log('warn', `thread ${threadId}: async answers wait for the next prompt: ${messageOf(error)}`);
     }
+    this.changed(threadId);
   }
 
   /**
@@ -83,17 +114,24 @@ export class DeferredInput {
   takeForRunningTurn(threadId: ThreadId): string | null {
     const memory = this.memory.take(threadId);
     if (memory) return memory;
+    // A native steer already owns delivery until its acknowledgement arrives.
+    if (this.threads.runner.steering.has(threadId)) return null;
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
+    const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
+    if (turnId) this.recordAnswer(threadId, turnId, held.join('\n\n'));
     this.deferredAnswers.delete(threadId);
+    this.changed(threadId);
     return `The user answered while you were working:\n\n${held.join('\n\n')}`;
   }
 
   /** What was held and never sent: it goes in front of the next prompt. */
   takeDeferred(threadId: ThreadId): string {
+    if (this.threads.runner.steering.has(threadId)) return '';
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return '';
     this.deferredAnswers.delete(threadId);
+    this.changed(threadId);
     return held.join('\n\n') + '\n\n';
   }
 

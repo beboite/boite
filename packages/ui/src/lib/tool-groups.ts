@@ -186,6 +186,9 @@ export function toolLine(part: ToolPart): ToolLine {
 /** What a running run says on its folded line: "Running git", "Reading app.ts". */
 export function liveLabel(part: ToolPart): string {
   const family = familyOf(part);
+  if (typeof part.inputText === 'string') return family === 'command'
+    ? fill(strings.chat.toolLive.command, { subject: strings.chat.toolCommandWord })
+    : strings.chat.toolBare[family];
   if (family === 'command') {
     const program = programOf(commandText(part));
     return fill(strings.chat.toolLive.command, { subject: program || strings.chat.toolCommandWord });

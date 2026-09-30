@@ -680,6 +680,8 @@ export interface ThreadSummary {
    * restart, and missing on older cores.
    */
   pendingMove?: PendingMove | null;
+  /** Answers accepted by the core, waiting for the running agent or the next turn. In memory only. */
+  pendingAnswers?: string[];
   unread: boolean;
   archived: boolean;
   /** Kept above the other threads of its project in the sidebar, whatever runs. */
