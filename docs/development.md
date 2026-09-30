@@ -566,6 +566,17 @@ and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
+A conversation at its bottom follows its answer in the frame that lays out the
+new paragraph, from the list's `ResizeObserver`. A wheel turned up leaves the
+bottom at once, unless a tool output under the pointer scrolls up first; a
+finger, a text selection or the scrollbar thumb holds the list until released,
+and a list pulled up that way stays where it was left. Jump to latest cuts to
+the last screen and a half and glides the rest in 380 ms on the app's
+ease-out curve, re-reading the bottom on every frame; reduced motion jumps.
+Except under a finger, the conversation keeps its scrollbar's room from the
+first message, so the column does not move when a reply first overflows.
+`tests/e2e/chat-scroll.test.ts` checks the follow, the wheel and the glide.
+
 In forced colors (Windows high contrast) the browser drops the shadows and
 border tints the UI uses to mark focus. `app.css` then gives every
 `:focus-visible` control a 2 px `Highlight` outline, and
@@ -754,7 +765,11 @@ archive drawers use the shared grid fold. All durations honor reduced motion.
 
 Unsent messages are saved in IndexedDB with strict transaction durability,
 separately for each core and data directory. A small synchronous text backup
-covers typing while a transaction is pending. A local core changing its port
+in `localStorage` is written on every keystroke. The IndexedDB journal follows
+800 ms after typing pauses, and at least every 5 s while it does not; a new
+attachment, a failed backup, `flushDrafts()`, hiding the page and leaving it
+write it at once. Writing the journal on every keystroke cloned each draft
+picture into IndexedDB while the user typed. A local core changing its port
 keeps the same drafts.
 New conversations keep one draft per project, visible in the sidebar after
 opening another thread. Existing conversations keep their own unsent reply.
