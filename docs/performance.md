@@ -45,6 +45,102 @@ bun bench/core-idle.ts 10
 The audit records samples, workload limits and remaining candidates, including
 queue admission, WebSocket fan-out and retained tool bodies in the browser.
 
+## Concurrent agent stress
+
+```sh
+bun run test:stress
+bun run bench:stress --threads 1000 --concurrency 64 --clients 12 --output stress.json
+bun run bench:stress --threads 1000 --concurrency 64 --clients 0 --output stress-solo.json
+```
+
+These are offline tests on fresh temporary data directories. The benchmark
+checks every streamed answer and persisted turn, workload concurrency, mass
+cancellation, a reader reconnect and recovery after killing the core. It runs
+both six turns at a time and the requested concurrency, bounded by the load
+generator rather than scheduler quotas. Cancellation and crash scenarios start
+all 1,000 long-running turns together. Mass cancellation covers both cold and
+already-used threads, and verifies their stopped history after recovery. Additional readers
+alternate local connections with compressed, paced remote connections.
+An independent process probes HTTP health, so parsing the load generator's
+WebSocket frames cannot delay the observer. Mass start/stop phases record
+accepted starts and health too, including diagnostics when an RPC expires.
+
+`test:stress` checks 24 real child processes across the scripted ACP, Codex
+and pi protocols, warm reuse, simultaneous stops and recovery after agent
+exits. It also opens the production UI in a hidden browser with 1,000 sidebar
+threads and a 256-turn burst, checks a foreground reply and writes desktop and
+phone captures. `BOITE_STRESS_ARTIFACTS` selects the capture directory.
+An HTTP 503 fixture verifies that failed health checks mark both the scenario
+and the overall benchmark report failed even when every agent stops normally.
+The smaller six-process regression runs in the normal core suite and starts a
+fresh core so earlier tests cannot hide a race in first-use imports.
+
+Authenticated RPC requests rotate between connections in four-millisecond
+slices. At most eight handlers per connection and 64 overall can wait on
+asynchronous work. Each connection retains at most 1,024 frames or 32 MiB of
+text; the total stays below 4,096 frames or 64 MiB, including active requests.
+A sender exceeding its limit closes with a reconnect reason. At the shared
+limit, the largest queued contributor closes to leave room for other readers.
+Active work keeps its capacity until completion; when only active work fills
+the shared byte limit, a new request is refused. Disconnect and shutdown
+discard work that has not started.
+The prompt and its queued status commit together before its driver starts.
+The running turn and thread status share a second transaction before driver
+startup. The finished
+turn and final thread state also commit together; awaited driver work and
+pending moves stay outside these transactions. In-process listeners stay
+synchronous; network notifications wait for commit and are discarded on rollback.
+Pending wakes, completed activity dismissal and stopped-child admission change
+in memory only after the queued prompt commits.
+
+Scheduler notifications publish the newest snapshot in each 16-millisecond
+window. Other events go out as soon as their storage writes commit.
+`scheduler.get` always reads the current state.
+Sidebar pull-request lookups share requests for the same thread and run four
+at a time per client. A manual refresh goes ahead of background lookups, so
+mounting or remounting thousands of rows cannot flood the RPC connection.
+
+Initial measurements on Windows with Bun 1.4.2, 2026-09-29, before scheduler
+launch limits were retired:
+
+| Scenario | Observed result |
+| --- | --- |
+| 24 scripted agents, cold then warm turns | Initially 38 processes instead of 24; sharing the pending driver load kept all 24 warm processes |
+| 1,000 echo threads, one observer, initial baseline | Both streaming bursts completed with exact answers; all 1,000 turns cancelled and recovered after a crash |
+| Same baseline, core memory at 64 concurrent turns | 115.8 MiB; this excludes real agent processes |
+| Same baseline, scheduler payloads | 163.3 MiB of decoded scheduler JSON on one connection during the 64-turn burst |
+| 1,000 threads and 12 additional readers before request pacing | Three HTTP requests timed out after ten seconds each; turn-start requests exceeded thirty seconds |
+| Same load after bounded dispatch and snapshot coalescing | Both bursts passed with exact streams; six concurrent turns took 60.0 s and 64 took 59.4 s |
+| Same run, independent health | No timeouts; p95 217/660 ms and maximum 1.81/3.51 s at six/64 concurrent turns |
+| Same run, scheduler payloads at 64 concurrent turns | 7.0 MiB of decoded JSON on the owner connection |
+| Same run, mass cancellation and crash recovery | All 1,000 turns cancelled in 19.5 s; 64 running and 936 queued turns recovered after an 8.1 s restart |
+| Production UI, 1,000 threads and a 256-turn burst | Foreground reply in 0.99 s, typing in 3.7 ms and maximum timer lag 36 ms; desktop and phone checked |
+
+After launch limits were retired, the same command with 12 additional readers
+passed on 2026-09-30 after grouping synchronous startup and completion writes:
+
+| Scenario | Observed result |
+| --- | --- |
+| 1,000 threads, workloads bounded by the generator | Exact streams at six/64 concurrent turns in 40.8/18.3 s |
+| Independent HTTP health during streaming | Zero errors; p95 58/131 ms and maximum 1.84/0.16 s at six/64 concurrent turns |
+| Scheduler payloads at 64 concurrent turns | 1.09 MiB of decoded JSON on the owner connection; no scheduler queue in this workload |
+| All 1,000 turns running together, cold then already used | Starts accepted in 10.2/10.6 s and cancelled in 9.7/6.1 s with the 30-second RPC deadline unchanged |
+| Independent HTTP health during mass start/stop | Zero errors; p95 117/109 ms and maximum 3.27/0.15 s for cold/warm phases |
+| Crash with 1,000 running turns | All recovered, earlier answers and both cancellations preserved, and a new turn completed after a 3.0 s restart |
+| Production UI, 2026-09-30, 1,000 threads and a 256-turn burst | Foreground reply in 0.68 s, typing in 3.3 ms and maximum timer lag 26 ms; desktop and phone checked |
+
+Two additional runs exceeded the 30-second deadline during 1,000 simultaneous
+starts. The instrumented failure accepted 505 starts before expiry, with no
+HTTP errors and maximum health latency 1.00 s. The full run above then passed
+with the same deadline. Background machine load was not controlled. These runs establish
+failures and reproducible checks. They do not
+establish a supported agent count or measure real provider quotas, agent RAM,
+the native shell, Linux or macOS under this load.
+The UI test gives background RPCs the benchmark's 30-second deadline, while
+the application uses 120 seconds. Visible replies keep a 30-second deadline;
+typing and individual browser tasks must stay below five seconds. Foreground
+timing excludes the separate wait for the background batch to be accepted.
+
 ## Naming a long conversation
 
 `bun run bench/retitle.ts` creates 5,000 messages containing about 40 MB of text

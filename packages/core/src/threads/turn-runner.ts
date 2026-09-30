@@ -53,21 +53,22 @@ export class TurnRunner {
     let thread = { ...selected, ...queued.execution };
 
     let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
-    this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
-      this.core.journal.putTurn(running);
-    });
-    this.core.bus.emit('turn.started', running);
-    setThreadStatus(this.core, threadId, 'running');
-
     let result: TurnResult;
     try {
+      // Commit the running state before a driver can spawn or stream output.
+      this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+        this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
+          this.core.journal.putTurn(running);
+        });
+        this.core.bus.emit('turn.started', running);
+        setThreadStatus(this.core, threadId, 'running');
+      })());
       this.core.workforce.resident.assertThreadRoute(threadId, thread);
       const provider = this.core.providers.require(thread.providerId);
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
       this.stopRequested.delete(threadId);
-      // What building the prompt takes for good (held answers, delegation
-      // letters), kept so a retry on a fresh session sends it too.
+      // Keep consumed input so a retry on a fresh session sends it too.
       const carried: CarriedInput = {};
       const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
       this.handles.set(threadId, handle);
@@ -116,34 +117,34 @@ export class TurnRunner {
       error: result.error ?? null,
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
-    this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
-      this.core.journal.putTurn(finished);
-    });
-    this.core.bus.emit('turn.finished', finished);
-
-    if (result.status === 'error') {
-      this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`);
-    }
-
-    const current = this.core.journal.getThread(threadId);
-    if (current === null) return;
-    const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
-    if (current.archived || !sameSession) releaseThread(threadId);
-    // A lost session was already forgotten by `dropLostSession` above, which
-    // moved the generation on: nothing here bumps it a second time.
-    const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
-    const next: ThreadSummary = {
-      ...current,
-      sessionId,
-      // A cut stays armed only while the thread still names the session it
-      // cuts: once the agent answered on its fork, or the session changed in
-      // any other way, resuming at that entry would drop real work.
-      sessionResumeAt: current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
-      status: result.status === 'error' ? 'error' : 'idle',
-      unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
-      promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
-    };
-    saveThread(this.core, next, 'thread.finished');
+    const completion = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
+        this.core.journal.putTurn(finished);
+      });
+      this.core.bus.emit('turn.finished', finished);
+      if (result.status === 'error') {
+        this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`);
+      }
+      const current = this.core.journal.getThread(threadId);
+      if (current === null) return null;
+      const sameSession = (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0);
+      if (current.archived || !sameSession) releaseThread(threadId);
+      // A lost session already moved the generation on, so do not bump it again.
+      const sessionId = sameSession ? result.sessionId ?? current.sessionId : current.sessionId;
+      const next: ThreadSummary = {
+        ...current,
+        sessionId,
+        // Keep a cut only while the thread still names the session it cuts.
+        sessionResumeAt: current.sessionResumeAt && sessionId === current.sessionId && sessionId === thread.sessionId ? current.sessionResumeAt : null,
+        status: result.status === 'error' ? 'error' : 'idle',
+        unread: current.unread || !this.core.subscribers.hasSubscribers(threadId),
+        promptCache: sameSession ? promptCacheOf(result, thread, finished.finishedAt ?? Date.now(), current.promptCache ?? null) ?? current.promptCache ?? null : current.promptCache ?? null,
+      };
+      saveThread(this.core, next, 'thread.finished');
+      return { next, sameSession };
+    })());
+    if (completion === null) return;
+    const { next, sameSession } = completion;
     // A move the agent asked for during the turn happens now that no process
     // works in the old folder, before any wake or held answer starts the next.
     await this.threads.moves.applyWaiting(threadId);

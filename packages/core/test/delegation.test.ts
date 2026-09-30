@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { DelegationConfig } from '@boite/contracts';
+import type { DelegationConfig, Turn } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -67,6 +67,43 @@ test('load ticks keep team snapshots quiet while semantic changes notify every s
     await Bun.sleep(0);
     expect(changed.sort()).toEqual([threadId, ...children.map(child => child.thread.id)].sort());
     expect(h.core.delegation.get(threadId).agents.every(agent => agent.thread.title === 'Updated task title')).toBe(true);
+  } finally { off(); }
+});
+
+test('rolled-back child notifications preserve team snapshots and stopped admission', async () => {
+  scripted();
+  const { h, threadId, spawn } = await setup();
+  const childId = (await spawn('rollback-child', 'Check rollback notifications')).thread.id;
+  await Bun.sleep(0);
+  const child = h.core.threads.require(childId);
+  const changed: string[] = [];
+  const off = h.core.bus.onCommitted((name, payload) => {
+    if (name === 'delegation.changed') changed.push((payload as { threadId: string }).threadId);
+  });
+  const admission = { id: 'turn_rollback_probe', threadId: childId } as Turn;
+  const updated = { ...child, title: 'Committed after rollback' };
+  try {
+    expect(h.core.delegation.prepareTurn(admission)).toBe(true);
+    // Abort after listeners have seen both events, rather than before the row write.
+    expect(() => h.core.bus.afterCommit(() => h.core.journal.db.transaction(() => {
+      h.core.journal.putThread(updated);
+      h.core.bus.emit('thread.updated', updated);
+      h.core.bus.emit('turn.finished', { ...admission, status: 'error', error: 'Aborted completion' });
+      throw new Error('forced notification rollback');
+    })())).toThrow('forced notification rollback');
+    await Bun.sleep(0);
+    expect(h.core.threads.require(childId).title).toBe(child.title);
+    expect(changed).toEqual([]);
+    expect(h.core.delegation.prepareTurn(admission)).toBe(true);
+
+    // The same summary must still notify when it is subsequently committed.
+    h.core.bus.afterCommit(() => h.core.journal.db.transaction(() => {
+      h.core.journal.putThread(updated);
+      h.core.bus.emit('thread.updated', updated);
+    })());
+    await Bun.sleep(0);
+    expect(changed.sort()).toEqual([threadId, childId].sort());
+    expect(h.core.delegation.get(threadId).agents[0]?.thread.title).toBe(updated.title);
   } finally { off(); }
 });
 

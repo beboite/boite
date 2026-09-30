@@ -44,7 +44,7 @@ export class Delegation {
       const config = this.config(thread.id);
       if (config.enabled && !config.paused) this.saveConfig(thread.id, { ...config, paused: true });
     }
-    this.off = core.bus.onAny((name, payload) => {
+    this.off = core.bus.onCommitted((name, payload) => {
       if (this.closed) return;
       if (name === 'thread.background') this.core.bus.emit('delegation.changed', { threadId: (payload as RpcEvents['thread.background']).threadId });
       if (name === 'message.part') {
@@ -253,13 +253,18 @@ export class Delegation {
   }
 
   reserveTurn(threadId: string, operation?: string): void {
+    this.prepareTurnReservation(threadId, operation)?.();
+  }
+
+  /** Reserve durable usage first; a failed enclosing transaction must leave the stopped guard intact. */
+  prepareTurnReservation(threadId: string, operation?: string): (() => void) | undefined {
     const thread = this.core.threads.require(threadId);
     if (!thread.parentThreadId && operation !== 'delegation') return;
     const root = this.root(threadId);
     this.available(root);
     const used = this.used(root.id);
     this.core.journal.setSetting(`delegation-turns:${root.id}`, used + 1);
-    this.stopped.delete(threadId);
+    return () => { this.stopped.delete(threadId); };
   }
   canRun(threadId: string): boolean {
     const thread = this.core.journal.getThread(threadId);

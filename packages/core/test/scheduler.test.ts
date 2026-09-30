@@ -158,6 +158,22 @@ describe('scheduler', () => {
     }
   });
 
+  test('a synchronous burst publishes one current scheduler snapshot to the client', async () => {
+    const client = await harness.connect();
+    const project = harness.core.projects.add(harness.dataDir, 'scheduler burst');
+    const account = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
+    const threads = Array.from({ length: 64 }, (_, i) => harness.core.threads.create({
+      projectId: project.id, providerId: 'echo', accountId: account.id, title: `burst ${i}`,
+    }));
+    const states: SchedulerState[] = [];
+    client.on('scheduler.updated', state => states.push(state));
+    holdAccountTurns(harness);
+    for (const thread of threads) harness.core.threads.startTurn(thread.id, '[sleep:60000]');
+    await waitFor(() => states.some(state => state.queued.length === threads.length));
+    expect(states).toHaveLength(1);
+    expect(states[0]).toEqual(harness.core.scheduler.state());
+  });
+
   test('a turn queued during an account login runs when the hold ends', async () => {
     const client = await harness.connect();
     const threads = await threeThreads(client);
@@ -165,9 +181,10 @@ describe('scheduler', () => {
     const states: SchedulerState[] = [];
     client.on('scheduler.updated', (state) => states.push(state));
 
+    const finished = client.next('turn.finished', turn => turn.threadId === threads[2], 15000);
     for (const threadId of threads.slice(0, 2)) await client.call('turns.start', { threadId, prompt: '[sleep:60000]' });
     const release = holdAccountTurns(harness);
-    await client.call('turns.start', { threadId: threads[2] ?? '', prompt: '[sleep:300]' });
+    await client.call('turns.start', { threadId: threads[2] ?? '', prompt: 'third' });
 
     const queued = await client.call('scheduler.get', {});
     expect(queued.running).toHaveLength(2);
@@ -180,10 +197,11 @@ describe('scheduler', () => {
 
     await waitFor(() => states.some((state) => state.queued.length === 1), 3000);
 
-    const finished = client.next('turn.finished', (turn) => turn.threadId === threads[2], 15000);
     release();
-    await finished;
-    for (const threadId of threads.slice(0, 2)) await client.call('turns.stop', { threadId });
+    expect((await finished).status).toBe('done');
+    await client.call('turns.stop', { threadId: threads[0]! });
+    await client.call('turns.stop', { threadId: threads[1]! });
+    await waitFor(() => harness.core.scheduler.state().running.length === 0);
     const settled = await client.call('scheduler.get', {});
     expect(settled.running).toHaveLength(0);
     expect(settled.queued).toHaveLength(0);

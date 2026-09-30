@@ -22,6 +22,7 @@ export interface Sample {
 function powershell(script: string): string {
   const run = Bun.spawnSync({
     cmd: ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
+    windowsHide: true,
     stdout: 'pipe',
     stderr: 'pipe',
   });

@@ -33,3 +33,49 @@ test('a report that throws again does not loop', () => {
   expect(reports).toBe(1);
   bus.dispose();
 });
+
+test('committed observers wait for the write while internal listeners remain synchronous', () => {
+  const bus = new Bus();
+  const internal: string[] = [], committed: string[] = [];
+  bus.onAny((_, payload) => internal.push((payload as { message: string }).message));
+  bus.onCommitted((_, payload) => committed.push((payload as { message: string }).message));
+  const result = bus.afterCommit(() => {
+    bus.emit('core.log', { level: 'info', message: 'first', at: 0 });
+    expect(internal).toEqual(['first']);
+    expect(committed).toEqual([]);
+    bus.afterCommit(() => bus.emit('core.log', { level: 'info', message: 'second', at: 0 }));
+    expect(committed).toEqual([]);
+    return 42;
+  });
+  expect(result).toBe(42);
+  expect(committed).toEqual(['first', 'second']);
+  bus.dispose();
+});
+
+test('rollback discards nested notifications and new deltas, preserving earlier deltas', () => {
+  const bus = new Bus();
+  const committed: string[] = [];
+  bus.onCommitted((name, payload) => committed.push(name === 'message.delta' ? (payload as { text: string }).text : name));
+  const delta = { threadId: 't', messageId: 'm', partIndex: 0, text: 'before' };
+  bus.emit('message.delta', delta);
+  expect(() => bus.afterCommit(() => {
+    bus.afterCommit(() => bus.emit('core.log', { level: 'info', message: 'nested', at: 0 }));
+    bus.emit('message.delta', { ...delta, text: 'rolled back' });
+    throw new Error('write failed');
+  })).toThrow('write failed');
+  bus.flush();
+  expect(committed).toEqual(['before']);
+  bus.afterCommit(() => {
+    bus.emit('core.log', { level: 'info', message: 'outer', at: 0 });
+    try {
+      bus.afterCommit(() => {
+        bus.emit('message.delta', { ...delta, text: 'nested failure' });
+        throw new Error('nested failed');
+      });
+    } catch { /* The enclosing write can still commit. */ }
+    bus.emit('message.delta', { ...delta, text: 'after' });
+  });
+  bus.flush();
+  expect(committed).toEqual(['before', 'core.log', 'after']);
+  bus.dispose();
+});

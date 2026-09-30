@@ -309,6 +309,18 @@ delegation end-to-end set passes six tests and 42 assertions in 20.79 seconds.
 Fresh theme, conversation and delegation desktop/phone captures were opened;
 colour controls and composers remain usable without overlap.
 
+On 2026-09-30, integrating `c17c4cb0` combines the audit with committed bus
+notifications and bounded RPC dispatch. A real SQLite rollback after child
+events exposed a phantom team notification. Delegation now reacts only after
+commit; the regression also checks unchanged stopped admission and a later
+committed update with the same summary. It fails before the listener fix and
+passes afterward. All 1,303 core tests pass, with 22 skips across 131 fresh
+processes in 79.97 seconds; all 1,030 UI tests pass in 145 files in 75.90 seconds.
+Types and architecture pass. Five delegation/native-agent end-to-end tests
+and 29 assertions pass in 9.40 seconds; regenerated desktop/phone captures were
+opened. The current UI entry measures 528,941 bytes, UI files total 3,420,426
+bytes and the core main bundle measures 829,407 bytes. Retained limits pass.
+
 ## Verification
 
 - `bun run check`: architecture and TypeScript passed; Svelte reported zero

@@ -82,23 +82,23 @@ describe('LineSplitter', () => {
   test('a 32 MiB line in 64 KiB chunks is scanned once, not once per chunk', () => {
     const huge = `{"data":"${'q'.repeat(32 * 1024 * 1024)}"}`;
     const chunks = chunksOf(`${huge}\n`, CHUNK);
-    // Count the input submitted to newline searches instead of wall time on a
-    // shared runner. Repeatedly scanning a growing pending line is quadratic.
+    // Count the input searched for newlines, independent of runner contention.
+    // Repeatedly scanning a growing buffer would search over 8 GiB here.
     const indexOf = String.prototype.indexOf;
-    let scanned = 0;
-    let lines: string[] = [];
-    String.prototype.indexOf = function (this: string, search: string, position?: number): number {
-      if (search === '\n') scanned += Math.max(0, this.length - (position ?? 0));
-      return indexOf.call(this, search, position);
-    };
+    let searched = 0;
+    let lines: string[];
     try {
+      String.prototype.indexOf = function (search: string, fromIndex = 0): number {
+        if (search === '\n') searched += Math.max(0, this.length - fromIndex);
+        return indexOf.call(this, search, fromIndex);
+      };
       ({ lines } = split(chunks));
     } finally {
       String.prototype.indexOf = indexOf;
     }
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.length).toBe(huge.length);
-    expect(scanned).toBeLessThanOrEqual(huge.length + 1);
+    expect(lines[0]).toBe(huge);
+    expect(searched).toBeLessThanOrEqual(huge.length + 1);
   });
 });
 

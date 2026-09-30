@@ -106,12 +106,23 @@ export class ActivityStore {
 
   /** A new user request retires the finished overlay without deleting its history. */
   userPrompt(threadId: string): void {
-    const state = this.states.get(threadId);
-    if (!state) return;
+    this.prepareUserPrompt(threadId)?.();
+  }
+
+  /** Write the dismissal row in the caller's transaction; apply memory and notify after commit. */
+  prepareUserPrompt(threadId: string): (() => void) | undefined {
+    const previous = this.states.get(threadId);
+    if (!previous) return;
+    const state = { ...previous, goal: previous.goal ? { ...previous.goal } : null };
     let changed = false;
     if (state.tasks.length && state.tasks.every(task => task.status === 'completed') && !state.tasksDismissed) { state.tasksDismissed = true; changed = true; }
     if (state.goal?.status === 'complete' && !state.goal.dismissed) { state.goal.dismissed = true; changed = true; }
-    if (changed) this.save(threadId);
+    if (!changed) return;
+    this.core.journal.setSetting(`activity:${threadId}`, state);
+    return () => {
+      this.states.set(threadId, state);
+      this.core.bus.emit('thread.activity', { threadId, activity: this.get(threadId) });
+    };
   }
 
   private observeTool(threadId: string, part: MessagePart): void {
