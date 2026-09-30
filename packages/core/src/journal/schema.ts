@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -353,9 +353,13 @@ export function migrate(db: Database, file: string): void {
     ); CREATE INDEX IF NOT EXISTS thread_deletions_root ON thread_deletions(root_id);`);
     version = 23;
   }
+  if (!db.query("SELECT 1 FROM pragma_table_info('threads') WHERE name = 'title_state'").get()) {
+    db.exec('ALTER TABLE threads ADD COLUMN title_state TEXT;');
+    version = 24;
+  }
   if (!db.query("SELECT 1 FROM pragma_table_info('projects') WHERE name = 'worktree_default'").get()) {
     db.exec('ALTER TABLE projects ADD COLUMN worktree_default INTEGER NOT NULL DEFAULT 0');
-    version = 24;
+    version = 25;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

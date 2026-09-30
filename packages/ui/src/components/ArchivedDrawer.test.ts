@@ -35,7 +35,7 @@ test('the drawer reads the project\'s archived threads on opening, and a restore
   running = mount(ArchivedDrawer, { target: document.body, props: { store: store as never, project: project({ archivedThreads: 2 }) } });
   flushSync();
   const toggle = document.querySelector<HTMLButtonElement>('[data-testid=archived-drawer-toggle]')!;
-  expect(toggle.textContent).toContain('2 archived');
+  expect(toggle.textContent).toContain('Archived conversations (2)');
   // Folded, nothing is read.
   expect(call).not.toHaveBeenCalled();
 

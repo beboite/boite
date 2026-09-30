@@ -565,7 +565,7 @@ shellTest('the native updater reports its local version and refuses installation
   expect(status?.supported).toBe(false);
   expect(status?.currentVersion).toMatch(/^\d+\.\d+\.\d+/);
   const refused = await page?.evaluate<string>(`window.__TAURI_INTERNALS__.invoke('app_update_check', {channel:'stable'}).then(() => 'allowed', error => String(error))`);
-  expect(refused).toContain('installed Windows x64');
+  expect(refused).toContain('Updates require an installed Boite');
 }, TIMEOUT);
 
 shellTest('the native file opener launches the original executable and rejects paths outside the thread', async () => {
@@ -1321,7 +1321,11 @@ shellTest(
   async () => {
     // A core that was already answering when the shell opened is nobody's
     // child and is in no Job Object of the shell's: quitting must not touch it.
-    const adopted = await startCore();
+    // Adoption requires the installed bundle's identity. A source core has
+    // no bundle hash and is intentionally replaced by a split-bundle shell.
+    const command = [join(dirname(EXE), `boite-core${CORE_SUFFIX}`)];
+    if (process.platform === 'win32') command.push(join(dirname(EXE), 'core', 'main.js'));
+    const adopted = await startCore({ command });
     const debugPort = await freePort();
     let shell = 0;
     let shellPage: BrowserPage | undefined;

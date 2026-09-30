@@ -41,8 +41,13 @@ test('coordination steers the current Codex turn without creating a user turn', 
   await waitFor(() => harness!.core.journal.listMessages(threadId).some(m => m.role === 'assistant'));
   expect(await harness!.core.threads.steer(threadId, 'Boite agent coordination. Wait for the VM.')).toBe(true);
   expect(fakeLog()).toContain('turn/steer codex-fake-turn-1 Boite agent coordination');
+  const turn = harness!.core.journal.listTurns(threadId)[0]!;
+  expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'User correction',
+    attachments: [{ kind: 'image', mimeType: 'image/png', data: 'aGVsbG8=', name: 'sample.png' }], clientRequestId: 'codex_steer_01' })).toEqual({ accepted: true });
+  expect(fakeLog()).toContain('turn/steer codex-fake-turn-1 User correction');
+  expect(fakeLog()).toContain('steer-images 1 data:image/png;base64,');
   expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
-  expect(harness!.core.journal.listMessages(threadId).filter(m => m.role === 'user')).toHaveLength(1);
+  expect(harness!.core.journal.listMessages(threadId).filter(m => m.role === 'user')).toHaveLength(2);
   expect(harness!.core.journal.listMessages(threadId).some(m => m.role === 'system')).toBe(true);
   await client.call('turns.stop', { threadId });
 });
@@ -1273,13 +1278,17 @@ describe('codex driver', () => {
       (summary) => summary.id === thread.id && summary.titleSource === 'agent',
       20000,
     );
-    await runTurn(client, thread.id, 'remember the word pelican');
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 20000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'remember the word pelican', attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'pelican.png' }] });
 
     // The core's one cleaning rule: quotes and the closing period go.
     expect((await titled).title).toBe('Pelican notes');
+    await finished;
     // No small model was listed by a probe, so the first of Codex's picks goes out.
     expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna ephemeral');
     expect(fakeLog()).toContain('turn/start model=gpt-6-luna effort=low');
+    expect(countLines(`image data:image/png;base64,${png}`)).toBe(2);
     // Its app-server is gone with the answer, traced under the thread.
     await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
   });

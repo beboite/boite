@@ -1,9 +1,16 @@
 # Agent coordination
 
-Open **Communication settings** above a conversation to let its agent contact other
-agents. It starts off. Choose Brief for occasional questions about a shared
-resource, or Team for a task that needs several agents. Describe what the agent
-is working on in Resources so another agent can find the right contact.
+Ordinary conversations start in Brief mode, including existing conversations
+without saved communication settings. Their agents can contact other unarchived
+conversations across projects and mutually trusted machines, and can wake an
+idle agent within its hourly budget. No machine is trusted automatically.
+
+Open **Communication settings** above a conversation to disable communication,
+restrict it to the current project, or choose Team for a task that needs several
+agents. Explicit owner settings are preserved. Describe what the agent is
+working on in Resources so another agent can find the right contact. Archived
+conversations are unavailable. Persistent agents use their own group and mission
+permissions instead of ordinary thread coordination.
 
 | Mode | Messages sent per hour | Automatic wake turns per hour | Messages received per hour |
 | --- | --- | --- | --- |
@@ -22,9 +29,11 @@ without expanding a technical panel. Incoming messages sit on the left with
 "Received from"; outgoing messages sit on the right in the accent color with
 "Your agent sent to" and the recipient's name.
 Coordination settings hold contacts, budgets and permissions. Pause suspends
-automatic coordination; Resume enables it again. Stop,
-a failed turn and a core restart pause coordination too. Paired devices can read
-the panel; only an owner connection can change permissions.
+automatic coordination; Resume enables it again. Stop
+and a failed turn pause coordination too. A core restart pauses conversations
+with unfinished turns or pending messages; idle conversations without pending
+work remain reachable. Paired devices can read the panel; only an owner
+connection can change permissions.
 
 ## Reaching another computer
 
@@ -35,10 +44,11 @@ use the agent coordination section in Machines to link them. Boite exchanges
 their public identities and checks the connection in both directions. HTTP is
 accepted only on numeric loopback for two cores on the same computer.
 
-Each participating conversation must also enable Across projects and machines.
-Without it, discovery and messages stay within that conversation's project on
-the same core. A machine link does not enable every conversation. Removing a
-link revokes that machine's access on the selected core.
+Across projects and machines is enabled by default for ordinary conversations.
+Both endpoints must allow it: disabling it restricts discovery and messages to
+that conversation's project on the same core. A machine link never overrides
+a conversation's explicit restrictions or pause. Removing a link revokes that
+machine's access on the selected core.
 
 Each core signs requests and responses with its own Ed25519 key. Trusted public
 keys identify peers; owner tokens and provider credentials never cross this

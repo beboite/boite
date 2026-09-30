@@ -29,13 +29,16 @@ async function show(principal: 'owner' | 'session' = 'owner', embedded = false):
 
 test('an owner configures a thread and sees the hourly budgets', async () => {
   const active = await show();
-  expect(active.coordination?.config.mode).toBe('off');
+  expect(active.coordination?.config.mode).toBe('brief');
   expect(active.coordinationDirectory).toBeNull();
   const panel = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-panel"]')!;
   panel.open = true;
   panel.dispatchEvent(new Event('toggle'));
   await settle();
   expect(active.coordinationDirectory).not.toBeNull();
+  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-off"]')!.click();
+  await settle();
+  expect(active.coordination?.config.mode).toBe('off');
   document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-brief"]')!.click();
   await settle();
   expect(active.coordination?.config.mode).toBe('brief');
@@ -76,7 +79,7 @@ test('a paired device reads coordination but cannot change it', async () => {
 
 test('the Agents panel copy is a row of its own, apart from the conversation bar', async () => {
   const active = await show('owner', true);
-  expect(active.coordination?.config.mode).toBe('off');
+  expect(active.coordination?.config.mode).toBe('brief');
   expect(document.querySelector('[data-testid="coordination-panel"]')).toBeNull();
   const settings = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-settings"]')!;
   expect(settings.classList.contains('embedded')).toBe(true);

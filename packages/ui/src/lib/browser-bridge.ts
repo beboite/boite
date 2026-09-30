@@ -10,6 +10,7 @@
  * line.
  */
 import { TauriBridge } from './browser-bridge-tauri';
+import { linuxShell } from './shell-platform';
 import { installPreviewPicker, validPreviewSelection, type PreviewSelection } from './preview-comments';
 import highlightPreviewElement from './preview-highlight.js';
 import { previewReferencesError, type PreviewReference } from '@boite/contracts';
@@ -264,7 +265,7 @@ function pickBridge(): BrowserBridge {
   }
   // The shell is the only host with a webview to park, and `?fake=1` above wins
   // over it so a capture of the fake client keeps working inside the shell.
-  if (window.__TAURI_INTERNALS__ !== undefined) return new TauriBridge();
+  if (window.__TAURI_INTERNALS__ !== undefined && !linuxShell()) return new TauriBridge();
   return new NoBridge();
 }
 

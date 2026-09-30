@@ -50,7 +50,7 @@ export function createPiDriver(): Driver {
       running.attach(turn, warmMs);
       return {
         done: turn.done,
-        steer: (message) => running.steer(turn, message),
+        steer: (message, attachments) => running.steer(turn, message, attachments),
         stop: (): void => {
           running.stopTurn(turn);
         },

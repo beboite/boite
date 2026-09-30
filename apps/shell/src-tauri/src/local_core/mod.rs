@@ -68,14 +68,19 @@ pub(crate) struct Launch {
     /// The shell's own version. A running core that reports another version
     /// belongs to the install an update replaced, and is stopped.
     version: String,
+    /// The installed split bundle, even when a reinstall keeps the same version.
+    bundle_hash: Option<String>,
     /// How long a started core gets to answer `/health`.
     timeout: Duration,
 }
 
 impl Launch {
     pub(crate) fn new(channel: Channel, directory: PathBuf, resources: Option<PathBuf>, version: String) -> Self {
+        let command = core_command(channel, &directory);
+        let bundle_hash = command.as_ref().ok().and_then(CoreCommand::bundle_hash);
         Self {
-            command: core_command(channel, &directory),
+            command,
+            bundle_hash,
             directory,
             resources,
             resident: resident_core(),

@@ -13,7 +13,8 @@ owner can stop them explicitly through `core.shutdown`. Tests can set
 `KILL_ON_JOB_CLOSE` Job Object. Adopted and remote cores remain independent.
 The shell passes the data directory to the core with `--data-dir` and adopts a
 core only when its pid is alive and `/health` reports the shell's own version;
-a core of another version is stopped through `POST /shutdown` and replaced. A
+split JavaScript bundles must also match the SHA-256 captured at core startup.
+A core of another version or bundle is stopped through `POST /shutdown` and replaced. A
 core that exits while starting is reported at once with the last lines it
 printed. A resident core still starting after 60 seconds is kept, and the next
 request for the endpoint picks it up. When the local core stops answering, the
@@ -28,7 +29,8 @@ within the regular install and share its data. The desktop updater belongs to
 the shell, uses main-webview-only IPC and never acts on the selected remote core.
 It verifies signed installers before offering installation. Updates wait for
 the local core to atomically admit an idle stop; active work remains usable
-and the wait can be cancelled. The installer never kills a busy core.
+and the wait can be cancelled. Silent installation requires an idle core;
+accepting the manual installer's Kill prompt also stops its resident core.
 [Updates](updates.md).
 
 ## One WebSocket, one contract
@@ -82,7 +84,8 @@ runs; history and prior archive flags are retained without restarting agents.
 Closing a shell or reconnecting leaves undo available on a resident core.
 Journal close purges unrestored families, including delegation and workflow
 history, in one transaction; startup does the same after a hard stop. Project
-removal also purges that project's pending deletions.
+removal also purges that project's pending deletions. Delete acts immediately
+without a confirmation dialog; the session undo offer remains available.
 
 Text deltas are coalesced per thread every 16 ms before they reach a socket or
 the message. Streamed text is no event of its own: it is journaled as the
@@ -291,6 +294,9 @@ answer. A probe that finds no executable, whose agent dies, or that passes twent
 seconds, thirty for pi, throws with the reason and caches nothing. One whose own account changed
 or whose descriptors were reloaded while it ran is refused as stale; another
 account changing does not touch it, and the UI asks again without a toast.
+Background discovery skips accounts known to be signed out or in error. A failed
+background read keeps the cached or descriptor models and logs its reason without
+a toast; an explicit model refresh or sending a prompt still reports failures.
 
 ## The UI streams, and stops streaming
 

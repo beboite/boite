@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
+mod attachments;
 mod browser;
 mod channel;
 mod closing;
@@ -55,7 +56,25 @@ fn notify(app: AppHandle, webview: Webview, title: String, body: String, thread_
     platform::notify(app, title, body, thread_id)
 }
 
+/// Set by an update just before `app.restart()`. On Linux and macOS the
+/// restart starts the new shell while the old one still holds `shell.lock`:
+/// the new one would wake the exiting one and quit, leaving no window. It
+/// waits for the lock instead, and the variable goes no further than here.
+const RESTARTED_AFTER_UPDATE: &str = "BOITE_RESTARTED_AFTER_UPDATE";
+
+fn acquire_after_update(directory: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    let restarted = std::env::var_os(RESTARTED_AFTER_UPDATE).is_some();
+    std::env::remove_var(RESTARTED_AFTER_UPDATE);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let acquired = instance::acquire(directory)?;
+        if acquired.is_some() || !restarted || std::time::Instant::now() >= deadline { return Ok(acquired); }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 pub fn run() {
+    platform::before_webview();
     // The channel is read here and nowhere else: the compiled bundle identifier
     // is the only thing that says which install this executable is. Nothing
     // from here to the end of this block may panic: there is no window yet,
@@ -63,7 +82,7 @@ pub fn run() {
     let context = tauri::generate_context!();
     let channel = Channel::of_identifier(&context.config().identifier);
     let directory = resolve_data_dir(channel);
-    let _instance = match instance::acquire(&directory) {
+    let _instance = match acquire_after_update(&directory) {
         Ok(Some(file)) => Some(file),
         // Another instance already owns this data directory: it shows its
         // window, which may be in the tray or behind others, and this process
@@ -97,7 +116,7 @@ pub fn run() {
     let preferences_path = directory.join("shell-settings.json");
     let close_to_tray = close_to_tray_or_default(&preferences_path);
     let app_updater = updater::AppUpdater::new(context.package_info().version.to_string(), directory.clone(),
-        cfg!(all(windows, target_arch = "x86_64")) && !cfg!(debug_assertions)
+        updater::replaceable_package() && !cfg!(debug_assertions)
             && channel == Channel::Stable && !hidden());
 
     let app = tauri::Builder::default()
@@ -112,6 +131,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
             local_files::open_local_file,
+            attachments::save_attachment,
             window::shell_ready,
             whip::whip_window,
             tray::quit_shell,
@@ -152,6 +172,8 @@ pub fn run() {
             // holds this thread for several hundred milliseconds, and the core
             // used to wait behind it for no reason (bench/startup.ts).
             start_core(&handle);
+            #[cfg(target_os = "macos")]
+            window::install_macos_menu(&handle)?;
             let window = build_main_window(&handle, channel)?;
             if !hidden() {
                 // The window works without a tray: closing it then quits.
@@ -188,10 +210,10 @@ pub fn run() {
             let text = format!("Boite could not start: {error}");
             record_failure(&failures, &text);
             if !hidden() {
-                platform::alert("Boite", &format!(
-                    "{text}\n\nThis is written in {}.\n\nRepairing or reinstalling the Microsoft Edge WebView2 Runtime often fixes it: https://developer.microsoft.com/microsoft-edge/webview2/",
-                    failures.join(FAILURE_LOG).display()
-                ));
+                let repair = if cfg!(windows) {
+                    "\n\nRepairing or reinstalling the Microsoft Edge WebView2 Runtime often fixes it: https://developer.microsoft.com/microsoft-edge/webview2/"
+                } else { "" };
+                platform::alert("Boite", &format!("{text}\n\nThis is written in {}.{repair}", failures.join(FAILURE_LOG).display()));
             }
             std::process::exit(1);
         }

@@ -274,6 +274,9 @@ describe('shells', () => {
     expect(pickShell('linux', { SHELL: '/usr/bin/zsh' }, () => null, () => true).exe).toBe('/usr/bin/zsh');
     expect(pickShell('linux', {}, () => null, (path) => path === '/bin/bash').exe).toBe('/bin/bash');
     expect(pickShell('linux', {}, () => null, () => false).exe).toBe('/bin/sh');
+    expect(pickShell('linux', { SHELL: '/usr/bin/zsh' }, () => null, () => true).args).toEqual([]);
+    // Homebrew's PATH lives in ~/.zprofile, which only a login shell reads.
+    expect(pickShell('darwin', { SHELL: '/bin/zsh' }, () => null, () => true)).toEqual({ exe: '/bin/zsh', args: ['-l'], kind: 'posix' });
   });
 
   test('a typed command quotes what the shell would split', () => {

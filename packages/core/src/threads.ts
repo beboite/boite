@@ -385,6 +385,7 @@ export class ThreadStore {
     if (params.title !== undefined && params.title.length > 0) {
       next.title = params.title;
       next.titleSource = 'user';
+      next.titleState = { version: (thread.titleState?.version ?? 0) + 1, needsRefinement: false };
     }
     const account = this.core.accounts.require(params.accountId ?? thread.accountId);
     const switched = account.id !== thread.accountId;

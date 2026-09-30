@@ -37,12 +37,13 @@ afterEach(() => {
 });
 
 describe('journal', () => {
-  test('schema 23 projects migrate with worktree defaults off and retain enabled defaults after reopen', () => {
+  test('schema 24 projects migrate with worktree defaults off and retain enabled defaults after reopen', () => {
     journal.putProject({ id: 'prj_default', name: 'test', path: dir, createdAt: 1 });
-    journal.db.exec('ALTER TABLE projects DROP COLUMN worktree_default; PRAGMA user_version = 23');
+    journal.db.exec('ALTER TABLE projects DROP COLUMN worktree_default; PRAGMA user_version = 24');
     journal.close();
     journal = new Journal(file);
     expect(journal.getProject('prj_default')?.worktreeDefault).toBeUndefined();
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
     journal.putProject({ ...journal.getProject('prj_default')!, worktreeDefault: true });
     journal.close();
     journal = new Journal(file);
@@ -88,6 +89,21 @@ describe('journal', () => {
     expect(journal.projectIcons().size).toBe(0);
     journal.putProjectIcon('prj_old', { kind: 'tech', id: 'go' }, 2);
     expect(journal.projectIcons().get('prj_old')).toEqual({ kind: 'tech', tech: 'go', version: null });
+  });
+
+  test('a schema 23 journal retains existing titles and persists new refinement state across opens', () => {
+    const thread = { id: 'thr_title', projectId: 'prj', title: 'My title', titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    journal.putThread(thread);
+    journal.db.exec('ALTER TABLE threads DROP COLUMN title_state; PRAGMA user_version = 23;');
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread(thread.id)).toMatchObject({ title: 'My title', titleSource: 'user' });
+    expect(journal.getThread(thread.id)?.titleState).toBeUndefined();
+    journal.putThread({ ...thread, titleState: { version: 4, needsRefinement: true } });
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread(thread.id)?.titleState).toEqual({ version: 4, needsRefinement: true });
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
   });
 
   test('the schema version is stamped and WAL is on', () => {

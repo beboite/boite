@@ -106,7 +106,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -185,6 +185,7 @@ export const fr: Translation = {
     setUp: 'Configurer la dictée', tryAgain: 'Réessayer',
     update: 'Mettre à jour le moteur', updateHint: 'Un moteur plus rapide est disponible, 8 Mo.',
     https: 'L\'accès au micro demande HTTPS ou localhost. Ouvrez le lien d\'appairage sécurisé de ce cœur.',
+    linux: 'La dictée n\'est pas encore disponible dans l\'app Linux : sa vue web ne donne pas accès au micro. Ouvrez Boite dans un navigateur pour dicter.',
     denied: 'L\'accès au micro a été refusé. Autorisez-le dans les réglages du navigateur ou du système, puis réessayez.',
     noMicrophone: 'Aucun micro trouvé. Branchez-en un et réessayez.', microphoneBusy: 'Le micro est indisponible. Vérifiez qu\'une autre application ne l\'utilise pas.',
     silence: 'Aucune parole détectée. Réessayez plus près du micro.', failed: 'Enregistrement impossible. Réessayez.',
@@ -291,7 +292,7 @@ export const fr: Translation = {
     hideReminder: 'Masquer le rappel',
     heading: "Mises à jour de l'application",
     intro: 'Choisissez les versions suivies par cette application de bureau. Boite et Boite Nightly partagent cette installation, vos conversations et vos réglages.',
-    unsupported: 'Les mises à jour automatiques sont disponibles dans les versions Windows x64 installées.',
+    unsupported: 'Les mises à jour automatiques sont disponibles dans les versions installées : l’installateur Windows x64, l’app macOS et le .deb ou l’AppImage Linux.',
     channel: 'Canal de publication',
     stable: 'Boite',
     nightly: 'Boite Nightly',
@@ -434,8 +435,8 @@ export const fr: Translation = {
     projectArchivedToast: '{project} archivé',
     archivedProjects: 'Projets archivés ({count})',
     restoreProject: 'Restaurer',
-    archivedThreadsOne: '1 archivée',
-    archivedThreadsMany: '{count} archivées',
+    archivedThreadsOne: 'Conversations archivées (1)',
+    archivedThreadsMany: 'Conversations archivées ({count})',
     restoreThread: 'Restaurer',
     removeProject: 'Retirer de Boite',
     removeProjectTitle: 'Retirer {project} de Boite ?',
@@ -466,8 +467,7 @@ export const fr: Translation = {
     pinned: 'Épinglée',
     archive: 'Archiver',
     delete: 'Supprimer',
-    deleteTitle: 'Supprimer cette conversation ?',
-    deleteBody: '"{title}" et ses sous-conversations disparaîtront de vos conversations. Les agents en cours seront arrêtés. Vous pourrez annuler jusqu’à l’arrêt complet de Boite. Les fichiers du projet et les branches Git seront conservés.',
+    deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
     deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
     archiveTitle: 'Archiver cette conversation ?',
     archivedToast: '« {title} » archivée',
@@ -976,10 +976,10 @@ export const fr: Translation = {
     placeholderNew: 'Que voulez-vous faire ?',
     send: 'Envoyer',
     stop: 'Arrêter',
-    queued: 'Envoyé à la fin du tour en cours',
+    queued: 'Envoyé après le prochain outil, ou à la fin du tour',
     queuedPaused: 'Retenu après un envoi refusé',
     sendNow: 'Envoyer maintenant',
-    sendNowHint: 'Arrête le tour en cours et envoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
+    sendNowHint: "Transmet les messages à l'agent en cours sans l'arrêter. Entrée dans le champ vide fait de même.",
     retryQueuedHint: 'Renvoie tous les messages en attente ensemble. Entrée dans le champ vide fait de même.',
     picker: 'Fournisseur et modèle',
     models: 'Modèles',
@@ -1159,7 +1159,8 @@ export const fr: Translation = {
     reload: 'Recharger',
     urlPlaceholder: 'Rechercher ou saisir une URL',
     openExternal: 'Ouvrir dans le navigateur du système',
-    slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web"
+    slotEmpty: "La page s'affiche ici dès que la coque fournit la vue web",
+    slotLinux: "Le navigateur intégré n'est pas encore disponible dans l'app Linux. Ouvrez la page dans votre navigateur."
   },
 
   terminal: {

@@ -66,13 +66,17 @@ export function cleanAgentTitle(answer: string, max = AGENT_TITLE_MAX): string |
 }
 
 /** The prompt an agent is asked with: the exchange, bounded, and one instruction. */
-export function titleRequest(prompt: string, answer: string): string {
-  const user = prompt.length > TITLE_INPUT_MAX ? `${prompt.slice(0, TITLE_INPUT_MAX)} [cut]` : prompt;
-  const assistant = answer.length > TITLE_INPUT_MAX ? `${answer.slice(0, TITLE_INPUT_MAX)} [cut]` : answer;
+export function titleRequest(prompt: string, answer: string, initial = false): string {
+  const user = limitTitleInput(prompt);
+  const assistant = limitTitleInput(answer);
   return [
     'Write a short title for the conversation below, one line of a sidebar: 2 to 6 words, fewer than 40 characters.',
     'Name the task itself. No quotes, no trailing period, no emoji, the same language as the user.',
-    'Answer with the title alone.',
+    'Title the user\'s subject and desired outcome. Use the assistant only to resolve an unnamed subject, never to replace the user\'s goal with an incidental finding.',
+    'Return JSON with keys title (string) and needsRefinement (boolean).',
+    initial
+      ? 'Set needsRefinement to true only when the subject is still unknown, such as an unresolved link, "fix this", or an unexplained attachment. Otherwise set it to false.'
+      : 'Use the answer to resolve a vague subject. Set needsRefinement to false.',
     '',
     '<user>',
     user,
@@ -82,4 +86,30 @@ export function titleRequest(prompt: string, answer: string): string {
     assistant.length > 0 ? assistant : '(no text)',
     '</assistant>',
   ].join('\n');
+}
+
+/** Keep the original subject and final constraints or findings when an exchange exceeds the title budget. */
+function limitTitleInput(text: string): string {
+  if (text.length <= TITLE_INPUT_MAX) return text;
+  const marker = '\n[cut]\n';
+  const half = Math.floor((TITLE_INPUT_MAX - marker.length) / 2);
+  return text.slice(0, half) + marker + text.slice(-(TITLE_INPUT_MAX - marker.length - half));
+}
+
+/** Structured answers carry the refinement decision; older hooks may still return a plain title. */
+export function parseAgentTitle(raw: string): { title: string; needsRefinement: boolean } | null {
+  const text = raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1').trim();
+  if (!text.startsWith('{')) {
+    const title = cleanAgentTitle(text);
+    return title === null ? null : { title, needsRefinement: false };
+  }
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value === null || typeof value !== 'object' || !('title' in value) || typeof value.title !== 'string') return null;
+    if ('needsRefinement' in value && typeof value.needsRefinement !== 'boolean') return null;
+    const title = cleanAgentTitle(value.title);
+    return title === null ? null : { title, needsRefinement: 'needsRefinement' in value && value.needsRefinement === true };
+  } catch {
+    return null;
+  }
 }

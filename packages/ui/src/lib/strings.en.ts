@@ -94,7 +94,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -176,6 +176,7 @@ export const strings = {
     setUp: 'Set up dictation', tryAgain: 'Try again',
     update: 'Update engine', updateHint: 'A faster engine is available, 8 MB.',
     https: 'Microphone access needs HTTPS or localhost. Open the secure pairing link for this core.',
+    linux: 'Dictation is not available in the Linux app yet: its webview does not grant the microphone. Open Boite in a browser to dictate.',
     denied: 'Microphone permission was denied. Allow it in your browser or system settings, then try again.',
     noMicrophone: 'No microphone was found. Connect one and try again.', microphoneBusy: 'The microphone is unavailable. Check whether another app is using it.',
     silence: 'No speech was detected. Try again closer to the microphone.', failed: 'Could not record audio. Try again.',
@@ -284,7 +285,7 @@ export const strings = {
     hideReminder: 'Hide reminder',
     heading: 'App updates',
     intro: 'Choose the releases this desktop app follows. Stable and nightly share this installation, conversations and settings.',
-    unsupported: 'Automatic app updates are available in installed Windows x64 builds.',
+    unsupported: 'Automatic app updates are available in installed builds: the Windows x64 installer, the macOS app, and the Linux .deb or AppImage.',
     channel: 'Release channel',
     stable: 'Boite',
     nightly: 'Boite Nightly',
@@ -430,8 +431,8 @@ export const strings = {
     archivedProjects: 'Archived projects ({count})',
     restoreProject: 'Restore',
     /** The drawer under a project's rows: its archived threads, opened for this session only. */
-    archivedThreadsOne: '1 archived',
-    archivedThreadsMany: '{count} archived',
+    archivedThreadsOne: 'Archived conversations (1)',
+    archivedThreadsMany: 'Archived conversations ({count})',
     restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
     removeProjectTitle: 'Remove {project} from Boite?',
@@ -467,8 +468,7 @@ export const strings = {
     pinned: 'Pinned',
     archive: 'Archive',
     delete: 'Delete',
-    deleteTitle: 'Delete this thread?',
-    deleteBody: '"{title}" and its sub-threads will disappear from your conversations. Running agents will stop. You can undo this until Boite is fully stopped. Project files and Git branches will be kept.',
+    deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
     archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
@@ -1025,11 +1025,11 @@ export const strings = {
     placeholderNew: 'What do you want to do?',
     send: 'Send',
     stop: 'Stop',
-    queued: 'Sent when the current turn ends',
+    queued: 'Sent after the next tool, or when the turn ends',
     /** A refused send held the pending messages until the user sends again. */
     queuedPaused: 'Held after a refused send',
     sendNow: 'Send now',
-    sendNowHint: 'Stops the current turn and sends all pending messages together. Enter in the empty composer does the same.',
+    sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
     models: 'Models',
@@ -1218,7 +1218,8 @@ export const strings = {
     reload: 'Reload',
     urlPlaceholder: 'Search or enter URL',
     openExternal: 'Open in the system browser',
-    slotEmpty: 'The page opens here once the shell provides the webview'
+    slotEmpty: 'The page opens here once the shell provides the webview',
+    slotLinux: 'The built-in browser is not available in the Linux app yet. Open the page in your own browser.'
   },
 
   terminal: {

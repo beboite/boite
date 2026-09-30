@@ -53,10 +53,10 @@ test('a pull request skips the extra architectures, a main push skips what the p
   const all = affectedChecks(['packages/core/src/main.ts']);
   const pr = plan(all, 'pr');
   expect(pr).toMatchObject({ core: true, web: true, desktop: true, server: true, e2e: true });
-  expect(JSON.parse(pr.portable)).toEqual(['ubuntu-24.04', 'macos-15']);
+  expect(JSON.parse(pr.portable)).toEqual(['ubuntu-22.04', 'macos-15']);
   const warm = plan(all, 'warm');
   expect(warm).toMatchObject({ core: false, web: true, desktop: true, server: true, e2e: false });
-  expect(JSON.parse(warm.portable)).toEqual(['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'macos-15-intel']);
+  expect(JSON.parse(warm.portable)).toEqual(['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-15', 'macos-15-intel']);
   const full = plan(all, 'full');
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);

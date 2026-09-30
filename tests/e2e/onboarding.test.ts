@@ -94,10 +94,22 @@ test('seven screens fit both languages and widths, without leaving the tour', as
     await page.click(`[data-testid=onboarding-locale-${locale}]`);
     for (const width of [1100, 390]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width === 390 });
+      let panelHeight: number | undefined;
       for (const step of ['welcome', 'profile', 'agents', 'usage', 'reach', 'quiet', 'privacy']) {
         await page.click(`[data-testid=onboarding-dot-${step}]`);
         await page.waitFor(`document.querySelector('[data-testid=onboarding-step]')?.dataset.step === '${step}'`);
         await capture(`tour-${locale}-${width}-${step}.png`);
+        const height = await page.evaluate<number>(`document.querySelector('[data-testid=onboarding] [role=dialog]').getBoundingClientRect().height`);
+        expect(height).toBeLessThanOrEqual(width === 390 ? 640 : 600);
+        if (panelHeight !== undefined) expect(height).toBe(panelHeight);
+        panelHeight = height;
+        if (step !== 'profile' && step !== 'privacy') {
+          expect(await page.evaluate(`(() => {
+            const scene = document.querySelector('[data-testid=onboarding-scene]');
+            const controls = scene.querySelector('.controls');
+            return getComputedStyle(controls).display === 'none' || controls.getBoundingClientRect().top >= scene.querySelector('.stage').getBoundingClientRect().bottom;
+          })()`)).toBe(true);
+        }
         expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
         // Privacy ends on its consent rows, every other screen on Next.
         expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-${step === 'privacy' ? 'back' : 'next'}]').getBoundingClientRect().bottom <= innerHeight`)).toBe(true);
@@ -117,6 +129,7 @@ test('seven screens fit both languages and widths, without leaving the tour', as
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click('[data-testid=onboarding-dot-agents]');
   expect(await page.evaluate(`document.querySelector('[data-testid=onboarding-animation]').getAnimations({subtree:true}).length`)).toBe(0);
+  expect(await page.evaluate(`getComputedStyle(document.querySelector('[data-testid=onboarding-scene] .controls')).display`)).toBe('none');
   await capture('tour-reduced-motion.png');
 }, 120_000);
 

@@ -147,6 +147,7 @@ export class Store {
     ctx.workflows.reset();
     for (const off of ctx.off) off();
     ctx.off = [];
+    ctx.composer.inputBoundaries = {};
     ctx.client = null;
     ctx.threads.subscribedThreadId = null;
     ctx.delegation.delegationSubscribedThreadId = null;
@@ -456,6 +457,9 @@ export class Store {
   submit(...args: Parameters<Composer['submit']>) { return this.#ctx.composer.submit(...args); }
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
+  get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
+  steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }
+  sendQueuedNow(...args: Parameters<Composer['sendQueuedNow']>) { return this.#ctx.composer.sendQueuedNow(...args); }
   stop(...args: Parameters<Composer['stop']>) { return this.#ctx.composer.stop(...args); }
 
   // -------------------------------------------------------------------------

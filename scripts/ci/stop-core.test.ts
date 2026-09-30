@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,12 +21,14 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
 await Bun.write(directory + '/core.json', JSON.stringify({pid:process.pid,port:server.port,token:'fixture'}));
 `;
 
-async function withCore(mode: string, action: (directory: string, child: Bun.Subprocess) => Promise<void>) {
-  const directory = mkdtempSync(join(tmpdir(), 'boite-stop-'));
-  const executable = join(directory, 'boite-core.exe');
+async function withCore(mode: string, action: (directory: string, child: Bun.Subprocess) => Promise<void>, runtime = false) {
+  const directory = mkdtempSync(join(tmpdir(), 'boite stop-'));
+  const executable = join(directory, runtime ? 'bun.exe' : 'boite-core.exe');
   copyFileSync(process.execPath, executable);
-  writeFileSync(join(directory, 'core.ts'), fixture);
-  const child = Bun.spawn([executable, join(directory, 'core.ts'), directory, mode], { stdout: 'ignore', stderr: 'pipe', windowsHide: true });
+  const entry = runtime ? join(directory, 'core', 'main.js') : join(directory, 'core.ts');
+  if (runtime) mkdirSync(join(directory, 'core'));
+  writeFileSync(entry, fixture);
+  const child = Bun.spawn([executable, entry, directory, mode, '--data-dir', directory], { stdout: 'ignore', stderr: 'pipe', windowsHide: true });
   try {
     const deadline = Date.now() + 10_000;
     while (!existsSync(join(directory, 'core.json'))) {
@@ -41,14 +43,35 @@ async function withCore(mode: string, action: (directory: string, child: Bun.Sub
   }
 }
 
-async function stop(directory: string, idleOnly: boolean) {
+async function stop(directory: string, idleOnly: boolean, explicit = false) {
   return Bun.spawn(['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
-    env: { ...process.env, BOITE_STOP_DIR: directory, BOITE_STOP_EXE: join(directory, 'boite-core.exe'), BOITE_STOP_IDLE: idleOnly ? '1' : '0' },
+    env: { ...process.env, BOITE_STOP_DIR: directory, BOITE_STOP_EXE: join(directory, 'boite-core.exe'), BOITE_STOP_IDLE: idleOnly ? '1' : '0', BOITE_STOP_EXPLICIT: explicit ? '1' : '0' },
     stdout: 'pipe', stderr: 'pipe', windowsHide: true,
   }).exited;
 }
 
 describe.skipIf(process.platform !== 'win32')('manual installer admission', () => {
+  test('accepting Kill also stops a busy or legacy core hosted by Bun', async () => {
+    for (const mode of ['busy', 'legacy']) {
+      await withCore(mode, async (directory, child) => {
+        expect(await stop(directory, true, true)).toBe(0);
+        expect(await child.exited).toBe(0);
+      }, true);
+    }
+  }, 60_000);
+  test('an installed bundle hosted by bun.exe must exit before installation proceeds', async () => {
+    await withCore('idle', async (directory, child) => {
+      await withCore('busy', async (_otherDirectory, unrelated) => {
+        expect(await stop(directory, true)).toBe(0);
+        expect(await child.exited).toBe(0);
+        expect(unrelated.exitCode).toBeNull();
+      }, true);
+    }, true);
+    await withCore('busy', async (directory, child) => {
+      expect(await stop(directory, true)).not.toBe(0);
+      expect(child.exitCode).toBeNull();
+    }, true);
+  }, 60_000);
   test('busy, legacy and incorrect acknowledgements leave the exact core running', async () => {
     for (const mode of ['busy', 'legacy', 'wrong-pid']) {
       await withCore(mode, async (directory, child) => {

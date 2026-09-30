@@ -255,7 +255,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
   }
 
   // An ephemeral thread is a title call: it answers in a few words, not with the request.
-  for (const chunk of chunksOf(ephemeral ? '"Pelican notes."' : plainOf(text))) say(chunk);
+  for (const chunk of chunksOf(ephemeral ? '{"title":"Pelican notes.","needsRefinement":false}' : plainOf(text))) say(chunk);
 
   for (const directive of directives) {
     switch (directive) {
@@ -580,6 +580,8 @@ function handle(method: string, raw: unknown): unknown {
       const active = textOf(params['expectedTurnId']);
       if (!waiting.has(active) || params['threadId'] !== threadId) throw new Error('no matching active turn');
       log(`turn/steer ${active} ${promptOf(params)}`);
+      const images = Array.isArray(params['input']) ? params['input'].filter((input: Record<string, unknown>) => input['type'] === 'image') : [];
+      if (images.length) log(`steer-images ${images.length} ${String(images[0]['url']).slice(0, 22)}`);
       return { turnId: active };
     }
     case 'turn/interrupt': {
