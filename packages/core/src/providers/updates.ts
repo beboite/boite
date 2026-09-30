@@ -110,6 +110,21 @@ function failureSummary(stdout: string, stderr: string): string | undefined {
   return output.find((line) => /\berror:|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
 }
 
+/**
+ * Why an updater that exited with zero left its version where it was, in its
+ * own words. `opencode upgrade` reports every failure and every skip this way,
+ * through a prompt library whose frame falls back to ASCII letters (`x`, `o`)
+ * when its output is not a Unicode terminal, and closes with `Done`.
+ */
+function stuckReason(output: string): string | undefined {
+  const lines = stripVTControlCharacters(output).split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/^[xoT]\s{2,}/, '').trim())
+    .filter((line) => /[\p{L}\p{N}]/u.test(line) && !/^done\.?$/i.test(line));
+  // An errno such as EBUSY or EPERM counts in capitals only: `exit` is no error code.
+  const reason = lines.findLast((line) => /fail|error|skipped|unknown|denied|cannot|could not|unable/i.test(line) || /\bE[A-Z]{3,}\b/.test(line)) ?? lines.at(-1);
+  return reason?.slice(0, 300);
+}
+
 async function npmLatest(name: string): Promise<string> {
   const response = await fetch(`https://registry.npmjs.org/${name.replaceAll('/', '%2F')}/latest`, {
     signal: AbortSignal.timeout(VERSION_TIMEOUT_MS),
@@ -519,16 +534,18 @@ export class HarnessUpdates {
   private async runUpdate(target: Target, before: Entry): Promise<void> {
     const id = target.descriptor.id;
     try {
+      let said = '';
       if (target.route === 'managed') await this.runManaged(target);
       else {
         this.assertWritable(target);
-        await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
+        said = await this.run(target, (target.profile.update as ProviderSelfUpdate).args, UPDATE_TIMEOUT_MS);
       }
       // An updater may have moved the program on PATH.
       forgetWhich();
       const read = await this.read(target);
       if (this.closed || this.core.stopping) return;
       const stuck = target.route === 'self' && before.current !== null && read.current === before.current && this.newer({ ...before, ...read });
+      const reason = stuck ? stuckReason(said) : undefined;
       // An updater that checks by itself and exits cleanly has just named its
       // newest release: the one it now reports, moved or not. Without this the
       // row would offer the same run again, as if nothing had happened.
@@ -537,7 +554,7 @@ export class HarnessUpdates {
         route: target.route,
         ...confirmed,
         state: stuck ? 'failed' : 'idle',
-        message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}` : null,
+        message: stuck ? `${target.descriptor.name} ran its updater and still reports ${read.current}${reason === undefined ? '' : `: ${reason}`}` : null,
         checkedAt: Date.now(),
         program: this.targetOf(id)?.program ?? target.program,
       });
