@@ -82,6 +82,8 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   // account and permissions as its next prompt, without starting a turn.
   'threads.focus',
   'turns.start',
+  // Paired phones can send the same user follow-ups as the owner's composer.
+  'turns.steer',
   'turns.stop',
   // The point of carrying the phone: answering the agent from anywhere.
   'permissions.list',
@@ -109,6 +111,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'project.added', 'project.removed', 'project.updated',
   'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
   'turn.started', 'turn.finished',
+  'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',
   'permission.requested', 'permission.resolved', 'question.asked', 'question.answered',
   'scheduler.updated', 'accounts.updated', 'accounts.removed',

@@ -425,3 +425,25 @@ test('with a brain, a new Claude session reads the Boite guide once and learns `
   expect(calls.at(-1)!.prompts[0]).toContain('boite where');
   expect(calls.at(-1)!.prompts[0]).not.toContain('boite ask');
 });
+
+
+test('user follow-ups enter the running Claude prompt stream without a second turn or interrupt', async () => {
+  const client = await harness.connect();
+  const threadId = await claudeThread(client);
+  scripted(fake => fake.emit(init('sess-steer')));
+  const turn = await client.call('turns.start', { threadId, prompt: 'Keep working' });
+  await waitFor(() => calls[0]?.prompts.length === 1);
+  const image = { kind: 'image' as const, mimeType: 'image/png' as const, data: 'aGVsbG8=', name: 'sample.png' };
+  expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Use this image', attachments: [image], clientRequestId: 'claude_steer_01' })).toEqual({ accepted: true });
+  await waitFor(() => calls[0]?.prompts.length === 2);
+  expect(JSON.parse(calls[0]!.prompts[1]!)).toEqual([
+    { type: 'text', text: 'Use this image' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.data } },
+  ]);
+  expect(queries[0]!.interrupts).toBe(0);
+  expect(harness.core.journal.listTurns(threadId)).toHaveLength(1);
+  const finished = client.next('turn.finished', record => record.id === turn.id);
+  queries[0]!.emit(assistant('sess-steer', [{ type: 'text', text: 'Follow-up applied' }]));
+  queries[0]!.emit(success('sess-steer'));
+  expect((await finished).status).toBe('done');
+});

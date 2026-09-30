@@ -1,5 +1,6 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
@@ -309,6 +310,7 @@ export function threadMethods(ctx: FakeContext) {
       ctx.bus.subscribed.delete(params.threadId);
       return { ok: true };
     },
+    'turns.steer': async params => steerUser(ctx, params),
     'threads.focus': async (params) => {
       if (params.threadId !== null && (typeof params.threadId !== 'string' || params.threadId.length === 0)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId must be a nonempty thread id or null', data: { field: 'threadId' } });
@@ -388,7 +390,11 @@ export function threadMethods(ctx: FakeContext) {
         else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
       }
       const gone = new Set(removed.map((entry) => entry.turnId));
-      thread.turns = thread.turns.filter((turn) => !gone.has(turn.id));
+      const kept = new Set(thread.messages.map(entry => entry.turnId));
+      thread.turns = thread.turns.filter((turn) => kept.has(turn.id));
+      for (const [key, request] of ctx.turnRequests) {
+        if (key.startsWith(`${thread.id}:`) && gone.has(request.turn.id)) ctx.turnRequests.delete(key);
+      }
       thread.sessionId = null;
       thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
       thread.context = null;

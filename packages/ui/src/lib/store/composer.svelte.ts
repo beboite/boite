@@ -15,7 +15,7 @@ import type { Choice } from '../store.svelte';
 import type { StoreContext } from './context';
 
 /** A prompt waiting behind a running turn, with what it was written with. */
-type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[] };
+type QueuedPrompt = { text: string; attachments: Attachment[]; previewReferences?: PreviewReference[]; afterBoundary?: string };
 
 /** The refusal `turns.start` answers while the thread already runs a turn, or null for any other error. */
 function turnInFlight(error: unknown): TurnInFlightData | null {
@@ -44,6 +44,9 @@ export class Composer {
     editing?: MessageId | null;
   }>>({});
 
+  inputBoundaries = $state<Record<string, { turnId: string; boundary: string }>>({});
+  private steerRequests = new Map<string, { content: string; id: string }>();
+
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
   composerInsertions = new Map<string, (start: number, end: number, text: string) => void>();
   pendingSends = new Map<string, { id: string; prompt: string; attachments: Attachment[]; previewReferences: PreviewReference[]; selectionVersion: number }>();
@@ -59,11 +62,68 @@ export class Composer {
         for (const [threadId, state] of Object.entries(this.composerStates)) {
           if (!state.queued.length || state.sending || state.paused) continue;
           const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
-          if (!thread || thread.archived || ['queued', 'running', 'waiting'].includes(thread.status)) continue;
-          untrack(() => void drainQueue(s, threadId, state));
+          if (!thread || thread.archived || ['queued', 'waiting'].includes(thread.status)) continue;
+          if (thread.status === 'running') {
+            const boundary = this.inputBoundaries[threadId];
+            if (!boundary || state.queued[0]?.afterBoundary === boundary.boundary || this.blocked(threadId) || state.queued.some(entry => activityCommand(entry.text))) continue;
+            untrack(() => {
+              for (const entry of state.queued) entry.afterBoundary = boundary.boundary;
+              void drainQueue(s, threadId, state, boundary.turnId);
+            });
+          } else untrack(() => void drainQueue(s, threadId, state));
         }
       });
     });
+  }
+
+
+  private blocked(threadId: string): boolean {
+    const s = this.ctx.store;
+    return s.pendingPermissions.some(request => request.threadId === threadId) ||
+      s.pendingQuestions.some(request => request.threadId === threadId && !request.async);
+  }
+
+  /** Skip the automatic tool-boundary wait, retaining pending approvals and questions. */
+  async sendQueuedNow(threadId: string): Promise<void> {
+    const s = this.ctx.store;
+    const state = this.composerStates[threadId];
+    const thread = s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId);
+    if (!state || !thread || state.sending || !state.queued.length || this.blocked(threadId) || thread.status === 'waiting' || thread.status === 'queued') return;
+    state.paused = false;
+    if (thread.status !== 'running') { await drainQueue(s, threadId, state); return; }
+    const turnId = s.openThread?.id === threadId ? s.openThread.turns.findLast(turn => turn.status === 'running')?.id : this.inputBoundaries[threadId]?.turnId;
+    if (!turnId || state.queued.some(entry => activityCommand(entry.text))) return;
+    for (const entry of state.queued) entry.afterBoundary = this.inputBoundaries[threadId]?.boundary;
+    await drainQueue(s, threadId, state, turnId);
+  }
+
+  /** True is provider acceptance, false is safely held input, null is a failed or uncertain send. */
+  async steer(prompt: string, threadId: string, turnId: string, attachments: Attachment[], previewReferences: PreviewReference[]): Promise<boolean | null> {
+    const s = this.ctx.store;
+    const client = this.ctx.client;
+    if (!client || s.connection !== 'ready' || this.blocked(threadId)) return false;
+    if (attachments.some(unresolvedAssetId)) { s.error = strings.errors.draftAttachment; return null; }
+    const selectionVersion = (s.openThread?.id === threadId ? s.openThread : s.threads.find(row => row.id === threadId))?.selectionVersion ?? 0;
+    const content = JSON.stringify([turnId, prompt, attachments, previewReferences, selectionVersion]);
+    let request = this.steerRequests.get(threadId);
+    if (!request || request.content !== content) {
+      request = { content, id: crypto.randomUUID() };
+      this.steerRequests.set(threadId, request);
+    }
+    try {
+      await this.ctx.connection.reloading?.promise;
+      if (this.ctx.client !== client || s.connection !== 'ready') return null;
+      const result = await client.call('turns.steer', { threadId, turnId, prompt, attachments, previewReferences,
+        clientRequestId: request.id, expectedSelectionVersion: selectionVersion });
+      if (this.ctx.client === client && result.accepted) this.steerRequests.delete(threadId);
+      return result.accepted;
+    } catch (error) {
+      if (this.ctx.client !== client) return null;
+      // An older core keeps the original end-of-turn queue. An uncertain submission stays paused.
+      if (error instanceof RpcFailure && error.code === RpcErrorCode.MethodNotFound) return false;
+      this.ctx.fail(error);
+      return null;
+    }
   }
 
   registerComposerInsertion(key: string, insert: (start: number, end: number, text: string) => void): () => void {

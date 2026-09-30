@@ -4,6 +4,23 @@ import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodN
 
 afterEach(() => vi.useRealTimers());
 
+test('rewinding a live follow-up keeps the turn belonging to earlier messages', async () => {
+  const client = new FakeClient({ delayMs: 5 });
+  await client.connect();
+  try {
+    const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[tools] Keep reading' });
+    const params = { threadId: 't-trace', turnId: turn.id, prompt: 'Change direction', clientRequestId: 'rewind_follow_up' };
+    expect(await client.call('turns.steer', params)).toEqual({ accepted: true });
+    await client.settled();
+    const target = (await client.call('threads.get', { threadId: 't-trace' })).messages.at(-1)!;
+    const rewound = await client.call('threads.rewind', { threadId: 't-trace', messageId: target.id });
+    expect(rewound.thread.turns.some(item => item.id === turn.id)).toBe(true);
+    expect(rewound.thread.messages.filter(message => message.role === 'user' && message.turnId === turn.id)).toHaveLength(1);
+    // As on the core, the receipt for the removed input no longer acknowledges it.
+    expect(await client.call('turns.steer', params)).toEqual({ accepted: false });
+  } finally { client.close(); }
+});
+
 test('fake agent receives selected element context while the visible prompt stays compact', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

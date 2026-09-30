@@ -1024,11 +1024,11 @@ export const strings = {
     placeholderNew: 'What do you want to do?',
     send: 'Send',
     stop: 'Stop',
-    queued: 'Sent when the current turn ends',
+    queued: 'Sent after the next tool, or when the turn ends',
     /** A refused send held the pending messages until the user sends again. */
     queuedPaused: 'Held after a refused send',
     sendNow: 'Send now',
-    sendNowHint: 'Stops the current turn and sends all pending messages together. Enter in the empty composer does the same.',
+    sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
     models: 'Models',
