@@ -24,6 +24,33 @@ test('Muse subagent snapshots reach the native team', async () => {
   ]);
 });
 
+test('Muse quotas come only from observed host notifications, never a probe or an extra turn', async () => {
+  const client = await startCore();
+  const threadId = await museThread(client);
+  const thread = await client.call('threads.get', { threadId });
+  const quota = async () => (await client.call('quotas.list', { refresh: true })).find((row) => row.accountId === thread.accountId)!;
+  const before = fakeLog();
+  expect(await quota()).toMatchObject({ status: 'unavailable', windows: [], checkedAt: null });
+  expect(fakeLog()).toBe(before);
+  expect((await runTurn(client, threadId, '[quota]')).status).toBe('done');
+  const observed = await quota();
+  expect(observed).toMatchObject({ status: 'ready', windows: [
+    { id: 'window', usedPercent: 100, resetsAt: 1900000000000 },
+    { id: 'weekly', usedPercent: 18, resetsAt: 1900100000000 },
+  ] });
+  expect(observed.checkedAt).toBeGreaterThan(0);
+  const after = fakeLog();
+  await quota();
+  expect(fakeLog()).toBe(after);
+  expect(after).not.toContain('usage/read');
+  expect(after).not.toContain('resetCredit');
+  await client.call('quotas.configure', { accountId: thread.accountId!, enabled: false });
+  await runTurn(client, threadId, '[quota]');
+  expect(await quota()).toMatchObject({ status: 'disabled', windows: [] });
+  await client.call('quotas.configure', { accountId: thread.accountId!, enabled: true });
+  expect(await quota()).toMatchObject({ status: 'unavailable', windows: [], checkedAt: null });
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 

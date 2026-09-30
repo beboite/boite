@@ -178,6 +178,41 @@ test('the limits tab is its own page, one card per provider, no scrolling throug
   expect(page.errors()).toEqual([]);
 }, 60_000);
 
+test('exhausted quotas expose banked resets and a confirmed budget on desktop and phone', async () => {
+  await viewport(1280, 800);
+  await page.navigate(`${origin}/?fake=1&quotaExtras=1`);
+  await page.waitFor(`document.querySelector('[data-testid=nav-settings]')`);
+  await page.click('[data-testid=nav-limits]');
+  await page.waitFor(`document.querySelector('[data-testid=limits-glance] [data-testid=quota-credits]')`);
+  expect(await page.text('[data-testid=limits-glance]')).toContain('Monthly budget remaining');
+  expect(await page.evaluate<number>(`Math.max(...[...document.querySelectorAll('[data-testid=limits-glance] .summary [role=meter]')].map(el => el.getBoundingClientRect().height))`)).toBeLessThanOrEqual(6);
+  expect(await page.evaluate(`(() => { const r = document.querySelector('[data-testid=limits-glance]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
+  await capture('quota-extras-glance.png');
+  await page.click('[data-testid=nav-limits]');
+  await page.waitFor(`!document.querySelector('[data-testid=limits-glance]')`);
+  await openLimits();
+  await page.waitFor(`document.querySelector('[data-testid=quota-credits]')`);
+  const claude = '[data-testid=usage-limit-provider][data-provider=claude]';
+  const codex = '[data-testid=usage-limit-provider][data-provider=codex]';
+  expect(await count(`${claude} [data-testid=quota-banked-resets]`)).toBeGreaterThan(0);
+  expect(await count(`${codex} [data-testid=quota-banked-resets]`)).toBeGreaterThan(0);
+  expect(await page.text(`${claude} [data-testid=quota-credits]`)).toContain('Monthly budget remaining');
+  expect(await attribute(`${claude} [data-testid=quota-credits] [role=meter]`, 'aria-valuenow')).toBe('75');
+  expect(await count(`${codex} [data-testid=quota-credits]`)).toBe(0);
+  expect(await count('[data-testid=quota-extras] button')).toBe(0);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  await capture('quota-extras-desktop.png');
+  await viewport(390, 844, true);
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-detail] [data-testid=quota-credits]')`);
+  expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('[data-testid=quota-extras]')].every(el => el.getBoundingClientRect().right <= innerWidth)`)).toBe(true);
+  await capture('quota-extras-phone.png');
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
+  await viewport(1280, 800);
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-limits]')`);
+  expect(page.errors()).toEqual([]);
+}, 60_000);
+
 test('a paired device reads the history and is told where the limits are', async () => {
   await viewport(1280, 800);
   await page.navigate(`${origin}/?fake=1&principal=session`);

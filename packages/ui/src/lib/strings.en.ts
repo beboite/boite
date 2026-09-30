@@ -1713,11 +1713,20 @@ export const strings = {
   },
 
   quotas: {
+    bankedReset: '{count} banked reset',
+    observed: 'Observed {time}',
+    remainingUnder: 'Less than {percent}% left',
+    bankedResets: '{count} banked resets',
+    resetExpires: 'Next reset expires {time}',
+    budgetRemaining: 'Monthly budget remaining',
+    creditRemaining: 'Credits remaining',
+    creditBalance: '{count} credits',
+
     trayHeading: 'Usage',
     /** The tray icon's right-click menu. */
     trayShow: 'Show',
     trayQuit: 'Quit',
-    names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
+    names: { muse: 'Muse Code', claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Off',
     noReading: 'Unavailable',
     cliSource: 'agy command-line login',

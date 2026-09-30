@@ -1647,10 +1647,19 @@ export const fr: Translation = {
   },
 
   quotas: {
+    bankedReset: '{count} reset en réserve',
+    observed: 'Relevé du {time}',
+    remainingUnder: 'Moins de {percent} % restants',
+    bankedResets: '{count} resets en réserve',
+    resetExpires: 'Prochain reset expirant {time}',
+    budgetRemaining: 'Budget mensuel restant',
+    creditRemaining: 'Crédits restants',
+    creditBalance: '{count} crédits',
+
     trayHeading: 'Consommation',
     trayShow: 'Afficher',
     trayQuit: 'Quitter',
-    names: { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
+    names: { muse: 'Muse Code', claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity', grok: 'Grok', opencode: 'OpenCode Go' },
     off: 'Désactivé',
     noReading: 'Indisponible',
     cliSource: 'connexion en ligne de commande agy',

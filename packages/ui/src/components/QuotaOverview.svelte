@@ -1,9 +1,10 @@
 <script lang="ts">
+  import QuotaExtras from './QuotaExtras.svelte';
   import { ChevronDown } from '@lucide/svelte';
   import type { AccountQuota } from '@boite/contracts';
   import ProviderLogo from './ProviderLogo.svelte';
   import { fill, strings } from '../lib/strings';
-  import { quotaWindowName, weekdayTime } from '../lib/format';
+  import { exactTime, quotaWindowName, weekdayTime } from '../lib/format';
   import { quotaGroups } from '../lib/quota-reader.svelte';
 
   /**
@@ -31,6 +32,7 @@
     {@const used = windows.length ? Math.max(...windows.map((limit) => limit.usedPercent)) : null}
     {@const stale = group.rows.some((row) => row.status === 'unavailable')}
     {@const resets = windows.flatMap((limit) => (limit.resetsAt === null ? [] : [limit.resetsAt]))}
+    {@const observed = group.rows.flatMap((row) => row.source === 'observation' && row.checkedAt !== null ? [row.checkedAt] : [])}
     <article data-testid="quota-provider" data-provider={group.providerId} class:expanded={expanded === group.providerId}>
       <button class="summary ghost" aria-expanded={expanded === group.providerId} aria-controls={`usage-${group.providerId}`} disabled={windows.length === 0} onclick={() => (expanded = expanded === group.providerId ? null : group.providerId)}>
         <span class="logo"><ProviderLogo providerId={group.providerId} size={19} /></span>
@@ -39,14 +41,17 @@
           {#if windows.length}
             <span class="meters" class:stale>
               {#each windows as limit (`${limit.accountId}:${limit.id}`)}
-                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-busy={loading && !completed.includes(limit.accountId)} class:low={limit.usedPercent >= 80} class:empty={limit.usedPercent >= 100} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
+                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-busy={loading && !completed.includes(limit.accountId)} class:low={limit.usedPercent >= 80} class:exhausted={limit.usedPercent >= 100} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}: ${left(limit.usedPercent)}`}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
               {/each}
             </span>
-            <span class="caption">{stale ? strings.quotas.stale : resets.length ? reset(Math.min(...resets)) : strings.quotas.noReset}</span>
+            <span class="caption">{observed.length ? `${fill(strings.quotas.observed, { time: exactTime(Math.min(...observed)) })} · ` : ''}{stale ? strings.quotas.stale : resets.length ? reset(Math.min(...resets)) : strings.quotas.noReset}</span>
           {/if}
         </span>
         {#if windows.length}<ChevronDown size={13} />{/if}
       </button>
+      <div class="extras">
+        {#each group.rows as row (row.accountId)}<QuotaExtras {row} accountLabel={group.rows.length > 1} />{/each}
+      </div>
       {#each group.rows.filter((row) => row.error) as row (row.accountId)}
         <p class="error" role="status">{group.rows.length > 1 ? `${row.label}: ` : ''}{row.error}</p>
       {/each}
@@ -58,7 +63,7 @@
               <div class="window" class:low={limit.usedPercent >= 80}>
                 <span class="window-name">{quotaWindowName(limit.label)}</span>
                 <span class="window-left">{left(limit.usedPercent)}</span>
-                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:empty={limit.usedPercent >= 100}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
+                <span class="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100 - limit.usedPercent} aria-label={`${group.providerName} ${quotaWindowName(limit.label)}`} aria-busy={loading && !completed.includes(row.accountId)} class:low={limit.usedPercent >= 80} class:exhausted={limit.usedPercent >= 100}><span class="fill" style:width="{100 - limit.usedPercent}%"></span></span>
                 {#if limit.resetsAt}<span class="caption">{reset(limit.resetsAt)}</span>{/if}
               </div>
             {/each}
@@ -85,13 +90,15 @@
   .amount { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .amount.low { color: var(--color-live); }
   .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
+  .extras { display: grid; gap: 10px; padding: 0 4px 12px 40px; }
+  .extras:empty { display: none; }
   .error { margin: 0; padding: 0 4px 12px 40px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .meters { display: flex; gap: 4px; }
   .meters.stale { opacity: 0.45; }
   .track { flex: 1; width: 0; min-width: 0; height: 4px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-surface-3); filter: saturate(1); transition: filter var(--dur-3) var(--ease-out-quint); }
   .fill { display: block; height: 100%; background: var(--color-success); border-radius: var(--radius-sm); transition: width var(--dur-3) var(--ease-out-quint), background-color var(--dur-3) var(--ease-out-quint); }
   .track.low .fill { background: var(--color-live); }
-  .track.empty { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
+  .track.exhausted { background: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface-3)); }
   .summary :global(svg:last-child) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
   .expanded .summary > :global(svg) { transform: rotate(180deg); }
   /* Unfolded, each window is a name, what is left, its bar and its reset, lined up under the logo's column. */

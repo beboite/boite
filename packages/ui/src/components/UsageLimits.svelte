@@ -1,7 +1,8 @@
 <script lang="ts">
+  import QuotaExtras from './QuotaExtras.svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { quotaWindowName, tenth, weekdayTime } from '../lib/format';
+  import { exactTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
   import { quotaGroups } from '../lib/quota-reader.svelte';
   import ProviderLogo from './ProviderLogo.svelte';
 
@@ -24,11 +25,12 @@
 <div class="limits" class:loading data-testid="usage-limits">
   {#each groups as group (group.providerId)}
     {@const at = checked(group.rows)}
+    {@const observed = group.rows.some((row) => row.source === 'observation')}
     <section class="card provider" data-testid="usage-limit-provider" data-provider={group.providerId}>
       <header>
         <ProviderLogo providerId={group.providerId} size={18} />
         <strong>{group.providerName}</strong>
-        {#if at !== null}<small title={fill(strings.quotas.checked, { time: weekdayTime(at) })}>{weekdayTime(at)}</small>{/if}
+        {#if at !== null}<small title={fill(observed ? strings.quotas.observed : strings.quotas.checked, { time: observed ? exactTime(at) : weekdayTime(at) })}>{observed ? exactTime(at) : weekdayTime(at)}</small>{/if}
       </header>
       {#each group.rows as row (row.accountId)}
         <article data-testid="usage-limit-account" data-provider={row.providerId} aria-busy={loading && !completed.includes(row.accountId)}>
@@ -46,6 +48,7 @@
               {#if limit.resetsAt}<small>{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</small>{/if}
             </div>
           {/each}
+          <QuotaExtras {row} />
           {#if row.windows.length === 0 && !row.error}<p class="muted">{strings.quotas.unavailable}</p>{/if}
           {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
         </article>

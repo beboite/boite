@@ -120,6 +120,8 @@ export interface TurnContext {
    * when it changed. Names are deduplicated, the first wins.
    */
   commands(list: AgentCommand[]): void;
+  /** Subscription quotas observed by a host, without a probe or a paid turn. */
+  quota?(reading: import('@boite/contracts').QuotaReading, observedAt: number): void;
   tasks?(list: import('@boite/contracts').AgentTask[]): void;
   /**
    * What the agent still runs in the background, whole, whenever it changed.

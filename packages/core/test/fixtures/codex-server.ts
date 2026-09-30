@@ -493,6 +493,11 @@ function handle(method: string, raw: unknown): unknown {
         platformFamily: process.platform === 'win32' ? 'windows' : 'unix',
         platformOs: process.platform === 'win32' ? 'windows' : 'linux',
       };
+    case 'account/rateLimits/read':
+      log(`account/rateLimits/read ${JSON.stringify(params)}`);
+      return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
+        credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
+        rateLimitResetCredits: { availableCount: 2, credits: null } };
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.

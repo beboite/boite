@@ -3,10 +3,11 @@ import { mkdtempSync } from 'node:fs';
 import { removeDir } from './fs-retry.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Account, AccountQuota, QuotaWindow } from '@boite/contracts';
+import type { Account, AccountQuota, QuotaReading, QuotaWindow } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
+import { claudeQuotaDetails, codexQuotaDetails } from './quota-details.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
 
 const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
@@ -62,7 +63,7 @@ export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
 }
 
 /** The token stays inside this function and is sent only to Anthropic. */
-async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> {
+async function readClaude(core: Core, account: Account): Promise<QuotaReading> {
   const provider = core.providers.require(account.providerId);
   const env = core.accounts.accountEnv(account, provider);
   const directory = env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude');
@@ -73,7 +74,7 @@ async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> 
   if (typeof token !== 'string' || !token) throw new Error('This Claude account has no subscription login. Connect it in Providers.');
   let response: Response;
   try {
-    response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+    response = await fetch('https://api.anthropic.com/api/oauth/usage?cedar_ember=1', {
       headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
@@ -81,18 +82,18 @@ async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> 
   if (response.status === 401) throw new Error('Claude login expired. Reconnect the account in Providers.');
   if (response.status === 429) throw new Error('Claude quota requests are rate limited. Retrying in five minutes.');
   if (!response.ok) throw new Error(`Claude quota request returned HTTP ${response.status}.`);
-  try { return claudeQuotaWindows(await response.json()); }
+  try { const raw: unknown = await response.json(); return { windows: claudeQuotaWindows(raw), ...claudeQuotaDetails(raw) }; }
   catch { throw new Error('Claude returned an invalid quota response.'); }
 }
 
-async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
+async function readCodex(core: Core, account: Account): Promise<QuotaReading> {
   const { readCodexQuota } = await import('./drivers/codex.ts');
   const provider = core.providers.require(account.providerId);
   const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
   const threadId = `quota:${account.id}`;
   const exits: Promise<void>[] = [];
   try {
-    return codexQuotaWindows(await readCodexQuota({
+    const raw = await readCodexQuota({
       provider, accountId: account.id, cwd,
       accountEnv: core.accounts.accountEnv(account, provider),
       spawnChild: (cmd, args, opts) => {
@@ -102,7 +103,8 @@ async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
       },
       killTree: () => core.procs.killTree(threadId),
       log: () => undefined,
-    }));
+    });
+    return { windows: codexQuotaWindows(raw), ...codexQuotaDetails(raw) };
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);
@@ -113,24 +115,41 @@ async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
   }
 }
 
-export type QuotaReader = (account: Account) => Promise<QuotaWindow[]>;
+export type QuotaReader = (account: Account) => Promise<QuotaWindow[] | QuotaReading>;
 
 export class QuotaStore {
   private cache = new Map<string, { value: AccountQuota; retryAt: number }>();
   private pending = new Map<string, Promise<AccountQuota>>();
   private generation = 0;
+  private observations = new Map<string, AccountQuota>();
   constructor(private core: Core, private read: QuotaReader = (account) => account.providerId === 'claude' ? readClaude(core, account) : account.providerId === 'codex' ? readCodex(core, account) : readExtraQuota(core, account)) {
-    core.bus.onAny((name) => {
-      if (name === 'accounts.updated' || name === 'accounts.removed' || name === 'providers.updated') this.invalidate();
+    core.bus.onAny((name, payload) => {
+      if (name === 'accounts.updated' || name === 'accounts.removed') this.invalidate(String(object(payload)['id'] ?? object(payload)['accountId'] ?? ''));
+      else if (name === 'providers.updated') this.invalidate();
     });
   }
-  invalidate(): void { this.generation++; this.cache.clear(); }
+  invalidate(accountId?: string): void {
+    this.generation++; this.cache.clear();
+    if (accountId) this.observations.delete(accountId); else this.observations.clear();
+  }
   private base(account: Account): AccountQuota {
     const preferences = object(this.core.journal.getSetting('quota-accounts'));
-    const supported = ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID;
+    const supported = this.isMuse(account) || ['claude', 'codex', 'grok', 'opencode'].includes(account.providerId) || account.id === ANTIGRAVITY_QUOTA_ID;
     const enabled = account.id === ANTIGRAVITY_QUOTA_ID ? preferences[account.id] === true : preferences[account.id] !== false;
     return { accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : this.core.providers.get(account.providerId)?.name ?? account.providerId,
       label: account.label, enabled, status: !supported ? 'unsupported' : !enabled ? 'disabled' : 'unavailable', windows: [], checkedAt: null, error: null };
+  }
+  private isMuse(account: Account): boolean { return this.core.providers.get(account.providerId)?.protocol === 'muse'; }
+  /** Only running hosts contribute observations; listing never starts a Muse turn. */
+  observe(accountId: string, reading: QuotaReading, observedAt: number): void {
+    const account = this.core.accounts.list().find((row) => row.id === accountId);
+    if (!account || !this.isMuse(account) || !this.base(account).enabled || !reading.windows.length) return;
+    const previous = this.observations.get(accountId);
+    if (previous && (previous.checkedAt ?? 0) > observedAt) return;
+    const value: AccountQuota = { ...this.base(account), ...reading, status: 'ready', source: 'observation', checkedAt: observedAt };
+    this.observations.set(accountId, value);
+    const rows = [...this.core.accounts.list(), cliAccount].map((row) => this.observations.get(row.id) ?? this.cache.get(row.id)?.value ?? this.base(row));
+    this.core.bus.emit('quotas.updated', rows);
   }
   async list(refresh = false, requestId?: string): Promise<AccountQuota[]> {
     if (requestId !== undefined && (typeof requestId !== 'string' || !requestId || requestId.length > 128)) {
@@ -157,11 +176,12 @@ export class QuotaStore {
         }
       }));
     }));
-    return result;
+    return result.map((row) => this.observations.get(row.accountId) ?? row);
   }
   private async one(account: Account, refresh: boolean): Promise<AccountQuota> {
     const base = this.base(account);
     if (base.status !== 'unavailable') return base;
+    if (this.isMuse(account)) return this.observations.get(account.id) ?? base;
     const cached = this.cache.get(account.id);
     // Refresh cannot bypass failure backoff or turn a hover into a request flood.
     if (cached && (Date.now() < cached.retryAt || (!refresh && Date.now() - (cached.value.checkedAt ?? 0) < CACHE_MS))) return cached.value;
@@ -171,10 +191,12 @@ export class QuotaStore {
     const running = (async () => {
       let value: AccountQuota;
       try {
-        const windows = await this.read(account);
-        value = { ...base, windows, status: windows.length ? 'ready' : 'unavailable', checkedAt: Date.now(), error: windows.length ? null : 'No subscription quota was reported for this account.' };
+        const raw = await this.read(account);
+        const reading = Array.isArray(raw) ? { windows: raw } : raw;
+        const ready = reading.windows.length > 0 || reading.resetCredits !== undefined || reading.credits !== undefined;
+        value = { ...base, ...reading, status: ready ? 'ready' : 'unavailable', checkedAt: Date.now(), error: ready ? null : 'No subscription quota was reported for this account.' };
       } catch (error) {
-        value = { ...base, windows: cached?.value.windows ?? [], checkedAt: cached?.value.checkedAt ?? null,
+        value = { ...(cached?.value ?? base), status: 'unavailable', checkedAt: cached?.value.checkedAt ?? null,
           error: error instanceof Error ? error.message : 'Quota request failed.' };
       }
       if (generation === this.generation) this.cache.set(account.id, { value, retryAt: Date.now() + (value.status === 'ready' ? 10_000 : RETRY_MS) });
@@ -188,8 +210,8 @@ export class QuotaStore {
     if (typeof enabled !== 'boolean') throw invalidParams('quotas.configure enabled must be a boolean');
     const next = { ...object(this.core.journal.getSetting('quota-accounts')), [accountId]: enabled };
     this.core.journal.append({ type: 'quotas.configured', threadId: null, version: 1, payload: { accountId, enabled } }, () => this.core.journal.setSetting('quota-accounts', next));
-    this.invalidate();
-    const result = [...this.core.accounts.list(), cliAccount].map((account) => this.base(account));
+    this.invalidate(accountId);
+    const result = [...this.core.accounts.list(), cliAccount].map((account) => this.observations.get(account.id) ?? this.base(account));
     this.core.bus.emit('quotas.updated', result);
     return result;
   }

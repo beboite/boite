@@ -158,6 +158,7 @@ export class TurnContexts {
       context: (use) => {
         if ((this.threads.require(threadId).selectionVersion ?? 0) === (thread.selectionVersion ?? 0)) this.threads.agentState.noteContext(threadId, use);
       },
+      quota: (reading, observedAt) => this.core.quotas.observe(account.id, reading, observedAt),
       tasks: (list) => this.core.activity.tasks(threadId, list),
       hook: (report) => {
         this.core.hooks.record({ providerId: provider.id, accountId: account.id, threadId }, report);

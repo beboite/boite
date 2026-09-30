@@ -1,7 +1,8 @@
 <script lang="ts">
+  import QuotaExtras from './QuotaExtras.svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { strings } from '../lib/strings';
-  import { weekdayTime } from '../lib/format';
+  import { exactTime, weekdayTime } from '../lib/format';
   /** `bare` drops the card and the provider header, for a list that already sits under its account. */
   let { rows, compact = false, bare = false }: { rows: AccountQuota[]; compact?: boolean; bare?: boolean } = $props();
   const date = (at: number) => weekdayTime(at);
@@ -22,8 +23,9 @@
             {#if limit.resetsAt}<small>{strings.quotas.resets.replace('{time}', date(limit.resetsAt))}</small>{/if}
           </div>
         {/each}
+        <QuotaExtras {row} />
         {#if row.error}<p class="error" role="status">{row.error}</p>{/if}
-        {#if row.checkedAt}<small>{row.status === 'ready' ? strings.quotas.checked.replace('{time}', date(row.checkedAt)) : `${strings.quotas.stale} · ${date(row.checkedAt)}`}</small>
+        {#if row.checkedAt}<small>{row.status === 'ready' ? (row.source === 'observation' ? strings.quotas.observed : strings.quotas.checked).replace('{time}', row.source === 'observation' ? exactTime(row.checkedAt) : date(row.checkedAt)) : `${strings.quotas.stale} · ${date(row.checkedAt)}`}</small>
         {:else if !row.error}<p class="muted">{strings.quotas.unavailable}</p>{/if}
       {/if}
     </article>
