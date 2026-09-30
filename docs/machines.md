@@ -147,10 +147,15 @@ palette, also available with Ctrl+K, without a permanent search field.
 It matches thread titles, project names and machine names across connected
 hosts. The draft's project picker also includes every connected host.
 
-With several machines connected, cards show the machine icon beside the title.
-The machine name remains in the tooltip and accessible label. A second row
-appears only for the project or an associated PR, shown as a green underlined
-number. Connecting another machine leaves cards without project or PR metadata
+With several machines connected, Recent cards show the machine icon beside the
+title. In Projects the project header carries it once for its cards, in red
+while that machine is unreachable. The machine name remains in the tooltip and
+accessible label. Every card shows
+the provider's logo before the title; its tooltip names the provider and the
+model. A second row appears only for the project or an associated PR, shown as
+a green underlined number. A card that has that row also names the thread's
+worktree branch there; a branch alone does not add the row. The phone list
+always has a second line and appends the branch to it. Connecting another machine leaves cards without project or PR metadata
 at their single-machine height. No placeholder appears when there is no PR. PR
 metadata comes from the execution machine's `gh pr list`, using the worktree
 branch or the current branch of the working directory. Non-repositories and

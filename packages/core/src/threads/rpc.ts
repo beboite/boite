@@ -65,6 +65,10 @@ export function registerThreadMethods(core: Core): void {
     ctx.connection.subscriptions.delete(params.threadId);
     return { ok: true } as const;
   });
+  core.router.register('threads.focus', (params, ctx) => {
+    core.threads.focus.set(ctx.connection.id, params.threadId);
+    return { ok: true } as const;
+  });
   core.router.register('turns.start', async (params) => {
     await requireCwd(core, params.threadId);
     return core.threads.startTurn(params.threadId, params.prompt, params.attachments ?? [], params.expectedSelectionVersion, undefined, undefined, params.clientRequestId, undefined, params.previewReferences ?? []);

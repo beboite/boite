@@ -47,7 +47,7 @@ function askedQuestions(raw: unknown): AskedQuestion[] {
 /** What the gate reads from its session: the turn the CLI is on, and the context of the last turn attached. */
 export interface GateHost {
   head(): ClaudeTurn | null;
-  ctx(): TurnContext;
+  ctx(): Pick<TurnContext, 'log'>;
 }
 
 /** The permission callback and the two tool hooks one session hands the SDK. */

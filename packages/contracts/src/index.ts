@@ -1784,6 +1784,10 @@ export interface CoordinationConfig {
   remote: boolean;
   paused: boolean;
 }
+/** Default communication for ordinary threads; explicit owner settings take precedence. */
+export function defaultCoordinationConfig(): CoordinationConfig {
+  return { mode: 'brief', resources: '', remote: true, paused: false };
+}
 export interface AgentAddress { coreId: string; threadId: ThreadId }
 export interface AgentContact extends AgentAddress {
   title: string;
@@ -2457,6 +2461,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
+  /** The conversation visible on this connection; null releases its prepared agent. No turn is started. */
+  'threads.focus': { params: { threadId: ThreadId | null }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };

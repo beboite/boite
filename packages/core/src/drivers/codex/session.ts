@@ -5,7 +5,7 @@ import { tildePath } from '../../paths.ts';
 import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
-import type { QuestionAsk, TurnContext } from '../types.ts';
+import type { QuestionAsk, SessionContext, TurnContext } from '../types.ts';
 import {
   answerTextOf,
   imageInputsOf,
@@ -29,6 +29,7 @@ import {
 } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
 import { CodexTurn } from './turn.ts';
+import { SessionRetention } from '../session-retention.ts';
 
 /**
  * What `thread/resume` answers when the thread's rollout file is gone. Both
@@ -65,6 +66,7 @@ const SQLITE_INIT_CLOSE_MS = 2_000;
  * core shutdown or a changed setup ends it.
  */
 export class CodexSession {
+  private readonly retention = new SessionRetention();
   private child: SpawnedChild | null = null;
   private rpc: CodexRpc | null = null;
   private starting: Promise<void> | null = null;
@@ -86,7 +88,7 @@ export class CodexSession {
   private stopTimer: Timer | null = null;
   private contextSink: CodexTurn['ctx']['context'] | null = null;
   /** The context the process was opened with, for a hook that runs while no turn is. */
-  private opener: TurnContext | null = null;
+  private opener: SessionContext | null = null;
   private queue: Promise<void> = Promise.resolve();
   private running = 0;
   /** `agentMessage` items that are asynchronous questions: drawn as cards, their text deltas dropped. */
@@ -105,7 +107,19 @@ export class CodexSession {
 
   /** Reusable only while the process is up and the turn asks for the very same setup. */
   usable(key: string, warmMs: number): boolean {
-    return !this.ended && !this.closing && this.key === key && warmMs > 0 && this.warmMs > 0;
+    return !this.ended && !this.closing && this.key === key && this.retention.reusable(warmMs, this.warmMs);
+  }
+
+  setViewed(viewed: boolean): void {
+    this.retention.setViewed(viewed);
+    this.clearIdle();
+    if (!viewed && !this.busy() && !this.ended) this.armIdle();
+  }
+
+  async prepare(ctx: SessionContext): Promise<void> {
+    try { await this.start(ctx); }
+    catch (error) { this.drop(); throw error; }
+    finally { ctx.finishStartup?.(); }
   }
 
   busy(): boolean {
@@ -177,7 +191,7 @@ export class CodexSession {
   }
 
   /** Archive, shutdown, an idle window, a changed setup: the process goes. */
-  close(reason: string | null, ctx?: TurnContext): void {
+  close(reason: string | null, ctx?: SessionContext): void {
     if (this.ended) return;
     this.closing = true;
     if (reason !== null && ctx !== undefined) ctx.log('warn', `codex session: ${reason}`);
@@ -262,21 +276,21 @@ export class CodexSession {
     this.clearStopGrace();
     turn.settle();
     this.running = Math.max(0, this.running - 1);
-    if (drop || this.closing || this.warmMs <= 0) {
+    if (drop || this.closing || this.retention.idleMs(this.warmMs) <= 0) {
       this.drop();
       return;
     }
-    if (this.running === 0) this.armIdle();
+    if (this.running === 0 && !this.retention.viewed) this.armIdle();
   }
 
   // -- the process ----------------------------------------------------------
 
-  private start(ctx: TurnContext): Promise<void> {
+  private start(ctx: SessionContext): Promise<void> {
     if (this.starting === null) this.starting = this.open(ctx);
     return this.starting;
   }
 
-  private async open(ctx: TurnContext): Promise<void> {
+  private async open(ctx: SessionContext): Promise<void> {
     const profile = profileFor(ctx.provider);
     const executable = profile === undefined ? null : resolveExecutable(profile);
     if (executable === null) {
@@ -319,7 +333,7 @@ export class CodexSession {
   }
 
   /** Only restart a failed SQLite initialization, before any thread or prompt is sent. */
-  private async initialize(ctx: TurnContext, executable: string, args: string[]): Promise<CodexRpc> {
+  private async initialize(ctx: SessionContext, executable: string, args: string[]): Promise<CodexRpc> {
     this.initializing = true;
     try {
       for (let attempt = 1; ; attempt += 1) {
@@ -345,7 +359,7 @@ export class CodexSession {
           try {
             await Promise.race([
               new Promise<void>(resolve => { timer = setTimeout(resolve, delay); }),
-              this.active?.stopped,
+              ...(this.active === null ? [] : [this.active.stopped]),
             ]);
           } finally {
             clearTimeout(timer);
@@ -357,7 +371,7 @@ export class CodexSession {
     }
   }
 
-  private spawn(ctx: TurnContext, executable: string, args: string[]): CodexRpc {
+  private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,
@@ -384,7 +398,7 @@ export class CodexSession {
     return rpc;
   }
 
-  private watch(child: SpawnedChild, ctx: TurnContext, rpc: CodexRpc): void {
+  private watch(child: SpawnedChild, ctx: SessionContext, rpc: CodexRpc): void {
     let closed: () => void = () => undefined;
     this.processClosed = new Promise<void>(resolve => { closed = resolve; });
     child.stderr.setEncoding('utf8');
@@ -434,7 +448,7 @@ export class CodexSession {
     try {
       await Promise.race([
         this.processClosed,
-        this.active?.stopped,
+        ...(this.active === null ? [] : [this.active.stopped]),
         new Promise<void>(resolve => { timer = setTimeout(resolve, SQLITE_INIT_CLOSE_MS); }),
       ]);
     } finally {
@@ -491,7 +505,7 @@ export class CodexSession {
     this.idle = setTimeout(() => {
       this.idle = null;
       this.drop();
-    }, this.warmMs);
+    }, this.retention.idleMs(this.warmMs));
     this.idle?.unref?.();
   }
 
@@ -614,7 +628,7 @@ export class CodexSession {
    * Settings can say which ones and why. An older Codex without `hooks/list`
    * is one line in the log.
    */
-  private async reportSkippedHooks(rpc: CodexRpc, ctx: TurnContext): Promise<void> {
+  private async reportSkippedHooks(rpc: CodexRpc, ctx: SessionContext): Promise<void> {
     try {
       const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
       for (const entry of listed.data ?? []) {
@@ -651,7 +665,7 @@ export class CodexSession {
     }
   }
 
-  private async onRequest(ctx: TurnContext, method: string, raw: unknown): Promise<unknown> {
+  private async onRequest(ctx: SessionContext, method: string, raw: unknown): Promise<unknown> {
     const params = (raw ?? {}) as Record<string, unknown>;
     switch (method) {
       case 'item/commandExecution/requestApproval': {
@@ -699,7 +713,7 @@ export class CodexSession {
    * a url, or a device verification has no card yet and is declined, which
    * Codex reports as a refused call instead of a failed request.
    */
-  private async answerElicitation(ctx: TurnContext, params: Record<string, unknown>): Promise<unknown> {
+  private async answerElicitation(ctx: SessionContext, params: Record<string, unknown>): Promise<unknown> {
     const server = textOf(params['serverName']);
     const meta = (params['_meta'] ?? {}) as Record<string, unknown>;
     const schema = params['requestedSchema'] as { required?: unknown } | undefined;
@@ -725,7 +739,7 @@ export class CodexSession {
    * the request is answered with what was collected: leaving it unanswered
    * would hang the agent.
    */
-  private async askQuestions(ctx: TurnContext, raw: unknown): Promise<Record<string, string>> {
+  private async askQuestions(ctx: SessionContext, raw: unknown): Promise<Record<string, string>> {
     const turn = this.current;
     const answers: Record<string, string> = {};
     if (turn === null || !Array.isArray(raw)) return answers;

@@ -177,6 +177,139 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('viewing prepares one session without a turn and reuses it with retention disabled', async () => {
+    const client = await startCore({ warmProcessMinutes: 0 });
+    const threadId = await codexThread(client);
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    expect(countLines('initialize')).toBe(1);
+    expect(fakeLog()).not.toContain('turn/start');
+    expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+    expect(harness!.core.journal.listMessages(threadId)).toHaveLength(0);
+    for (const prompt of ['first', 'second']) {
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt });
+      expect((await finished).status).toBe('done');
+    }
+    expect(countLines('initialize')).toBe(1);
+    expect(harness!.core.procs.liveCount(threadId)).toBe(1);
+    const other = await harness!.connect();
+    await other.call('threads.focus', { threadId });
+    await client.call('threads.focus', { threadId: null });
+    const finished = other.next('turn.finished', turn => turn.threadId === threadId);
+    await other.call('turns.start', { threadId, prompt: 'another viewer' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(1);
+    other.close();
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0, 35_000);
+  }, 40_000);
+
+  test('sending while preparation is opening waits for the same process', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_SLOW_START'] = '200';
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'during startup' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(1);
+    expect(fakeLog().split('\n').filter(line => line.startsWith('turn/start'))).toHaveLength(1);
+  });
+
+  test('a viewed selection change replaces setup without creating a turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => fakeLog().includes('thread/start'));
+    await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
+    await waitFor(() => countLines('initialize') === 2);
+    await waitFor(() => fakeLog().includes('sandbox=danger-full-access'));
+    expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'new setup' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(2);
+    await client.call('threads.archive', { threadId });
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+    await client.call('threads.focus', { threadId });
+    expect(countLines('initialize')).toBe(2);
+  });
+
+  test('an unsuccessful preparation leaves a later prompt able to recover', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    process.env['CODEX_FAKE_INIT_ERROR'] = 'startup failed without a retryable SQLite error';
+    const failed = client.next('core.log', entry => entry.message.includes('preparing the visible conversation failed'));
+    await client.call('threads.focus', { threadId });
+    await waitFor(() => countLines('initialize') === 1);
+    await failed;
+    await waitFor(() => harness!.core.procs.liveCount(threadId) === 0);
+    expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+    delete process.env['CODEX_FAKE_INIT_ERROR'];
+    delete process.env['CODEX_FAKE_INIT_FAILURES'];
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+    await client.call('turns.start', { threadId, prompt: 'recover' });
+    expect((await finished).status).toBe('done');
+    expect(countLines('initialize')).toBe(2);
+  });
+
+  test('archiving before lazy preparation starts cannot launch an abandoned process', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const contexts = harness!.core.threads.contexts;
+    const make = contexts.makeSessionContext.bind(contexts);
+    let archived = false;
+    const setup = spyOn(contexts, 'makeSessionContext').mockImplementation((...args) => {
+      const context = make(...args);
+      void harness!.core.threads.archive(threadId, true);
+      archived = true;
+      return context;
+    });
+    try {
+      await client.call('threads.focus', { threadId });
+      await waitFor(() => archived);
+      // The next RPC follows archive and the resolved preparation microtasks.
+      expect((await client.call('threads.get', { threadId })).archived).toBe(true);
+      expect(countLines('initialize')).toBe(0);
+      expect(harness!.core.procs.liveCount(threadId)).toBe(0);
+      expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+    } finally { setup.mockRestore(); }
+  });
+
+  test('preparation honors SQLite backoff without an active turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    process.env['CODEX_FAKE_INIT_FAILURES'] = '1';
+    process.env['CODEX_FAKE_INIT_RPC_ERROR'] = 'exit';
+    const procs = harness!.core.procs;
+    const spawn = procs.spawnChild.bind(procs);
+    const launches: number[] = [];
+    const launch = spyOn(procs, 'spawnChild').mockImplementation((...args) => {
+      if (args[0] === threadId) launches.push(performance.now());
+      return spawn(...args);
+    });
+    let retryAt = 0;
+    const log = harness!.core.log.bind(harness!.core);
+    const logging = spyOn(harness!.core, 'log').mockImplementation((level, message) => {
+      if (message.includes('retrying SQLite initialization')) retryAt = performance.now();
+      log(level, message);
+    });
+    try {
+      await client.call('threads.focus', { threadId });
+      await waitFor(() => fakeLog().includes('thread/start'));
+      expect(launches).toHaveLength(2);
+      expect(retryAt).toBeGreaterThan(0);
+      expect(launches[1]! - retryAt).toBeGreaterThanOrEqual(450);
+      expect(harness!.core.journal.listTurns(threadId)).toHaveLength(0);
+      const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+      await client.call('turns.start', { threadId, prompt: 'after preparation recovered' });
+      expect((await finished).status).toBe('done');
+      expect(countLines('initialize')).toBe(2);
+    } finally { launch.mockRestore(); logging.mockRestore(); }
+  });
+
   test('an initialize RPC error waits for late SQLite stderr and exit before retrying', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

@@ -46,6 +46,21 @@ async function pairedDevice(): Promise<Awaited<ReturnType<typeof connect>>> {
 }
 
 describe('the access gate', () => {
+  test('paired phones can focus a conversation, but agent sockets cannot', async () => {
+    const owner = await harness.connect();
+    const { threadId } = await echoThread(harness, owner);
+    const phone = await pairedDevice();
+    const agent = await connect(harness.url, harness.core.agents.tokenFor(threadId));
+    try {
+      expect(await phone.call('threads.focus', { threadId })).toEqual({ ok: true });
+      expect(await phone.call('threads.focus', { threadId: null })).toEqual({ ok: true });
+      let rejected: Error | null = null;
+      try { await agent.call('threads.focus', { threadId }); }
+      catch (error) { rejected = error as Error; }
+      expect(rejected?.message).toContain('threads.focus');
+    } finally { phone.close(); agent.close(); }
+  });
+
   test('paired messages cannot impersonate a persistent agent session', () => {
     expect(() => assertAllowed('agents.message.send', deviceConnection(), { threadId: 'thr_other' })).toThrow('threadId');
     expect(() => assertAllowed('agents.message.send', deviceConnection(), { scope: { kind: 'agent', id: 'identity' } })).not.toThrow();

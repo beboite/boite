@@ -35,8 +35,11 @@ test('connecting another machine keeps thread rows at their single-machine heigh
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 8`);
   await capture('readability-thread-density');
   expect(await height()).toBeCloseTo(single, 1);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`)).toBe(true);
+  // In Projects the header names the machine; a row repeating it would only take room from the title.
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => !e.querySelector('.machine'))`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('project-row')}')).every(e => e.querySelector('${id('project-host')}[title][aria-label]'))`)).toBe(true);
   await page.click(id('view-recent'));
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).every(e => e.querySelector('.headline .machine[title][aria-label]'))`);
   await page.click(id('project-filter'));
   await page.evaluate(`Array.from(document.querySelectorAll('${id('project-filter-menu')} [data-value]')).find(e => e.dataset.value === JSON.stringify(['http://builder.test', 'p-notes'])).click()`);
   await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 1`);
@@ -64,7 +67,7 @@ test('thread metadata, message identity and expandable trace fit a narrow panel'
   await page.waitFor(`document.querySelectorAll('${id('thread-pr')}').length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('usage-pill')}') === null`)).toBe(true);
   expect(await page.evaluate(`Array.from(document.querySelectorAll('.metadata')).every(e => !e.textContent.includes('No PR') && !e.textContent.includes('My computer') && !e.textContent.includes('Builder'))`)).toBe(true);
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => e.closest('.thread').querySelector('.machine') && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('thread-pr')}')).every(e => (e.closest('.thread').querySelector('.machine') || e.closest('${id('project')}')?.querySelector('${id('project-host')}')) && getComputedStyle(e).textDecorationLine.includes('underline'))`)).toBe(true);
   await page.evaluate(`window.__openedPr = null; window.open = (url) => { window.__openedPr = url; return null; }`);
   const prUrl = await page.evaluate<string>(`document.querySelector('${id('thread-pr')}').href`);
   await page.click(id('thread-pr'));

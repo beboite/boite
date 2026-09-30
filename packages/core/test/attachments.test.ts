@@ -16,12 +16,17 @@ const file: FileAttachment = { kind: 'file', name: 'report.pdf', mimeType: 'appl
 test('files reach the driver as persistent host paths and remain in history', async () => {
   const client = await harness.connect();
   const { threadId } = await echoThread(harness, client);
+  await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
   const turn = await client.call('turns.start', { threadId, prompt: 'Read this', attachments: [file] });
   await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
   const messages = harness.core.journal.listMessages(threadId);
   expect(messages[0]!.parts).toContainEqual({ type: 'file', name: file.name, mimeType: file.mimeType, data: file.data });
   const reply = messages.filter(m => m.role === 'assistant').flatMap(m => m.parts).filter(p => p.type === 'text').map(p => p.text).join('');
-  const reference = JSON.parse(reply.slice(reply.indexOf('{"name":"report.pdf"')).trim());
+  expect(reply).toContain('boite agents send');
+  const referenceLine = reply.split('\n').find(line => line.startsWith('{"name":"report.pdf"'));
+  expect(referenceLine).toBeDefined();
+  const reference = JSON.parse(referenceLine!);
+  expect(reference).toMatchObject({ name: file.name, mimeType: file.mimeType, bytes: Buffer.from(file.data, 'base64').length });
   expect(isAbsolute(reference.path)).toBe(true);
   expect(readFileSync(reference.path).toString()).toBe('%PDF-test');
   const continued = continuationInput(harness.core.journal, threadId, 'next-turn', { prompt: 'Now summarize', attachments: [] }, harness.core.providers.require('echo'), part => fileReference(harness.dataDir, part));
