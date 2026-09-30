@@ -1,7 +1,7 @@
 /**
- * The one action the app can take back right now: an archive, for a few
- * seconds after it went through. The toast shows it with its button, Ctrl+Z
- * outside a text field runs it, and a newer offer replaces an older one.
+ * The current undo action: archives expire after a few seconds, deletions
+ * remain until dismissed, replaced or their core session ends. Ctrl+Z outside
+ * a text field runs it; the session deletion list keeps earlier deletions.
  */
 
 /** How long the way back stays offered. */
@@ -11,6 +11,7 @@ export interface UndoOffer {
   id: number;
   message: string;
   run: () => Promise<unknown>;
+  session?: { store: object; startedAt: number };
 }
 
 class UndoStore {
@@ -18,11 +19,16 @@ class UndoStore {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #next = 0;
 
-  offer(message: string, run: () => Promise<unknown>): void {
+  offer(message: string, run: () => Promise<unknown>, options: { persistent?: boolean; session?: UndoOffer['session'] } = {}): void {
     clearTimeout(this.#timer);
     const id = ++this.#next;
-    this.current = { id, message, run };
-    this.#timer = setTimeout(() => { if (this.current?.id === id) this.current = null; }, UNDO_MS);
+    this.current = { id, message, run, session: options.session };
+    if (!options.persistent) this.#timer = setTimeout(() => { if (this.current?.id === id) this.current = null; }, UNDO_MS);
+  }
+
+  discardExpired(store: object, startedAt: number | undefined): void {
+    const session = this.current?.session;
+    if (session?.store === store && session.startedAt !== startedAt) this.dismiss();
   }
 
   /** Runs the offered action once; a failure lands on `onerror`, the offer is gone either way. */

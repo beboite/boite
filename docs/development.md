@@ -228,10 +228,15 @@ Delete is separate from Archive. The thread's row and title menus offer it to
 the owner, and both archived lists have a delete button. Every deletion asks
 for confirmation, even for an idle thread. `threads.remove { threadId }`
 stops the conversation and its sub-threads, waits for their processes to exit,
-then removes their messages, turns, events, traces, delegation and workflow
-history in one journal transaction.
-`thread.removed` updates every connected client and the project archive count.
-The conversation cannot be restored; project files, Git worktrees and branches,
+then hides them from the sidebar and archives while retaining their history.
+The Undo toast stays available until dismissed or replaced; Settings has a
+separate list of conversations deleted during this session for later undo.
+`threads.deleted` lists them and `threads.restore { threadId }` restores their
+history and previous archive flags, without restarting agents. A window close
+or lost connection keeps undo available while its core runs. Complete core
+shutdown purges unrestored conversations; startup purges them after a crash.
+`thread.removed` with `undoable: true` updates connected clients and archive
+counts without erasing history. Project files, Git worktrees and branches,
 and transcripts stored by native providers stay on disk. Persistent agent
 sessions stay managed through Agents, and a sub-thread is deleted with its
 parent. Paired devices can archive and restore conversations; deletion is

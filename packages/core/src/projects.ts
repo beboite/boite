@@ -341,6 +341,7 @@ export class ProjectStore {
       );
       for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
       this.core.bus.emit('project.removed', { projectId });
+      this.core.bus.emit('thread.deletionsUpdated', {});
       this.files.forget(project.path);
       this.git.delete(project.path);
       this.iconQueued.delete(projectId);

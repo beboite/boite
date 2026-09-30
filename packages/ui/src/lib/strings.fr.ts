@@ -466,7 +466,8 @@ export const fr: Translation = {
     archive: 'Archiver',
     delete: 'Supprimer',
     deleteTitle: 'Supprimer cette conversation ?',
-    deleteBody: '"{title}" et ses sous-conversations seront supprimées définitivement de Boite. Les agents en cours seront arrêtés. Cette action est irréversible. Les fichiers du projet et les branches Git seront conservés.',
+    deleteBody: '"{title}" et ses sous-conversations disparaîtront de vos conversations. Les agents en cours seront arrêtés. Vous pourrez annuler jusqu’à l’arrêt complet de Boite. Les fichiers du projet et les branches Git seront conservés.',
+    deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
     archiveTitle: 'Archiver cette conversation ?',
     archivedToast: '« {title} » archivée',
     undo: 'Annuler',
@@ -1515,6 +1516,12 @@ export const fr: Translation = {
       empty: 'Aucune conversation archivée sur cette machine.',
       restore: 'Restaurer',
       open: 'Ouvrir'
+    },
+    deleted: {
+      heading: 'Supprimées pendant cette session',
+      intro: 'L’annulation reste disponible jusqu’à l’arrêt complet de Boite sur cette machine, même quand il continue en arrière-plan après la fermeture de sa fenêtre.',
+      show: 'Afficher les conversations supprimées',
+      empty: 'Aucune suppression à annuler pendant cette session.',
     },
     worktrees: {
       storage: 'Emplacement de stockage',

@@ -480,13 +480,28 @@ export class ThreadStore {
       const ids = family.map(thread => thread.id);
       this.core.journal.append(
         { type: 'thread.removed', threadId: null, version: 1, payload: { threadIds: ids } },
-        () => this.core.journal.deleteThreads(ids),
+        () => this.core.journal.stageThreadDeletion(threadId, family),
       );
-      for (const id of ids) this.core.bus.emit('thread.removed', { threadId: id });
+      for (const id of ids) this.core.bus.emit('thread.removed', { threadId: id, undoable: true });
+      this.core.bus.emit('thread.deletionsUpdated', {});
       if (root.projectId !== null && this.core.journal.getProject(root.projectId)) this.core.projects.announce(root.projectId);
     } finally {
       for (const thread of family) this.removing.delete(thread.id);
     }
+  }
+
+  restoreDeleted(threadId: ThreadId): ThreadSummary {
+    const root = this.core.journal.listDeletedThreads().find(t => t.id === threadId);
+    if (!root) throw notFound(`threadId: no deletion to undo in this Boite session for ${threadId}`, { threadId });
+    if (root.projectId !== null) this.core.projects.require(root.projectId);
+    const ids = this.core.journal.append(
+      { type: 'thread.restored', threadId, version: 1, payload: { threadId } },
+      () => this.core.journal.restoreDeletedThreads(threadId),
+    );
+    for (const id of ids) this.core.bus.emit('thread.created', this.withLoad(this.require(id)));
+    this.core.bus.emit('thread.deletionsUpdated', {});
+    if (root.projectId !== null) this.core.projects.announce(root.projectId);
+    return this.withLoad(this.require(threadId));
   }
 
   pin(threadId: ThreadId, pinned: boolean): ThreadSummary {

@@ -465,6 +465,16 @@ export class Threads {
     }
   }
 
+  async restoreDeletedThread(threadId: ThreadId): Promise<ThreadSummary | null> {
+    const client = this.ctx.client;
+    if (!client) return null;
+    try {
+      const summary = await client.call('threads.restore', { threadId });
+      this.upsertThread(summary);
+      return summary;
+    } catch (error) { this.ctx.fail(error); return null; }
+  }
+
   /** Applied to this machine only, for both RPC answers and removal events. */
   async removed(threadId: ThreadId): Promise<void> {
     const s = this.ctx.store;

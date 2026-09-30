@@ -2,6 +2,7 @@
   import { Trash2 } from '@lucide/svelte';
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
+  import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
@@ -23,10 +24,18 @@
   /** Once per mount: a read that fails leaves the button, not a retry loop. */
   let asked = false;
   const removed = new Set<ThreadId>();
-  $effect(() => store.client?.on('thread.removed', ({ threadId }) => {
-    removed.add(threadId);
-    threads = threads?.filter(t => t.id !== threadId) ?? null;
-  }));
+  $effect(() => {
+    const client = store.client;
+    const offRemove = client?.on('thread.removed', ({ threadId }) => {
+      removed.add(threadId);
+      threads = threads?.filter(t => t.id !== threadId) ?? null;
+    });
+    const offRestore = client?.on('thread.created', summary => {
+      if (!removed.delete(summary.id)) return;
+      if (summary.archived && !summary.parentThreadId && threads !== null) threads = [...threads, summary];
+    });
+    return () => { offRemove?.(); offRestore?.(); };
+  });
 
   $effect(() => {
     if (asked || (!eager && store.settingsSection?.id !== 'archived') || store.connection !== 'ready') return;
@@ -112,6 +121,8 @@
     </ul>
   {/if}
 </section>
+
+<DeletedThreads {store} {eager} />
 
 <style>
   .archived {

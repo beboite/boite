@@ -120,6 +120,7 @@ export class FakeContext {
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
   readonly threads = new Map<ThreadId, Thread>();
+  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[] }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
   readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();

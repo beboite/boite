@@ -467,7 +467,8 @@ export const strings = {
     archive: 'Archive',
     delete: 'Delete',
     deleteTitle: 'Delete this thread?',
-    deleteBody: '"{title}" and its sub-threads will be permanently deleted from Boite. Running agents will stop. This cannot be undone. Project files and Git branches will be kept.',
+    deleteBody: '"{title}" and its sub-threads will disappear from your conversations. Running agents will stop. You can undo this until Boite is fully stopped. Project files and Git branches will be kept.',
+    deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
     archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
     archivedToast: 'Archived "{title}"',
@@ -1578,6 +1579,12 @@ export const strings = {
       empty: 'No archived thread on this machine.',
       restore: 'Restore',
       open: 'Open'
+    },
+    deleted: {
+      heading: 'Deleted this session',
+      intro: 'Undo remains available until Boite fully stops on this machine, including while it runs in the background after closing its window.',
+      show: 'Show deleted conversations',
+      empty: 'No deleted conversation to undo in this session.',
     },
     /** The worktrees a thread leaves on disk, and their removal by hand. */
     worktrees: {

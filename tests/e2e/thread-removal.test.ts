@@ -13,7 +13,7 @@ beforeAll(async () => {
 afterAll(async () => { await server?.close(); });
 
 for (const width of [1280, 390]) {
-  test(`deleting a conversation at ${width}px asks first and removes it from the archive too`, async () => {
+  test(`deleting conversations at ${width}px supports immediate and later session undo`, async () => {
     const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width, height: 900 } });
     try {
       await page.waitFor(`globalThis.__boiteTest?.workspace.active.openThread && document.querySelector('[data-testid=thread-header]')`);
@@ -34,7 +34,7 @@ for (const width of [1280, 390]) {
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-menu-${width}.png`));
       await chooseDelete();
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-confirm-${width}.png`));
-      expect(await page.evaluate<string>(`document.querySelector('[data-testid=confirm-dialog]').textContent`)).toContain('cannot be undone');
+      expect(await page.evaluate<string>(`document.querySelector('[data-testid=confirm-dialog]').textContent`)).toContain('until Boite is fully stopped');
       await page.click('[data-testid=confirm-cancel]');
       expect(await page.evaluate<boolean>(`globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`)).toBe(true);
       await openMenu();
@@ -42,6 +42,12 @@ for (const width of [1280, 390]) {
       await page.click('[data-testid=confirm-ok]');
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.list', { includeArchived: true }).then(rows => rows.some(t => t.id === ${JSON.stringify(id)}))`)).toBe(false);
+      await page.waitFor(`document.querySelector('[data-testid=undo-action]')`);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-undo-${width}.png`));
+      await page.click('[data-testid=undo-action]');
+      await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(id)}`);
+      await openMenu(); await chooseDelete(); await page.click('[data-testid=confirm-ok]');
+      await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width < 720) {
         await page.click('[data-testid=mobile-settings]');
@@ -68,6 +74,18 @@ for (const width of [1280, 390]) {
       await page.waitFor(`!document.querySelector('[data-testid=archived-list] [data-thread-id="${archivedId}"]')`);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.list', { includeArchived: true }).then(rows => rows.some(t => t.id === ${JSON.stringify(archivedId)}))`)).toBe(false);
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      await page.waitFor(`document.querySelector('[data-testid=deleted-show]') || document.querySelector('[data-testid=deleted-list]')`);
+      if (await page.evaluate(`document.querySelector('[data-testid=deleted-show]') !== null`)) await page.click('[data-testid=deleted-show]');
+      await page.waitFor(`document.querySelectorAll('[data-testid=deleted-list] li').length === 2`);
+      await page.evaluate(`document.querySelector('[data-testid=deleted-threads]').scrollIntoView({block:'center'}); document.querySelector('[data-testid=undo-toast] button:last-child')?.click()`);
+      await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-session-${width}.png`));
+      await page.click(`[data-testid=deleted-list] [data-thread-id="${archivedId}"] [data-testid=deleted-restore]`);
+      await page.waitFor(`!document.querySelector('[data-testid=deleted-list] [data-thread-id="${archivedId}"]')`);
+      expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId: ${JSON.stringify(archivedId)}}).then(t => t.archived)`)).toBe(true);
+      await page.click(`[data-testid=deleted-list] [data-thread-id="${id}"] [data-testid=deleted-restore]`);
+      await page.waitFor(`document.querySelector('[data-testid=deleted-empty]')`);
+      expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId: ${JSON.stringify(id)}}).then(t => t.archived)`)).toBe(false);
     } finally {
       await page.close();
     }

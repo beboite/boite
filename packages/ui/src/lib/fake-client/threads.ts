@@ -274,6 +274,7 @@ export function threadMethods(ctx: FakeContext) {
       if (root.agentSessionId || root.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'threadId: expected a top-level conversation without agentSessionId', data: { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' } });
       if (removing.has(threadId)) throw refusal('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
       const family = [...ctx.threads.values()].filter(t => t.id === threadId || t.parentThreadId === threadId);
+      const archived = family.map(t => t.archived);
       for (const thread of family) { removing.add(thread.id); thread.archived = true; }
       try {
         ctx.workflows.stopRoot(threadId, 'Conversation deleted');
@@ -283,23 +284,33 @@ export function threadMethods(ctx: FakeContext) {
         }
         for (const thread of family) {
           ctx.threads.delete(thread.id);
-          ctx.coordination.delete(thread.id);
-          ctx.letters.delete(thread.id);
           clearTimeout(ctx.activityTimers.get(thread.id));
           ctx.activityTimers.delete(thread.id);
-          for (const [key, request] of ctx.turnRequests) if (request.turn.threadId === thread.id) ctx.turnRequests.delete(key);
-          ctx.emit('thread.removed', { threadId: thread.id });
+          ctx.emit('thread.removed', { threadId: thread.id, undoable: true });
         }
-        ctx.delegationAgents.delete(threadId);
-        ctx.delegationConfigs.delete(threadId);
-        ctx.delegationLetters.delete(threadId);
-        ctx.delegationTurns.delete(threadId);
-        ctx.workflows.forget(threadId);
+        ctx.deletedThreads.set(threadId, { threads: family, archived });
+        ctx.emit('thread.deletionsUpdated', {});
         if (root.projectId !== null) announceProject(ctx, root.projectId);
         return { ok: true };
       } finally {
         for (const thread of family) removing.delete(thread.id);
       }
+    },
+    'threads.deleted': async () => [...ctx.deletedThreads.values()].reverse().map(family => structuredClone(toSummary(family.threads[0]!))),
+    'threads.restore': async ({ threadId }) => {
+      const family = ctx.deletedThreads.get(threadId);
+      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no deletion to undo in this Boite session for ${threadId}`, data: { threadId } });
+      const root = family.threads.find(t => t.id === threadId)!;
+      if (root.projectId !== null && !ctx.projects.some(p => p.id === root.projectId)) throw ctx.notFound('project', root.projectId);
+      for (const [index, thread] of family.threads.entries()) {
+        thread.archived = family.archived[index]!;
+        ctx.threads.set(thread.id, thread);
+        ctx.emit('thread.created', structuredClone(toSummary(thread)));
+      }
+      ctx.deletedThreads.delete(threadId);
+      ctx.emit('thread.deletionsUpdated', {});
+      if (root.projectId !== null) announceProject(ctx, root.projectId);
+      return structuredClone(toSummary(root));
     },
     'threads.pin': async (params) => {
       const thread = ctx.thread(params.threadId);

@@ -16,7 +16,7 @@ afterEach(async () => {
   await Promise.all(processOutput);
 });
 
-test('removal stops the family and clears its stored history while keeping project files', async () => {
+test('removal stops the family and hides it until undo, preserving history and project files', async () => {
   const { threadId } = await echoThread(harness, client);
   const { threadId: keptId } = await echoThread(harness, client, 'keep');
   // Real owned processes keep the native tracker active and verify cancellation,
@@ -56,23 +56,32 @@ test('removal stops the family and clears its stored history while keeping proje
   expect((await client.call('questions.list', {})).some(q => q.id === questionId)).toBe(false);
   for (const id of [threadId, childId]) {
     expect(harness.core.journal.getThread(id)).toBeNull();
-    expect(harness.core.journal.listMessages(id)).toEqual([]);
-    expect(harness.core.journal.listTurns(id)).toEqual([]);
-    expect(harness.core.journal.listProcesses(id, 100)).toEqual([]);
-    expect(harness.core.journal.getSetting(`move-note:${id}`)).toBeUndefined();
-    expect(harness.core.journal.getSetting(`memory-notices:${id}`)).toBeUndefined();
-    expect(harness.core.journal.getSetting(`coordination:${id}`)).toBeUndefined();
-    expect(harness.core.journal.db.query('SELECT COUNT(*) AS n FROM events WHERE thread_id = ?').get(id)).toEqual({ n: 0 });
+    expect(harness.core.journal.listMessages(id).length).toBeGreaterThan(0);
+    expect(harness.core.journal.listTurns(id).length).toBeGreaterThan(0);
+    expect(harness.core.journal.listProcesses(id, 100).length).toBeGreaterThan(0);
+    expect(harness.core.journal.getSetting(`memory-notices:${id}`)).toEqual([{ text: 'old notice' }]);
+    expect(harness.core.journal.getSetting(`coordination:${id}`)).toMatchObject({ resources: 'private conversation resources' });
   }
-  for (const turn of turns) expect(harness.core.journal.getTurn(turn.id)).toBeNull();
-  expect(harness.core.journal.listProcesses(terminalId, 100)).toEqual([]);
+  for (const turn of turns) expect(harness.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+  expect(harness.core.journal.listProcesses(terminalId, 100).length).toBeGreaterThan(0);
   expect(keptProcess.proc.exitCode).toBeNull();
   expect(harness.core.procs.liveCount(keptId)).toBeGreaterThan(0);
   expect(harness.core.journal.getThread(keptId)).not.toBeNull();
   expect(existsSync(marker)).toBe(true);
-  // A delayed turn completion or stream flush cannot recreate the removed rows.
+  await expect(client.call('threads.get', { threadId })).rejects.toThrow('unknown thread');
+  expect((await client.call('threads.list', { includeArchived: true })).some(t => t.id === threadId || t.id === childId)).toBe(false);
+  expect((await client.call('threads.deleted', {})).map(t => t.id)).toEqual([threadId]);
+  const history = harness.core.journal.listMessages(threadId);
+  const restored = await client.call('threads.restore', { threadId });
+  expect(restored.archived).toBe(false);
+  expect(harness.core.journal.getThread(childId)?.archived).toBe(false);
+  expect((await client.call('delegation.get', { threadId })).agents.some(a => a.thread.id === childId)).toBe(true);
+  expect((await client.call('threads.get', { threadId })).messages).toEqual(history);
+  expect(await client.call('threads.deleted', {})).toEqual([]);
+  expect(harness.core.procs.liveCount(threadId)).toBe(0);
+  // A delayed stream flush does not change restored history.
   harness.core.journal.flushDeltas();
-  expect(harness.core.journal.listMessages(threadId)).toEqual([]);
+  expect(harness.core.journal.listMessages(threadId)).toEqual(history);
 });
 
 test('a paired device cannot delete conversations and agent sessions stay managed by Agents', async () => {
@@ -80,7 +89,10 @@ test('a paired device cannot delete conversations and agent sessions stay manage
   const { grant } = await client.call('pairing.grant', {});
   const session = harness.core.sessions.exchange(grant, { name: 'phone', version: 'test' });
   const device = await connect(harness.url, session.token);
-  try { await expect(device.call('threads.remove', { threadId })).rejects.toThrow(); }
+  try {
+    for (const method of ['threads.remove', 'threads.restore'] as const) await expect(device.call(method, { threadId })).rejects.toThrow();
+    await expect(device.call('threads.deleted', {})).rejects.toThrow();
+  }
   finally { device.close(); }
   const thread = harness.core.threads.require(threadId);
   harness.core.journal.putThread({ ...thread, agentSessionId: 'session-owned-by-agent' });

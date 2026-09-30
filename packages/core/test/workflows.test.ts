@@ -112,6 +112,11 @@ test('a plan runs as child threads: output feeds a fan-out, a false condition sk
   // A retried start is the same run.
   expect((await owner.call('workflows.start', { threadId, plan: REVIEW, requestId: 'review-1' })).id).toBe(run.id);
   await expect(owner.call('workflows.start', { threadId, plan: { ...REVIEW, name: 'Other' }, requestId: 'review-1' })).rejects.toThrow('different content');
+  const recorded = await owner.call('workflows.get', { threadId, runId: run.id });
+  await owner.call('threads.remove', { threadId });
+  await owner.call('threads.restore', { threadId });
+  expect(await owner.call('workflows.get', { threadId, runId: run.id })).toEqual(recorded);
+  expect(h.core.scheduler.state().running).toEqual([]);
 });
 
 test('plans are refused by field before anything starts', async () => {

@@ -124,6 +124,7 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
+    this.#ctx.deletedThreads.clear();
     const ctx = this.#ctx;
     ctx.agents.close();
     unregisterCore(ctx);

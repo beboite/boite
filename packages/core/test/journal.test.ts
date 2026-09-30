@@ -70,6 +70,35 @@ describe('journal', () => {
     expect(mode.journal_mode).toBe('wal');
   });
 
+  test('session deletion restores archive state and history, and shutdown purges only unrestored threads', () => {
+    const thread = { id: 'thr_undo', projectId: 'prj', title: 'undo', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, speed: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: true, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    for (const id of ['thr_undo', 'thr_gone']) {
+      journal.putThread({ ...thread, id });
+      journal.putMessage({ ...sampleMessage(`msg_${id}`), threadId: id, state: 'complete' });
+      journal.stageThreadDeletion(id, [{ ...thread, id }]);
+    }
+    expect(journal.listThreads()).toEqual([]);
+    expect(journal.archivedThreadCounts().size).toBe(0);
+    expect(journal.listDeletedThreads().map(t => t.id).sort()).toEqual(['thr_gone', 'thr_undo']);
+    journal.restoreDeletedThreads('thr_undo');
+    expect(journal.getThread('thr_undo')?.archived).toBe(true);
+    expect(journal.archivedThreadCounts().get('prj')).toBe(1);
+    expect(journal.listMessages('thr_undo')).toHaveLength(1);
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread('thr_undo')).not.toBeNull();
+    expect(journal.getThread('thr_gone')).toBeNull();
+    expect(journal.listMessages('thr_gone')).toEqual([]);
+    expect(journal.listDeletedThreads()).toEqual([]);
+    // Simulate a hard stop: bypass Journal.close, leaving the pending rows on disk.
+    journal.stageThreadDeletion('thr_undo', [journal.getThread('thr_undo')!]);
+    journal.db.close();
+    journal = new Journal(file);
+    expect(journal.listThreads()).toEqual([]);
+    expect(journal.listMessages('thr_undo')).toEqual([]);
+    expect(journal.listDeletedThreads()).toEqual([]);
+  });
+
   test('append writes the event and the projection in one call', () => {
     journal.append({ type: 'project.added', threadId: null, version: 1, payload: { id: 'prj_1' } }, () => {
       journal.putProject({ id: 'prj_1', name: 'one', path: 'D:/one', createdAt: 1 });

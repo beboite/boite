@@ -35,7 +35,7 @@ export class ActivityStore {
         const thread = payload as { id: string; archived: boolean };
         if (thread.archived) this.pauseAll(thread.id);
       }
-      if (name === 'thread.removed') {
+      if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) {
         const { threadId } = payload as { threadId: string };
         this.clearTimer(threadId);
         this.states.delete(threadId);

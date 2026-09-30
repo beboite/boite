@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { Store } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { archiveThread, reopenLastArchived } from './archive';
@@ -40,4 +40,35 @@ test('deletion clears the owning machine composer and leaves colliding IDs on an
   expect(second.threads.some(t => t.id === 't-trace')).toBe(true);
   expect(second.openThread?.id).toBe('t-trace');
   expect(second.composerStates['t-trace']?.text).toBe('Second machine');
+  const history = await second.client!.call('threads.get', { threadId: 't-trace' });
+  await first.restoreDeletedThread('t-trace');
+  expect(first.threads.some(t => t.id === 't-trace')).toBe(true);
+  expect((await first.client!.call('threads.get', { threadId: 't-trace' })).messages).toEqual(history.messages);
+  expect(second.openThread?.id).toBe('t-trace');
+});
+
+test('deletion undo stays offered past the archive timeout and survives a temporary disconnect', async () => {
+  const store = await ready();
+  const { deleteThread } = await import('./thread-removal');
+  const { confirm } = await import('./confirm.svelte');
+  vi.spyOn(confirm, 'ask').mockResolvedValueOnce(true);
+  vi.useFakeTimers();
+  try {
+    expect(await deleteThread(store, store.threads.find(t => t.id === 't-trace')!)).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(undo.current).not.toBeNull();
+    const client = store.client as FakeClient;
+    client.drop(); client.restore();
+    await store.reload();
+    await undo.take();
+    expect((await client.call('threads.deleted', {}))).toEqual([]);
+    expect((await client.call('threads.get', { threadId: 't-trace' })).archived).toBe(false);
+    vi.spyOn(confirm, 'ask').mockResolvedValueOnce(true);
+    await deleteThread(store, store.threads.find(t => t.id === 't-trace')!);
+    expect(undo.current).not.toBeNull();
+    client.core!.startedAt++;
+    client.drop(); client.restore();
+    await store.reload();
+    expect(undo.current).toBeNull();
+  } finally { vi.useRealTimers(); vi.restoreAllMocks(); }
 });

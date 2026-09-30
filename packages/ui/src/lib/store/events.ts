@@ -3,6 +3,7 @@ import type { Client, EventHandler } from '../client';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { rightPanel } from '../right-panel.svelte';
+import { undo } from '../undo.svelte';
 import { lastIndexById } from '../thread-rows';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
@@ -34,6 +35,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
+          undo.discardExpired(s, s.core?.startedAt);
           // `WsClient` writes its principal from the hello answer before it
           // reports `ready`, and this handler runs before `connect()` returns:
           // reading it here is what keeps the owner-only calls out of the very

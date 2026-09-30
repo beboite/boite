@@ -58,7 +58,7 @@ export class Delegation {
         const thread = payload as ThreadSummary;
         if (thread.parentThreadId) this.changed(thread.parentThreadId);
       }
-      if (name === 'thread.removed') this.remove((payload as { threadId: string }).threadId);
+      if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.remove((payload as { threadId: string }).threadId);
     });
     // The tick remains for expiry and a steer a driver was not ready for.
     this.timer = setInterval(() => this.tick(), 1000);
