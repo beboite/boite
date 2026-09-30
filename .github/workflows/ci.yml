@@ -5,20 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      windows-probe:
-        type: boolean
-        default: false
-        description: Run the Windows native shutdown reproductions only.
   workflow_call:
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         description: Required only when sign-updates is enabled.
         required: false
     inputs:
-      windows-probe:
-        type: boolean
-        default: false
       force:
         type: boolean
         default: true
@@ -47,7 +39,6 @@ env:
 
 jobs:
   changes:
-    if: ${{ !inputs.windows-probe }}
     runs-on: ubuntu-24.04
     outputs:
       core: ${{ steps.filter.outputs.core }}
@@ -314,20 +305,9 @@ jobs:
       packages: write
     uses: ./.github/workflows/server.yml
 
-  windows-probe:
-    if: github.event_name == 'workflow_dispatch' && inputs.windows-probe
-    runs-on: windows-2025
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-      - run: bun scripts/ci/windows-probe.ts
-
   required:
     name: CI required
-    if: always() && !inputs.windows-probe
+    if: always()
     needs: [changes, core, web, desktop, e2e, desktop-portable, server]
     runs-on: ubuntu-24.04
     steps:
