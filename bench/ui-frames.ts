@@ -7,12 +7,20 @@
  * Run: bun bench/ui-frames.ts [--cpu 4] [--size 1920x1080@1.5] [--runs 2]
  *        [--only "palette over stream,long thread scroll"] [--noblur]
  *        [--ui <other checkout>/packages/ui] [--bundle <dir>] [--browser <chrome>]
+ *        [--trace] [--profile <dir>]
  *
  * Without --bundle it builds the UI once, in a child process and into a
  * temporary directory (`--build <dir>` alone builds and exits), from this
  * checkout or from the `packages/ui` that --ui names, to compare two. `--noblur`
  * also measures every scenario with backdrop filters switched off, which is
  * how a blur's own share of a frame is told apart.
+ *
+ * The typing scenarios press a key every 40 ms in the composer and report each
+ * key's latency, from its keydown to the task after the next frame. `--trace`
+ * adds the layouts each window ran and how many a script forced, counts that
+ * hold whatever else the machine runs; `BENCH_FORCED=1` names the scripts and
+ * `BENCH_INVALIDATIONS=1` what invalidated layout and style. `--profile` writes
+ * a CPU profile per scenario; `BENCH_MINIFY=0` keeps the function names.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -284,7 +292,6 @@ async function main(): Promise<void> {
       const after = await page.metrics();
       const scrolled = await page.evaluate<number>(`window.__sc ? Math.round(Math.abs(window.__sc.scrollTop - window.__sc0)) : 0`);
       const keys = await page.evaluate<number[]>(`window.__keys.slice(window.__keys0)`);
-      const keysSeen = () => keys.length;
       if (TRACE) {
         await page.send('Tracing.end');
         await traceDone;
@@ -316,9 +323,10 @@ async function main(): Promise<void> {
           for (const event of forcedLayouts) { const name = event.args.beginData.stackTrace.slice(0, 3).map((frame) => frame.functionName || '(anon)').join(' < '); const [n, ms] = by.get(name) ?? [0, 0]; by.set(name, [n + 1, ms + (event.dur ?? 0) / 1000]); }
           for (const [name, [n, ms]] of [...by].sort((a, b) => b[1][1] - a[1][1]).slice(0, 8)) console.log(`    forced ${n}x ${ms.toFixed(0)} ms: ${name}`);
         }
-        console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, keys ${keysSeen()}; ${top}`);
+        console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, keys ${keys.length}; ${top}`);
       }
       if (PROFILE) { const { profile } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${current.replaceAll(' ', '-')}.cpuprofile`), JSON.stringify(profile)); }
+      // The typist stops with the measured window.
       typing += 1;
       const gaps = run.times.slice(1).map((time, index) => time - run.times[index]!).sort((a, b) => a - b);
       const seconds = (run.times.at(-1)! - run.times[0]!) / 1000;
@@ -348,7 +356,8 @@ async function main(): Promise<void> {
             await setup();
             await page.call(`function (css) { let s = document.getElementById('bench-variant'); if (!s) { s = document.createElement('style'); s.id = 'bench-variant'; document.head.append(s); } s.textContent = css; }`, css);
             const m = await measure();
-            const perPixel = m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
+            // Only a wheel's distance: a list following its answer, or a draft scrolling to its caret, is no scroll cost.
+            const perPixel = name.includes('scroll') && m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
             const at = (share: number) => (m.keys[Math.min(m.keys.length - 1, Math.floor(m.keys.length * share))] ?? 0).toFixed(1);
             const keys = m.keys.length ? `${m.keys.length}, ${at(0.5)}, ${at(0.95)}, ${at(1)}` : '-';
             console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} (${m.scriptMs.toFixed(0)}, ${m.layoutMs.toFixed(0)}, ${m.styleMs.toFixed(0)}) | ${perPixel} | ${keys}`);
