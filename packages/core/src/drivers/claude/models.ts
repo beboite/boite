@@ -45,12 +45,8 @@ export async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Pro
         ...(row.supportsFastMode ? { speeds: [{ id: 'fast', label: 'Fast' }] } : {}),
       };
     });
-    const current = new Set(models.map(model => model.id.replace(/\[.*\]$/, '')));
-    // Explicit legacy ids remain runnable even when the CLI only lists its aliases.
-    // Unknown native capabilities stay absent rather than inheriting another model's.
-    for (const model of ctx.provider.models) {
-      if (model.legacy && !current.has(model.id)) models.push({ id: model.id, name: model.name, legacy: true });
-    }
+    // Native discovery supplies no legacy classification. Keep its rows current
+    // and do not append obsolete descriptor entries to the account's catalog.
     return { models: models.filter((model, index) => models.findIndex(m => m.id === model.id) === index), probedAt: Date.now() };
   } finally { if (timer) clearTimeout(timer); prompts.end(); query?.close(); abortController.abort(); ctx.killTree(); }
 }

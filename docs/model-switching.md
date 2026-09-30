@@ -56,8 +56,12 @@ model starred on different accounts.
 
 Claude aliases use their resolved id and versioned name. Default aliases are
 filtered before deduplication so they cannot hide the named Opus row or its Fast
-capability. Known legacy descriptor ids stay available; capabilities absent from
-native discovery remain absent instead of inheriting another model's settings.
+capability. Native discovery replaces the descriptor list rather than adding
+older descriptor ids. Models without an explicit legacy classification stay in
+the main list, including models found on a manual refresh; the legacy submenu
+appears only when the list contains explicitly classified legacy entries.
+Capabilities absent from native discovery remain absent instead of inheriting
+another model's settings.
 
 The lightning button beside the effort chip cycles through the model's advertised speeds and
 back to standard. Codex uses its per-model `serviceTiers` list, including Fast or
