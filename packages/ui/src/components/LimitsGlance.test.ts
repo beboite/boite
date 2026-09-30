@@ -68,7 +68,7 @@ test('the glance shows fallback allowances without expanding and dates cached Mu
   document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
   await settle();
   expect(document.body.textContent).toContain('Observed');
-  expect(document.body.textContent).toContain('1 banked reset');
+  expect(document.querySelector('[data-testid=quota-banked-resets]')).toBeNull();
   expect(document.body.textContent).toContain('0.04 credits');
   expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude"]')).not.toBeNull();
 });

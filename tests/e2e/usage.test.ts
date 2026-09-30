@@ -185,6 +185,7 @@ test('exhausted quotas expose banked resets and a confirmed budget on desktop an
   await page.click('[data-testid=nav-limits]');
   await page.waitFor(`document.querySelector('[data-testid=limits-glance] [data-testid=quota-credits]')`);
   expect(await page.text('[data-testid=limits-glance]')).toContain('Monthly budget');
+  expect(await count('[data-testid=limits-glance] [data-testid=quota-banked-resets]')).toBe(0);
   expect(await page.evaluate<number>(`Math.max(...[...document.querySelectorAll('[data-testid=limits-glance] .summary [role=meter]')].map(el => el.getBoundingClientRect().height))`)).toBeLessThanOrEqual(6);
   expect(await page.evaluate(`(() => { const r = document.querySelector('[data-testid=limits-glance]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
   expect(await page.text('[data-testid=limits-glance] [data-provider=claude] .mini-label')).toBe('5 hours');
@@ -192,6 +193,7 @@ test('exhausted quotas expose banked resets and a confirmed budget on desktop an
   await page.click('[data-testid=limits-glance] [data-provider=claude] .summary');
   await page.waitFor(`document.querySelector('[data-testid=limits-glance] [data-provider=claude] .details')`);
   expect(await count('[data-testid=limits-glance] [data-provider=claude] .details [role=meter]')).toBe(3);
+  expect(await count('[data-testid=limits-glance] [data-testid=quota-banked-resets]')).toBe(0);
   await capture('quota-extras-glance-expanded.png');
   await page.click('[data-testid=nav-limits]');
   await page.waitFor(`!document.querySelector('[data-testid=limits-glance]')`);
@@ -226,6 +228,7 @@ test('exhausted quotas expose banked resets and a confirmed budget on desktop an
   await page.waitFor(`document.querySelector('[data-testid=quota-popup] [data-testid=quota-credits]')`);
   expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('[data-testid=quota-extras]')].every(el => el.getBoundingClientRect().right <= innerWidth)`)).toBe(true);
   expect(await attribute('[data-testid=quota-popup] [data-provider=claude] [data-testid=quota-credits] [role=meter]', 'aria-valuenow')).toBe('75');
+  expect(await count('[data-testid=quota-popup] [data-testid=quota-banked-resets]')).toBe(0);
   await capture('quota-extras-compact.png');
   await scheme('light');
   await capture('quota-extras-compact-light.png');

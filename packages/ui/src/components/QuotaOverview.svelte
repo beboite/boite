@@ -39,7 +39,7 @@
       <button class="summary ghost" aria-expanded={expanded === group.providerId} aria-controls={`usage-${group.providerId}`} disabled={windows.length === 0} onclick={() => (expanded = expanded === group.providerId ? null : group.providerId)}>
         <span class="logo"><ProviderLogo providerId={group.providerId} size={19} /></span>
         <span class="content">
-          <span class="headline"><span class="name">{group.providerName}</span><span class="amount" class:low={used !== null && used >= 80} class:out={used !== null && used >= 100}>{used !== null ? left(used) : strings.quotas.noReading}</span></span>
+          <span class="headline"><span class="name">{group.providerName}</span><span class="amount" class:low={used !== null && used >= 80}>{used !== null ? left(used) : strings.quotas.noReading}</span></span>
           {#if windows.length}
             <span class="meters" class:stale>
               {#each windows as limit (`${limit.accountId}:${limit.id}`)}
@@ -85,17 +85,16 @@
   article + article { border-top: 1px solid var(--color-border); }
   .summary { width: 100%; height: auto; min-height: 52px; padding: 3px 4px; line-height: 1.2; display: flex; gap: 10px; text-align: left; border-radius: var(--radius-md); white-space: normal; }
   .summary:disabled { opacity: 1; cursor: default; }
-  .logo { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-3); align-self: start; margin-top: 2px; }
+  .logo { flex: none; width: 26px; display: grid; place-items: center; }
   .content { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .headline { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .name { font-size: var(--text-base); font-weight: 550; color: var(--color-foreground); }
-  .amount { color: var(--color-foreground); background: var(--color-surface-3); border-radius: var(--radius-sm); padding: 2px 6px; font-size: var(--text-xs); line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .amount.low { color: var(--color-live); background: color-mix(in srgb, var(--color-live) 10%, var(--color-surface-2)); }
-  .amount.out { color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface-2)); }
+  .amount { color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .amount.low { color: var(--color-live); }
   .caption { font-size: var(--text-xs); color: var(--color-muted-foreground); font-weight: 400; }
-  .extras { display: grid; gap: 10px; padding: 2px 4px 10px 44px; }
+  .extras { display: grid; gap: 10px; padding: 2px 4px 10px 40px; }
   .extras:not(:has(> :global(*))) { display: none; }
-  .error { margin: 0; padding: 0 4px 12px 44px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
+  .error { margin: 0; padding: 0 4px 12px 40px; color: var(--color-danger); font-size: var(--text-xs); overflow-wrap: anywhere; }
   .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 6px; }
   .mini-window { min-width: 0; display: flex; align-items: center; gap: 3px; }
   .mini-window .track { flex: 1; }
@@ -108,7 +107,7 @@
   .summary > :global(svg) { flex: none; color: var(--color-subtle); transition: transform var(--dur-2); }
   .expanded .summary > :global(svg) { transform: rotate(180deg); }
   /* Unfolded, each window is a name, what is left, its bar and its reset, lined up under the logo's column. */
-  .details { display: grid; gap: 10px; padding: 2px 4px 12px 44px; animation: rise var(--dur-2) var(--ease-out-quint); }
+  .details { display: grid; gap: 10px; padding: 2px 4px 12px 40px; animation: rise var(--dur-2) var(--ease-out-quint); }
   .account { font-size: var(--text-xs); font-weight: 600; color: var(--color-muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
   .window { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; font-size: var(--text-sm); }
   .window .track { grid-column: 1 / -1; width: 100%; }

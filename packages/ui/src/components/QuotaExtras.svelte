@@ -2,7 +2,7 @@
   import { RotateCcw, Wallet } from '@lucide/svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
-  import { creditBalance, exactTime, tenth, weekdayTime } from '../lib/format';
+  import { creditBalance, exactTime, tenth } from '../lib/format';
 
   let { row, accountLabel = false, compact = false }: { row: AccountQuota; accountLabel?: boolean; compact?: boolean } = $props();
   let resets = $derived(row.resetCredits);
@@ -11,7 +11,7 @@
   let showCredits = $derived(row.enabled && row.status === 'ready' && exhausted && credits?.enabled === true &&
     credits.remaining !== null && Number.isFinite(credits.remaining) && credits.remaining > 0 &&
     (credits.kind === 'balance' || (credits.limit !== null && Number.isFinite(credits.limit) && credits.limit > 0)));
-  let showResets = $derived(row.enabled && row.status === 'ready' && resets !== undefined && resets.availableCount > 0);
+  let showResets = $derived(!compact && row.enabled && row.status === 'ready' && resets !== undefined && resets.availableCount > 0);
   let percent = $derived(credits?.limit ? Math.max(0, Math.min(100, (credits.remaining ?? 0) / credits.limit * 100)) : null);
   let budgetLabel = $derived(fill(percent !== null && percent > 0 && percent < 0.1 ? strings.quotas.remainingUnder : strings.quotas.remaining,
     { percent: tenth(percent !== null && percent > 0 && percent < 0.1 ? 0.1 : percent ?? 0) }));
@@ -25,13 +25,13 @@
     {#if showResets && resets}
       <div class="resets" data-testid="quota-banked-resets">
         <span class="reserve"><RotateCcw size={13} aria-hidden="true" />{fill(resets.availableCount === 1 ? strings.quotas.bankedReset : strings.quotas.bankedResets, { count: String(resets.availableCount) })}</span>
-        {#if resets.nextExpiresAt !== null}<small title={fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) })} aria-label={compact ? fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) }) : undefined}>{compact ? weekdayTime(resets.nextExpiresAt) : fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) })}</small>{/if}
+        {#if resets.nextExpiresAt !== null}<small>{fill(strings.quotas.resetExpires, { time: exactTime(resets.nextExpiresAt) })}</small>{/if}
       </div>
     {/if}
     {#if showCredits && credits}
       <div class="credits" data-testid="quota-credits">
         <div class="legend">
-          <span class="heading"><Wallet size={15} aria-hidden="true" />{headings[credits.kind]}</span>
+          <span class="heading">{#if !compact}<Wallet size={15} aria-hidden="true" />{/if}{headings[credits.kind]}</span>
           <span class="amount">{credits.kind === 'budget' ? budgetLabel : fill(strings.quotas.creditBalance, { count: creditBalance(credits.remaining!) })}</span>
         </div>
         {#if percent !== null}
@@ -56,12 +56,8 @@
   .track { height: 6px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--color-success) 12%, var(--color-surface-3)); overflow: hidden; }
   .fill { height: 100%; background: var(--color-success); border-radius: var(--radius-sm); }
   .compact { gap: 9px; }
-  .compact .resets { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 7px; }
-  .compact .resets small { font-size: calc(var(--text-xs) - 1px); }
-  .compact .reserve { padding: 3px 6px; font-size: calc(var(--text-xs) - 1px); line-height: 1.2; }
-  .compact .credits { padding: 8px; gap: 7px; }
+  .compact .credits { padding: 0; border: none; border-radius: 0; background: none; gap: 5px; }
   .compact .legend { gap: 8px; }
-  .compact .heading { gap: 5px; }
-  .compact .amount { margin-left: auto; font-size: var(--text-xs); }
-  .compact .track { height: 4px; }
+  .compact .amount { margin-left: auto; font-size: var(--text-xs); font-weight: 400; color: var(--color-muted-foreground); }
+  .compact .track { height: 4px; background: var(--color-surface-3); }
 </style>

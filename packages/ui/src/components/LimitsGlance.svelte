@@ -77,7 +77,7 @@
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
     use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close }}>
     <header>
-      <h2><Gauge size={14} aria-hidden="true" />{strings.quotas.glance}</h2>
+      <h2>{strings.quotas.glance}</h2>
       {#if store.owner}
         <button type="button" class="ghost icon" aria-label={strings.quotas.refresh} title={strings.quotas.refresh} aria-busy={reader.loading} data-testid="limits-glance-refresh" onclick={() => read(true)}><RefreshCw size={14} class={reader.loading ? 'spinning' : ''} /></button>
       {/if}
@@ -112,8 +112,7 @@
   header, footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 14px; }
   header { border-bottom: 1px solid var(--color-border); }
   footer { justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--color-border); }
-  h2 { margin: 0; display: flex; align-items: center; gap: 7px; font-size: var(--text-sm); font-weight: 600; }
-  h2 :global(svg) { color: var(--color-muted-foreground); }
+  h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
   .body { flex: 1; min-height: 0; overflow-y: auto; padding: 5px 10px; }
   .failed { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 4px; color: var(--color-danger); font-size: var(--text-sm); }
   .failed p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
