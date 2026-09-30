@@ -199,7 +199,12 @@
 {/if}
 
 <style>
-  .scrim { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: var(--color-scrim); backdrop-filter: blur(4px); animation: fade var(--dur-2) var(--ease-out-quint); }
+  /*
+   * No backdrop blur here: the tour animates for as long as it is open, and a
+   * window-wide blur under a moving panel is redrawn on every frame. Measured
+   * in software compositing on 2026-09-30: 9 to 13 fps with it, 50 to 60 without.
+   */
+  .scrim { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: var(--color-scrim); animation: fade var(--dur-2) var(--ease-out-quint); }
   .scrim.closing { animation-name: fade-out; pointer-events: none; }
   /* The title bar stays above the tour: the window can still be moved, minimized or closed. */
   .scrim.shell { top: var(--titlebar); }

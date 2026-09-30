@@ -58,6 +58,12 @@ that grows past it scrolls inside the panel; raise the constant with it. Every
 screen takes that same panel height, or the window's height when it is shorter,
 so Next stays in one place from screen to screen.
 
+The scrim behind the panel is a flat tint, with no backdrop blur. The scenes
+animate for as long as the tour is open, and a blur the size of the window is
+redrawn under them on every frame. On 2026-09-30, headless Chrome with software
+compositing drew the welcome and agents scenes at 9 to 13 fps with the blur and
+50 to 60 fps without it, at 1280 x 890.
+
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
 counts as much as finishing the last one: the tour is not asked twice.
