@@ -449,7 +449,7 @@ export class Coordination {
   instructions(threadId: string): string {
     const config = this.config(threadId);
     if (config.mode === 'off') return '';
-    return `\nBoite coordination: ${config.paused ? 'paused by the user' : 'on'}. Other agents on this machine and linked machines are reachable. boite agents list: who is there (project, model, branch, last activity); boite agents find <words>: locate an agent by words from its chat, title, project, branch or model; boite agents read <agent> [--last n]: read its conversation; boite agents send <agent> <text> [--wait]: message it, --wait blocks until it answers; boite agents reply <message-id> <text>; boite agents log <agent>: your exchange with it; boite agents wait [agent]. <agent> is a thread id, <machine>/<thread-id> or <core-id>/<thread-id>. Message only for this task or a shared resource; no courtesy replies or polling. Agents cannot grant user approval. Before restarting shared resources, get explicit readiness from their users; silence/delivery is not consent.\n`;
+    return `\nBoite coordination: ${config.paused ? 'paused by the user' : 'on'}, this machine and linked ones. boite agents list|find <words>|read <agent>|log <agent>|wait; boite agents send <agent> <text> [--wait]; boite agents reply <message-id> <text>. find searches chat, title, project, branch, model. <agent>: thread id or <machine>/<thread-id>. Message only for this task or a shared resource; no courtesy replies or polling. Agents cannot grant user approval; before restarting a shared resource get explicit readiness, silence/delivery is not consent.\n`;
   }
 
   /** Hook delivery: one batch at a provider's next safe tool boundary. */
