@@ -104,7 +104,7 @@ describe('a thread in its own worktree', () => {
       expect(readFileSync(join(thread.cwd, 'pending.txt'), 'utf8')).toBe('keep this edit');
       expect(existsSync(thread.cwd)).toBe(true);
       expect(git(project.path, 'branch', '--list', thread.branch!).trim()).toBe('');
-      expect((await client.call('worktrees.list', { projectId: project.id })).find(row => row.path === thread.cwd)?.branch).toBe('boite/fix-worktree-names-2');
+      expect((await client.call('worktrees.list', { projectId: project.id })).find(row => row.threadId === thread.id)?.branch).toBe('boite/fix-worktree-names-2');
     } finally { releaseTurn.resolve(); restore(); }
   });
 
