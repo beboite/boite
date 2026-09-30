@@ -622,9 +622,10 @@ function retireWorker(): void {
     restartWanted = false;
     if (again && refCount > 0 && completionPort !== 0) ensureWorker(completionPort);
   };
+  running.addEventListener('close', () => finish(false), { once: true });
   running.onmessage = (event: { data: unknown }): void => {
     const message = event.data as JobsWorkerMessage;
-    if (message.kind === 'stopped') finish(false);
+    if (message.kind === 'stopped') running.onmessage = null;
     else if (message.kind === 'packet') onWorkerMessage(message);
   };
   if (flag !== null) Atomics.store(flag, 0, 1);
@@ -862,8 +863,13 @@ function teardown(): Promise<void> {
     // The loop leaves on that packet and posts 'stopped'; the port closes then,
     // never while the worker may still be blocked on it. Closing it on the
     // fallback also ends a wait nothing woke.
+    // 'stopped' only acknowledges the loop. Wait for Bun's close event before
+    // a caller can dispose this core or load another isolated test context.
+    running.addEventListener('close', () => once(false), { once: true });
     running.onmessage = (event: { data: unknown }): void => {
-      if ((event.data as JobsWorkerMessage).kind === 'stopped') once(false);
+      const message = event.data as JobsWorkerMessage;
+      if (message.kind === 'stopped') running.onmessage = null;
+      else if (message.kind === 'packet' && message.handle !== 0) api?.close(message.handle);
     };
     const timer = setTimeout(() => once(true), 1000);
   });
