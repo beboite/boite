@@ -1140,13 +1140,17 @@ describe('codex driver', () => {
       (summary) => summary.id === thread.id && summary.titleSource === 'agent',
       20000,
     );
-    await runTurn(client, thread.id, 'remember the word pelican');
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const finished = client.next('turn.finished', turn => turn.threadId === thread.id, 20000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'remember the word pelican', attachments: [{ kind: 'image', mimeType: 'image/png', data: png, name: 'pelican.png' }] });
 
     // The core's one cleaning rule: quotes and the closing period go.
     expect((await titled).title).toBe('Pelican notes');
+    await finished;
     // No small model was listed by a probe, so the first of Codex's picks goes out.
     expect(fakeLog()).toContain('thread/start approvalPolicy=never sandbox=read-only model=gpt-6-luna ephemeral');
     expect(fakeLog()).toContain('turn/start model=gpt-6-luna effort=low');
+    expect(countLines(`image data:image/png;base64,${png}`)).toBe(2);
     // Its app-server is gone with the answer, traced under the thread.
     await waitFor(() => harness?.core.procs.liveCount(thread.id) === 0);
   });

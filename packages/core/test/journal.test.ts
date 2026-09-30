@@ -78,6 +78,21 @@ describe('journal', () => {
     expect(journal.projectIcons().get('prj_old')).toEqual({ kind: 'tech', tech: 'go', version: null });
   });
 
+  test('a schema 23 journal retains existing titles and persists new refinement state across opens', () => {
+    const thread = { id: 'thr_title', projectId: 'prj', title: 'My title', titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    journal.putThread(thread);
+    journal.db.exec('ALTER TABLE threads DROP COLUMN title_state; PRAGMA user_version = 23;');
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread(thread.id)).toMatchObject({ title: 'My title', titleSource: 'user' });
+    expect(journal.getThread(thread.id)?.titleState).toBeUndefined();
+    journal.putThread({ ...thread, titleState: { version: 4, needsRefinement: true } });
+    journal.close();
+    journal = new Journal(file);
+    expect(journal.getThread(thread.id)?.titleState).toEqual({ version: 4, needsRefinement: true });
+    expect(journal.db.query('PRAGMA user_version').get()).toEqual({ user_version: SCHEMA_VERSION });
+  });
+
   test('the schema version is stamped and WAL is on', () => {
     const version = journal.db.query('PRAGMA user_version').get() as { user_version: number };
     expect(version.user_version).toBe(SCHEMA_VERSION);

@@ -10,6 +10,7 @@ import { askPermission, askQuestion, askAsync } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
 import { applyWaitingMove } from './thread-move';
+import { autoTitle } from './titles';
 import type { FakeContext } from './context';
 
 export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<boolean> {
@@ -106,6 +107,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   thread.sessionId = thread.sessionId ?? `sess-${turn.id}`;
   ctx.touch(thread);
   ctx.emit('turn.started', structuredClone(turn));
+  if (!operation) autoTitle(ctx, thread);
   pushScheduler(ctx, turn, 'running');
 
   const record = { cancelled: false, done: Promise.resolve() };

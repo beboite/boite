@@ -1,10 +1,11 @@
 import { defaultTitleModel } from '@boite/contracts';
-import type { Account, Message, ProviderDescriptor, ProviderId, ThreadId, ThreadSummary, TurnId } from '@boite/contracts';
+import type { Account, ImageAttachment, Message, ProviderDescriptor, ProviderId, ThreadId, ThreadSummary, TurnId } from '@boite/contracts';
+import { setTimeout as pause } from 'node:timers/promises';
 import type { Core } from '../core.ts';
 import { getDriver, probedModelsOf, writesTitles } from '../drivers/index.ts';
 import { messageOf, refused } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
-import { cleanAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
+import { parseAgentTitle, textOf, titleFromPrompt } from '../titles.ts';
 import { saveThread, withLoad } from './records.ts';
 
 /** Who writes a title: a provider, the account it runs under, and the model. */
@@ -14,93 +15,156 @@ interface TitleWriter {
   model: string | null;
 }
 
-/**
- * A thread's title written from its first prompt and answer, on request or
- * after its first finished turn.
- */
+/** Retry transient title failures twice, with the same backoff as T3 Code. Mutable for offline tests. */
+export const TITLE_RETRY = { delayMs: 2_000 };
+
+/** Initial naming, conditional refinement and explicit regeneration share one writer. */
 export class ThreadTitles {
-  /** The threads a title is being written for right now: a second ask is refused, not doubled. */
-  private readonly retitling = new Set<ThreadId>();
+  private readonly retitling = new Map<ThreadId, Promise<ThreadSummary>>();
+  private readonly abort = new AbortController();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
-  /**
-   * A title from the thread's first prompt and first answer: the driver's own
-   * words when it has some (`titleSource: agent`), the first line of the
-   * prompt otherwise (`prompt`). A driver that throws is one warning on the
-   * log and the same fallback, never a failed call. Refused by name on a
-   * thread with no prompt yet, or while an earlier ask is still running.
-   */
-  async retitle(threadId: ThreadId): Promise<ThreadSummary> {
+  /** Explicit regeneration may replace an earlier manual name, but never a newer rename. */
+  retitle(threadId: ThreadId): Promise<ThreadSummary> {
     const thread = this.threads.require(threadId);
     if (this.retitling.has(threadId)) {
       throw refused('a title is already being written for this thread', { threadId });
     }
-    let first: Message | undefined;
-    let answer: Message | undefined;
-    for (const message of this.core.journal.walkMessages(threadId)) {
-      if (first === undefined && message.role === 'user') first = message;
-      if (answer === undefined && message.role === 'assistant' && textOf(message).length > 0) answer = message;
-      if (first !== undefined && answer !== undefined) break;
-    }
-    if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId });
-    const prompt = textOf(first);
-    const writer = this.writer(thread);
-
-    this.retitling.add(threadId);
-    let agentTitle: string | null = null;
-    try {
-      const driver = writer === null ? null : getDriver(writer.provider.protocol);
-      if (writer !== null && driver?.title !== undefined) {
-        const raw = await driver.title({
-          thread,
-          provider: writer.provider,
-          account: writer.account,
-          accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider),
-          prompt,
-          answer: answer === undefined ? '' : textOf(answer),
-          model: writer.model,
-          spawnChild: this.threads.contexts.leasedSpawnChild(threadId, writer.provider),
-          log: (level, message) => {
-            this.core.log(level, message);
-          },
-        });
-        agentTitle = raw === null ? null : cleanAgentTitle(raw);
-      }
-    } catch (error) {
-      this.core.log('warn', `no title from ${writer?.provider.name ?? thread.providerId} for thread ${threadId}: ${messageOf(error)}`);
-    } finally {
-      this.retitling.delete(threadId);
-    }
-    if (this.core.journal.isClosed()) return thread;
-
-    // The thread as it stands now: a rename that landed during the ask is the
-    // user's, and the agent's words do not go over it. Asking again on a name
-    // the user typed earlier is still allowed, since that ask is his own.
-    const current = this.threads.require(threadId);
-    if (current.titleSource === 'user' && current.title !== thread.title) return withLoad(this.core, current);
-    if (agentTitle !== null) return saveThread(this.core, { ...current, title: agentTitle, titleSource: 'agent' }, 'thread.updated');
-    const fromPrompt = titleFromPrompt(prompt);
-    if (fromPrompt.length === 0 || (fromPrompt === current.title && current.titleSource === 'prompt')) {
-      return withLoad(this.core, current);
-    }
-    return saveThread(this.core, { ...current, title: fromPrompt, titleSource: 'prompt' }, 'thread.updated');
+    return this.start(thread, false, false);
   }
 
-  /**
-   * The first finished turn of a thread still called by its prompt gets an
-   * agent's title, when one can write it. Not awaited by the turn: the title
-   * lands as its own `thread.updated`, seconds later on a real agent.
-   */
+  /** Name the first user turn without waiting for its agent's response. */
   autoTitle(threadId: ThreadId, turnId: TurnId): void {
     const thread = this.core.journal.getThread(threadId);
-    if (thread === null || thread.archived || thread.titleSource !== 'prompt') return;
-    if (this.writer(thread) === null) return;
-    const done = this.core.journal.listTurns(threadId).filter((turn) => turn.status === 'done');
-    if (done.length !== 1 || done[0]?.id !== turnId) return;
-    void this.retitle(threadId).catch((error: unknown) => {
-      this.core.log('warn', `no title for thread ${threadId}: ${messageOf(error)}`);
+    if (thread === null || thread.archived || thread.titleSource !== 'prompt' || thread.titleState !== undefined) return;
+    const first = this.core.journal.listTurns(threadId).find((turn) => !turn.execution?.operation);
+    if (first?.id !== turnId || this.writer(thread) === null || this.retitling.has(threadId)) return;
+    // The pending decision survives a restart or a title call that finishes after the user turn.
+    const pending = saveThread(this.core, { ...thread, titleState: { version: 1, needsRefinement: true } }, 'thread.updated');
+    this.background(pending, true);
+  }
+
+  /** Only a vague first subject needs another call once that first turn completed. */
+  autoRefine(threadId: ThreadId): void {
+    if (this.abort.signal.aborted || this.core.journal.isClosed() || this.retitling.has(threadId)) return;
+    const thread = this.core.journal.getThread(threadId);
+    if (thread === null || thread.archived || thread.titleSource === 'user' || !thread.titleState?.needsRefinement || thread.status !== 'idle') return;
+    const turns = this.core.journal.listTurns(threadId).filter((turn) => !turn.execution?.operation);
+    if (turns.length !== 1 || turns[0]?.status !== 'done' || this.writer(thread) === null) return;
+    this.background(thread, false);
+  }
+
+  /** Recover persisted refinement decisions after the core has restored its accounts and turns. */
+  recover(): void {
+    if (this.abort.signal.aborted || this.core.journal.isClosed()) return;
+    for (const thread of this.core.journal.listThreads()) {
+      if (thread.titleState?.needsRefinement) this.autoRefine(thread.id);
+    }
+  }
+
+  close(): void {
+    this.abort.abort();
+  }
+
+  private background(thread: ThreadSummary, initial: boolean): void {
+    void this.start(thread, initial, true).catch((error: unknown) => {
+      if (!this.abort.signal.aborted) this.core.log('warn', `no title for thread ${thread.id}: ${messageOf(error)}`);
     });
+  }
+
+  private start(thread: ThreadSummary, initial: boolean, automatic: boolean): Promise<ThreadSummary> {
+    const pending = this.generate(thread, initial, automatic);
+    this.retitling.set(thread.id, pending);
+    const settled = () => {
+      if (this.retitling.get(thread.id) !== pending) return;
+      this.retitling.delete(thread.id);
+      // Completion can beat the initial title. Refine here too, after that decision lands.
+      if (initial) this.autoRefine(thread.id);
+    };
+    void pending.then(settled, settled);
+    return pending;
+  }
+
+  private async generate(thread: ThreadSummary, initial: boolean, automatic: boolean): Promise<ThreadSummary> {
+    let first: Message | undefined;
+    const answers: string[] = [];
+    for (const message of this.core.journal.walkMessages(thread.id)) {
+      if (message.role === 'user') {
+        if (first !== undefined) break;
+        first = message;
+      }
+      if (!initial && first !== undefined && message.turnId === first.turnId && message.role === 'assistant') {
+        const text = textOf(message);
+        if (text.length > 0) answers.push(text);
+      }
+      // The initial call needs only the user request, not an unfinished assistant message.
+      if (initial && first !== undefined) break;
+    }
+    if (first === undefined) throw refused('this thread has no prompt to write a title from', { threadId: thread.id });
+    const prompt = textOf(first);
+    const writer = this.writer(thread);
+    const attachments: ImageAttachment[] = first.parts.flatMap((part) => part.type === 'image'
+      ? [{ kind: 'image' as const, mimeType: part.mimeType, data: part.data, name: part.alt }]
+      : []);
+    let generated: ReturnType<typeof parseAgentTitle> = null;
+    if (writer !== null) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (!this.current(thread, automatic)) return this.latest(thread);
+        try {
+          const raw = await getDriver(writer.provider.protocol).title!({
+            thread, provider: writer.provider, account: writer.account,
+            accountEnv: this.core.accounts.accountEnv(writer.account, writer.provider),
+            prompt, answer: answers.join('\n\n'), initial,
+            attachments: writer.provider.capabilities.images ? attachments : [],
+            model: writer.model,
+            spawnChild: this.threads.contexts.leasedSpawnChild(thread.id, writer.provider),
+            log: (level, message) => this.core.log(level, message),
+          });
+          generated = raw === null ? null : parseAgentTitle(raw);
+          if (generated === null) throw new Error('the agent wrote no usable title');
+          break;
+        } catch (error) {
+          if (this.abort.signal.aborted) return thread;
+          if (attempt === 2) {
+            this.core.log('warn', `no title from ${writer.provider.name} for thread ${thread.id}: ${messageOf(error)}`);
+          } else {
+            await pause(TITLE_RETRY.delayMs * 2 ** attempt, undefined, { signal: this.abort.signal });
+          }
+        }
+      }
+    }
+    const current = this.current(thread, automatic);
+    if (current === null) return this.latest(thread);
+    if (generated !== null) {
+      return saveThread(this.core, {
+        ...current, title: generated.title === 'New thread' ? current.title : generated.title, titleSource: 'agent',
+        titleState: { version: (current.titleState?.version ?? 0) + 1, needsRefinement: initial && (generated.needsRefinement || generated.title === 'New thread') },
+      }, 'thread.updated');
+    }
+    // Failed automatic calls retain the current title and pending refinement decision.
+    if (automatic) return withLoad(this.core, current);
+    const fallback = titleFromPrompt(prompt);
+    return saveThread(this.core, {
+      ...current, title: fallback || current.title, titleSource: fallback ? 'prompt' : current.titleSource,
+      titleState: { version: (current.titleState?.version ?? 0) + 1, needsRefinement: false },
+    }, 'thread.updated');
+  }
+
+  /** A title revision also protects renaming to the same text or away and back while a call runs. */
+  private current(expected: ThreadSummary, automatic: boolean): ThreadSummary | null {
+    if (this.abort.signal.aborted || this.core.journal.isClosed()) return null;
+    const current = this.core.journal.getThread(expected.id);
+    if (current === null || (automatic && current.archived)) return null;
+    if (current.title !== expected.title || current.titleSource !== expected.titleSource ||
+      (current.titleState?.version ?? 0) !== (expected.titleState?.version ?? 0) ||
+      (current.sessionGeneration ?? 0) !== (expected.sessionGeneration ?? 0)) return null;
+    return current;
+  }
+
+  private latest(fallback: ThreadSummary): ThreadSummary {
+    if (this.core.journal.isClosed()) return fallback;
+    return withLoad(this.core, this.core.journal.getThread(fallback.id) ?? fallback);
   }
 
   /**

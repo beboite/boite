@@ -2,7 +2,7 @@
 import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
-import { RETITLE_DELAY_MS } from './providers';
+import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
 import { announceProject, archiveProject } from './project-archive';
@@ -221,6 +221,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.title !== undefined && params.title.length > 0) {
         thread.title = params.title;
         thread.titleSource = 'user';
+        thread.titleState = { version: (thread.titleState?.version ?? 0) + 1, needsRefinement: false };
       }
       if (params.model !== undefined && params.model !== thread.model) { thread.model = params.model; thread.effort = null; thread.speed = null; }
       if (params.effort !== undefined) thread.effort = params.effort;
@@ -229,36 +230,7 @@ export function threadMethods(ctx: FakeContext) {
       if (before !== [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0')) thread.selectionVersion = (thread.selectionVersion ?? 0) + 1;
       return ctx.touch(thread);
     },
-    'threads.retitle': async (params) => {
-      const thread = ctx.thread(params.threadId);
-      const first = thread.messages.find((message) => message.role === 'user');
-      if (first === undefined) {
-        throw new RpcFailure({
-          code: RpcErrorCode.Refused,
-          message: 'this thread has no prompt to write a title from',
-          data: { threadId: params.threadId }
-        });
-      }
-      if (ctx.retitling.has(thread.id)) {
-        throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a title is already being written for this thread', data: { threadId: thread.id } });
-      }
-      // The echo agent's rule, at the echo agent's pace: its prefix and the first five words.
-      ctx.retitling.add(thread.id);
-      try {
-        await new Promise<void>((resolve) => setTimeout(resolve, RETITLE_DELAY_MS));
-      } finally {
-        ctx.retitling.delete(thread.id);
-      }
-      ctx.thread(thread.id);
-      const words = first.parts
-        .map((part) => (part.type === 'text' ? part.text : ''))
-        .join(' ')
-        .split(/\s+/)
-        .filter((word) => word.length > 0);
-      thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
-      thread.titleSource = 'agent';
-      return ctx.touch(thread);
-    },
+    'threads.retitle': async (params) => writeTitle(ctx, ctx.thread(params.threadId)),
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });

@@ -2,30 +2,45 @@
 
 A thread's title is one of three things, and `titleSource` on its summary says
 which: `prompt`, the first line of what the user typed; `agent`, what the agent
-wrote after reading the first exchange; `user`, a name the user gave. The rule
+wrote from the first request; `user`, a name the user gave. The rule
 is that a name the user gave is never overwritten, and a title from the prompt
-is replaced once by the agent's, right after the first finished turn.
+is replaced by the agent's while the first turn runs.
 
 ## Where each title comes from
 
 - A thread is created with the first line of its prompt, cut at sixty
   characters on a word, and `titleSource: 'prompt'`. A thread with no prompt
   yet keeps the title the client sent.
-- When the first turn ends `done`, the core asks a driver with a `title` hook
-  for a title (see [which model writes it](#which-model-writes-it)). The
-  prompt asks for 2 to 6 words, under forty characters, so the title fits one
+- When the first user turn starts, the core asks a driver with a `title` hook
+  for a title in parallel with the main agent (see
+  [which model writes it](#which-model-writes-it)). The prompt asks for 2 to
+  6 words, under forty characters, so the title fits one
   sidebar line. The echo driver answers with `Echo:` and the first five words
   of the prompt, its directives cut. The Claude driver sends one short call,
   one turn, no tools, no session written. The Codex driver starts its own
   app-server for an ephemeral thread, read-only sandbox, no approvals, `low`
   effort, and closes it after the answer; the thread's warm session is left
-  alone. Both take thirty seconds at most and are spawned under the thread so
-  the trace carries them. The answer is cleaned (the first line, a `Title:`
+  alone. Each attempt takes thirty seconds at most and is spawned under the thread so
+  the trace carries them. The request includes the first message and its
+  images when the title provider supports images. The model returns JSON
+  with `title` and `needsRefinement`; plain titles from older hooks still
+  work and need no refinement. The title is cleaned (the first line, a `Title:`
   prefix, quotes, backticks, a trailing period, cut at sixty characters on a
-  word) and saved with `titleSource: 'agent'`. An agent that says nothing, or
-  fails, is one line on `core.log` at `warn` and the prompt's title stands.
-- `threads.update` with a `title` saves it with `titleSource: 'user'`. The
-  agent's answer never touches it again, unless the user asks.
+  word) and saved with `titleSource: 'agent'`. A failed or empty call gets two
+  retries, after two and four seconds. Exhausted retries write one warning on
+  `core.log` and retain the current title.
+- The model asks for refinement only when the subject is still unknown: an
+  unresolved link, an unexplained image, or a request such as "fix this".
+  After the first turn ends `done`, a second call can resolve that subject
+  from the first request and all assistant text in that turn. Clear requests
+  use one title call. If the response finishes before initial naming, the core
+  waits for that decision, then refines if needed. Later user turns do not
+  trigger automatic naming or refinement.
+- `titleState` stores the revision and pending refinement decision in the
+  journal. A restart resumes pending refinement on completed, idle threads.
+  `threads.update` with a `title` saves it with `titleSource: 'user'`, advances
+  the revision and clears refinement. An in-flight call cannot overwrite a
+  newer rename, even when the user types the same name or changes it back.
 
 Drivers without a `title` hook (Muse Code, OpenCode, Antigravity, the
 Antigravity CLI, Grok, pi today) keep the prompt's title when Automatic is
@@ -67,8 +82,13 @@ prompt's title is saved again with `titleSource: 'prompt'`.
 
 The fake client in `?fake=1` answers `threads.retitle` after two hundred
 milliseconds with the echo rule, so the UI can be worked on without a core.
+It also generates the initial title during the first turn and protects newer
+manual renames with the same revision check.
 
-The core streams the journal until it finds the first user message and first
-nonempty assistant answer. It does not decode the remaining history to name
-the conversation. `bun run bench/retitle.ts` measures this path on a temporary
-core with 5,000 messages and the offline echo driver.
+The initial call reads only the first user message. Refinement and explicit
+regeneration read that first turn's assistant text, stopping at the next user
+message. The model is asked to keep the user's subject and desired outcome,
+using assistant findings only to resolve an unnamed subject. It does not
+decode the remaining history to name the conversation.
+`bun run bench/retitle.ts` measures this path on a temporary core with
+5,000 messages and the offline echo driver.

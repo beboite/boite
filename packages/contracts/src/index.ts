@@ -640,6 +640,8 @@ export interface ThreadSummary {
   agentSessionId?: string;
   title: string;
   titleSource: TitleSource;
+  /** Durable title revision and whether the first answer should resolve a vague initial subject. Missing on older cores. */
+  titleState?: { version: number; needsRefinement: boolean };
   providerId: ProviderId;
   accountId: AccountId;
   model: string | null;
