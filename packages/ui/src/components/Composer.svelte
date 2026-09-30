@@ -248,6 +248,8 @@
   let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
   let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
   let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
+  /** The text is drawn by the paint layer over the box, which must wrap exactly as the box does. */
+  let highlighted = $derived(painted || previewReferences.length > 0 || attachments.some(item => item.kind === 'image'));
 
   function syncInput() {
     if (!box) return;
@@ -260,7 +262,10 @@
     if (!element) return;
     let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
-      if (element.clientWidth !== inputWidth) { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
+      // A box that sizes itself writes no height here, so the paint layer takes
+      // the new width (a scrollbar came or went) in this same frame.
+      if (sizesItself) syncInput();
+      else if (element.clientWidth !== inputWidth) { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
       else syncInput();
     });
     observer.observe(element);
@@ -331,8 +336,11 @@
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
     track();
-    // A box that sizes itself reports a new height or width to the observer above.
+    // A box that sizes itself reports a new height or width to the observer
+    // above. Under the paint layer the width is read now: the key may have
+    // brought the scrollbar, and the layer must wrap as the box does.
     if (!sizesItself) grow();
+    else if (highlighted) syncInput();
   }
 
   /** Where the caret is now: read after every key, click and input. */
@@ -738,7 +746,7 @@
     {/if}
 
     <div class="input-wrap">
-    {#if painted || previewReferences.length || attachments.some(item => item.kind === 'image')}
+    {#if highlighted}
       <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
         <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} command={commandToken || undefined} onreference={(reference) => {
           if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
@@ -746,7 +754,7 @@
       </div>
     {/if}
     <textarea
-      class:highlighted={painted || previewReferences.length > 0 || attachments.some(item => item.kind === 'image')}
+      class:highlighted
       bind:this={box}
       value={text}
       onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
