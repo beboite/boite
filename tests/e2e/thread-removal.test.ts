@@ -37,7 +37,10 @@ for (const width of [1280, 390]) {
         await page.click('[data-testid=archived-drawer-toggle]');
         await page.waitFor(`document.querySelectorAll('[data-testid=archived-drawer] li').length === 7`);
       }
-      await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+      // A theme change can leave transitions pending inside closed disclosures.
+      // Only wait for the archive surface whose layout this capture verifies.
+      const archives = width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]';
+      await page.evaluate(`Promise.all([document.fonts.ready, ...document.querySelector('${archives}').getAnimations({subtree:true}).filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-archives-readable-${width}.png`));
       expect(await page.evaluate(`Array.from(document.querySelectorAll('${width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]'} li')).every(row => {
         const title = row.querySelector('.title');
