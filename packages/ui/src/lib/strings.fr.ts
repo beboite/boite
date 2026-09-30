@@ -1671,6 +1671,7 @@ export const fr: Translation = {
     unsupported: "Ce fournisseur n'expose pas ses quotas d'abonnement ici.",
     disabled: 'Le suivi des quotas est désactivé pour ce compte.',
     loading: 'Lecture des limites du fournisseur',
+    slowHint: "Antigravity peut mettre jusqu'à deux minutes à répondre.",
     tracked: 'Comptes suivis',
     trackedHint: "Boite lit les limites des comptes activés ici. Un compte désactivé n'est jamais interrogé.",
     providers: 'Gérer les fournisseurs',

@@ -55,3 +55,22 @@ test('late progress and a late final response cannot replace a newer refresh', a
   expect(reader.loading).toBe(false);
   expect(f.listeners.size).toBe(0);
 });
+
+test('switching an account off still reads, and a failed read keeps its reason until one lands', async () => {
+  const f = fixture();
+  const reader = new QuotaReader('configure-test');
+  const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  const configuring = reader.configure(f.client, 'slow', false);
+  f.calls[0]!.resolve([row('fast'), { ...row('slow'), enabled: false, status: 'disabled', windows: [] }]);
+  await settle();
+  // Before, only switching on read again, so the other cards kept what the switch answered.
+  expect(f.calls).toHaveLength(2);
+  f.calls[1]!.reject(new Error('Disconnected'));
+  await configuring;
+  expect(reader.error).toBe('Disconnected');
+  expect(reader.rows!.map((quota) => quota.accountId)).toEqual(['fast', 'slow']);
+  const retry = reader.read(f.client, true);
+  f.calls[2]!.resolve([row('fast', 60)]);
+  await retry;
+  expect(reader.error).toBeNull();
+});

@@ -604,6 +604,8 @@ export class PluginStore {
       await this.run(id, installed, [...args]);
       if (this.closing) throw refused('Boite is shutting down.');
       this.cache.delete(id);
+      // The saved login changed hands: its last quota reading is someone else's now.
+      this.core.quotas.forget((accountId) => this.blocksAccount(accountId));
       this.core.quotas.invalidate();
       // Announced whatever the status reads: a switch between two signed-in
       // logins leaves it at 'ok', yet the model lists belong to the old login.

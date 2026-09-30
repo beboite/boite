@@ -1739,6 +1739,7 @@ export const strings = {
     unsupported: 'This provider does not expose subscription quotas here.',
     disabled: 'Quota monitoring is off for this account.',
     loading: 'Reading provider limits',
+    slowHint: 'Antigravity can take up to two minutes to answer.',
     tracked: 'Tracked accounts',
     trackedHint: 'Boite reads the limits of the accounts switched on here. An account switched off is never asked.',
     providers: 'Manage providers',
