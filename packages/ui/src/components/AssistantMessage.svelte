@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CircleAlert, FishingHook, MessageCircleQuestionMark } from '@lucide/svelte';
   import { showDockedQuestion } from '../lib/question-dock.svelte';
-  import type { Account, Message } from '@boite/contracts';
+  import type { Account, MemoryEvent, Message } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
@@ -16,7 +16,9 @@
   import ChatFile from './ChatFile.svelte';
   import ThinkingPart from './ThinkingPart.svelte';
   import ToolGroup from './ToolGroup.svelte';
-  import { partRuns, runKey, type ToolPart } from '../lib/tool-groups';
+  import { runKey, type ToolPart } from '../lib/tool-groups';
+  import { memoryPartRuns } from '../lib/memory-timeline';
+  import MemoryRow from './MemoryRow.svelte';
 
   /**
    * An assistant or system message in the timeline: the model that wrote it,
@@ -30,7 +32,8 @@
     message,
     progress,
     signedOut,
-    showModel
+    showModel,
+    memoryEvents = []
   }: {
     store: Store;
     threadId: string;
@@ -38,6 +41,7 @@
     progress: TurnProgress;
     signedOut: Account | null;
     showModel: boolean;
+    memoryEvents?: MemoryEvent[];
   } = $props();
 
   function lastTextIndex(message: Message): number {
@@ -48,7 +52,7 @@
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);
   const caretAt = $derived(message.state === 'streaming' ? lastTextIndex(message) : -1);
   const thought = $derived(progress.thought(message.turnId));
-  const runs = $derived(partRuns(message.parts));
+  const runs = $derived(memoryPartRuns(message.parts, memoryEvents));
   const isBackground = (toolId: string) => store.openThread?.background?.some((task) => task.toolId === toolId) ?? false;
 </script>
 
@@ -63,8 +67,10 @@
 {/if}
 {#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
-  {#each runs as run (runKey(run))}
-    {#if run.kind === 'tools'}
+  {#each runs as run (run.kind === 'memory' ? run.key : runKey(run))}
+    {#if run.kind === 'memory'}
+      <MemoryRow event={run.events[0]!} events={run.events} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
+    {:else if run.kind === 'tools'}
       <div class="part" data-kind="tool">
         <ToolGroup parts={run.indices.map((at) => message.parts[at]).filter((part): part is ToolPart => part?.type === 'tool')} {isBackground} />
       </div>

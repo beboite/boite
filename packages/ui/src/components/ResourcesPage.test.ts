@@ -68,3 +68,21 @@ test('saves a percentage and can return the quota and reserve to auto', async ()
   expect(store.memory!.limits).toEqual({ budgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8 });
   expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
 });
+
+test('memory protection toggles immediately, keeps configured values and explains auto sizing', async () => {
+  await setup();
+  const toggle = document.querySelector<HTMLInputElement>('[data-testid=setting-memory-protection]')!;
+  expect(toggle.checked).toBe(true);
+  expect(document.getElementById(toggle.getAttribute('aria-describedby')!)?.textContent).toBe(strings.settings.memoryProtectionHint);
+  expect(document.body.textContent).toContain(strings.settings.memoryAutoHint);
+  await store.saveSettings({ threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  toggle.click(); await settle();
+  expect(await client.call('settings.get', {})).toMatchObject({ memoryProtection: false, threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  expect(store.memory!.limits).toEqual({ budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 });
+  expect(document.querySelector<HTMLInputElement>('[data-testid=memory-cap]')!.disabled).toBe(true);
+  expect(document.querySelector('[data-testid=memory-status]')!.textContent).toContain(strings.resources.protectionOff);
+  toggle.click(); await settle();
+  expect(await client.call('settings.get', {})).toMatchObject({ memoryProtection: true, threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  expect(store.memory!.limits.threadMemoryCapMb).toBe(4096);
+  expect(document.querySelector<HTMLInputElement>('[data-testid=memory-cap]')!.disabled).toBe(false);
+});

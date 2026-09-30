@@ -9,6 +9,7 @@ import type { ProcessPlatform } from './platform/types.ts';
 export class MemoryGuard {
   private policy = initialMemoryPolicy();
   private agentBytes = 0;
+  private enabled = true;
   private limits: ReturnType<typeof resolveMemoryLimits> | null = null;
 
   constructor(private readonly bus: Bus, private readonly platform: ProcessPlatform) {}
@@ -21,13 +22,20 @@ export class MemoryGuard {
   }
 
   applySettings(settings: Settings): void {
+    this.enabled = settings.memoryProtection !== false;
     this.limits = resolveMemoryLimits(settings, this.platform.machineMemory()?.totalBytes ?? totalmem());
+    if (!this.enabled) {
+      const changed = this.state !== 'ok';
+      this.policy = initialMemoryPolicy();
+      if (changed) this.bus.emit('resources.memory', { threadId: null, kind: 'pressure', state: 'ok', at: Date.now() });
+    }
   }
 
   sample(agentBytes: number, processes: MemoryProcess[], kill: (process: MemoryProcess) => boolean): void {
     if (this.limits === null) return;
     const at = Date.now();
     this.agentBytes = agentBytes;
+    if (!this.enabled) return;
     const result = decideMemory(this.policy, {
       at, agentBytes, processes,
       availableBytes: this.platform.machineMemory()?.availableBytes ?? null,
@@ -50,6 +58,7 @@ export class MemoryGuard {
   }
 
   memoryLimit(threadId: string | null, kind: 'thread-cap' | 'budget'): void {
+    if (!this.enabled) return;
     this.bus.emit('resources.memory', { threadId, kind, state: this.state, at: Date.now() });
   }
 }

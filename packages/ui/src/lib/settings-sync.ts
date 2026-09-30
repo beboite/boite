@@ -31,6 +31,7 @@ export const PORTABLE_SETTINGS = [
   'agentCpuCapPercent',
   'agentMemoryBudgetPercent',
   'threadMemoryCapMb',
+  'memoryProtection',
   'focusGuard',
   'muteAgents',
   'reapOrphans',

@@ -27,6 +27,55 @@ test('unknown process and size are omitted', () => {
   flushSync(); expect(document.querySelector('.details')).toBeNull();
 });
 
+test('a memory notice stays between the interrupted tool and later output in the same message', async () => {
+  const client = new FakeClient({ delayMs: 0 }); const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const thread = store.openThread!;
+    thread.memoryEvents = [{ threadId: thread.id, kind: 'killed', reason: 'machine', limitBytes: 3072 * 1048576, state: 'critical', exe: 'cargo.exe', at: 20 }];
+    thread.messages = [{ id: 'interrupted', threadId: thread.id, turnId: 'turn', role: 'assistant', state: 'complete', createdAt: 10, parts: [
+      { type: 'text', text: 'Before the interruption' },
+      { type: 'tool', toolId: 'build', name: 'Bash', input: { command: 'cargo build' }, output: 'Stopped', status: 'error', startedAt: 15, finishedAt: 21 },
+      { type: 'text', text: 'After the interruption' },
+      { type: 'tool', toolId: 'retry', name: 'Bash', input: { command: 'cargo build -j 2' }, output: 'Done', status: 'done', startedAt: 30, finishedAt: 40 },
+    ] }];
+    mounted = mount(MessageList, { target: document.body, props: { store, threadId: thread.id, messages: thread.messages } });
+    flushSync();
+    const text = document.querySelector('[data-testid=timeline]')!.textContent!;
+    expect(text.indexOf(strings.resources.killTitle)).toBeGreaterThan(text.indexOf('Before the interruption'));
+    expect(text.indexOf(strings.resources.killTitle)).toBeLessThan(text.indexOf('After the interruption'));
+  } finally { store.detach(); client.close(); }
+});
+
+test('live stops share a compact disclosure and stay at their boundary as the answer grows and reopens', async () => {
+  const client = new FakeClient({ delayMs: 0 }); const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const thread = store.openThread!;
+    thread.memoryEvents = [];
+    const message = thread.messages.at(-1)!;
+    message.state = 'streaming'; message.parts = [{ type: 'text', text: 'Build started' }];
+    mounted = mount(MessageList, { target: document.body, props: { store, threadId: thread.id, messages: thread.messages } });
+    const at = Date.now();
+    for (const [index, exe] of ['cargo.exe', 'rustc.exe', 'node.exe'].entries()) client.emitMemory({ threadId: thread.id, kind: 'killed', reason: 'machine', limitBytes: 3072 * 1048576, bytes: 100 * 1048576, exe, state: 'critical', at: at + index * 3000, anchor: { messageId: message.id, partIndex: 1 } });
+    store.openThread!.messages.at(-1)!.parts = [...message.parts, { type: 'text', text: 'Build retried with fewer workers\n\n' }];
+    flushSync();
+    const row = document.querySelector('[data-testid=memory-row]')!;
+    expect(document.querySelectorAll('[data-testid=memory-row]')).toHaveLength(1);
+    expect(row.textContent).toContain(strings.resources.killCount(3));
+    expect(row.querySelector('details')!.open).toBe(false);
+    expect([...row.querySelectorAll('.process')].map(node => node.textContent)).toEqual(['cargo.exe', 'rustc.exe', 'node.exe']);
+    const text = document.querySelector('[data-testid=timeline]')!.textContent!;
+    expect(text.indexOf(strings.resources.killCount(3))).toBeLessThan(text.indexOf('Build retried'));
+    row.querySelector<HTMLButtonElement>('.configure')!.click();
+    expect(store.settingsTab).toBe('resources');
+    expect(store.settingsSection?.id).toBe('limits');
+    await store.open('t-trace'); flushSync();
+    expect(document.body.textContent).toContain(strings.resources.killCount(3));
+    expect(store.openThread!.memoryEvents?.find(event => event.at === at)?.anchor).toEqual({ messageId: message.id, partIndex: 1 });
+  } finally { store.detach(); client.close(); }
+});
+
 test('thread history and live notices appear in the timeline and survive reopening', async () => {
   const client = new FakeClient({ delayMs: 0 }); const store = new Store(); store.attach(client);
   try {
