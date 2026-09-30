@@ -59,11 +59,14 @@ class Page {
   #pending = new Map<number, (value: Record<string, unknown>) => void>();
   constructor(private readonly socket: WebSocket) {
     socket.addEventListener('message', (event) => {
-      const message = JSON.parse(String(event.data)) as { id?: number; result?: Record<string, unknown> };
-      if (message.id !== undefined) {
-        this.#pending.get(message.id)?.(message.result ?? (message as Record<string, unknown>));
-        this.#pending.delete(message.id);
-      }
+      const message: unknown = JSON.parse(String(event.data));
+      if (typeof message !== 'object' || message === null) return;
+      const { id, result } = message as { id?: unknown; result?: Record<string, unknown> };
+      if (typeof id !== 'number') return;
+      const settle = this.#pending.get(id);
+      if (typeof settle !== 'function') return;
+      this.#pending.delete(id);
+      settle(result ?? (message as Record<string, unknown>));
     });
   }
   send(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -78,6 +81,14 @@ class Page {
     const answer = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }) as { result?: { value?: T }; exceptionDetails?: unknown };
     if (answer.exceptionDetails) throw new Error(JSON.stringify(answer.exceptionDetails).slice(0, 400));
     return answer.result?.value as T;
+  }
+  /** Runs a function in the page with its arguments passed as values, never spliced into code. */
+  async call(functionDeclaration: string, ...args: unknown[]): Promise<void> {
+    const global = await this.send('Runtime.evaluate', { expression: 'globalThis' }) as { result?: { objectId?: string } };
+    const answer = await this.send('Runtime.callFunctionOn', {
+      objectId: global.result?.objectId, functionDeclaration, arguments: args.map((value) => ({ value })), awaitPromise: true, returnByValue: true,
+    }) as { exceptionDetails?: unknown };
+    if (answer.exceptionDetails) throw new Error(JSON.stringify(answer.exceptionDetails).slice(0, 400));
   }
   async waitFor(expression: string, ms = 30_000): Promise<void> {
     const end = Date.now() + ms;
@@ -156,7 +167,7 @@ async function main(): Promise<void> {
     };
     const stream = async (): Promise<void> => {
       await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
-      await page.evaluate(`(() => { const input = document.querySelector('[data-testid=composer-input]'); input.value = ${JSON.stringify(PROMPT)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await page.call(`function (text) { const input = document.querySelector('[data-testid=composer-input]'); input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); }`, PROMPT);
       await Bun.sleep(100);
       await page.evaluate(`document.querySelector('[data-testid=composer-send]').click()`);
       await Bun.sleep(600);
@@ -228,7 +239,7 @@ async function main(): Promise<void> {
         for (const [variant, css] of Object.entries(VARIANTS)) {
           try {
             await setup();
-            await page.evaluate(`(() => { let s = document.getElementById('bench-variant'); if (!s) { s = document.createElement('style'); s.id = 'bench-variant'; document.head.append(s); } s.textContent = ${JSON.stringify(css)}; })()`);
+            await page.call(`function (css) { let s = document.getElementById('bench-variant'); if (!s) { s = document.createElement('style'); s.id = 'bench-variant'; document.head.append(s); } s.textContent = css; }`, css);
             const m = await measure();
             const perPixel = m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
             console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} | ${perPixel}`);
