@@ -165,7 +165,7 @@
   .body { padding: 0 14px 14px; border-top: 1px solid var(--color-border); max-height: min(48dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
   .summary, .empty, .notice { margin: 10px 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.45; }
   .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
-  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); }
+  .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .modes button { width: 100%; }
   .modes .chosen { background: var(--color-active); color: var(--color-foreground); box-shadow: inset 0 0 0 1px var(--color-edge); }
   .resources { display: grid; gap: 6px; margin-top: 12px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
