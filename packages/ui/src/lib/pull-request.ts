@@ -17,13 +17,14 @@ export function resetPullRequestSupport(client: Client): void {
 }
 
 /** `refresh` is a user's own request: the core reads the repository again instead of answering from what it kept. */
-export async function lookupPullRequest(client: Client, threadId: ThreadId, refresh = false): Promise<Lookup> {
+export async function lookupPullRequest(client: Client, threadId: ThreadId, refresh = false, checkout = ''): Promise<Lookup> {
   let state = lookups.get(client);
   if (!state) {
     state = { active: 0, waiting: [], pending: new Map() };
     lookups.set(client, state);
   }
-  const key = `${threadId}|${refresh}`;
+  // A moved thread must not share an outstanding read for its previous checkout.
+  const key = JSON.stringify([threadId, refresh, checkout]);
   const pending = state.pending.get(key);
   if (pending) return pending;
   // A sidebar remount shares its lookup; metadata leaves room for interactive RPCs.

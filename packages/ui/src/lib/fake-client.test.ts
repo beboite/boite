@@ -4,6 +4,20 @@ import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodN
 
 afterEach(() => vi.useRealTimers());
 
+test('moving a fake thread drops PR metadata from its previous branch', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    expect((await client.call('threads.pullRequest', { threadId: 't-trace' }))?.number).toBe(84);
+    const moved = await client.call('threads.move', { threadId: 't-trace', projectId: 'p-notes' });
+    expect(moved.branch).not.toBeNull();
+    expect(await client.call('threads.pullRequest', { threadId: moved.id })).toBeNull();
+    const drafts = await client.call('projects.drafts', {});
+    expect((await client.call('threads.move', { threadId: moved.id, projectId: drafts.id })).branch).toBeNull();
+    expect(await client.call('threads.pullRequest', { threadId: moved.id })).toBeNull();
+  } finally { client.close(); }
+});
+
 test('rewinding a live follow-up keeps the turn belonging to earlier messages', async () => {
   const client = new FakeClient({ delayMs: 5 });
   await client.connect();

@@ -116,7 +116,6 @@ function unavailable(error: unknown): boolean {
 export class PullRequests {
   #remotes = new Map<string, Cached<boolean>>();
   #lists = new Map<string, Cached<PullRequestList>>();
-  #heads = new Map<string, Cached<string>>();
   #branches = new Map<string, Cached<PullRequest>>();
   /** Why gh cannot answer, once it said so; automatic lookups then spawn nothing. */
   #ghUnavailable: string | null = null;
@@ -132,6 +131,10 @@ export class PullRequests {
   }
 
   async #read(thread: ThreadSummary, refresh: boolean): Promise<PullRequest> {
+    // A shared checkout's current branch belongs to no particular thread.
+    // Only a branch associated with this thread can identify its pull request.
+    const branch = thread.branch;
+    if (!branch || branch === 'HEAD') return null;
     // Off the event loop and under one deadline: a folder on a share whose
     // host is gone answers nothing for 21 s.
     const deadline = Date.now() + GIT_PROBE_TIMEOUT_MS;
@@ -150,14 +153,11 @@ export class PullRequests {
       this.#ghUnavailable = null;
       this.#remotes.delete(repository);
       this.#lists.delete(repository);
-      this.#heads.delete(thread.cwd);
       for (const key of this.#branches.keys()) if (key.startsWith(`${repository}\n`)) this.#branches.delete(key);
     }
     // Forgejo, GitLab and local repositories have no GitHub PR to query.
     const github = await this.#cached(this.#remotes, repository, REMOTES_TTL_MS, async () => hasGitHubRemote(await this.#run(thread, root, 'git', ['remote', '-v'])));
     if (!github) return null;
-    const branch = thread.branch ?? (await this.#cached(this.#heads, thread.cwd, LIST_TTL_MS, async () => (await this.#run(thread, thread.cwd, 'git', ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()));
-    if (branch === 'HEAD') return null;
     if (this.#ghUnavailable !== null) return null;
     const list = await this.#gh(refresh, () => this.#cached(this.#lists, repository, LIST_TTL_MS, async () => parsePullRequestList(
       await this.#run(thread, root, 'gh', ['pr', 'list', '--state', 'all', '--limit', String(LIST_LIMIT), '--json', 'headRefName,number,url,state']),

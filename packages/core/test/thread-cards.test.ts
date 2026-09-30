@@ -88,6 +88,31 @@ function fakeGh(prs: { headRefName: string; number: number }[]): string[] {
   return ['-e', `await Bun.sleep(60); console.log(${JSON.stringify(JSON.stringify(list))})`];
 }
 
+test('project-directory threads do not inherit the shared checkout branch PR', async () => {
+  const client = await harness.connect();
+  const repo = join(harness.dataDir, 'shared-checkout');
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  const ids: string[] = [];
+  for (let index = 0; index < 2; index++) {
+    const { threadId } = await echoThread(harness, client);
+    harness.core.journal.putThread({ ...harness.core.threads.require(threadId), cwd: repo, branch: null });
+    ids.push(threadId);
+  }
+  const spawn = harness.core.procs.spawn.bind(harness.core.procs);
+  const replacement = spyOn(harness.core.procs, 'spawn').mockImplementation((scope, command, args, options) => {
+    const output = command === 'gh'
+      ? fakeGh([{ headRefName: 'fix/archive-no-confirm', number: 180 }])
+      : ['-e', `console.log(${JSON.stringify(args[0] === 'remote' ? 'origin\thttps://github.com/example/repo.git (fetch)' : 'fix/archive-no-confirm')})`];
+    return spawn(scope, process.execPath, output, options);
+  });
+  try {
+    const reader = new PullRequests(harness.core);
+    expect(await Promise.all(ids.map(id => reader.read(id)))).toEqual([null, null]);
+    expect(await reader.read(ids[0]!, true)).toBeNull();
+    expect(replacement).not.toHaveBeenCalled();
+  } finally { replacement.mockRestore(); }
+});
+
 test('PR reads run one gh call per repository, two processes at a time, and match each branch', async () => {
   const client = await harness.connect();
   const ids: string[] = [];
