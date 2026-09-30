@@ -217,8 +217,17 @@ nightlies publish automatically. Neither a draft nor an unsigned older release
 is offered by the desktop updater.
 
 These are Tauri updater signatures, not Windows Authenticode signatures or
-Apple Developer ID signatures. The macOS application is signed ad hoc and not
-notarized, so Gatekeeper asks once before the first start (README). Linux
+Apple Developer ID signatures.
+
+A release or nightly signs the macOS application with a Developer ID and
+notarizes it when six repository secrets are set: `APPLE_CERTIFICATE` (the
+Developer ID Application `.p12`, base64), `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, and the App Store Connect API key used for
+notarization, `APPLE_API_ISSUER`, `APPLE_API_KEY_ID` and
+`APPLE_API_PRIVATE_KEY` (the `.p8` contents). The CI then checks the stapled
+ticket and Gatekeeper's verdict on the bundle. Without all six, and on every
+pull request, the bundle is signed ad hoc and Gatekeeper asks once before the
+first start (README). Both need the Apple Developer Program. Linux
 packages are built on Ubuntu 22.04, whose glibc 2.35 is the oldest a user can
 run them on.
 

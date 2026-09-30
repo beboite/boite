@@ -49,9 +49,10 @@ boite is in beta. Download it from
 | Linux x64 | `Boite_<version>_amd64.deb` or `Boite_<version>_amd64.AppImage` |
 | Linux ARM64 | `Boite_<version>_arm64.deb` or `Boite_<version>_aarch64.AppImage` |
 
-The macOS app is not notarized yet. After dragging it to Applications, run
-`xattr -cr /Applications/Boite.app` once, or open it and allow it under System
-Settings, Privacy & Security. Linux packages need glibc 2.35 or newer (Ubuntu
+A macOS release built with the project's Apple Developer ID is signed and
+notarized and opens like any downloaded app. One built without it is signed ad
+hoc: after dragging it to Applications, run `xattr -cr /Applications/Boite.app`
+once, or open it and allow it under System Settings, Privacy & Security. Linux packages need glibc 2.35 or newer (Ubuntu
 22.04, Debian 12, Fedora 36 and later) with WebKitGTK 4.1. An AppImage also
 needs FUSE 2 (`libfuse2`); make the file executable before starting it.
 

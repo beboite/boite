@@ -10,6 +10,24 @@ on:
       TAURI_SIGNING_PRIVATE_KEY:
         description: Required only when sign-updates is enabled.
         required: false
+      # A published macOS build is signed with this Developer ID and notarized
+      # when all six are set; without them it stays ad-hoc signed.
+      APPLE_CERTIFICATE:
+        description: Base64 of the Developer ID Application .p12.
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        description: 'Developer ID Application: <name> (<team id>).'
+        required: false
+      APPLE_API_ISSUER:
+        description: App Store Connect API issuer ID, for notarization.
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_PRIVATE_KEY:
+        description: Contents of the AuthKey_<id>.p8 file.
+        required: false
     inputs:
       force:
         type: boolean
@@ -246,7 +264,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           workspaces: apps/shell/src-tauri -> target
-          shared-key: desktop-portable-v1
+          # Per runner: a cache built on Ubuntu 24.04 restored on 22.04 left crates rustc could not load.
+          shared-key: desktop-portable-${{ matrix.os }}-v1
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Set nightly artifact version
         if: inputs.channel == 'nightly' && inputs.version != ''
@@ -304,17 +323,39 @@ jobs:
       - name: Build and test macOS application bundle
         if: runner.os == 'macOS'
         env:
-          # Ad-hoc: no Apple Developer ID yet, so Gatekeeper asks once (README).
-          APPLE_SIGNING_IDENTITY: '-'
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          DEVELOPER_ID_CERTIFICATE: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE || '' }}
+          DEVELOPER_ID_PASSWORD: ${{ inputs.sign-updates && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          DEVELOPER_ID_IDENTITY: ${{ inputs.sign-updates && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          NOTARY_ISSUER: ${{ inputs.sign-updates && secrets.APPLE_API_ISSUER || '' }}
+          NOTARY_KEY_ID: ${{ inputs.sign-updates && secrets.APPLE_API_KEY_ID || '' }}
+          NOTARY_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.APPLE_API_PRIVATE_KEY || '' }}
         run: |
           export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
+          if [ -n "$DEVELOPER_ID_CERTIFICATE" ] && [ -n "$DEVELOPER_ID_PASSWORD" ] && [ -n "$DEVELOPER_ID_IDENTITY" ] \
+            && [ -n "$NOTARY_ISSUER" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_PRIVATE_KEY" ]; then
+            # Tauri imports the certificate into a temporary keychain, signs the
+            # app and its sidecar, then notarizes and staples with the API key.
+            printf '%s' "$NOTARY_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+            export APPLE_CERTIFICATE="$DEVELOPER_ID_CERTIFICATE" APPLE_CERTIFICATE_PASSWORD="$DEVELOPER_ID_PASSWORD"
+            export APPLE_SIGNING_IDENTITY="$DEVELOPER_ID_IDENTITY" APPLE_API_ISSUER="$NOTARY_ISSUER"
+            export APPLE_API_KEY="$NOTARY_KEY_ID" APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+            notarized=1
+          else
+            # Ad-hoc: Gatekeeper asks once before the first start (README).
+            export APPLE_SIGNING_IDENTITY='-'
+            notarized=0
+          fi
           # shellcheck disable=SC2086 # BUNDLE_CONFIGS holds several arguments.
           bun apps/shell/scripts/tauri.ts build $BUNDLE_CONFIGS --bundles app,dmg
           cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
           # Dictation: without both, macOS refuses or kills the microphone request.
           plutil -extract NSMicrophoneUsageDescription raw "$RUNNER_TEMP/Boite.app/Contents/Info.plist"
           codesign -d --entitlements - --xml "$RUNNER_TEMP/Boite.app" | grep -q com.apple.security.device.audio-input
+          if [ "$notarized" = 1 ]; then
+            xcrun stapler validate "$RUNNER_TEMP/Boite.app"
+            spctl --assess --type execute --verbose "$RUNNER_TEMP/Boite.app"
+          fi
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
       - name: Collect release bundles
         run: bun scripts/ci/desktop-bundles.ts "$RUNNER_TEMP/desktop-bundles"
