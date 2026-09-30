@@ -1526,7 +1526,7 @@ test('an async question waits in the dock above the composer, stacked, and the t
 
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
-test('a tool card shows the input as the model types it, then switches to the parsed one', async () => {
+test('a tool card stays folded while its input arrives and reveals parsed details on demand', async () => {
   await mountOnFake();
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
@@ -1535,35 +1535,18 @@ test('a tool card shows the input as the model types it, then switches to the pa
   await waitFor(() => !query<HTMLButtonElement>('[data-testid=composer-send]').disabled);
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
-  // The card opens itself while the json arrives, so sampling the pre catches
-  // the growth without racing a click on the toggle. The thread already holds
-  // seeded tool cards: only the streaming one is this test's.
   await waitFor(() => document.querySelector('[data-testid=tool-card][data-streaming=true]') !== null);
   const card = query('[data-testid=tool-card][data-streaming=true]');
-  const typed: string[] = [];
-  const lines: string[] = [];
+  let samples = 0;
   while (card.dataset.streaming === 'true') {
-    typed.push(card.querySelector('[data-testid=tool-input]')?.textContent ?? '');
-    lines.push(card.querySelector('.line')?.textContent ?? '');
+    expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(card.querySelector('[data-testid=tool-input]')).toBeNull();
+    expect(card.querySelector('.line')?.textContent).toBe('Running a command');
+    samples++;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  expect(samples).toBeGreaterThan(1);
 
-  // Every sample is a prefix of the json, and at least two of them differ: that
-  // is the input growing rather than landing whole.
-  const partials = typed.filter((text) => text.length > 0);
-  expect(partials.length).toBeGreaterThan(0);
-  for (const text of partials) expect(STREAMED_TOOL_INPUT.startsWith(text)).toBe(true);
-  expect(new Set(typed).size).toBeGreaterThan(1);
-  expect(partials.at(-1)).toBe(STREAMED_TOOL_INPUT);
-
-  // The summary reads the half-typed value, never the raw json.
-  const summaries = lines.filter((text) => text.length > 0);
-  expect(summaries.length).toBeGreaterThan(0);
-  for (const text of summaries) expect('echo streamed'.startsWith(text)).toBe(true);
-
-  // Once the parsed input lands the card folds back to its one line. The body
-  // stays built so the fold can animate its height both ways; what says it is
-  // shut is the toggle, and the fold around it holds no open track.
   await waitFor(() => card.dataset.streaming === 'false');
   expect(card.querySelector('[data-testid=tool-toggle]')?.getAttribute('aria-expanded')).toBe('false');
   expect(card.querySelector('.fold')?.classList.contains('open')).toBe(false);

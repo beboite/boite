@@ -104,8 +104,8 @@
     return change ? [{ kind: 'diff', ...change }] : [];
   });
   let others = $derived(documents.filter((doc) => doc.kind !== 'diff'));
-  let compact = $derived(!nested && !streaming && !failed && documents.length === 0 && diffs.length === 0);
-  let label = $derived(compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
+  let compact = $derived(!nested && !failed && documents.length === 0 && diffs.length === 0);
+  let label = $derived(streaming ? liveLabel(part) : compact ? status === 'running' ? liveLabel(part) : runSummary([part]) : line.text);
   let counts = $derived(diffs.reduce((sum, doc) => {
     const one = diffCounts(diffRows(doc.oldText, doc.newText));
     return { added: sum.added + one.added, removed: sum.removed + one.removed };
@@ -116,11 +116,9 @@
    */
   let headless = $derived(new Set(diffs.map((doc) => doc.path)).size <= 1 && line.text.includes(fileName(diffs[0]?.path ?? '')));
 
-  // The body opens itself while the input is being typed: that is the whole point
-  // of the stream. It folds back to the one line once the parsed input lands. A
-  // file change comes open on its diff, unless it failed: then nothing changed.
+  // Input stays behind the disclosure while it arrives. A successful edit opens on its diff.
   let toggled = $state<boolean | null>(null);
-  let shown = $derived(toggled ?? (streaming || (diffs.length > 0 && !failed)));
+  let shown = $derived(toggled ?? (diffs.length > 0 && !failed));
   let chip = $derived(others.length > 0 && !shown ? chipFor(others) : '');
 
   let inputJson = $derived(streaming ? '' : json(input));

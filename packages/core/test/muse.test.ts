@@ -354,9 +354,13 @@ describe('muse driver', () => {
     expect((await finished).status).toBe('done');
     expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
     expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
-    expect(textsOf(await lastParts(client, threadId))).toEqual(['working heard: > Which database?\n\nSQLite']);
     const thread = await client.call('threads.get', { threadId });
-    expect(thread.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    expect(textsOf(thread.messages.findLast(message => message.role === 'assistant')?.parts ?? [])).toEqual(['working heard: > Which database?\n\nSQLite']);
+    const users = thread.messages.filter(message => message.role === 'user');
+    expect(users).toHaveLength(2);
+    expect(users[1]?.parts).toEqual([{ type: 'text', text: '> Which database?\n\nSQLite' }]);
+    expect(thread.pendingAnswers).toEqual([]);
+    expect(thread.turns).toHaveLength(1);
   });
 
   test('a steer the host refuses keeps the answer for the turn after', async () => {

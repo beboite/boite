@@ -737,13 +737,20 @@ test('fake async answers given while a turn runs start one turn together after i
     }
     const questions = await client.call('questions.list', { threadId });
     expect(questions).toHaveLength(2);
-    await client.call('turns.start', { threadId, prompt: 'hello' });
+    await client.call('turns.start', { threadId, prompt: 'hello [permission]' });
+    await vi.waitFor(async () => expect(await client.call('permissions.list', { threadId })).toHaveLength(1));
     for (const [index, question] of questions.entries()) {
       await client.call('questions.answer', { threadId, questionId: question.id, optionIds: [String(index + 1)] });
     }
+    expect((await client.call('threads.get', { threadId })).pendingAnswers).toEqual([
+      '> Which port should the dev server take?\n\n5173', '> Which port should the dev server take?\n\n4173'
+    ]);
+    const [permission] = await client.call('permissions.list', { threadId });
+    await client.call('permissions.answer', { requestId: permission!.id, decision: 'allow' });
     await client.settled();
     const after = await client.call('threads.get', { threadId });
     expect(after.turns).toHaveLength(4);
+    expect(after.pendingAnswers).toEqual([]);
     const prompts = after.messages.filter((message) => message.role === 'user').map((message) => message.parts[0]?.type === 'text' ? message.parts[0].text : '');
     expect(prompts.at(-1)).toBe('> Which port should the dev server take?\n\n5173\n\n> Which port should the dev server take?\n\n4173');
   } finally { client.close(); }

@@ -45,8 +45,7 @@
   } = $props();
 
   function lastTextIndex(message: Message): number {
-    const last = message.parts.length - 1;
-    return message.parts[last]?.type === 'text' ? last : -1;
+    return message.parts.findLastIndex(part => part.type === 'text');
   }
 
   const execution = $derived(store.openThread?.turns.find((turn) => turn.id === message.turnId)?.execution);

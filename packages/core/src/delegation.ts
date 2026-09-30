@@ -18,7 +18,7 @@ function text(value: unknown, field: string, max: number): string {
 }
 /** Load and the derived live fields arrive in thread.updated without changing team history. */
 function teamState(thread: ThreadSummary): string {
-  const { load, runningSince, backgroundWork, pendingMove, ...stored } = thread;
+  const { load, runningSince, backgroundWork, pendingMove, pendingAnswers, ...stored } = thread;
   return JSON.stringify(Object.fromEntries(Object.entries(stored).sort(([left], [right]) => left.localeCompare(right))));
 }
 export function delegationPrompt(letters: AgentLetter[]): string {
