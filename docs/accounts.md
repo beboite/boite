@@ -260,8 +260,35 @@ no account uses the default location, and the provider's default model and
 effort once it is connected. Default-location accounts keep their
 external login.
 Claude subscription quotas come from its OAuth usage endpoint using the account's
-credentials file. Keychain-only Claude credentials are not supported. Codex quotas
-come from `account/rateLimits/read`, without starting a conversation.
+credentials file. For Keychain logins or expired tokens, its CLI reads usage
+with `skipBehaviors: true`, an empty prompt queue and no tools or hooks. That
+fallback may omit reset grants and paid usage details. Codex quotas come from
+`account/rateLimits/read`, without starting a conversation.
+
+These reads also collect banked resets. Claude requests `cedar_ember=1` on
+its GET usage request and counts eligible, usable, unpaused, unexpired grants
+only when the reported next grant is available. Codex uses the reported count
+of reset credits even when the optional details are absent. Only counts and
+expiration times reach the client. Boite never redeems a reset or changes paid
+usage settings.
+
+Once any subscription window is exhausted, a confirmed enabled, positive paid
+allowance appears beneath it. Claude's allowance is the remaining monthly
+spending budget, displayed as a percentage of its cap; it is not a prepaid
+wallet balance. Codex reports a credit balance but does not confirm automatic
+paid usage, so Boite retains the balance with an unknown activation state and
+hides it in the automatic fallback display. Missing, disabled and zero paid
+allowances remain hidden; a failed read does not advertise stale resets or
+credits as available.
+
+Muse Code hosts that support `usage/changed` (1.4.0 or later) contribute their
+last observed subscription windows through an existing conversation. Listing
+or refreshing limits never starts a host or sends a prompt. Before the first
+observation, after disabling monitoring, or with older hosts, Muse remains
+unavailable. Its reported observation time is preserved, including over-quota
+readings. The schema exposes neither paid credit balances nor banked resets.
+Live Muse observations are kept in memory per account, not polled as fresh
+HTTP snapshots.
 
 The tray Usage window and Settings, Limits list only the providers with a
 signed-in account whose limits are monitored. Each tray row shows the lowest

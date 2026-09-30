@@ -22,13 +22,19 @@ const FAKE_LOGIN_MENU = [
 function quotas(ctx: FakeContext): AccountQuota[] {
   const accounts = [...ctx.accounts, { id: 'quota:antigravity-cli', providerId: 'antigravity', label: 'Antigravity CLI' }];
   return accounts.map((account, index) => ({
+    ...(ctx.quotaExtras && ctx.quotaEnabled[account.id] !== false && ['claude', 'codex'].includes(account.providerId) ? {
+      resetCredits: { availableCount: account.providerId === 'claude' ? 1 : 2, nextExpiresAt: Date.now() + 7 * 86400_000 },
+      credits: account.providerId === 'claude'
+        ? { kind: 'budget' as const, enabled: true, remaining: 75, limit: 100, unlimited: false }
+        : { kind: 'balance' as const, enabled: null, remaining: 42, limit: null, unlimited: false },
+    } : {}),
     accountId: account.id, providerId: account.providerId, providerName: account.providerId === 'opencode' ? 'OpenCode Go' : ctx.providers.find((p) => p.id === account.providerId)?.name ?? account.providerId,
     label: account.label, enabled: account.id === 'quota:antigravity-cli' ? ctx.quotaEnabled[account.id] === true : ctx.quotaEnabled[account.id] !== false,
     // The CLI's own account reports nothing: its limits come from the `quota:antigravity-cli` source.
     status: account.providerId === 'echo' || account.providerId === 'pi' || account.providerId === 'antigravity-cli' || account.id === 'a-antigravity' ? 'unsupported' : ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? 'disabled' : 'ready',
     checkedAt: Date.now(), error: null,
     windows: ctx.quotaEnabled[account.id] === false || account.id === 'quota:antigravity-cli' && ctx.quotaEnabled[account.id] !== true ? [] : [
-      { id: 'primary', label: '5 hours', usedPercent: [32, 87, 14, 48, 71, 6, 23, 40][index % 8]!, resetsAt: Date.now() + (1 + index % 4) * 3600_000 },
+      { id: 'primary', label: '5 hours', usedPercent: ctx.quotaExtras && ['claude', 'codex'].includes(account.providerId) ? 100 : [32, 87, 14, 48, 71, 6, 23, 40][index % 8]!, resetsAt: Date.now() + (1 + index % 4) * 3600_000 },
       { id: 'secondary', label: 'Weekly', usedPercent: [61, 94, 38, 27, 55, 12, 73, 66][index % 8]!, resetsAt: Date.now() + (1 + index % 6) * 86400_000 },
       // Claude also reports a weekly window per model, which the core names `Weekly · <model>`.
       ...(account.providerId === 'claude' ? [{ id: 'model:Opus', label: 'Weekly · Opus', usedPercent: 44, resetsAt: Date.now() + 3 * 86400_000 }] : []),

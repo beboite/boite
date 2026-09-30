@@ -19,6 +19,7 @@ interface Formatters {
   /** One digit after the decimal sign, always: `38.0 s`, `38,0 s`. */
   tenths: Intl.NumberFormat;
   whole: Intl.NumberFormat;
+  credits: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
 }
 
@@ -37,6 +38,7 @@ function formatters(): Formatters {
     plain: new Intl.NumberFormat(tag),
     tenths: new Intl.NumberFormat(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     whole: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
+    credits: new Intl.NumberFormat(tag, { maximumSignificantDigits: 6 }),
     weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
   };
   sets.set(tag, made);
@@ -136,6 +138,11 @@ export function tokens(value: number): string {
 /** Every digit of a count, grouped the way the language groups them. */
 export function count(value: number): string {
   return formatters().plain.format(value);
+}
+
+/** A fractional credit balance must not round a positive allowance to zero. */
+export function creditBalance(value: number): string {
+  return formatters().credits.format(value);
 }
 
 export function cost(value: number | null): string {

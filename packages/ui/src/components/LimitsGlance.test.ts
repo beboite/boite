@@ -57,3 +57,18 @@ test('an individual quota failure shows its reason beside the provider', async (
   const provider = document.querySelector('[data-testid="quota-provider"][data-provider="grok"]')!;
   expect(provider.querySelector('[role="status"]')?.textContent).toContain(row.error);
 });
+
+test('the glance shows fallback allowances without expanding and dates cached Muse observations', async () => {
+  const row: AccountQuota = { ...quota,
+    windows: [{ ...quota.windows[0]!, usedPercent: 100 }], resetCredits: { availableCount: 1, nextExpiresAt: null },
+    credits: { kind: 'balance', enabled: true, remaining: 0.04, limit: null, unlimited: false } };
+  const observed: AccountQuota = { ...quota, accountId: 'muse-account', providerId: 'muse', providerName: 'Muse Code', source: 'observation', checkedAt: Date.now() - 600_000 };
+  const store = { client: { call: async () => [row, observed], on: () => () => {} }, owner: true, endpointUrl: 'glance-observed-core', accounts: [] } as unknown as Store;
+  mounted = mount(LimitsGlance, { target: document.body, props: { store } });
+  document.querySelector<HTMLButtonElement>('[data-testid="nav-limits"]')!.click();
+  await settle();
+  expect(document.body.textContent).toContain('Observed');
+  expect(document.querySelector('[data-testid=quota-banked-resets]')).toBeNull();
+  expect(document.body.textContent).toContain('0.04 credits');
+  expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude"]')).not.toBeNull();
+});

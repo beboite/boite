@@ -366,8 +366,31 @@ export interface QuotaWindow {
   resetsAt: Timestamp | null;
 }
 
+/** A read-only count. No redeemable identifiers reach the client. */
+export interface QuotaResetCredits {
+  availableCount: number;
+  nextExpiresAt: Timestamp | null;
+}
+
+export interface QuotaCredits {
+  /** A prepaid balance or a monthly spending budget, never interchangeable. */
+  kind: 'balance' | 'budget';
+  /** Null means the provider did not confirm automatic paid usage. */
+  enabled: boolean | null;
+  /** Provider units. Budgets are displayed as a percentage, not a wallet. */
+  remaining: number | null;
+  limit: number | null;
+  unlimited: boolean;
+}
+
+export interface QuotaReading {
+  windows: QuotaWindow[];
+  resetCredits?: QuotaResetCredits;
+  credits?: QuotaCredits;
+}
+
 /** Provider-reported limits, never inferred from Boite's token ledger. */
-export interface AccountQuota {
+export interface AccountQuota extends QuotaReading {
   /** Account id, or `quota:antigravity-cli` for the opt-in local CLI quota source. */
   accountId: AccountId;
   providerId: ProviderId;
@@ -375,7 +398,8 @@ export interface AccountQuota {
   label: string;
   enabled: boolean;
   status: 'ready' | 'unavailable' | 'unsupported' | 'disabled';
-  windows: QuotaWindow[];
+  /** A host's last observation, rather than a fresh account snapshot. */
+  source?: 'observation';
   checkedAt: Timestamp | null;
   error: string | null;
 }

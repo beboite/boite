@@ -42,6 +42,7 @@ import {
   STARTUP_DEADLINE_MS,
   SUBAGENT_TOOL_NAME,
 } from './protocol.ts';
+import { museQuotaReading } from '../../quota-details.ts';
 import { handshake, mintUuidV7, MspError, MuseRpc } from './rpc.ts';
 import { MuseTurn } from './turn.ts';
 
@@ -87,6 +88,7 @@ export class MuseSession {
   private opening: MuseTurn | null = null;
   private current: MuseTurn | null = null;
   private killTree: (() => void) | null = null;
+  private quotaSink: TurnContext['quota'] | null = null;
   private contextSink: TurnContext['context'] | null = null;
   private readonly items = new Map<string, { kind: string; revision: number }>();
   private readonly approvals = new Map<string, OpenApproval>();
@@ -226,6 +228,7 @@ export class MuseSession {
     turn.sessionId = sessionId;
     this.current = turn;
     this.contextSink = turn.ctx.context;
+    this.quotaSink = turn.ctx.quota ?? null;
     const ctx = turn.ctx;
     try {
       await this.align(rpc, sessionId, ctx);
@@ -311,6 +314,7 @@ export class MuseSession {
   }
 
   private async open(ctx: TurnContext): Promise<void> {
+    this.quotaSink = ctx.quota ?? null;
     const executable = museExecutable(ctx.provider);
     const posture = MODE_POSTURE[ctx.thread.permissionMode];
     const child = ctx.spawnChild(executable, [...(profileFor(ctx.provider)?.launch?.args ?? []), ...posture.flags], {
@@ -493,6 +497,11 @@ export class MuseSession {
     // One host, one session: anything about another session is not this thread's.
     if (typeof params['sessionId'] === 'string' && params['sessionId'] !== this.sessionId) return;
     switch (method) {
+      case 'usage/changed': {
+        const usage = museQuotaReading(params);
+        if (usage) this.quotaSink?.(usage.reading, usage.observedAt);
+        return;
+      }
       case 'session/modelChanged':
         if (typeof params['modelId'] === 'string') this.modelId = params['modelId'];
         return;

@@ -67,6 +67,8 @@ export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
+  /** Exhausted quotas with read-only extras for visual checks. */
+  quotaExtras?: boolean;
   /**
    * Characters per streamed delta, like the echo driver's 16, so a per-delta
    * cost shows. Unset streams an answer in five deltas; `?fake=1&stream=tokens` sets 16.
@@ -193,6 +195,7 @@ export class FakeContext {
   readonly delayMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
+  readonly quotaExtras: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
    * have a subject (`provider-installs.ts`).
@@ -200,6 +203,7 @@ export class FakeContext {
   readonly harnessUpdates: HarnessUpdate[] = initialHarnessUpdates();
 
   constructor(options: FakeClientOptions = {}) {
+    this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
     this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { readCodexQuota } from '../src/drivers/codex.ts';
+import { codexQuotaDetails } from '../src/quota-details.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -177,6 +179,22 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('quota reads preserve reset counts and balances without starting a turn or redeeming credits', async () => {
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota:${accountId}`;
+    const raw = await readCodexQuota({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined });
+    await core.procs.stopAndWait(threadId);
+    expect(codexQuotaDetails(raw)).toEqual({ resetCredits: { availableCount: 2, nextExpiresAt: null },
+      credits: { kind: 'balance', enabled: null, remaining: 42.5, limit: null, unlimited: false } });
+    const lines = fakeLog().trim().split('\n');
+    expect(lines).toEqual(['initialize', 'initialized', 'account/rateLimits/read {}']);
+  });
   test('viewing prepares one session without a turn and reuses it with retention disabled', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
