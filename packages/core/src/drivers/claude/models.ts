@@ -37,7 +37,7 @@ export async function readClaudeModels(ctx: ProbeContext, deps: ClaudeDeps): Pro
       // The family and version alone, as the other providers name theirs: `Opus 5.5`, never `Claude Opus 5.5`.
       // Older CLIs put the version in the description and a bare `Opus` in the display name.
       const versioned = (name: string) => name.match(/^(?:Claude\s+)?((?:Fable|Opus|Sonnet|Haiku)\s+\d+(?:\.\d+)*)(?:\b|$)/i)?.[1];
-      const name = known?.name ?? versioned(row.displayName) ?? versioned(row.description) ?? (row.displayName.trim().replace(/^Claude(?:\s+|$)/i, '').trim() || id);
+      const name = versioned(row.displayName) ?? versioned(row.description) ?? known?.name ?? (row.displayName.trim().replace(/^Claude(?:\s+|$)/i, '').trim() || id);
       const levels = row.supportsEffort ? (row.supportedEffortLevels ?? []).map(id => ({ id: String(id), label: id === 'xhigh' ? 'Extra high' : id.charAt(0).toUpperCase() + id.slice(1) })) : [];
       if (row.supportsAdaptiveThinking) levels.push({ id: 'ultrathink', label: 'Ultrathink' });
       return { id, name: id.includes('[1m]') ? `${name} (1M)` : name,

@@ -352,7 +352,7 @@ describe('claude driver', () => {
 test('Claude discovery reports only its model capabilities, caches and refreshes without a prompt', async () => {
   scripted(fake => { fake.modelsAnswer = [
     { value: 'default', resolvedModel: 'claude-opus-5', displayName: 'Default (recommended)', description: '', supportsFastMode: true },
-    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'Opus 5 with 1M context', supportsEffort: true, supportedEffortLevels: ['low', 'high'], supportsAdaptiveThinking: true, supportsFastMode: true },
+    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'Opus 5.5 with 1M context', supportsEffort: true, supportedEffortLevels: ['low', 'high'], supportsAdaptiveThinking: true, supportsFastMode: true },
     { value: 'haiku', displayName: 'Haiku', description: '', supportsEffort: false, supportsFastMode: false },
     // The shape Claude Code 2.1 answers for a model the descriptor does not list yet.
     { value: 'claude-opus-5-5', resolvedModel: 'claude-opus-5-5', displayName: 'Opus 5.5', description: 'Most capable for ambitious work' },
@@ -365,7 +365,7 @@ test('Claude discovery reports only its model capabilities, caches and refreshes
   const id = await claudeThread(client);
   const accountId = (await client.call('threads.get', { threadId: id })).accountId;
   const result = await client.call('providers.probe', { providerId: 'claude', accountId });
-  expect(result.models[0]?.name).toBe('Opus 5');
+  expect(result.models[0]?.name).toBe('Opus 5.5');
   expect(result.models.some(model => /default/i.test(model.name))).toBe(false);
   expect(result.models.some(model => model.id === 'claude-opus-4-8')).toBe(false);
   expect(result.models.every(model => !model.legacy)).toBe(true);

@@ -32,6 +32,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           resetPullRequestSupport(client);
           models.probeEpoch++;
           models.probeAttempts.clear();
+          models.probeTimes.clear();
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
@@ -239,12 +240,14 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.probedModels = {};
     models.probeEpoch++;
     models.probeAttempts.clear();
+    models.probeTimes.clear();
     models.effortAttempts.clear();
     models.saveModels();
   });
   on('providers.probed', ({ providerId, accountId, models: probed }) => {
     s.probedModels = { ...s.probedModels, [probeKey(providerId, accountId)]: probed };
     models.probeAttempts.add(probeKey(providerId, accountId));
+    models.probeTimes.set(probeKey(providerId, accountId), Date.now());
     models.saveModels();
   });
   on('project.added', (project) => {

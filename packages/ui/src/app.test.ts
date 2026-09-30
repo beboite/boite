@@ -467,12 +467,17 @@ test('past twelve models the column gets a search field, prefix groups and keybo
 
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
-  // Claude lists ten models: short enough to stay a plain list.
-  expect(document.querySelector('[data-testid=picker-search]')).toBeNull();
+  // Search is available even on the shorter Claude list.
+  expect(document.querySelector('[data-testid=picker-search]')).not.toBeNull();
+  await type(query<HTMLInputElement>('[data-testid=picker-search]'), 'opus 4.8');
+  await waitFor(() => shownModels().length === 1);
+  expect(shownModels()).toEqual(['claude-opus-4-8']);
+  expect(document.querySelector('[data-testid=picker-legacy]')).toBeNull();
 
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
   await waitFor(() => document.querySelector('[data-testid=picker-search]') !== null);
+  await waitFor(() => shownModels().length === 22);
   expect(shownModels().length).toBe(22);
   expect(groupLabels().sort()).toEqual(['anthropic', 'nvidia', 'openai', 'opencode', 'openrouter']);
   // The column opens on a long list, so the field already has the caret.
