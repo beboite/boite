@@ -412,7 +412,7 @@ export function threadMethods(ctx: FakeContext) {
         else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
       }
       const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
-      return structuredClone({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const });
+      return structuredClone({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
     },
     'threads.fork': async (params) => {
       const source = ctx.thread(params.threadId);

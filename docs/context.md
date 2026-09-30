@@ -94,6 +94,24 @@ refusal leaves its text intact instead of queuing a duplicate. Navigating while
 the rewind is pending still sends the replacement to the original thread on
 its owning machine.
 
+The core saves private file checkpoints before and after each conversation
+turn, for every driver. Editing restores the changes made by the removed
+turns before truncating their messages. It preserves unrelated files and
+refuses a conflict with outside edits before changing either files or history.
+Git projects include tracked files and non-ignored untracked files; HEAD and
+the index stay unchanged. Other projects use a bounded file walk, excluding
+`.git`, `.boite`, `.agents`, `node_modules`, `AGENTS.md` and `.env` files.
+Backups include binary content, deletions, creations, permissions and symlinks,
+stored under the core data directory with content deduplicated per thread.
+They survive restarts and leave with a permanently removed project or thread.
+
+Each snapshot is limited to 20000 files, 16 MiB per file and 128 MiB total.
+Old turns without backups, overlapping turns in the same workspace, a cut
+inside a running turn and incomplete snapshots cannot restore code. The rewind
+answers `files: { status, count, reason? }`; `status` is `restored`, `unchanged`
+or `unavailable`. The client shows a warning for unavailable backups rather
+than claiming that the code was restored.
+
 `threads.fork { threadId, messageId, worktree? }` copies the history up to and
 including any finished message into a new thread titled after the source with
 ` (fork)`. The source is left as it was. `worktree: true` makes the worktree

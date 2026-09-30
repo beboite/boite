@@ -401,11 +401,14 @@ describe('grok', () => {
     expect(loggedLines('interject ')).toEqual([JSON.stringify('> Which database?\n\nSQLite')]);
     expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
     const thread = await client.call('threads.get', { threadId });
-    const parts = thread.messages[thread.messages.length - 1]?.parts ?? [];
+    const parts = thread.messages.filter(message => message.role === 'assistant').at(-1)?.parts ?? [];
     const text = parts.find((part) => part.type === 'text');
     expect(text?.type === 'text' ? text.text : '').toBe('heard: > Which database?\n\nSQLite');
     // Taken in the turn: no second turn carries it again.
-    expect(thread.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+    const prompts = thread.messages.filter(message => message.role === 'user');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]!.parts).toEqual([{ type: 'text', text: '> Which database?\n\nSQLite' }]);
+    expect(new Set(prompts.map(message => message.turnId)).size).toBe(1);
   });
 
   test('an older Grok without _x.ai/interject holds the answer for the turn after', async () => {
