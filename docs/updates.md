@@ -84,7 +84,12 @@ manual reinstall. Its hooks (`windows/hooks.nsh` and
 `windows/stop-core.ps1`) first close a running shell, with the installer's own
 "Boite is running" question: an open window would start the core again within
 seconds, from the file about to be replaced. They then find the
-`boite-core.exe` processes running that install's exact file. A busy,
+`boite-core.exe` processes running that install's exact file, plus a core
+hosted by `bun.exe` when its PID matches `core.json` and its parsed arguments
+name that install's `core/main.js` and data directory. Other Bun processes
+are left alone. Accepting the interactive Kill prompt also authorizes stopping
+that resident core, including an older core without idle admission. Silent
+and passive installations still require idle admission. In those modes a busy,
 unreachable or older core without idle admission aborts installation before
 files are replaced. An admitted core that has not exited after 15 seconds also
 aborts installation. Explicit uninstall still requests ordinary shutdown and
@@ -97,8 +102,8 @@ without one.
 `scripts/ci/stop-core.test.ts` also runs the stop script directly, without a
 packaged shell, and checks that busy and legacy cores remain running.
 
-The first upgrade from a core without idle admission needs an explicit stop
-after its work finishes, followed by a manual installer. An older in-app
+The first silent upgrade from a core without idle admission needs an explicit
+stop after its work finishes, followed by a manual installer. An older in-app
 updater retains its previous interrupting behavior until it is replaced.
 This change postpones replacement of the whole application; it does not load
 a new core or UI alongside agents executing on the old version.
@@ -112,8 +117,11 @@ The custom NSIS template and its upstream version are documented in
 `apps/shell/src-tauri/windows/VENDOR.md`.
 
 When the new shell starts, it reads the version the running core reports on
-`/health`. A core of another version, left by an install that could not stop
-it, is stopped and replaced by the core shipped with the shell.
+`/health`. For Windows split bundles it also compares the entry file's SHA-256
+with the hash captured by the core at startup. A previous bundle is replaced
+even when a reinstall keeps the same version number. A legacy core without a
+hash is also replaced when this install has a split bundle. Compiled sidecars
+and source runs continue to compare versions.
 
 Offline checks, missing releases, signature failures and installation failures
 appear in the card with a retry action. They do not display a system dialog or

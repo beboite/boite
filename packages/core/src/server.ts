@@ -363,7 +363,7 @@ export function startServer(options: ServerOptions): RunningServer {
       }
 
       if (url.pathname === '/health') {
-        return Response.json({ ok: true, version: core.version, pid: process.pid });
+        return Response.json({ ok: true, version: core.version, pid: process.pid, bundleHash: core.bundleHash });
       }
 
       if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);

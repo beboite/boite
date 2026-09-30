@@ -56,7 +56,7 @@ pub(super) fn resolve_core(state: &CoreState) -> Result<(CoreEndpoint, Option<u3
     let mut before = None;
     match read_core_file(&file) {
         Ok(Some(existing)) => {
-            match probe(&existing, &launch.version) {
+            match probe(&existing, &launch.version, launch.bundle_hash.as_deref()) {
                 Probe::Current => return Ok((endpoint_of(&existing), existing.pid)),
                 Probe::Stale(version) => {
                     eprintln!("[shell] the running core is version {version} and this shell {}: stopping it", launch.version);

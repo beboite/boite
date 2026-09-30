@@ -1321,7 +1321,11 @@ shellTest(
   async () => {
     // A core that was already answering when the shell opened is nobody's
     // child and is in no Job Object of the shell's: quitting must not touch it.
-    const adopted = await startCore();
+    // Adoption requires the installed bundle's identity. A source core has
+    // no bundle hash and is intentionally replaced by a split-bundle shell.
+    const command = [join(dirname(EXE), `boite-core${CORE_SUFFIX}`)];
+    if (process.platform === 'win32') command.push(join(dirname(EXE), 'core', 'main.js'));
+    const adopted = await startCore({ command });
     const debugPort = await freePort();
     let shell = 0;
     let shellPage: BrowserPage | undefined;

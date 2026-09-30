@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { Channel, PairingGrant, PairingRole, Settings } from '@boite/contracts';
 import { processIo, runCli } from './cli.ts';
 import { connect } from './client.ts';
@@ -316,7 +317,12 @@ export function main(argv: string[]): void {
   const token = previous.token ?? newToken();
   let core: Core;
   try {
-    core = new Core({ dataDir, token, channel: flags.channel, onShutdown: () => shutdown() });
+    // Windows ships a Bun runtime and a split bundle. Capture what this run
+    // loaded now; reading it on /health after a reinstall would describe new code.
+    const entry = process.argv[1];
+    const bundleHash = entry?.endsWith('.js') && existsSync(entry)
+      ? createHash('sha256').update(readFileSync(entry)).digest('hex') : undefined;
+    core = new Core({ dataDir, token, channel: flags.channel, bundleHash, onShutdown: () => shutdown() });
   } catch (error) {
     // A journal from a newer release, among others: say why and leave the data as it is.
     unlock();
