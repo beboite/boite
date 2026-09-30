@@ -88,7 +88,13 @@ test('git checkpoints restore the dirty starting state without changing HEAD, th
   await writeFile(join(cwd, '.gitignore'), 'ignored.txt\n');
   await writeFile(join(cwd, 'app.ts'), 'staged');
   expect((await git(h.core, threadId, cwd, ['add', '.'])).code).toBe(0);
-  expect((await git(h.core, threadId, cwd, ['commit', '--quiet', '-m', 'fixture'])).code).toBe(0);
+  // The fixture must not depend on the runner having a configured Git identity.
+  const committed = Bun.spawnSync({
+    cmd: ['git', 'commit', '--quiet', '-m', 'fixture'], cwd,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  if (!committed.success) throw new Error(committed.stderr.toString());
   await writeFile(join(cwd, 'app.ts'), 'dirty staged');
   expect((await git(h.core, threadId, cwd, ['add', 'app.ts'])).code).toBe(0);
   await writeFile(join(cwd, 'app.ts'), 'dirty unstaged');
