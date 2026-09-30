@@ -344,13 +344,21 @@ jobs:
             }
           }
           Write-Host "Worker scenarios: $failures failures"
-          $polling = $originalJobs.Replace('function ensureWorker(port: number): void {', "function ensureWorker(port: number): void { workerFailure = 'diagnostic polling'; startPolling(); return;")
+          $polling = $originalJobs.Replace('function ensureNative(): Native | null {', "function ensureNative(): Native | null { return null;")
           Set-Content $jobsPath $polling
           for ($i = 1; $i -le 3; $i++) {
-            Write-Host "Polling comparison $i"
+            Write-Host "No FFI comparison $i"
             bun test packages/core/test/thread-remove.test.ts
           }
           Set-Content $jobsPath $originalJobs
+          $procsPath = 'packages/core/src/procs.ts'
+          $originalProcs = Get-Content $procsPath -Raw
+          Set-Content $procsPath ($originalProcs.Replace('const usage = entry.usage();', 'const usage = null;'))
+          for ($i = 1; $i -le 3; $i++) {
+            Write-Host "No Bun resourceUsage comparison $i"
+            bun test packages/core/test/thread-remove.test.ts
+          }
+          Set-Content $procsPath $originalProcs
           if ($failures -gt 0) { throw "$failures native reproductions failed" }
 
   required:

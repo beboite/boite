@@ -46,7 +46,7 @@ scope.onmessage = (event: { data: unknown }): void => {
   try {
     symbols = dlopen('kernel32.dll', {
       GetQueuedCompletionStatus: {
-        args: [FFIType.u64, FFIType.buffer, FFIType.buffer, FFIType.buffer, FFIType.u32],
+        args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32],
         returns: FFIType.i32,
       },
       OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.u64 },

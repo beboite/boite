@@ -86,9 +86,9 @@ const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 function loadKernel32() {
   return dlopen('kernel32.dll', {
     CreateJobObjectW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
-    SetInformationJobObject: { args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32], returns: FFIType.i32 },
+    SetInformationJobObject: { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     QueryInformationJobObject: {
-      args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32, FFIType.ptr],
+      args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32, FFIType.ptr],
       returns: FFIType.i32,
     },
     AssignProcessToJobObject: { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 },
@@ -99,16 +99,16 @@ function loadKernel32() {
     OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.u64 },
     CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
     GetLastError: { args: [], returns: FFIType.u32 },
-    QueryFullProcessImageNameW: { args: [FFIType.u64, FFIType.u32, FFIType.buffer, FFIType.buffer], returns: FFIType.i32 },
-    GetExitCodeProcess: { args: [FFIType.u64, FFIType.buffer], returns: FFIType.i32 },
+    QueryFullProcessImageNameW: { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
+    GetExitCodeProcess: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
     GetProcessTimes: {
-      args: [FFIType.u64, FFIType.buffer, FFIType.buffer, FFIType.buffer, FFIType.buffer],
+      args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
       returns: FFIType.i32,
     },
-    K32GetProcessMemoryInfo: { args: [FFIType.u64, FFIType.buffer, FFIType.u32], returns: FFIType.i32 },
-    GetProcessIoCounters: { args: [FFIType.u64, FFIType.buffer], returns: FFIType.i32 },
+    K32GetProcessMemoryInfo: { args: [FFIType.u64, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+    GetProcessIoCounters: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
     ReadProcessMemory: {
-      args: [FFIType.u64, FFIType.u64, FFIType.buffer, FFIType.u64, FFIType.buffer],
+      args: [FFIType.u64, FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.ptr],
       returns: FFIType.i32,
     },
   });
@@ -117,7 +117,7 @@ function loadKernel32() {
 function loadNtdll() {
   return dlopen('ntdll.dll', {
     NtQueryInformationProcess: {
-      args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32, FFIType.buffer],
+      args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32, FFIType.ptr],
       returns: FFIType.i32,
     },
   });
