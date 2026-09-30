@@ -1691,8 +1691,9 @@ export const strings = {
   experiments: {
     whip: {
       title: 'Whip',
-      hint: 'A button at the bottom left shakes the Boite window with each hit. In a browser or maximized window, it shakes the whole interface. Respects reduced motion',
-      action: 'Whip'
+      hint: 'An animated whip follows your pointer or finger. Flick to crack it, click or tap to let go. The icon sits with the bottom controls. Respects reduced motion',
+      action: 'Throw the whip',
+      drop: 'Drop the whip'
     },
     chatArtifacts: { title: 'Chat files and previews', hint: 'Open file links and preview files returned by an agent in the conversation' },
     previewComments: { title: 'Preview comments', hint: 'Select an element in the integrated browser and add feedback to the conversation draft' },

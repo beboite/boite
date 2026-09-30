@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WhipButton from './WhipButton.svelte';
   import { Activity, ArrowLeft, Bot, ChevronDown, Ellipsis, MessageSquare, PencilLine, Pin, Plus, Search, Settings } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
@@ -169,6 +170,7 @@
 {/if}
 
 <div class="mobile-navigation">
+  {#if experimentOn('whip')}<WhipButton mobile onerror={error => { store.error = error instanceof Error ? error.message : String(error); }} />{/if}
   {#if experimentOn('resident-agents')}<button class="ghost icon agents-launcher" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="mobile-agents" onclick={() => store.showAgents()}><Bot size={20} /></button>{/if}
   <nav class="mobile-tabs" aria-label={strings.mobile.navigation} data-testid="mobile-tabs">
   <button class="ghost" class:active={store.page === 'chat' && screen !== 'activity'} aria-current={store.page === 'chat' && screen !== 'activity' ? 'page' : undefined} data-testid="mobile-conversations" onclick={() => show('threads')}><MessageSquare size={20} /><span>{strings.mobile.threads}</span></button>
