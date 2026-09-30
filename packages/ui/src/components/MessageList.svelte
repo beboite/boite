@@ -15,6 +15,7 @@
   import MoveMarker from './MoveMarker.svelte';
   import SpawnMarker from './SpawnMarker.svelte';
   import MemoryRow from './MemoryRow.svelte';
+  import { placeMemoryEvents } from '../lib/memory-timeline';
   import MessageActions from './MessageActions.svelte';
   import { turnAnswer } from '../lib/message-display';
   import { focusComposer } from '../lib/focus';
@@ -73,7 +74,8 @@
     const memory: Message[] = [...memoryRows].map(([id, event]) => ({ id, threadId, turnId: id, role: 'system', parts: [], state: 'complete', createdAt: event.at }));
     return [...visible, ...forwarded, ...activity, ...runs, ...memory].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   });
-  const memoryRows = $derived(new Map((store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []).map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
+  const memoryPlacement = $derived(placeMemoryEvents(messages, store.openThread?.id === threadId ? store.openThread.memoryEvents ?? [] : store.delegationThread?.id === threadId ? store.delegationThread.memoryEvents ?? [] : []));
+  const memoryRows = $derived(new Map(memoryPlacement.standalone.map((event, index) => [`memory:${event.at}:${event.kind}:${index}`, event])));
   const timelineOrder = $derived(timeline.map(message => message.id).join('\0'));
   const savedReading = untrack(() => store.readingPositions?.get(threadId));
 
@@ -595,7 +597,7 @@
           {:else if letter && letterSelf(letter)}
             <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
           {:else if memoryRows.has(message.id)}
-            <MemoryRow event={memoryRows.get(message.id)!} />
+            <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}
             <MoveMarker notice={movedBy(message)!} />
           {:else if startedFrom(message)}
@@ -603,7 +605,7 @@
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
-            <AssistantMessage {store} {threadId} {message} {progress} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} />
+            <AssistantMessage {store} {threadId} {message} {progress} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} memoryEvents={memoryPlacement.inline.get(message.id) ?? []} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />

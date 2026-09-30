@@ -1193,6 +1193,7 @@ export interface MemoryStatus {
   state: MemoryState;
   agentBytes: number;
   availableBytes: number | null;
+  /** All zero when protection is off; usage readings remain available. */
   limits: { budgetMb: number; threadMemoryCapMb: number; memoryReserveMb: number };
 }
 
@@ -1203,6 +1204,8 @@ interface MemoryEventBase {
   bytes?: number;
   state: MemoryState;
   at: number;
+  /** Insert after the parts present when this notice arrived, including after reload. */
+  anchor?: { messageId: MessageId; partIndex: number };
 }
 
 export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
@@ -1246,6 +1249,8 @@ export interface Settings {
   threadMemoryCapMb: number;
   /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
   memoryReserveMb: number;
+  /** Automatic memory stops and Windows allocation caps. Missing means enabled. */
+  memoryProtection?: boolean;
   /**
    * Windows of agent processes never keep the foreground: one that takes it is
    * sent to the bottom without activation and the window the user was on gets

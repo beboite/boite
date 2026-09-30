@@ -157,9 +157,9 @@ test.each([
 test('memory percentage travels between machines but the reserve stays local', async () => {
   const from = await machine(); const to = await machine();
   try {
-    await from.call('settings.set', { agentMemoryBudgetPercent: 35, memoryReserveMb: 4096 });
+    await from.call('settings.set', { agentMemoryBudgetPercent: 35, memoryReserveMb: 4096, memoryProtection: false });
     await to.call('settings.set', { memoryReserveMb: 512 });
     await syncSettings(await end(from), await end(to));
-    expect(await to.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 35, memoryReserveMb: 512 });
+    expect(await to.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 35, memoryReserveMb: 512, memoryProtection: false });
   } finally { from.close(); to.close(); }
 });

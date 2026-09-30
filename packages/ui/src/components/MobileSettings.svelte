@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Monitor, Palette, Mic } from '@lucide/svelte';
+  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -9,6 +9,7 @@
   import AppearancePage from './AppearancePage.svelte';
   import ExperimentsPage from './ExperimentsPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
+  import ResourcesPage from './ResourcesPage.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
   import UsagePage from './UsagePage.svelte';
@@ -28,7 +29,7 @@
   let archived = $state(false);
   let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
-  let page = $derived((store.owner && store.settingsTab === 'brain') || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
+  let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
     ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
@@ -36,6 +37,7 @@
     : page === 'worktrees' ? strings.settings.worktrees.heading
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
+    : page === 'resources' ? strings.settings.tabs.resources
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
   let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}` : page === 'limits' ? strings.usage.limitsIntro
@@ -89,6 +91,11 @@
           <button class="ghost row" data-testid="settings-tab-limits" onclick={() => store.showSettings('limits')}>
             <Gauge size={20} /><span>{strings.usage.limits}</span><ChevronRight size={18} />
           </button>
+          {#if store.owner}
+            <button class="ghost row" data-testid="settings-tab-resources" onclick={() => store.showSettings('resources')}>
+              <ShieldCheck size={20} /><span>{strings.settings.tabs.resources}</span><ChevronRight size={18} />
+            </button>
+          {/if}
           <button class="ghost row" data-testid="mobile-settings-archived" onclick={() => { archived = true; }}>
             <ArchiveRestore size={20} /><span>{strings.settings.archived.heading}</span><ChevronRight size={18} />
           </button>
@@ -125,6 +132,8 @@
         <UsagePage {store} />
       {:else if page === 'limits'}
         <LimitsPage {store} />
+      {:else if page === 'resources' && store.owner}
+        <ResourcesPage {store} />
       {:else if page === 'experiments'}
         <ExperimentsPage />
       {:else if page === 'worktrees'}

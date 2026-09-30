@@ -213,10 +213,15 @@ export class FakeClient implements ObservableClient {
     ctx.memoryState = event.state;
     ctx.emit('resources.memory', structuredClone(event));
     if (event.threadId === null) return;
-    const thread = ctx.threads.get(event.threadId);
+    const threadId = event.threadId;
+    const thread = ctx.threads.get(threadId);
     if (!thread) return;
+    const message = thread.messages.at(-1);
+    if (!event.anchor && message?.role === 'assistant' && message.state === 'streaming') {
+      event = { ...event, anchor: { messageId: message.id, partIndex: message.parts.length } };
+    }
     thread.memoryEvents = [...(thread.memoryEvents ?? []), event].slice(-100);
-    ctx.emitToThread(event.threadId, 'thread.memory', { ...event, threadId: event.threadId });
+    ctx.emitToThread(threadId, 'thread.memory', { ...event, threadId });
   }
 
   /**

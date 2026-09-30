@@ -34,11 +34,18 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('phone settings separate device preferences from remote administration, including owner sessions', async () => {
+test('phone settings expose owner protection and keep paired devices out of remote administration', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await page.click('[data-testid=mobile-settings]');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') !== null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
+  await page.click('[data-testid=settings-tab-resources]');
+  await page.waitFor(`document.querySelector('[data-testid=setting-memory-protection]')`);
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('session'); store.principal='session'; })()`);
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]') === null`);
+  await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('owner'); store.principal='owner'; })()`);
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]')`);
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);

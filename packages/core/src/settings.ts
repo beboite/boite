@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentMemoryBudgetPercent: 60,
   threadMemoryCapMb: 0,
   memoryReserveMb: 0,
+  memoryProtection: true,
   focusGuard: true,
   muteAgents: true,
   reapOrphans: true,

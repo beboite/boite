@@ -4,7 +4,8 @@ import type { ProcessLimits } from './platform/types.ts';
 type MemoryLimits = Pick<ProcessLimits, 'budgetMb' | 'threadMemoryCapMb' | 'memoryReserveMb'>;
 
 /** Resolve auto values once for the kernel limits and the pressure governor. */
-export function resolveMemoryLimits(settings: Pick<Settings, 'agentMemoryBudgetPercent' | 'threadMemoryCapMb' | 'memoryReserveMb'>, totalBytes: number): MemoryLimits {
+export function resolveMemoryLimits(settings: Pick<Settings, 'agentMemoryBudgetPercent' | 'threadMemoryCapMb' | 'memoryReserveMb' | 'memoryProtection'>, totalBytes: number): MemoryLimits {
+  if (settings.memoryProtection === false) return { budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 };
   const totalMb = totalBytes / (1024 * 1024);
   const roundDown = (mb: number): number => Math.floor(mb / 256) * 256;
   const budgetMb = roundDown(totalMb * settings.agentMemoryBudgetPercent / 100);

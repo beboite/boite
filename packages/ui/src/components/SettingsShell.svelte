@@ -139,6 +139,7 @@
     ['accounts', null, strings.harnessUpdates.auto],
     ['resources', 'quiet', strings.settings.focusGuard],
     ['resources', 'quiet', strings.settings.muteAgents],
+    ['resources', 'limits', strings.settings.memoryProtection],
     ['resources', 'tasks', strings.settings.reapOrphans],
     ['machines', 'devices', strings.settings.listenOnLan],
     ['machines', 'devices', strings.settings.pairing.mint],

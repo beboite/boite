@@ -4,6 +4,7 @@ import { MemoryGuard, memoryNotice } from '../src/memory-guard.ts';
 import { Bus } from '../src/bus.ts';
 import { createPosixPlatform } from '../src/platform/posix.ts';
 import { DEFAULT_SETTINGS } from '../src/settings.ts';
+import type { MemoryEvent } from '@boite/contracts';
 
 const sample = (patch: Partial<MemorySample> = {}): MemorySample => ({
   availableBytes: 1000, reserveBytes: 100, budgetBytes: 5000, quotaBytes: 2000,
@@ -12,6 +13,30 @@ const sample = (patch: Partial<MemorySample> = {}): MemorySample => ({
 const child = (pid: number, bytes: number, root = false, threadId = 'thread') => ({ threadId, pid, exe: 'child', bytes, root });
 
 describe('memory policy', () => {
+  test('disabling stops kills and notices immediately, keeps usage and resets the cooldown on reenable', () => {
+    const bus = new Bus();
+    const events: MemoryEvent[] = [];
+    const guard = new MemoryGuard(bus, { ...createPosixPlatform('linux'), machineMemory: () => ({ totalBytes: 32 * 1024 ** 3, availableBytes: 0 }) });
+    bus.onAny((name, payload) => { if (name === 'resources.memory') events.push(payload as MemoryEvent); });
+    const processes = [child(1, 100, true), child(2, 300)];
+    let kills = 0;
+    const kill = () => { kills++; return true; };
+    guard.applySettings(DEFAULT_SETTINGS);
+    guard.sample(400, processes, kill);
+    expect(kills).toBe(1);
+    guard.applySettings({ ...DEFAULT_SETTINGS, memoryProtection: false });
+    expect(events.at(-1)).toMatchObject({ kind: 'pressure', state: 'ok' });
+    const count = events.length;
+    guard.sample(500, processes, kill);
+    guard.memoryLimit('thread', 'thread-cap');
+    expect(kills).toBe(1);
+    expect(events).toHaveLength(count);
+    expect(guard.status()).toMatchObject({ state: 'ok', agentBytes: 500, limits: { budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 } });
+    guard.applySettings(DEFAULT_SETTINGS);
+    guard.sample(400, processes, kill);
+    expect(kills).toBe(2);
+    bus.dispose();
+  });
   test('kills the largest non-root of each thread over quota', () => {
     const processes = [child(1, 2500, true), child(2, 400), child(3, 300), child(4, 900, false, 'other')];
     const result = decideMemory(initialMemoryPolicy(), sample({ processes }));

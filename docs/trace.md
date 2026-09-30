@@ -230,10 +230,26 @@ the mixer and silence in the speakers.
 
 ## Turning them off
 
-All three live under Settings, Protection, and all three are on by default.
+Process protections live under Settings, Protection, and are on by default.
+Under Limits, "Protect available memory" controls automatic memory stops and
+the Windows allocation caps. Turning it off applies immediately to running
+conversations and keeps the configured budget, quota and reserve for later.
+The operating system can still refuse an allocation or stop a process.
+Zero in the quota or reserve fields means automatic sizing, not disabled.
+Memory readings remain visible with protection off.
+
+Memory notices appear beside the interrupted tool in a response. New notices
+persist their message and part boundary so later output and reopening cannot
+move them to the end. Older notices use tool timestamps when available.
+Consecutive stops at the same boundary with the same reason and threshold
+share a compact row, with the process list folded underneath. The row links
+to this machine's memory settings for owners.
+Owner connections also have the Protection page in the mobile settings menu.
+Paired devices retain their existing permissions and cannot change core settings.
 
 | Setting | Effect when off |
 |---|---|
+| `memoryProtection` | automatic memory stops and Windows global and conversation allocation caps are removed |
 | `focusGuard` | an agent's window keeps the foreground it took |
 | `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
 | `reapOrphans` | what a thread leaves running after its turn runs until the thread's tree is killed or the core exits |
