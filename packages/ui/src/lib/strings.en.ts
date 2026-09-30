@@ -470,10 +470,12 @@ export const strings = {
     delete: 'Delete',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
     deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
+    archiveTitle: 'Archive this thread?',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
     archivedToast: 'Archived "{title}"',
     undo: 'Undo',
     undoHint: 'Undo (Ctrl+Z)',
+    archiveBody: 'Its agent stops, its sub-threads stop with it, and the questions waiting for an answer are dropped. Archived threads, in Settings, brings the conversation back, not the work that was stopped.',
     draft: 'New thread'
   },
 

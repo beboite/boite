@@ -1,19 +1,45 @@
 import { tick } from 'svelte';
 import { closed } from './archive-history';
-import type { ProjectId, ThreadId, ThreadSummary } from '@boite/contracts';
+import type { ProjectId, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import { confirm } from './confirm.svelte';
 import { focusComposer } from './focus';
 import { fill, strings } from './strings';
 import { undo } from './undo.svelte';
 import { workspace } from './workspace.svelte';
 import type { Store } from './store.svelte';
 
+const LIVE: ThreadStatus[] = ['running', 'queued', 'waiting'];
+
 /**
- * The one way the UI archives a thread (row menu, title menu, palette). It goes
- * at once, live work included: the Undo toast, then the archived threads list
- * in Settings, bring the conversation back, not the work that was stopped.
- * Archived, the keyboard lands in the composer.
+ * Whether putting this thread away would cut work short: its own turn, a
+ * sub-thread still working, or a card waiting for an answer. Archiving stops
+ * all of it, and a restore brings none of it back.
+ */
+export function archiveInterrupts(store: Store, threadId: ThreadId): boolean {
+  const thread = store.threads.find((t) => t.id === threadId) ?? (store.openThread?.id === threadId ? store.openThread : null);
+  if (thread && LIVE.includes(thread.status)) return true;
+  if (store.threads.some((t) => t.parentThreadId === threadId && !t.archived && LIVE.includes(t.status))) return true;
+  return store.pendingPermissions.some((r) => r.threadId === threadId) || store.pendingQuestions.some((q) => q.threadId === threadId);
+}
+
+/**
+ * The one way the UI archives a thread (row menu, title menu, palette). A thread
+ * with live work asks first in the app's own dialog; an idle one goes at once,
+ * since the archived threads list in Settings brings it back. Archived, the
+ * keyboard lands in the composer; cancelled, the dialog gives it back to what
+ * had it. Never on the page, where Escape stops a turn.
  */
 export async function archiveThread(store: Store, threadId: ThreadId): Promise<boolean> {
+  if (archiveInterrupts(store, threadId)) {
+    const ok = await confirm.ask({
+      title: strings.sidebar.archiveTitle,
+      body: strings.sidebar.archiveBody,
+      confirmLabel: strings.sidebar.archive,
+      cancelLabel: strings.common.cancel,
+      danger: true
+    });
+    if (!ok) return false;
+  }
   const title = (store.threads.find((t) => t.id === threadId) ?? store.openThread)?.title ?? '';
   const wasOpen = store.openThread?.id === threadId;
   await store.archive(threadId);

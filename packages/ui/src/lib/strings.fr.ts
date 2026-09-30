@@ -469,9 +469,11 @@ export const fr: Translation = {
     delete: 'Supprimer',
     deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
     deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
+    archiveTitle: 'Archiver cette conversation ?',
     archivedToast: '« {title} » archivée',
     undo: 'Annuler',
     undoHint: 'Annuler (Ctrl+Z)',
+    archiveBody: "Son agent s'arrête, ses sous-conversations aussi, et les questions en attente de réponse sont abandonnées. Conversations archivées, dans les Réglages, ramène la conversation, pas le travail interrompu.",
     draft: 'Nouvelle conversation'
   },
 

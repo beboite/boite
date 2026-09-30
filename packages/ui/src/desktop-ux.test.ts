@@ -12,8 +12,8 @@ import { undo } from './lib/undo.svelte';
 
 /**
  * The desktop behaviours the UX audit found broken, on the whole app over the
- * in-memory fake: Escape that closed a popover also stopped the turn, machine
- * removal went through at one click, a failed Settings save said
+ * in-memory fake: Escape that closed a popover also stopped the turn, archive
+ * and machine removal went through at one click, a failed Settings save said
  * "Saved", and the sidebar neither floated live threads nor stopped repeating
  * the project under its own header.
  */
@@ -91,17 +91,35 @@ test('leaving a header rename with Escape hands the focus back to the title, not
   await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'thread-title');
 });
 
-test('archiving a thread that waits on the user goes at once, with no dialog, and Undo brings it back', async () => {
+test('archiving a thread that waits on the user asks first; cancel keeps it', async () => {
   await mountOnFake();
   await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
-  expect(await archiveThread(store, 't-bench')).toBe(true);
-  expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
-  expect(store.threads.some((t) => t.id === 't-bench' && !t.archived)).toBe(false);
-  await undo.take();
-  await waitFor(() => store.threads.find((t) => t.id === 't-bench')?.archived === false);
+  const archive = vi.spyOn(store, 'archive');
+  const answer = archiveThread(store, 't-bench');
+  await waitFor(() => document.querySelector('[data-testid=confirm-cancel]') !== null);
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  expect(await answer).toBe(false);
+  expect(archive).not.toHaveBeenCalled();
+  expect(store.threads.find((t) => t.id === 't-bench')?.archived).toBe(false);
 });
 
-test('a thread row menu closed with Escape hands the keyboard back to its button', async () => {
+test('Escape on the archive confirmation keeps the thread and hands the keyboard back to what had it', async () => {
+  await mountOnFake();
+  await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
+  const title = query('[data-testid=thread-title]');
+  title.focus();
+  const answer = archiveThread(store, 't-bench');
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-cancel');
+  vi.spyOn(store, 'busy', 'get').mockReturnValue(true);
+  const stop = vi.spyOn(store, 'stop').mockResolvedValue(undefined as never);
+  press(document.activeElement!, 'Escape');
+  expect(await answer).toBe(false);
+  await waitFor(() => document.activeElement === title);
+  flushSync();
+  expect(stop).not.toHaveBeenCalled();
+});
+
+test('a thread row menu closed with Escape, or by a pick whose dialog is cancelled, hands the keyboard back to its button', async () => {
   await mountOnFake();
   await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
   await waitFor(() => document.querySelector('[data-testid=thread-row][data-thread-id=t-bench]') !== null);
@@ -116,6 +134,15 @@ test('a thread row menu closed with Escape hands the keyboard back to its button
   await waitFor(() => document.activeElement === button);
   flushSync();
   expect(stop).not.toHaveBeenCalled();
+
+  button.click();
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive]') !== null);
+  query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
+  await waitFor(() => document.activeElement?.getAttribute('data-testid') === 'confirm-cancel');
+  query<HTMLButtonElement>('[data-testid=confirm-cancel]').click();
+  await waitFor(() => document.querySelector('[data-testid=confirm-dialog]') === null || document.activeElement === button);
+  await waitFor(() => document.activeElement === button);
+  expect(store.threads.find((t) => t.id === 't-bench')?.archived).toBe(false);
 });
 
 test('an archived thread comes back from Settings > General', async () => {
