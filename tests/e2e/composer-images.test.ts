@@ -37,6 +37,8 @@ test('pasted images have linked references and a preview that leaves the compose
     };
     expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toContain('[Image 1]');
     expect(await page.evaluate('document.querySelector("[data-testid=composer-input]").value')).toContain('[Image 2]');
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-image-open]").textContent.trim()')).toBe('');
+    expect(await page.evaluate('document.querySelector("[data-testid=composer-attachment]").title')).toContain('[Image 1]');
     await page.click('[data-testid=composer-image-open]');
     await page.waitFor('document.querySelector("[data-testid=composer-image-preview] img")?.naturalWidth === 960');
     expect(await page.evaluate('document.activeElement === document.querySelector("[data-testid=composer-input]")')).toBe(true);

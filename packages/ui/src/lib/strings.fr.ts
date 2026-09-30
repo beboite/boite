@@ -605,7 +605,7 @@ export const fr: Translation = {
   permissionMode: {
     default: 'Demander',
     acceptEdits: 'Modifier librement',
-    bypassPermissions: 'Autonome',
+    bypassPermissions: 'Auto',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },

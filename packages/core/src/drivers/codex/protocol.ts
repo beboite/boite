@@ -100,6 +100,8 @@ export interface CodexModel {
   isDefault?: boolean;
   supportedReasoningEfforts?: CodexReasoningEffortOption[];
   serviceTiers?: { id: string; name: string; description?: string }[];
+  /** Older catalogs advertised only the extra tier ids. */
+  additionalSpeedTiers?: string[];
   defaultReasoningEffort?: string;
 }
 

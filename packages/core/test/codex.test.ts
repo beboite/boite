@@ -395,6 +395,7 @@ describe('codex driver', () => {
     const { projectId, accountId } = await codexAccount(client);
     const models = (await client.call('providers.probe', { providerId: 'codex-fake', accountId })).models;
     expect(models.find(m => m.id === 'fake-smart')?.speeds?.map(s => s.id)).toEqual(['fast', 'ultrafast']);
+    expect(models.find(m => m.id === 'fake-fast')?.speeds?.map(s => s.id)).toEqual(['fast', 'ultrafast']);
     expect(models.find(m => m.id === 'fake-plain')?.speeds).toBeUndefined();
     const thread = await client.call('threads.create', { projectId, providerId: 'codex-fake', accountId, model: 'fake-smart', speed: 'ultrafast' });
     expect((await client.call('threads.get', { threadId: thread.id })).speed).toBe('ultrafast');

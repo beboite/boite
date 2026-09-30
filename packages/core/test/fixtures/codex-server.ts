@@ -160,6 +160,7 @@ const MODELS = [
     id: 'fake-fast',
     model: 'fake-fast',
     displayName: 'Fake Fast',
+    additionalSpeedTiers: ['fast', 'ultrafast'],
     description: 'the quick one',
     hidden: false,
     supportedReasoningEfforts: [
@@ -174,7 +175,7 @@ const MODELS = [
     id: 'fake-smart',
     model: 'fake-smart',
     displayName: 'Fake Smart',
-    serviceTiers: [{ id: 'fast', name: 'Fast', description: 'Priority processing' }, { id: 'ultrafast', name: 'Ultrafast', description: 'Access-controlled tier' }],
+    serviceTiers: [{ id: 'default', name: 'Standard' }, { id: 'fast', name: 'Fast', description: 'Priority processing' }, { id: 'ultrafast', name: 'Ultrafast', description: 'Access-controlled tier' }],
     description: 'the slow one',
     hidden: false,
     supportedReasoningEfforts: [

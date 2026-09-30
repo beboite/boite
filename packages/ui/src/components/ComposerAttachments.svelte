@@ -57,13 +57,12 @@
   {#each attachments as attachment, at (attachment)}
     {@const label = attachment.name ?? strings.composer.attachAlt}
     {@const pending = unresolvedAssetId(attachment)}
-    <div class="attachment" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : label}>
+    <div class="attachment" class:highlighted={highlighted === attachment} class:selected={visible === attachment && preview.shown} class:document={attachment.kind === 'file' || !!pending} data-testid="composer-attachment" title={pending ? strings.errors.draftAttachment : attachment.kind === 'image' ? `${imageLabel(images.indexOf(attachment) + 1)} · ${label}` : label}>
       {#if attachment.kind === 'image' && !pending}
         <button type="button" class="image-open" data-testid="composer-image-open"
           aria-label={fill(strings.composer.imagePreview, { image: imageLabel(images.indexOf(attachment) + 1) })}
           aria-expanded={visible === attachment && preview.shown} onclick={() => open(attachment)}>
           <img src="data:{attachment.mimeType};base64,{attachment.data}" alt={label} />
-          <span>{imageLabel(images.indexOf(attachment) + 1)}</span>
         </button>
       {:else}
         <FileText size={20} strokeWidth={1.5} />
@@ -95,7 +94,7 @@
   .attachment {
     position: relative;
     width: 88px;
-    height: 80px;
+    height: 64px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
@@ -104,8 +103,7 @@
   }
 
   .image-open { display: flex; flex-direction: column; gap: 0; width: 100%; height: 100%; padding: 0; border: none; border-radius: inherit; background: transparent; }
-  .image-open span { font-size: var(--text-xs); padding: 3px; }
-  .attachment .image-open img { height: 54px; object-fit: cover; }
+  .attachment .image-open img { height: 100%; object-fit: cover; }
   .attachment:hover, .attachment:focus-within, .attachment.highlighted, .attachment.selected { border-color: var(--color-accent); background: var(--color-accent-soft); }
   .attachment.highlighted { box-shadow: 0 0 0 2px var(--color-accent-soft); }
   .image-preview { margin: 10px 10px 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-background); animation: pop var(--dur-2) var(--ease-out-quint); }

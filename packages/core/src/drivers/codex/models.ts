@@ -71,12 +71,14 @@ function modelsFrom(provider: ProviderDescriptor, data: CodexModel[]): ModelInfo
     if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
     seen.add(id);
     const effort = effortOf(entry);
+    const tiers = entry.serviceTiers ?? entry.additionalSpeedTiers?.map(id => ({ id, name: effortLabel(id), description: undefined }));
+    const speeds = tiers?.filter(tier => tier.id !== 'default').map(tier => ({ id: tier.id, label: tier.name, ...(tier.description ? { description: tier.description } : {}) }));
     models.push({
       id,
       name: entry.displayName ?? id,
       default: entry.isDefault === true,
       ...(effort === null ? {} : { effort }),
-      ...(entry.serviceTiers?.length ? { speeds: entry.serviceTiers.filter(tier => tier.id !== "default").map(tier => ({ id: tier.id, label: tier.name, description: tier.description })) } : {}),
+      ...(speeds?.length ? { speeds } : {}),
     });
   }
   // Only the descriptor's own entry came back: the server said nothing useful.

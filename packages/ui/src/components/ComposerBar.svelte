@@ -17,6 +17,7 @@
   import { work } from '../lib/work-prefs.svelte';
   import { controlMenu } from '../lib/controls';
   import { contextLevel, contextPercent } from '../lib/tokens';
+  import { speedControl } from '../lib/model-speeds';
 
   /**
    * The row under the composer's box: the model, effort, mode and worktree
@@ -87,7 +88,8 @@
   // The reasoning chip belongs to the model the choice is on, and a model that
   // offers no scale (an agent that keeps its own) gets no chip at all.
   let effortLevels = $derived((store.modelOf(choice)?.effort?.levels ?? []).filter(level => provider?.protocol === 'claude-sdk' || level.id !== 'ultrathink'));
-  let speeds = $derived(store.modelOf(choice)?.speeds ?? []);
+  let speedOptions = $derived(speedControl(choice ? store.modelsOf(choice.providerId, choice.accountId) : [], choice));
+  let speeds = $derived(speedOptions.speeds);
   let activeEffort = $derived(choice?.effort ?? store.modelOf(choice)?.effort?.default ?? null);
 
   /** A null effort runs at the model's own default, not at a preset the client configured. */
@@ -138,7 +140,7 @@
       return;
     }
 
-    if (patch.speed !== undefined) { choice = { ...choice, speed: patch.speed }; store.remember(choice); return; }
+    if (patch.speed !== undefined) { choice = { ...choice, ...patch }; store.remember(choice); return; }
     // An effort alone: the model stays, so nothing else moves.
     if (patch.effort !== undefined) {
       if (patch.effort === choice.effort) return;
@@ -184,7 +186,7 @@
 
 <div class="bar" bind:this={bar}>
   {#key `${key}:${store.draft?.projectId ?? ''}`}
-  <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={choice?.speed ?? null} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick({ speed })} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
+  <ComposerOptions busy={picking} levels={effortLevels} effort={activeEffort} {speeds} speed={speedOptions.speed} {modes} modeLabel={(mode) => modeLabel(mode, provider)} modeHint={(mode) => modeHint(mode, provider)} mode={displayedMode} worktree={store.draft && draftRepository ? store.draft.worktree : null} {canAttach} onattach={() => picker?.click()} oneffort={pickEffort} onspeed={(speed) => void pick(speedOptions.pick(speed))} onmode={pickMode} onworktree={() => store.setDraftWorktree(!store.draft?.worktree)} />
   {/key}
   <div class="chips">
     <ModelPicker {store} {choice} disabled={picking} onpick={pick} />
@@ -194,7 +196,7 @@
 
     <div class="desktop-options">
     {#if effortLevels.length > 0 || speeds.length > 0}
-      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={choice?.speed ?? null} onspeed={(speed) => void pick({ speed })} />
+      <EffortSlider levels={effortLevels} active={activeEffort} onpick={pickEffort} {speeds} speed={speedOptions.speed} onspeed={(speed) => void pick(speedOptions.pick(speed))} />
     {/if}
 
     {#if modes.length > 0}
