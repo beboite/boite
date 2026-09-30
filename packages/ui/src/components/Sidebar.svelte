@@ -213,7 +213,8 @@
               >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
                   >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
-                >{/if}{#if multi}<span class="host" title={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
+                >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
+                  title={`${machine.label} · ${strings.connection[owner.connection]}`} aria-label={machine.label}><MachineIcon icon={machine.icon} os={owner.core?.os} /></span>{/if}
             </button>
             <button
               class="ghost small icon project-actions"
@@ -226,7 +227,7 @@
           <div class="fold" class:expanded={!collapsed} inert={collapsed}>
             <div class="rows">
               {#if draftHere}<DraftRow {owner} entry={draftHere} />{/if}
-              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={multi} />{/each}
+              {#each threads as thread (thread.id)}<ThreadCard {machine} {project} {thread} {now} hidden={collapsed} showProject={false} showMachine={false} />{/each}
               {#if threads.length === 0 && !draftHere}<p class="none">
                   {strings.sidebar.noThreads}
                 </p>{/if}
@@ -357,6 +358,10 @@
   .caret {
     display: flex;
     color: var(--color-subtle);
+  }
+  /* The rows under it carry no machine icon, so the header says the machine is unreachable. */
+  .host.offline {
+    color: var(--color-danger);
   }
   .caret {
     transform: rotate(90deg);
