@@ -156,13 +156,14 @@ describeWindows('windows job objects', () => {
     const mine = resources.find((entry) => entry.threadId === threadId);
     expect(mine?.live).toHaveLength(2);
 
+    // Process discovery and title updates can arrive before the first memory sample.
+    const measured = (entry: ThreadSummary) => entry.load?.processes === 2 && entry.load.memoryBytes > 0;
+    await until('a thread.updated carrying measured memory', () => loads.some(measured), 3000);
+    const pushed = loads.find(measured);
+    expect(pushed?.load?.memoryBytes).toBeGreaterThan(0);
     const thread = await client.call('threads.get', { threadId });
     expect(thread.load?.processes).toBe(2);
     expect(thread.load?.memoryBytes).toBeGreaterThan(0);
-
-    await until('a thread.updated carrying the load', () => loads.some((entry) => entry.load?.processes === 2), 3000);
-    const pushed = loads.find((entry) => entry.load?.processes === 2);
-    expect(pushed?.load?.memoryBytes).toBeGreaterThan(0);
     // The turn waits on the ping: a client replaces its row with the push, so the push keeps the row's clock.
     expect(pushed?.status).toBe('running');
     expect(pushed?.runningSince).toEqual(expect.any(Number));

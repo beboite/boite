@@ -114,7 +114,7 @@ test(
     await page.type(testid('composer-input'), 'browser thread [permission]');
     await clickWhenEnabled(testid('composer-send'));
 
-    await page.waitFor(`${textOf('thread-title')} === 'browser thread [permission]'`, 30_000);
+    await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`, 30_000);
     await page.waitFor(`document.querySelectorAll('${testid('thread-row')}').length === 1`);
     expect(await page.evaluate<boolean>(`!!document.querySelector('${testid('draft-row')}')`)).toBe(false);
   },
@@ -157,7 +157,7 @@ test(
 );
 
 test(
-  'the first finished turn gets the agent title, a rename keeps it, and the menu asks again',
+  'the first turn gets the agent title, a rename keeps it, and the menu asks again',
   async () => {
     // The echo agent's rule: its prefix and the first words of the prompt, the directive cut.
     await page.waitFor(`${textOf('thread-title')} === 'Echo: browser thread'`, 30_000);
@@ -668,11 +668,10 @@ test(
       // `permissions.list`.
       await page.navigate(pairingUrlOf(core));
       // The app opens on a draft; the waiting thread is one click away in the sidebar.
-      await page.waitFor(`Array.from(document.querySelectorAll('${testid('thread-row')}')).some((row) => row.textContent.includes('reloaded permission'))`, 30_000);
-      await page.evaluate<null>(
-        `(() => { Array.from(document.querySelectorAll('${testid('thread-row')}')).find((row) => row.textContent.includes('reloaded permission')).click(); return null; })()`,
-      );
-      await page.waitFor(`${textOf('thread-title')} === 'reloaded permission'`, 30_000);
+      const row = `[data-testid=thread-row][data-thread-id="${thread.id}"]`;
+      await page.waitFor(`document.querySelector(${JSON.stringify(row)})`, 30_000);
+      await page.click(row);
+      await page.waitFor(`${textOf('thread-title')} === 'Echo: reloaded'`, 30_000);
       await page.waitFor(`document.querySelector('${testid('permission-card')}')`, 30_000);
       await page.waitFor(`document.querySelector('${testid('permission-input')}')`, 30_000);
       expect(await page.text(testid('permission-input'))).toContain('echo');

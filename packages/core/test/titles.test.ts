@@ -278,11 +278,12 @@ describe('thread titles', () => {
 
     // A prompt of directives alone leaves the echo agent nothing to say: the
     // core cuts the prompt itself, and says so in `titleSource`.
+    // A manual name suppresses automatic naming, so this isolates regeneration.
+    await client.call('threads.update', { threadId, title: 'renamed' });
     await client.call('threads.subscribe', { threadId });
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, EVENT_TIMEOUT_MS);
     await client.call('turns.start', { threadId, prompt: '[tool]' });
     expect((await finished).status).toBe('done');
-    await client.call('threads.update', { threadId, title: 'renamed' });
     const back = await client.call('threads.retitle', { threadId });
     expect(back).toMatchObject({ title: '[tool]', titleSource: 'prompt' });
   });
