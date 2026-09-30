@@ -224,7 +224,9 @@
   --shadow-e3: 0 20px 60px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.06);
   --shadow-frame: 0 3px 8px rgb(0 0 0 / 0.24);
 
-  /* The composer and its activity dock share a translucent fill and top reflection. */
+  /* The composer and its activity dock share a top reflection. The dock floats over
+     the scrolling timeline, so its fill is nearly opaque: the blur only softens
+     the edge and the lines passing under it never read through its text. */
   --color-composer-surface: var(--color-surface-2);
   --color-activity-surface: var(--color-surface);
   --color-composer-focus: var(--color-edge);
@@ -636,7 +638,7 @@ html[data-chat-width='full'] {
 @supports (color: color-mix(in oklab, white 50%, black)) {
   :root {
     --color-composer-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
-    --color-activity-surface: color-mix(in oklab, var(--color-surface) 82%, transparent);
+    --color-activity-surface: color-mix(in oklab, var(--color-surface) 94%, transparent);
     --color-composer-focus: color-mix(in srgb, var(--color-foreground) 24%, transparent);
     --color-control-surface: color-mix(in oklab, var(--color-surface-2) 82%, transparent);
     --color-control-hover: color-mix(in oklab, var(--color-surface-3) 90%, transparent);
