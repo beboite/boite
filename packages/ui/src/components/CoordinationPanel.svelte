@@ -13,7 +13,9 @@
   const fallback = defaultCoordinationConfig();
   let view = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   let config = $derived(view?.config ?? fallback);
-  let summary = $derived(config.mode === 'brief' ? strings.coordination.summaryBrief : config.mode === 'team' ? strings.coordination.summaryTeam : strings.coordination.summaryOff);
+  // No budget sets Brief and Team apart any more: both are On, and a saved Team stays as it is.
+  let on = $derived(config.mode !== 'off');
+  let summary = $derived(on ? strings.coordination.summaryOn : strings.coordination.summaryOff);
   // The conversation loads it when it opens; a second copy does not ask again.
   onMount(() => { if (store.coordination?.self.threadId !== threadId) void store.loadCoordination(threadId, false); });
 
@@ -27,17 +29,25 @@
   }
 
   function modeLabel(mode: CoordinationMode): string {
-    return strings.coordination[mode];
+    return mode === 'off' ? strings.coordination.off : strings.coordination.on;
   }
 
-  function modeKey(event: KeyboardEvent, mode: CoordinationMode) {
-    const modes: CoordinationMode[] = ['off', 'brief', 'team'];
+  /** Off, or on: a thread already on keeps its saved mode. */
+  function choose(next: 'off' | 'on'): void {
+    if ((next === 'on') === on) return;
+    configure(next === 'off' ? { mode: 'off', paused: false } : { mode: 'brief' });
+  }
+
+  function modeKey(event: KeyboardEvent, current: 'off' | 'on') {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (modes.indexOf(mode) + (event.key === 'ArrowLeft' ? 2 : 1)) % 3;
-    const next = modes[index]!;
-    configure({ mode: next });
+    const next = event.key === 'Home' ? 'off' : event.key === 'End' ? 'on' : current === 'off' ? 'on' : 'off';
+    choose(next);
     (event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(`[data-testid="coordination-mode-${next}"]`)?.focus();
+  }
+
+  function contactFacts(agent: { machine: string; project?: string; agent?: string; resources: string }): string {
+    return [agent.project, agent.machine, agent.agent, agent.resources].filter(Boolean).join(' · ');
   }
 </script>
 
@@ -54,19 +64,19 @@
     {#if !store.owner}<p class="notice">{strings.coordination.ownerOnly}</p>{/if}
 
     <div class="modes" role="radiogroup" aria-label={strings.coordination.heading}>
-      {#each ['off', 'brief', 'team'] as mode (mode)}
+      {#each ['off', 'on'] as const as choice (choice)}
         <button
           type="button"
           class="quiet"
-          class:chosen={config.mode === mode}
+          class:chosen={(choice === 'on') === on}
           role="radio"
-          aria-checked={config.mode === mode}
+          aria-checked={(choice === 'on') === on}
           disabled={!store.owner || store.coordinationSaving}
-          tabindex={config.mode === mode ? 0 : -1}
-          onkeydown={(event) => modeKey(event, mode as CoordinationMode)}
-          data-testid="coordination-mode-{mode}"
-          onclick={() => configure({ mode: mode as CoordinationMode, paused: mode === 'off' ? false : config.paused })}
-        >{modeLabel(mode as CoordinationMode)}</button>
+          tabindex={(choice === 'on') === on ? 0 : -1}
+          onkeydown={(event) => modeKey(event, choice)}
+          data-testid="coordination-mode-{choice}"
+          onclick={() => choose(choice)}
+        >{choice === 'on' ? strings.coordination.on : strings.coordination.off}</button>
       {/each}
     </div>
 
@@ -99,9 +109,15 @@
       </label>
 
       <div class="budget" data-testid="coordination-budget">
-        <span>{fill(strings.coordination.sends, { used: String(view?.sent ?? 0), limit: String(view?.sendLimit ?? 0) })}</span>
-        <span>{fill(strings.coordination.wakes, { used: String(view?.wakes ?? 0), limit: String(view?.wakeLimit ?? 0) })}</span>
-        <span>{fill(strings.coordination.receives, { limit: config.mode === 'brief' ? '20' : '100' })}</span>
+        {#if view && typeof view.sendLimit === 'number'}
+          <!-- An older core still counts against hourly budgets. -->
+          <span>{fill(strings.coordination.sends, { used: String(view.sent), limit: String(view.sendLimit) })}</span>
+          <span>{fill(strings.coordination.wakes, { used: String(view.wakes), limit: String(view.wakeLimit ?? 0) })}</span>
+          <span>{fill(strings.coordination.receives, { limit: config.mode === 'brief' ? '20' : '100' })}</span>
+        {:else}
+          <span>{fill(strings.coordination.sent, { used: String(view?.sent ?? 0) })}</span>
+          <span>{fill(strings.coordination.woken, { used: String(view?.wakes ?? 0) })}</span>
+        {/if}
       </div>
 
       {#if store.owner}
@@ -122,7 +138,7 @@
         {:else}
           <ul class="contacts">
             {#each store.coordinationDirectory?.agents ?? [] as agent (`${agent.coreId}:${agent.threadId}`)}
-              <li data-testid="coordination-contact"><span><strong>{agent.title}</strong><small>{agent.machine} · {agent.resources || modeLabel(agent.mode)}</small></span><span class="contact-status">{strings.threadStatus[agent.status]}</span></li>
+              <li data-testid="coordination-contact"><span><strong>{agent.title}</strong><small>{contactFacts(agent)}</small></span><span class="contact-status">{strings.threadStatus[agent.status]}</span></li>
             {/each}
           </ul>
         {/if}
@@ -149,7 +165,7 @@
   .body { padding: 0 14px 14px; border-top: 1px solid var(--color-border); max-height: min(48dvh, 480px); overflow-y: auto; overscroll-behavior: contain; }
   .summary, .empty, .notice { margin: 10px 0; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.45; }
   .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
-  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); }
+  .modes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 3px; border-radius: var(--radius-md); background: var(--color-surface-2); }
   .modes button { width: 100%; }
   .modes .chosen { background: var(--color-active); color: var(--color-foreground); box-shadow: inset 0 0 0 1px var(--color-edge); }
   .resources { display: grid; gap: 6px; margin-top: 12px; color: var(--color-muted-foreground); font-size: var(--text-sm); }

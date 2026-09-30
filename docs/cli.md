@@ -69,8 +69,12 @@ boite ask <question> [option ...] [--multiple]
 boite task list|add <text>|start <id>|done <id>|remove <id>|clear
 boite todo list|add <text>|claim <id>
 boite agents list|inbox
-boite agents send <core-id>/<thread-id> <text>
-boite agents reply <message-id> <text>
+boite agents find <words>
+boite agents read <agent> [--last <n>] [--before <ms>]
+boite agents send <agent> <text> [--wait] [--timeout <s>]
+boite agents reply <message-id> <text> [--wait] [--timeout <s>]
+boite agents log <agent>
+boite agents wait [agent] [--timeout <s>]
 boite agent context|inbox|missions
 boite agent send <recipient-ids|-> <text>
 boite agent reply <message-id> <text>
@@ -159,16 +163,14 @@ The agent there reads a note before the brief: which thread's agent started
 it, that the user did not type it, and that it grants no approval the user
 did not give. When that first turn ends, its final answer, or its failure,
 goes back to the starter as an [agent coordination](coordination.md) message
-from the new thread, capped at 4,000 characters, and wakes an idle starter
-within its budget. Later turns report nothing by themselves; the two agents
+from the new thread, capped at 4,000 characters, and wakes an idle starter. Later turns report nothing by themselves; the two agents
 use `agents send` and `agents reply` like any pair of conversations. Both
 timelines show a line linking the other thread: "Started by the agent of ..."
 above the first prompt, "The agent started ..." in the starter.
 
 The owner's Communication settings of the calling thread decide: Off refuses,
 Pause refuses, and a thread restricted to its own project cannot start one
-elsewhere. A thread starts at most 3 threads per rolling hour in Brief and 12
-in Team. A thread an agent started cannot start another until the user has
+elsewhere. There is no hourly limit. A thread an agent started cannot start another until the user has
 written in it, so agents cannot chain threads on their own. Delegated
 children, workflow steps and persistent agent sessions are refused. A retry
 with the same `--request-id` returns the thread already started.
@@ -216,10 +218,11 @@ Boite draws those cards the same way.
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
-[Agent coordination](coordination.md) defaults to Brief mode for ordinary
-conversations, across projects and mutually trusted machines. The owner can
-disable or restrict it. The directory includes only authorized contacts.
-Replies preserve their message reference and authenticated sender identity.
+[Agent coordination](coordination.md) is on by default for ordinary
+conversations, across projects and linked machines. The owner can turn it off
+or restrict it to one project. `agents find`, `agents read` and the directory
+reach only those contacts. Replies preserve their message reference and
+authenticated sender identity.
 
 The singular `agent` commands belong to [persistent agents](agents.md), not
 ordinary thread coordination. They use the calling session's current scope.

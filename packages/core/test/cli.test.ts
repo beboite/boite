@@ -78,7 +78,30 @@ test('agents commands discover, send and reply using the calling thread identity
   const reply = await boite(['agents', 'reply', incoming.id, 'Understood', '--json']);
   expect(reply.code).toBe(0);
   expect(JSON.parse(reply.out).replyTo).toBe(incoming.id);
-  expect((await boite(['agents', 'inbox'])).out).toContain('from=');
+  expect((await boite(['agents', 'inbox'])).out).toContain(`<- from ${other}`);
+});
+
+test('agents reach each other by a short address, find by chat, read and wait for an answer', async () => {
+  const client = await harness.connect();
+  const other = (await echoThread(harness, client, 'VM worker')).threadId;
+  harness.core.journal.putMessage({ id: 'said', threadId: other, turnId: 'history', role: 'user', state: 'complete', createdAt: Date.now(), parts: [{ type: 'text', text: 'the staging database keeps timing out' }] });
+  const listed = await boite(['agents', 'list']);
+  expect(listed.out).toContain(`${other}  "VM worker"`);
+  const found = await boite(['agents', 'find', 'staging', 'timing']);
+  expect(found.out).toContain(other);
+  expect(found.out).toContain('> the staging database keeps timing out');
+  const read = await boite(['agents', 'read', other, '--last', '5']);
+  expect(read.out).toContain('user:\n    the staging database keeps timing out');
+  const self = harness.core.coordination.get(threadId).self;
+  const answering = new Promise<void>(resolve => setTimeout(() => {
+    void harness.core.coordination.send({ threadId: other, to: self, text: 'Restart it, I am done.', requestId: 'answer' }).then(() => resolve());
+  }, 300));
+  const sent = await boite(['agents', 'send', other, 'May I restart staging?', '--wait', '--timeout', '10']);
+  await answering;
+  expect(sent.code).toBe(0);
+  expect(sent.out).toContain('Restart it, I am done.');
+  expect((await boite(['agents', 'log', other])).out).toContain('-> to');
+  expect((await boite(['agents', 'send', 'thr_nobody', 'hi'])).err).toContain('no reachable agent has this address');
 });
 
 test('a send retried with the same --request-id is the same letter, and without it a new one', async () => {

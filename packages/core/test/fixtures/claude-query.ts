@@ -67,6 +67,11 @@ export class FakeQuery {
    * ends; true is an older fake that ends with no result at all.
    */
   silentInterrupt = false;
+  /**
+   * The real SDK rejects the stream of a CLI that exited on an error result
+   * with that result's text; null ends the stream cleanly.
+   */
+  exitError: string | null = null;
   /** Every live setter the driver reached for, in order, as `<name> <value>`. */
   readonly setters: string[] = [];
   /** The name of the one setter this CLI refuses, the way an older one would. */
@@ -127,7 +132,10 @@ export class FakeQuery {
         yield next;
         continue;
       }
-      if (this.ended) return;
+      if (this.ended) {
+        if (this.exitError !== null) throw new Error(`Claude Code returned an error result: ${this.exitError}`);
+        return;
+      }
       await new Promise<void>((resolve) => {
         this.notify = resolve;
       });

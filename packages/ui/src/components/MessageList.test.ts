@@ -225,7 +225,7 @@ test('agent letters join the timeline chronologically without exposing their del
     coordination: {
       self: { coreId: 'core-local', threadId: 't-short' },
       config: { mode: 'team', resources: '', remote: true, paused: false },
-      messages: letters, sent: 1, sendLimit: 40, wakes: 0, wakeLimit: 12
+      messages: letters, sent: 1, sendLimit: null, wakes: 0, wakeLimit: null
     }
   } as unknown as Store;
 

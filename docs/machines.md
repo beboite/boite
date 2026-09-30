@@ -66,6 +66,18 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
+## Agent links
+
+Two machines connected here with owner connections are linked for agent
+coordination as soon as both are ready: each core trusts the other's public
+key and address, then both check the link. Their agents can then find, read
+and message each other ([coordination](coordination.md)). Paired-device
+connections are never linked. Each core needs an HTTPS public address the
+other can reach; a pair that cannot link shows the reason in the Agent links
+section and is tried again when one of the machines reconnects. A link removed
+there is remembered on this device and stays removed until Link agents is
+used again.
+
 ## Automatic settings synchronization
 
 Each card of another machine has a checkbox to keep its settings synchronized
