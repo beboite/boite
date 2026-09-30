@@ -565,7 +565,7 @@ shellTest('the native updater reports its local version and refuses installation
   expect(status?.supported).toBe(false);
   expect(status?.currentVersion).toMatch(/^\d+\.\d+\.\d+/);
   const refused = await page?.evaluate<string>(`window.__TAURI_INTERNALS__.invoke('app_update_check', {channel:'stable'}).then(() => 'allowed', error => String(error))`);
-  expect(refused).toContain('installed Windows x64');
+  expect(refused).toContain('Updates require an installed Boite');
 }, TIMEOUT);
 
 shellTest('the native file opener launches the original executable and rejects paths outside the thread', async () => {
