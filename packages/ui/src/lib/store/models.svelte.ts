@@ -128,6 +128,8 @@ export class Models {
     const existing = this.probeRequests.get(key);
     if (existing) return existing;
     if (!client || !this.ctx.store.owner || (!refresh && this.probeAttempts.has(key))) return Promise.resolve();
+    const account = this.ctx.store.accountOf(accountId);
+    if (!refresh && (account?.status === 'unauthenticated' || account?.status === 'error')) return Promise.resolve();
     this.probeAttempts.add(key);
     const epoch = this.probeEpoch;
     this.probingModels = [...this.probingModels, key];
@@ -143,7 +145,10 @@ export class Models {
         // The account or the descriptors changed while the agent answered: the
         // core refused a stale list, and the next look asks again.
         if (epoch !== this.probeEpoch) this.probeAttempts.delete(key);
-        else this.ctx.fail(error);
+        else if (refresh) this.ctx.fail(error);
+        // Discovery also runs when the composer mounts, before any user action.
+        // An agent may still need a login even when its descriptor has no auth check.
+        else console.warn('background model discovery failed', error);
       }
       finally {
         if (this.probeRequests.get(key) === request) {

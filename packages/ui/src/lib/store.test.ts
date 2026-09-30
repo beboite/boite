@@ -821,11 +821,28 @@ describe('Store', () => {
   test('failed probes wait for manual retry instead of looping', async () => {
     const { store, client } = await ready();
     const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('agent offline'));
+    const models = store.modelsOf('opencode', 'a-opencode');
     await store.probeModels('opencode', 'a-opencode');
     await store.probeModels('opencode', 'a-opencode');
     expect(calls).toHaveBeenCalledTimes(1);
+    expect(store.error).toBeNull();
+    expect(store.modelsOf('opencode', 'a-opencode')).toEqual(models);
+    expect(store.isProbing('opencode', 'a-opencode')).toBe(false);
     await store.probeModels('opencode', 'a-opencode', true);
     expect(calls).toHaveBeenCalledTimes(2);
+    expect(store.error).toBe('agent offline');
+  });
+
+  test('background model discovery skips signed-out accounts but a manual refresh can retry', async () => {
+    const { store, client } = await ready();
+    store.accounts = store.accounts.map(account => account.id === 'a-opencode' ? { ...account, status: 'unauthenticated' } : account);
+    const calls = vi.spyOn(client, 'call').mockRejectedValue(new Error('sign in first'));
+    await store.probeModels('opencode', 'a-opencode');
+    expect(calls).not.toHaveBeenCalled();
+    expect(store.error).toBeNull();
+    await store.probeModels('opencode', 'a-opencode', true);
+    expect(calls).toHaveBeenCalledTimes(1);
+    expect(store.error).toBe('sign in first');
   });
 
   test('a probe the core refused because the account changed meanwhile is no error, and runs again', async () => {
