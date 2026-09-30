@@ -93,7 +93,9 @@ export class Delegation {
   async loadCoordination(threadId = this.ctx.store.openThread?.id, withDirectory = true): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
-    if (!client || !threadId) return;
+    // A machine that dropped is not asked; an effect that called this reads the
+    // connection here and calls again once the machine is back.
+    if (!client || !threadId || s.connection !== 'ready') return;
     const epoch = this.coordinationEpoch;
     const generation = this.ctx.threads.openGeneration;
     const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.coordinationEpoch === epoch && this.ctx.threads.openGeneration === generation;
@@ -143,7 +145,9 @@ export class Delegation {
   async loadDelegation(threadId = this.ctx.store.openThread?.id): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
-    if (!client || !threadId) return;
+    // A machine that dropped is not asked; an effect that called this reads the
+    // connection here and calls again once the machine is back.
+    if (!client || !threadId || s.connection !== 'ready') return;
     const epoch = this.delegationEpoch;
     const generation = this.ctx.threads.openGeneration;
     const current = () => this.ctx.client === client && s.openThread?.id === threadId && this.delegationEpoch === epoch && this.ctx.threads.openGeneration === generation;

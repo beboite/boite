@@ -1022,6 +1022,7 @@ export const strings = {
     placeholderNoProject: 'Message the agent',
     /** A new conversation, before anything is sent. */
     placeholderNew: 'What do you want to do?',
+    placeholderOffline: '{machine} is offline: messages wait here and go out when it reconnects',
     send: 'Send',
     stop: 'Stop',
     queued: 'Sent when the current turn ends',

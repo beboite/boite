@@ -134,7 +134,7 @@
     </div>
     {#snippet threadRow(row: typeof rows[number])}
       <div class="row">
-        <button class="ghost thread" data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
+        <button class="ghost thread" class:offline={row.machine.store.connection !== 'ready'} data-testid="mobile-thread-{row.thread.id}" onclick={async () => { await workspace.select(row.machine.store, row.thread.id); show('chat'); }}>
           <span class="summary"><span class="title"><span class="provider" data-testid="thread-provider" role="img" aria-label={agentLabel(row.machine.store, row.thread)}><ProviderLogo providerId={row.thread.providerId} size={13} /></span>{#if row.thread.pinned}<Pin size={12} />{/if}{row.thread.title}{#if hasUnsentDraft(row.machine.store.composerStates[row.thread.id])}<span class="draft" data-testid="thread-draft" title={strings.sidebar.unsentDraft} aria-label={strings.sidebar.unsentDraft}><PencilLine size={12} /></span>{/if}</span><span class="detail">{[projectName(row.project), several ? row.machine.label : null, row.thread.branch].filter(Boolean).join(' · ')}</span></span>
           <ThreadState thread={row.thread} {now} />
         </button>
@@ -203,6 +203,8 @@
     .title :global(svg) { margin-right: 4px; color: var(--color-muted-foreground); vertical-align: -1px; }
     .title .draft :global(svg) { margin: 0 0 0 6px; color: var(--color-accent); }
     .title .provider { display: inline-flex; margin-right: 6px; vertical-align: -2px; }
+    /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
+    .thread.offline .summary { opacity: 0.55; }
     .title .provider :global(svg) { margin: 0; }
     .detail { font-size: var(--text-xs); color: var(--color-muted-foreground); }
     .mobile-navigation { display: flex; align-items: center; flex-shrink: 0; padding: 2px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: var(--color-background); }

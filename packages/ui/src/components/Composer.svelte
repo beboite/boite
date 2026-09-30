@@ -14,6 +14,7 @@
   import { claudeKeywords, promptSegments } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
   import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
@@ -130,12 +131,19 @@
       untrack(() => void store.probeModelEffort(id, accountId, model));
     }
   });
+  /**
+   * A thread whose machine dropped still takes prompts: they wait in its queue,
+   * which the store keeps on the device and sends once the machine is back.
+   * A new thread needs the core to exist, so a draft waits for the machine.
+   */
+  let offline = $derived(store.connection !== 'ready' && store.openThread !== null && !store.draft);
+  let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
       readingFiles === 0 &&
       !attachments.some(unresolvedAssetId) &&
       choice !== null &&
-      store.connection === 'ready' &&
+      (store.connection === 'ready' || offline) &&
       !picking &&
       !dictating &&
       !composer?.sending
@@ -143,7 +151,9 @@
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    !store.openThread && store.draft
+    offline
+      ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
+      : !store.openThread && store.draft
       ? strings.composer.placeholderNew
       : store.openProject && provider
         ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
@@ -364,7 +374,7 @@
     const state = stateForInput();
     // An edited message: the thread goes back to before it, then this goes out
     // in its place. A refusal is shown and the text stays in the box.
-    if (state.editing && !store.busy && state.queued.length === 0) {
+    if (state.editing && !store.busy && state.queued.length === 0 && !offline) {
       state.sending = true;
       const rewound = await store.rewind(state.editing);
       state.sending = false;
@@ -374,7 +384,7 @@
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
-    if (store.busy || state.queued.length > 0) {
+    if (store.busy || state.queued.length > 0 || offline) {
       state.queued.push({ text: prompt, attachments: images, ...(references.length ? { previewReferences: references } : {}) });
       state.editing = null;
       state.text = '';

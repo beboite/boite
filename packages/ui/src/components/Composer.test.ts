@@ -546,18 +546,27 @@ test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
   }
 });
 
-test('reconnecting blocks keyboard and button sends without clearing text', async () => {
+test('reconnecting queues a send instead of sending it, and a new thread waits for the machine', async () => {
   await mountOnFake();
   await store.open('t-trace');
   const submit = vi.spyOn(store, 'submit');
   store.connection = 'connecting';
   await type('wait for connection');
+  expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(false);
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 1);
+  expect(submit).not.toHaveBeenCalled();
+  // A draft has no thread to queue behind: its text stays and nothing goes out.
+  store.connection = 'ready';
+  await openDraft();
+  store.connection = 'connecting';
+  await type('a new thread');
   expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(true);
   press('Enter');
   press('Enter', { ctrlKey: true });
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(submit).not.toHaveBeenCalled();
-  expect(input().value).toBe('wait for connection');
+  expect(input().value).toBe('a new thread');
 });
 
 test('ArrowUp removes the latest queued prompt and restores its images for editing', async () => {
@@ -596,6 +605,32 @@ test('Escape stops the running turn and sends pending input next', async () => {
   const prompts = store.openThread!.messages.filter((message) => message.role === 'user');
   expect(prompts.at(-1)?.parts).toEqual([{ type: 'text', text: 'Read this immediately' }]);
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
+});
+
+test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const other = store.threads.find((t) => t.id === 't-descriptors')!;
+  expect(other.status).toBe('idle');
+  const rpc = vi.spyOn(store.client!, 'call');
+  store.connection = 'closed';
+  // Its rows turn grey and still open.
+  await waitFor(() => document.querySelector('[data-thread-id="t-descriptors"]')?.closest('.thread')?.classList.contains('offline') === true);
+  await store.open(other.id);
+  expect(store.openThread?.id).toBe(other.id);
+  expect(store.error).toBeFalsy();
+  await waitFor(() => input().placeholder.includes('offline'));
+  await type('Run this once you are back');
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates[other.id]?.queued.length === 1);
+  expect(query('[data-testid=composer-queued]').textContent).toContain('Run this once you are back');
+  // Focus reads the socket's own state, which this fake keeps ready; a dropped socket sends nothing.
+  expect(rpc.mock.calls.map(([method]) => method).filter((method) => method !== 'threads.focus')).toEqual([]);
+  store.connection = 'ready';
+  await waitFor(() => store.composerStates[other.id]?.queued.length === 0);
+  const started = rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
+  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back' });
 });
 
 test('Enter in the emptied composer sends all pending prompts together now', async () => {
