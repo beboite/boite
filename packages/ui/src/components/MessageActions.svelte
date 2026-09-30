@@ -1,8 +1,7 @@
 <script lang="ts">
   import { Check, Copy, GitFork, Pencil, RotateCcw } from '@lucide/svelte';
   import { contextMenu } from '../lib/context-menu.svelte';
-  import { clockTime } from '../lib/format';
-  import { formatLocale } from '../lib/i18n.svelte';
+  import { clockTime, fullTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
 
   /**
@@ -58,7 +57,7 @@
 
 <span class="message-actions" data-testid="message-actions">
   {#if at !== undefined}
-    {@const full = new Date(at).toLocaleString(formatLocale(), { dateStyle: 'full', timeStyle: 'medium' })}
+    {@const full = fullTime(at)}
     <time class="stamp" data-testid="message-time" datetime={new Date(at).toISOString()} title={fill(strings.chat.sentAt, { time: full })}>{clockTime(at)}</time>
   {/if}
   {#if text}

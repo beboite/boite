@@ -84,10 +84,12 @@
     const middle = frame.top + (centers[slot] ?? 0);
     return { text, command: promptCommand(text), number, top: Math.min(window.innerHeight - 130, Math.max(12, middle - 21)), left: frame.right + 8 };
   });
+  /** Only a finger's rail scrolls (the coarse pointer rules below); a mouse's fits whole. */
+  const scrolls = typeof matchMedia === 'function' ? matchMedia('(pointer: coarse)') : null;
   $effect(() => {
     const selected = active;
     const node = rail;
-    if (!node) return;
+    if (!node || !scrolls?.matches) return;
     // A fast scroll moves the active prompt several times a frame. The rail
     // follows once per frame, when the layout it reads is being made anyway,
     // instead of forcing one inside every scroll event.
@@ -243,11 +245,15 @@
   .track button:hover:not(:disabled) { background: transparent; }
   .track button:focus-visible { outline: none; }
   i { display: block; flex: none; width: calc(10px + 12px * var(--weight, 0)); height: 2px; border-radius: 1px; background: currentColor; opacity: calc(0.45 + 0.55 * var(--weight, 0)); transition: width var(--dur-2) var(--ease-out-quint), opacity var(--dur-2), box-shadow var(--dur-2); }
+  /* A marker's bar is its full 22 px scaled down: the active prompt changes on
+     every few lines of a scroll, and a width easing there laid the page out
+     again on each frame. A transform eases on the compositor. */
+  .marker i { width: 22px; transform-origin: left center; transform: scaleX(calc((10 + 12 * var(--weight, 0)) / 22)); transition: transform var(--dur-2) var(--ease-out-quint), opacity var(--dur-2), box-shadow var(--dur-2); }
   .outline-group i { background: repeating-linear-gradient(to right, currentColor 0 2px, transparent 2px 4px); }
   .hot, .track button:focus-visible { color: var(--color-foreground); }
   .hot i, .track button:focus-visible i { opacity: 1; }
   .marker.active { color: var(--color-accent); }
-  .marker.active i { width: calc(16px + 6px * var(--weight, 0)); opacity: 1; box-shadow: 0 0 8px color-mix(in oklch, var(--color-accent) 55%, transparent); }
+  .marker.active i { transform: scaleX(calc((16 + 6 * var(--weight, 0)) / 22)); opacity: 1; box-shadow: 0 0 8px color-mix(in oklch, var(--color-accent) 55%, transparent); }
   .group-menu { position: fixed; z-index: 30; width: min(300px, calc(100vw - 70px)); max-height: 264px; overflow-y: auto; padding: 6px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-2); box-shadow: var(--shadow-e2); animation: pop var(--dur-2); }
   .group-menu.closing { animation-name: pop-out; pointer-events: none; }
   .group-menu button { width: 100%; height: auto; min-height: var(--control); padding: 6px 8px; gap: 10px; justify-content: flex-start; text-align: left; font-size: var(--text-sm); }
