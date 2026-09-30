@@ -738,14 +738,16 @@ shellTest('the Whip button moves the native window and restores its position', a
       const sample = await position();
       moved ||= sample.x !== origin.x || sample.y !== origin.y;
       await new Promise(resolve => setTimeout(resolve, 15));
-    } while (button.disabled && Date.now() < deadline);
-    if (button.disabled) throw new Error('Whip did not finish within five seconds');
+    } while (button.getAttribute('aria-busy') === 'true' && Date.now() < deadline);
+    if (button.getAttribute('aria-busy') === 'true') throw new Error('Whip did not finish within five seconds');
     return { origin, final: await position(), moved };
   })()`);
   expect(result.moved).toBe(true);
   expect(result.final).toEqual(result.origin);
   expect(await page.evaluate(`document.querySelector('[data-testid=error-toast]') === null`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'shell-whip.png'));
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`document.querySelector('[data-testid=whip-canvas]') === null`);
   await page.click(testid('nav-settings'));
   await page.click(testid('settings-tab-experiments'));
   await page.click(testid('experiment-whip'));

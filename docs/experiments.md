@@ -6,11 +6,20 @@ A phone has its own Experiments row under Settings, This phone.
 
 ## Whip
 
-Shows a Whip button at the bottom left, above the sidebar footer or phone tabs.
-Each hit shakes the native Boite window and returns it to its original position.
-Maximized and fullscreen windows, browsers, phones and window managers that
-ignore positioning shake the whole interface instead. Hits do not overlap. Turning the experiment off removes the button
-immediately. Reduced motion disables the shake.
+A small Whip icon sits beside the other controls in the sidebar footer and
+phone navigation. Throw it to pick up the animated rope from Boite Legacy:
+it follows the pointer, cracks on a fast flick, and falls off screen on a click.
+On a phone, drag the rope with a finger and release to drop it. Escape also drops it.
+The footer control remains available to drop or rethrow while the previous rope falls.
+After release, Escape resumes its usual app action.
+The opening arc uses unstretched links and fits the available side of the screen.
+The physics and canvas load only when the experiment is enabled; the animation
+loop and audio context close when it is turned off.
+
+Throwing also shakes the native Boite window and returns it to its original
+position. Maximized and fullscreen windows, browsers, phones and window managers
+that ignore positioning shake the interface instead. Hits do not overlap.
+Reduced motion disables new throws and stops any visible rope.
 
 ## Chat files and previews
 
@@ -84,8 +93,8 @@ the core. The end-to-end tests `artifacts.test.ts` and
 unit tests cover owning-machine boundaries and selection validation.
 No live provider login is required.
 
-`whip.test.ts` covers the toggle, persistence, desktop and phone layout, whole
-interface movement, cancellation and reduced motion. `shell.test.ts` verifies
+`whip.test.ts` covers the toggle, persistence, desktop and phone layout, drop and rethrow, whole
+interface movement, rope drawing and release, cancellation and reduced motion. `shell.test.ts` verifies
 native window movement and restoration, and refusal from a browser child webview.
 
 The opt-in `codex.live.test.ts` attachment case asks a real Codex process to

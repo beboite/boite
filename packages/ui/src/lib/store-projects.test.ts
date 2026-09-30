@@ -59,3 +59,42 @@ test('archiving the open project lands elsewhere, and another client hears the f
     client.close();
   }
 });
+
+test('worktree defaults follow the project on both clients and saved or explicit draft choices survive', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  const other = new Store();
+  store.attach(client);
+  other.attach(client);
+  try {
+    await store.connect();
+    await other.connect();
+    await store.setProjectWorktreeDefault('p-boite', true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    other.startDraft('p-boite');
+    expect(other.draft?.worktree).toBe(true);
+    store.startDraft('p-notes');
+    expect(store.draft?.worktree).toBe(false);
+    store.setDraftProject('p-boite');
+    expect(store.draft?.worktree).toBe(true);
+    store.setDraftWorktree(false);
+    store.setDraftProject('p-notes');
+    expect(store.draft?.worktree).toBe(false);
+    store.setDraftProject('p-boite');
+    expect(store.draft?.worktree).toBe(false);
+    store.composerStates.draft!.text = 'Keep this draft';
+    store.startDraft('p-notes');
+    store.startDraft('p-boite');
+    expect(store.draft?.worktree).toBe(false);
+    await store.setProjectWorktreeDefault('p-boite', false);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // The other client's already open draft keeps its choice.
+    expect(other.draft?.worktree).toBe(true);
+    other.startDraft('p-notes');
+    other.startDraft('p-boite');
+    expect(other.draft?.worktree).toBe(false);
+  } finally {
+    store.detach(); other.detach(); client.close();
+  }
+});

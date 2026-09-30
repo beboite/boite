@@ -9,6 +9,7 @@ export interface ProjectRow {
   created_at: number;
   /** Absent from a row read before schema 21. */
   archived?: number;
+  worktree_default?: number;
 }
 
 /** A row of `project_icons` without its bytes. */
@@ -105,7 +106,7 @@ export function parseJson<T>(text: string, location: string): T {
 }
 
 export function toProject(row: ProjectRow): Project {
-  return { id: row.id, name: row.name, path: row.path, createdAt: row.created_at, ...(row.archived ? { archived: true } : {}) };
+  return { id: row.id, name: row.name, path: row.path, createdAt: row.created_at, ...(row.archived ? { archived: true } : {}), ...(row.worktree_default ? { worktreeDefault: true } : {}) };
 }
 
 export function toThread(row: ThreadRow): ThreadSummary {

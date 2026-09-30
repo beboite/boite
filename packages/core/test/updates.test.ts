@@ -213,6 +213,16 @@ describe('harness updates', () => {
     expect(update.message).toContain('the release server refused the download');
   });
 
+  test('an updater that fails and exits with zero is failed with its own reason, not its closing line', async () => {
+    const { client } = await start('npm', 'update-stuck');
+    await client.call('providers.updates', { refresh: true });
+    const failed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    const update = only(await failed);
+    expect(update.current).toBe('1.0.0');
+    expect(update.message).toBe('Fake updating agent ran its updater and still reports 1.0.0: Upgrade failed for npm (exit code 1).');
+  });
+
   test('npm permission failures report the denied path rather than progress or the log location', async () => {
     const { client } = await start('command', 'update-permission');
     await client.call('providers.updates', { refresh: true });

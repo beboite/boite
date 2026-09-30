@@ -122,6 +122,15 @@ export class Models {
   }
 
   /**
+   * The first probe of this instance is running and nothing, live or cached,
+   * has answered yet: the picker shows it reading instead of the descriptor's
+   * list. A probe that fails or is never asked leaves that list standing.
+   */
+  modelsPending(providerId: ProviderId, accountId: string | null): boolean {
+    return accountId !== null && !this.probedModels[probeKey(providerId, accountId)] && this.isProbing(providerId, accountId);
+  }
+
+  /**
    * Ask the agent what it can run. Reopening after five minutes forces a fresh
    * catalog; cached rows stay visible while it reads, including after a failure.
    */

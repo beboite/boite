@@ -194,7 +194,7 @@ fieldset.card { border: 1px solid var(--color-border); padding: var(--settings-p
 /* A phone: the list is the screen, a conversation opens over it with a back arrow and no tab bar. */
 @media (max-width: 720px) {
   .agents-page { flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
-  .app:has(.agents-page.detail-open) .mobile-tabs { display: none; }
+  html.agents-detail-open .mobile-tabs { display: none; }
   .agents-rail { --ring: var(--color-background); width: auto; flex: 1; border-right: 0; background: var(--color-background); }
   .agents-main { display: none; }
   .agents-page.detail-open .agents-rail { display: none; }

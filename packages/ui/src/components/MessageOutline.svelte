@@ -87,9 +87,16 @@
   $effect(() => {
     const selected = active;
     const node = rail;
-    if (!node || node.matches(':hover') || node.contains(document.activeElement)) return;
-    const marker = Array.from(node.querySelectorAll<HTMLElement>('[data-message-id]')).find(item => item.dataset.messageId === selected);
-    if (marker) node.scrollTop = marker.offsetTop - node.clientHeight / 2;
+    if (!node) return;
+    // A fast scroll moves the active prompt several times a frame. The rail
+    // follows once per frame, when the layout it reads is being made anyway,
+    // instead of forcing one inside every scroll event.
+    const frame = requestAnimationFrame(() => {
+      if (node.matches(':hover') || node.contains(document.activeElement)) return;
+      const marker = Array.from(node.querySelectorAll<HTMLElement>('[data-message-id]')).find(item => item.dataset.messageId === selected);
+      if (marker) node.scrollTop = marker.offsetTop - node.clientHeight / 2;
+    });
+    return () => cancelAnimationFrame(frame);
   });
   /** Opens the rail around `at` (px from its top at rest), inside the timeline it floats over. */
   function open(at: (pitch: number, top: number) => number) {

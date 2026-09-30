@@ -40,6 +40,8 @@ available through the SDK.
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
+With no cached list, the column shows placeholder rows and the reading line until
+the first answer lands, and the descriptor's list if that answer fails.
 Reopening the picker after five minutes refreshes that account's catalog, and a
 catalog restored from storage is also revalidated. These reads replace the
 displayed models and their legacy flags without changing per-provider defaults.

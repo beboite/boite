@@ -6,9 +6,11 @@
  * that checks by itself prints, `update` installs 1.2.0, `update-current`
  * finds nothing newer and changes nothing, as `agy update` does, `update-broken`
  * fails the way a real updater does, and `update-launched` installs 1.2.0 only
- * when its launcher set `FAKE_MANAGED_BY_NPM`, as `codex update` does, and
+ * when its launcher set `FAKE_MANAGED_BY_NPM`, as `codex update` does,
  * `update-npm` installs 1.2.0 and writes the `npm_config_prefix` it was given
- * to `<state file>.prefix`, where `npm install -g` would have written. With
+ * to `<state file>.prefix`, where `npm install -g` would have written, and
+ * `update-stuck` fails and still exits with zero, as `opencode upgrade` does
+ * whatever went wrong. With
  * `FAKE_HANG=1`, `--version` answers and then hangs with a child on its pipes.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -40,6 +42,9 @@ else if (command === 'check') {
   writeFileSync(`${stateFile}.prefix`, process.env['npm_config_prefix'] ?? '(unset)');
   writeFileSync(stateFile, '1.2.0');
   console.log('updated to 1.2.0');
+} else if (command === 'update-stuck') {
+  // What `opencode upgrade` prints through @clack/prompts, colors and ASCII fallback included.
+  for (const line of ['\x1b[90m┌\x1b[39m  Upgrade', '│', '●  Using method: npm', '│', `●  From ${installed} → 1.1.0`, '│', '◇  Upgrade failed', '│', 'x  Upgrade failed for npm (exit code 1).', '│', '—  Done']) console.log(line);
 } else if (command === 'update-broken') {
   console.log('Using global installation update method...');
   console.error('error: the release server refused the download');

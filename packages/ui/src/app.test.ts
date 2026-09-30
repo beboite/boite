@@ -2276,7 +2276,10 @@ test('the desktop still has every one of them', async () => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  const preference = query<HTMLButtonElement>('[data-value=worktree-default]');
+  expect(preference.getAttribute('role')).toBe('menuitemcheckbox');
+  expect(preference.getAttribute('aria-checked')).toBe('false');
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
