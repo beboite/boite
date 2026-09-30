@@ -3,14 +3,17 @@ import { appendFileSync } from 'node:fs';
 // Unknown files run the complete suite. Documentation-only PRs still get the
 // required job, so branch protection never waits for a filtered-out workflow.
 export function affectedChecks(files: string[]) {
-  const checks = { core: false, web: false, desktop: false, server: false };
+  const checks = { core: false, web: false, desktop: false, server: false, android: false };
   for (const file of files) {
     if (
       /^(docs\/.*\.md|README\.md|AGENTS\.md|CONTRIBUTING\.md|SECURITY\.md|CODE_OF_CONDUCT\.md|LICENSE)$/.test(file) ||
       /^\.github\/(ISSUE_TEMPLATE\/|pull_request_template\.md$|topics\.json$|CODEOWNERS$|labeler\.yml$)/.test(file) ||
       file === '.coderabbit.yaml'
     ) continue;
-    if (/^(apps\/shell\/|tests\/e2e\/)/.test(file)) {
+    if (file.startsWith('apps/android/') || file === '.github/workflows/android.yml' || file === 'scripts/ci/android-apk.ts') {
+      // The wrapper loads the UI from the core, so nothing else goes into the APK.
+      checks.android = true;
+    } else if (/^(apps\/shell\/|tests\/e2e\/)/.test(file)) {
       checks.desktop = true;
     } else if (/^(Dockerfile$|\.dockerignore$|docker\/)/.test(file)) {
       checks.server = true;
@@ -22,7 +25,7 @@ export function affectedChecks(files: string[]) {
       checks.web = true;
     } else {
       // Core and contracts are used by both clients; unknown inputs stay safe.
-      checks.core = checks.web = checks.desktop = checks.server = true;
+      checks.core = checks.web = checks.desktop = checks.server = checks.android = true;
     }
   }
   return checks;
