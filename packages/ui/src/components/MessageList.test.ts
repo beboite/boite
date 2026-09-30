@@ -384,7 +384,9 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
 
   jumpButton()!.click();
   await settle();
-  expect(timeline.scrollTop).toBe(messages.length * ESTIMATE);
+  // The button goes at once; the list glides the last screen and a half down and lands at the bottom.
+  expect(jumpButton()).toBeNull();
+  await vi.waitFor(() => expect(timeline.scrollTop).toBe(messages.length * ESTIMATE), { timeout: 2_000 });
   expect(jumpButton()).toBeNull();
 });
 

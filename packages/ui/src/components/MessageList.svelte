@@ -805,11 +805,11 @@
     overscroll-behavior: contain;
   }
 
-  /* The scrollbar's room is kept on both sides from the first message: a
-     reply that first overflows the window no longer shifts the column
-     sideways mid-answer, and the column stays centred over the composer.
-     A finger's scrollbar floats over the text and takes no room. */
-  @media (pointer: fine) {
+  /* The scrollbar's room is kept on both sides from the first message, so the
+     column stands in the same place whether or not the thread overflows: a
+     reply that first fills the window no longer shifts it 5 px sideways
+     mid-answer. A finger's scrollbar floats over the text and takes no room. */
+  @media not (pointer: coarse) {
     .timeline { scrollbar-gutter: stable both-edges; }
   }
 
