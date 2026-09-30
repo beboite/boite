@@ -33,6 +33,12 @@
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
   const MAX_LINES = 8;
+  /**
+   * Chromium sizes the box to its text itself (`field-sizing: content`), in
+   * the frame's own layout. Elsewhere `grow` measures it, which lays the page
+   * out twice more inside every input event.
+   */
+  const sizesItself = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('field-sizing', 'content');
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
@@ -270,6 +276,7 @@
   function grow() {
     const el = box;
     if (!el) return;
+    if (sizesItself) { grown = el.value; syncInput(); return; }
     const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
@@ -279,7 +286,7 @@
   // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
   $effect(() => {
     void text;
-    if (!box) return;
+    if (!box || sizesItself) return;
     let current = true;
     void tick().then(() => { if (current && box?.value !== grown) grow(); });
     return () => { current = false; };
@@ -324,13 +331,18 @@
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
     track();
-    grow();
+    // A box that sizes itself reports a new height or width to the observer above.
+    if (!sizesItself) grow();
   }
 
   /** Where the caret is now: read after every key, click and input. */
   function track() {
     caret = box?.selectionEnd ?? text.length;
-    if (box) stateForInput().selection = { start: box.selectionStart, end: box.selectionEnd };
+    if (!box) return;
+    const { selectionStart: start, selectionEnd: end } = box;
+    const state = stateForInput();
+    // Every key comes here twice, on input and on keyup: an unmoved caret writes nothing.
+    if (state.selection?.start !== start || state.selection?.end !== end) state.selection = { start, end };
   }
 
   /** Writes a recalled or restored prompt in, caret at its end. */
@@ -875,6 +887,11 @@
 
   textarea { display: block; }
   .input-paint { max-height: none; }
+  /* The box grows with its text up to the cap above, laid out with the rest of the frame. */
+  @supports (field-sizing: content) {
+    /* The same eight lines `grow` stops at, as the measured height did. */
+    textarea { field-sizing: content; max-height: min(200px, calc(8lh + 16px)); }
+  }
 
   textarea:focus {
     outline: none;
