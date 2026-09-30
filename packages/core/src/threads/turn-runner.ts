@@ -34,6 +34,7 @@ export class TurnRunner {
   private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
   /** Threads whose running turn the user stopped: a lost session is not retried for them. */
   private readonly stopRequested = new Set<ThreadId>();
+  private readonly preparing = new Set<ThreadId>();
   readonly steering = new Set<ThreadId>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
@@ -68,30 +69,38 @@ export class TurnRunner {
       const account = this.core.accounts.require(thread.accountId);
       const driver = getDriver(provider.protocol);
       this.stopRequested.delete(threadId);
-      // Keep consumed input so a retry on a fresh session sends it too.
-      const carried: CarriedInput = {};
-      const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
-      this.handles.set(threadId, handle);
-      const forced = Promise.withResolvers<TurnResult>();
-      this.stopDeadlines.set(threadId, { handle, forced, timer: null });
-      if (!queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
-      // A `done` that settles after a forced stop is ignored.
-      result = await Promise.race([handle.done, forced.promise]);
-      const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
-      if (fresh !== null && result.status === 'error' && this.stopRequested.has(threadId)) {
-        // The user stopped a turn whose resume the agent refused: the prompt
-        // never reached a model, and the stop stands.
-        result = { ...result, status: 'stopped', error: undefined };
-      } else if (fresh !== null && result.status === 'error') {
-        // Same turn, fresh session: the prompt now carries the journal's history.
-        thread = fresh;
-        running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
-        const retry = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
-        this.handles.set(threadId, retry);
-        this.stopDeadlines.set(threadId, { handle: retry, forced, timer: null });
-        result = await Promise.race([retry.done, forced.promise]);
+      this.preparing.add(threadId);
+      const checkpoint = this.threads.codeCheckpoints.begin(thread, turnId);
+      if (checkpoint) await checkpoint;
+      this.preparing.delete(threadId);
+      if (this.stopRequested.has(threadId)) {
+        result = { status: 'stopped', sessionId: thread.sessionId, usage: null };
+      } else {
+        // Keep consumed input so a retry on a fresh session sends it too.
+        const carried: CarriedInput = {};
+        const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
+        this.handles.set(threadId, handle);
+        const forced = Promise.withResolvers<TurnResult>();
+        this.stopDeadlines.set(threadId, { handle, forced, timer: null });
+        if (!queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
+        // A `done` that settles after a forced stop is ignored.
+        result = await Promise.race([handle.done, forced.promise]);
+        const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
+        if (fresh !== null && result.status === 'error' && this.stopRequested.has(threadId)) {
+          // The user stopped a turn whose resume the agent refused: the prompt
+          // never reached a model, and the stop stands.
+          result = { ...result, status: 'stopped', error: undefined };
+        } else if (fresh !== null && result.status === 'error') {
+          // Same turn, fresh session: the prompt now carries the journal's history.
+          thread = fresh;
+          running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+          const retry = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
+          this.handles.set(threadId, retry);
+          this.stopDeadlines.set(threadId, { handle: retry, forced, timer: null });
+          result = await Promise.race([retry.done, forced.promise]);
+        }
+        if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
       }
-      if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
     } finally {
@@ -100,8 +109,11 @@ export class TurnRunner {
       if (deadline?.timer) clearTimeout(deadline.timer);
       this.stopDeadlines.delete(threadId);
       this.stopRequested.delete(threadId);
+      this.preparing.delete(threadId);
     }
 
+    const checkpoint = this.threads.codeCheckpoints.end(turnId);
+    if (checkpoint) await checkpoint;
     if (this.core.journal.isClosed()) return;
     this.core.delegation.submitted(threadId, turnId, result.status === 'done');
     // Writes what the turn streamed to its rows before anything reads them as finished.
@@ -188,7 +200,11 @@ export class TurnRunner {
 
   stopRunning(threadId: ThreadId): boolean {
     const handle = this.handles.get(threadId);
-    if (handle === undefined) return false;
+    if (handle === undefined) {
+      if (!this.preparing.has(threadId)) return false;
+      this.stopRequested.add(threadId);
+      return true;
+    }
     // An open card is what the driver is parked on. Aborting without answering
     // it leaves that await pending for good: the turn never finishes, the
     // thread stays `waiting`, and Stop does nothing the user can see.

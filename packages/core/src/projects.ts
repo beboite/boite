@@ -380,6 +380,7 @@ export class ProjectStore {
           return removed;
         },
       );
+      await this.core.threads.codeCheckpoints.discard(threadIds);
       for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
       this.core.bus.emit('project.removed', { projectId });
       this.core.bus.emit('thread.deletionsUpdated', {});

@@ -34,6 +34,7 @@ import { newId } from './ids.ts';
 import { assertDriverRunnable, releaseThread } from './drivers/index.ts';
 import { AgentState } from './threads/agent-state.ts';
 import { ThreadBranching } from './threads/branching.ts';
+import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
@@ -86,6 +87,7 @@ export class ThreadStore {
   readonly titles: ThreadTitles;
   /** `threads.rewind` and `threads.fork`. */
   readonly branching: ThreadBranching;
+  readonly codeCheckpoints: CodeCheckpoints;
   /** `threads.move`. */
   readonly moves: ThreadMove;
   /** `agent.spawn`. */
@@ -102,6 +104,7 @@ export class ThreadStore {
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
     this.branching = new ThreadBranching(core, this);
+    this.codeCheckpoints = new CodeCheckpoints(core);
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.recovery = new ThreadRecovery(core);
@@ -545,7 +548,7 @@ export class ThreadStore {
   }
 
   /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
-  rewind(threadId: ThreadId, messageId: MessageId): ThreadRewind {
+  rewind(threadId: ThreadId, messageId: MessageId): Promise<ThreadRewind> {
     return this.branching.rewind(threadId, messageId);
   }
 
@@ -562,6 +565,7 @@ export class ThreadStore {
   startTurn(threadId: ThreadId, prompt: string, attachments: Attachment[] = [], expectedSelectionVersion?: number, operation?: NonNullable<Turn['execution']>['operation'], activity?: { kind: 'goal' | 'loop'; iteration: number }, clientRequestId?: string, displayText?: string, previewReferences: PreviewReference[] = [], agentRunId?: string, startedBy?: ThreadLink): Turn {
     if (this.core.stopping) throw refused('the core is stopping; reconnect before sending another prompt');
     const thread = this.require(threadId);
+    this.codeCheckpoints.assertAvailable(thread.cwd);
     if (thread.agentSessionId && operation !== 'compact') {
       const run = agentRunId ? this.core.workforce.records.get('run', agentRunId) : null;
       if (!run || run.threadId !== threadId || run.status !== 'accepted' || run.id !== clientRequestId) throw refused('persistent agent sessions accept work through Agents, not turns.start');

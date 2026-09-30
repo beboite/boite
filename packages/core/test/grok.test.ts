@@ -411,6 +411,7 @@ describe('grok', () => {
     expect(users[1]?.parts).toEqual([{ type: 'text', text: '> Which database?\n\nSQLite' }]);
     expect(thread.pendingAnswers).toEqual([]);
     expect(thread.turns).toHaveLength(1);
+    expect(new Set(users.map(message => message.turnId)).size).toBe(1);
   });
 
   test('an older Grok without _x.ai/interject holds the answer for the turn after', async () => {

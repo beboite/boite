@@ -1075,6 +1075,8 @@ export interface ThreadRewind {
    * carrying the kept history, as a change of account does.
    */
   session: 'native' | 'seeded';
+  /** File changes restored before the cut. Missing on older cores. */
+  files?: { status: 'restored' | 'unchanged' | 'unavailable'; count: number; reason?: string };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { mintPairing, pairingUrlOf, startCore } from './lib/core.ts';
@@ -22,7 +23,10 @@ test('desktop and paired phone replace an edited message and silently skip a que
   try {
     await client.call('brain.configure', { path: null, enabled: false, boiteGuide: false });
     await client.call('settings.set', { asyncQuestions: false });
-    const project = await client.call('projects.add', { path: core.dataDir, name: 'Workspace' });
+    const cwd = join(core.dataDir, 'workspace');
+    await mkdir(cwd);
+    await writeFile(join(cwd, 'app.ts'), 'keep this code');
+    const project = await client.call('projects.add', { path: cwd, name: 'Workspace' });
     const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
     for (const mobile of [false, true]) {
       const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account.id, title: 'Review changes' });
@@ -47,7 +51,9 @@ test('desktop and paired phone replace an edited message and silently skip a que
       }
       await page.evaluate('Array.from(document.querySelectorAll("[data-role=user]")).find(row => row.querySelector("[data-testid=text-part]")?.textContent === "Original request").querySelector("[data-testid=message-edit]").click()');
       await page.waitFor('document.querySelector("[data-testid=composer-editing]") && document.querySelector("[data-testid=composer-input]").value === "Original request"');
-      await page.type(input, 'Changed request');
+      await page.evaluate('document.querySelector("[data-testid=composer-input]").focus(); document.querySelector("[data-testid=composer-input]").select()');
+      await page.send('Input.insertText', { text: 'Changed request' });
+      await page.waitFor('document.querySelector("[data-testid=composer-input]").value === "Changed request"');
       await capture(page, `message-edit-${mobile ? 'phone' : 'desktop'}.png`);
       const finished = client.next('turn.finished', turn => turn.threadId === thread.id);
       await page.click(send);
@@ -58,6 +64,11 @@ test('desktop and paired phone replace an edited message and silently skip a que
       expect(replaced.turns).toHaveLength(2);
       expect(replaced.messages.slice(kept.length).some(message => old.messages.some(previous => previous.id === message.id))).toBe(false);
       expect(replaced.messages.filter(message => message.role === 'user').at(-1)?.parts).toEqual([{ type: 'text', text: 'Changed request' }]);
+      const reply = replaced.messages.filter(message => message.role === 'assistant').at(-1)!.parts.filter(part => part.type === 'text').map(part => part.text).join('');
+      expect(reply).toContain('Changed request');
+      expect(reply).not.toContain('Original request');
+      expect(reply).not.toContain('Later request');
+      await capture(page, `message-replaced-${mobile ? 'phone' : 'desktop'}.png`);
 
       await client.call('questions.ask', { threadId: thread.id, text: 'Which file should be checked first?', options: ['Parser', 'Renderer'] });
       await page.waitFor('document.querySelector("[data-testid=question-skip]")');

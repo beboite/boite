@@ -40,6 +40,7 @@ test('the fake rewinds like the core: drops the rest, refuses the wrong message 
     expect(rewound.prompt).toBe('edit this');
     expect(rewound.attachments).toEqual([{ kind: 'image', mimeType: 'image/png', data: 'AAAA', name: 'shot.png' }]);
     expect(rewound.session).toBe('seeded');
+    expect(rewound.files).toEqual({ status: 'unchanged', count: 0 });
     expect(rewound.thread.sessionId).toBeNull();
     expect(rewound.thread.messages.some(message => message.id === edited)).toBe(false);
     expect(rewound.thread.messages.some(message => message.id === kept)).toBe(true);
@@ -49,6 +50,22 @@ test('the fake rewinds like the core: drops the rest, refuses the wrong message 
     await expect(client.call('threads.rewind', { threadId: 't-trace', messageId: kept })).rejects.toMatchObject({ data: { reason: 'turn-in-flight' } });
     await client.settled();
   } finally { client.close(); }
+});
+
+test('a rewind without file backups visibly explains that the code could not be restored', async () => {
+  const { store, client } = await ready();
+  try {
+    const [, edited] = await twoTurns(client, 't-trace');
+    await store.open('t-trace');
+    const call = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      const result = await call(method, params);
+      if (method === 'threads.rewind') return { ...result as object, files: { status: 'unavailable', count: 0 } } as typeof result;
+      return result;
+    });
+    expect((await store.rewind(edited))?.files?.status).toBe('unavailable');
+    expect(store.error).toContain('code');
+  } finally { store.detach(); }
 });
 
 test('the fake forks a copy that leaves the source whole', async () => {
