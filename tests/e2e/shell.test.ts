@@ -746,6 +746,8 @@ shellTest('the Whip button moves the native window and restores its position', a
   expect(result.final).toEqual(result.origin);
   expect(await page.evaluate(`document.querySelector('[data-testid=error-toast]') === null`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'shell-whip.png'));
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`document.querySelector('[data-testid=whip-canvas]') === null`);
   await page.click(testid('nav-settings'));
   await page.click(testid('settings-tab-experiments'));
   await page.click(testid('experiment-whip'));
