@@ -38,6 +38,11 @@ test('coordination steers a running pi turn over its RPC connection', async () =
   await waitFor(() => harness!.core.journal.listMessages(threadId).some(m => m.role === 'assistant'));
   expect(await harness!.core.threads.steer(threadId, 'Boite agent coordination. Wait for the VM.')).toBe(true);
   expect(fakeLog()).toContain('steering Boite agent coordination');
+  const turn = harness!.core.journal.listTurns(threadId)[0]!;
+  expect(await client.call('turns.steer', { threadId, turnId: turn.id, prompt: 'User correction',
+    attachments: [{ kind: 'image', mimeType: 'image/png', data: 'aGVsbG8=', name: 'sample.png' }], clientRequestId: 'pi_steer_01' })).toEqual({ accepted: true });
+  expect(fakeLog()).toContain('steering User correction');
+  expect(fakeLog()).toContain('steer-image image/png 8');
   expect(harness!.core.journal.listTurns(threadId)).toHaveLength(1);
   await client.call('turns.stop', { threadId });
   await waitFor(() => fakeLog().includes('clear_queue\nabort'));

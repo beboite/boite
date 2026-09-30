@@ -10,6 +10,7 @@ import { askPermission, askQuestion, askAsync } from './requests';
 import { backgroundShell, streamToolInput, runTool, documentTool, spawnProcess, toolBurst } from './turn-tools';
 import { delegationConfig, pumpDelegation } from './delegation';
 import { applyWaitingMove } from './thread-move';
+import { autoTitle } from './titles';
 import type { FakeContext } from './context';
 
 export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<boolean> {
@@ -106,6 +107,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   thread.sessionId = thread.sessionId ?? `sess-${turn.id}`;
   ctx.touch(thread);
   ctx.emit('turn.started', structuredClone(turn));
+  if (!operation) autoTitle(ctx, thread);
   pushScheduler(ctx, turn, 'running');
 
   const record = { cancelled: false, done: Promise.resolve() };
@@ -120,7 +122,7 @@ async function stream(
   thread: Thread,
   turn: Turn,
   prompt: string,
-  record: { cancelled: boolean },
+  record: { cancelled: boolean; steered?: { prompt: string; attachments: Attachment[] }[] },
   attachments: Attachment[] = [],
   modelPrompt: string = prompt
 ): Promise<void> {
@@ -235,6 +237,15 @@ async function stream(
   const spawn = SPAWN_MARKER.exec(prompt);
   if (!record.cancelled && spawn && spawn[1]) {
     await spawnProcess(ctx, thread, spawn[1]);
+  }
+
+  for (const input of record.steered ?? []) {
+    if (record.cancelled) break;
+    const partIndex = message.parts.length;
+    const text = input.attachments.map(attachment => `[${attachment.kind} ${attachment.mimeType}] `).join('') + input.prompt;
+    const part: MessagePart = { type: 'text', text };
+    message.parts.push(part);
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part });
   }
 
   if (!record.cancelled && prompt === '[compact]') {

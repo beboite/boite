@@ -237,7 +237,7 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
     expect(first.indexOf('Shared convention')).toBeLessThan(first.indexOf('boite where'));
   }
   else expect(first).not.toContain('Shared convention');
-  expect(first).not.toContain('boite agents send');
+  expect(first).toContain('boite agents send');
   expect(first).not.toContain('boite delegate spawn');
   expect(first.indexOf('boite where')).toBeLessThan(first.indexOf('Hello'));
   expect(readdirSync(root)).toEqual(files);

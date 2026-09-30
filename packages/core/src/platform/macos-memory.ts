@@ -10,9 +10,14 @@ function loadProc() {
 let native: ReturnType<typeof loadProc> | null = null;
 let unavailable = false;
 
-/** rusage_info_v0: the 16-byte UUID precedes six counters, then resident size. */
+/**
+ * rusage_info_v0: the 16-byte UUID precedes six counters, then resident size
+ * at 64 and the physical footprint at 72. The footprint is what Activity
+ * Monitor calls Memory: it leaves out the shared libraries resident size
+ * counts once per process, which inflated a tree of compiler workers.
+ */
 export function residentMemory(buffer: Uint8Array): number {
-  return Number(new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getBigUint64(64, true));
+  return Number(new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getBigUint64(72, true));
 }
 
 function readMemory(pid: number): number | null {

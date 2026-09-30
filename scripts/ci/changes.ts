@@ -36,8 +36,10 @@ export function needsWorkflowLint(files: string[]): boolean {
   return files.some((file) => /^\.github\/(workflows|actions)\//.test(file) || file.startsWith('scripts/ci/'));
 }
 
-const PORTABLE_PR = ['ubuntu-24.04', 'macos-15'];
-const PORTABLE_ALL = ['ubuntu-24.04', 'ubuntu-24.04-arm', 'macos-15', 'macos-15-intel'];
+// Linux builds on the oldest runner that carries WebKitGTK 4.1: its glibc (2.35)
+// is the floor for every Linux user a published package can serve.
+const PORTABLE_PR = ['ubuntu-22.04', 'macos-15'];
+const PORTABLE_ALL = ['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-15', 'macos-15-intel'];
 
 // `pr` gates a merge, `warm` follows it on main, `full` is a release, a nightly
 // or a manual run. A pull request skips the slow extra architectures; the main

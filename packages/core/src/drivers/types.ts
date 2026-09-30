@@ -206,7 +206,9 @@ export interface TurnHandle {
   done: Promise<TurnResult>;
   stop(): void;
   /** False means not ready, rejection means uncertain dispatch and must not be replayed. */
-  steer?(message: string): Promise<boolean>;
+  steer?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
+  /** Native user input, when system coordination uses a separate tool-boundary hook. */
+  steerUser?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
 }
 
 /**
@@ -251,6 +253,10 @@ export interface TitleContext {
   prompt: string;
   /** The first answer of the thread, its text parts only. Empty when the agent wrote no text. */
   answer: string;
+  /** Initial naming runs in parallel with the first turn; later calls can resolve its subject. */
+  initial?: boolean;
+  /** Images from the first user message, omitted for a writer that cannot read them. */
+  attachments?: ImageAttachment[];
   /**
    * The model to write it with: the one Settings names, else the provider's
    * small default. Null only for a provider with no small model on record,

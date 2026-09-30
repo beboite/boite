@@ -136,6 +136,15 @@ desktop and paired phones after the original changes or disappears. The thread
 must have a turn and must not be archived. The optional rich preview is under
 the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
 
+In the desktop app, clicking the file's name or icon saves it in the system's
+Downloads folder and opens it. The shell's `save_attachment` command opens only
+pictures, PDF, text, audio, video and office documents. It shows any other type
+selected in its folder, so an agent cannot run a program through that click.
+The download button saves the file without opening it. A file with the same
+name and the same bytes is reused, not copied again. In a browser the name
+opens a picture full size and downloads anything else. A picture's preview also
+opens it full size.
+
 Task ids are `t1`, `t2` and so on, allocated by the CLI; `start 2` and
 `start t2` mean the same. `task` rows print as `t1 [ ] text`, `[>]` in
 progress, `[x]` completed. A todo is a card of the project's list, shared by
@@ -160,8 +169,9 @@ Boite draws those cards the same way.
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
-[Agent coordination](coordination.md) must be enabled by the owner before an
-agent can send messages. The directory includes only authorized contacts.
+[Agent coordination](coordination.md) defaults to Brief mode for ordinary
+conversations, across projects and mutually trusted machines. The owner can
+disable or restrict it. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
 
 The singular `agent` commands belong to [persistent agents](agents.md), not

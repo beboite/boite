@@ -4,8 +4,9 @@
 ; the generated installer only closes the shell (`CheckIfAppIsRunning` matches
 ; boite-shell.exe by name). A reinstall or an uninstall over a running core
 ; cannot write or delete boite-core.exe ("Error opening file for writing"), so
-; these hooks obtain idle admission before installation. Explicit uninstall
-; still stops the core of this install, with stop-core.ps1.
+; these hooks obtain idle admission before installation, or carry the user's
+; accepted Kill prompt to the resident core. Explicit uninstall also stops
+; the core of this install, with stop-core.ps1.
 ;
 ; Tauri's installer.nsi includes this file near its top, before it defines
 ; BUNDLEID, MAINBINARYNAME and PRODUCTNAME. Nothing outside the macros below
@@ -36,15 +37,49 @@
   !endif
   !echo "Boite hooks: ${BUNDLEID} stops the core of ${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}"
 
+  Push $0
+  Push $1
+  Push $2
+  Push $PassiveMode
+  StrCpy $2 "0"
+  ; Only the interactive Kill prompt grants an explicit stop, including the
+  ; resident core. Silent and passive updates continue to require idle admission.
+  IfSilent boite_core_no_explicit_stop
+  ${If} $PassiveMode != 1
+    !if "${INSTALLMODE}" == "currentUser"
+      nsis_tauri_utils::FindProcessCurrentUser "${MAINBINARYNAME}.exe"
+    !else
+      nsis_tauri_utils::FindProcess "${MAINBINARYNAME}.exe"
+    !endif
+    Pop $0
+    ${If} $0 = 0
+      nsis_tauri_utils::StrReplace "$(appRunningOkKill)" "{{product_name}}" "${PRODUCTNAME}"
+      Pop $1
+      MessageBox MB_OKCANCEL $1 IDOK boite_core_explicit_stop IDCANCEL boite_core_cancel_stop
+      boite_core_explicit_stop:
+      StrCpy $2 "1"
+      ; The original check still owns closing the shell. Skip its duplicate
+      ; question only after this same question has actually been accepted.
+      StrCpy $PassiveMode "1"
+      Goto boite_core_no_explicit_stop
+      boite_core_cancel_stop:
+      Pop $PassiveMode
+      Pop $2
+      Pop $1
+      Pop $0
+      Abort
+    ${EndIf}
+  ${EndIf}
+  boite_core_no_explicit_stop:
+
   ; The window first. A running shell restarts a core it lost within seconds,
   ; from the executable this installer is about to replace, and the check the
   ; template runs after this hook waits on an OK/Cancel box before it ends the
   ; shell. This is that same check, run earlier: the same question before
   ; anything is stopped, and the template's then finds nothing left to close.
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  Pop $PassiveMode
 
-  Push $0
-  Push $1
   InitPluginsDir
   File "/oname=$PLUGINSDIR\boite-stop-core.ps1" "${BOITE_HOOKS_DIR}\stop-core.ps1"
   ; The paths reach the script through the environment, so no path can break
@@ -52,12 +87,14 @@
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_EXE", t "$INSTDIR\boite-core.exe") i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_DIR", t "${BOITE_DATA_ROOT}\${BOITE_DATA_NAME}") i'
   System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_IDLE", t "${IDLE_ONLY}") i'
+  System::Call 'Kernel32::SetEnvironmentVariable(t "BOITE_STOP_EXPLICIT", t "$2") i'
   ; nsExec runs it without a window.
   nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\boite-stop-core.ps1"'
   Pop $0
   !if "${IDLE_ONLY}" == "1"
     StrCmp $0 "0" boite_core_admitted
       DetailPrint "Boite is still working or cannot confirm an idle core. Finish its work or stop it explicitly, then retry."
+      Pop $2
       Pop $1
       Pop $0
       SetErrorLevel 2
@@ -73,6 +110,7 @@
     IfErrors 0 boite_core_writable
       !if "${IDLE_ONLY}" == "1"
         DetailPrint "boite-core.exe is still in use. Nothing was replaced; retry once the core has exited."
+        Pop $2
         Pop $1
         Pop $0
         SetErrorLevel 2
@@ -86,6 +124,7 @@
     FileClose $1
   boite_core_free:
   ClearErrors
+  Pop $2
   Pop $1
   Pop $0
 !macroend

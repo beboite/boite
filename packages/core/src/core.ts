@@ -53,6 +53,7 @@ export interface SubscriptionSink {
 }
 
 export interface CoreOptions {
+  bundleHash?: string;
   dataDir: string;
   token: string;
   /** Which install this core belongs to. Absent means the stable one. */
@@ -95,6 +96,7 @@ export function resolveCliDir(
 
 export class Core {
   readonly version = CORE_VERSION;
+  readonly bundleHash: string | undefined;
   readonly dataDir: string;
   readonly token: string;
   readonly channel: Channel;
@@ -192,6 +194,7 @@ export class Core {
   }
 
   constructor(options: CoreOptions) {
+    this.bundleHash = options.bundleHash;
     this.dataDir = options.dataDir;
     this.token = options.token;
     this.channel = options.channel ?? 'stable';
@@ -239,6 +242,7 @@ export class Core {
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
   }
@@ -269,6 +273,7 @@ export class Core {
   info(): CoreInfo {
     return {
       version: this.version,
+      ...(this.bundleHash ? { bundleHash: this.bundleHash } : {}),
       protocolVersion: PROTOCOL_VERSION,
       hostname: hostname(),
       os: currentOs(),
@@ -311,6 +316,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.threads.titles.close();
     await this.agentRuntime.close();
     this.#stopping = true;
     await this.brain.close();

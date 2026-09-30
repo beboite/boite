@@ -3,6 +3,7 @@
   import type { Message, Turn } from '@boite/contracts';
   import { bytes } from '../lib/format';
   import { decodedBytes } from '../lib/attachments';
+  import { decodeBase64, saveAttachment } from '../lib/attachment-save';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { claudeKeywords, promptCommand, promptSegments, promptText } from '../lib/message-display';
@@ -42,6 +43,19 @@
     return message.parts.filter((part): part is ImagePart => part.type === 'image');
   }
 
+  type FilePart = Extract<Message['parts'][number], { type: 'file' }>;
+
+  /** In the shell the link saves the file into Downloads and opens it; a browser downloads it. */
+  async function openFile(event: MouseEvent, part: FilePart): Promise<void> {
+    if (window.__TAURI_INTERNALS__ === undefined) return;
+    event.preventDefault();
+    try {
+      await saveAttachment(part.name ?? strings.composer.attachAlt, decodeBase64(part.data), true);
+    } catch (error) {
+      store.error = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   const images = $derived(imagesOf(message));
   const copyText = $derived(message.parts.flatMap((part) => part.type === 'text' ? [promptText(part)] : []).join('\n\n'));
   /** The move this prompt told the agent about, first thing the core put before its words. */
@@ -58,7 +72,7 @@
         : claudeKeywords(store.providerOf(store.openThread?.providerId ?? '')?.protocol, store.openThread?.model)}
       <p class="user-text" data-testid="text-part">{#if part.previewReferences?.length}<PreviewReferences text={prompt} references={part.previewReferences} {store} threadId={message.threadId} {keywords} />{:else}{#each promptSegments(prompt, promptCommand(prompt), keywords) as segment, at (at)}{#if segment.kind === 'command'}<span class="command">{segment.text}</span>{:else if segment.kind === 'plain'}{segment.text}{:else}<span class="keyword-{segment.kind}" data-testid="keyword-highlight">{segment.text}</span>{/if}{/each}{/if}</p>
     {:else if part.type === 'file'}
-      <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt}>
+      <a class="file-attachment" data-testid="file-part" href="data:application/octet-stream;base64,{part.data}" download={part.name ?? strings.composer.attachAlt} onclick={(event) => openFile(event, part)}>
         <FileText size={20} strokeWidth={1.5} />
         <span><span>{part.name ?? strings.composer.attachAlt}</span><small>{bytes(decodedBytes(part.data))}</small></span>
       </a>

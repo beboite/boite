@@ -126,7 +126,7 @@
       {/if}
     </div>
   {/key}
-  <!-- The controls sit over the scene's top edge and show on hover, focus or pause. -->
+  <!-- Keep playback controls below the scene so touch devices can read every row. -->
   <div class="controls">
     {#if playing}
       <button class="ghost icon" aria-pressed={paused} aria-label={paused ? t.resume : t.pause} title={paused ? t.resume : t.pause} data-testid="onboarding-animation-pause" onclick={() => paused = !paused}>{#if paused}<Play size={14} />{:else}<Pause size={14} />{/if}</button>
@@ -136,13 +136,13 @@
 </figure>
 
 <style>
-  /* The frame's padding leaves room for the glow and the controls without moving the scene off the text column. */
+  /* The frame's padding leaves room for the glow without moving the scene off the text column. */
   figure { position: relative; margin: 12px -10px 4px; padding: 10px; border-radius: calc(var(--radius-lg) + 6px); container-type: inline-size; }
   /* An inner accent glow while the scene plays, so it reads as an animation and not a picture. */
   figure::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent), inset 0 0 22px color-mix(in srgb, var(--color-accent) 30%, transparent); opacity: 0; transition: opacity var(--dur-3) var(--ease-out-quint); }
   figure.playing::after { opacity: 1; animation: glow calc(var(--dur-3) * 8) ease-in-out infinite alternate; }
-  /* A solid strip over the scene's top edge, under the glow so the ring stays whole. */
-  .controls { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 44px; padding: 0 10px; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: var(--color-surface); border-bottom: 1px solid var(--color-border); box-shadow: var(--shadow-e1); opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
+  /* Reserve a small row for playback so controls never cover the illustration. */
+  .controls { position: relative; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 28px; margin-top: 4px; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-2) var(--ease-out-quint), transform var(--dur-2) var(--ease-out-quint); }
   .controls button { width: 28px; height: 28px; color: var(--color-muted-foreground); }
   .controls button:hover { color: var(--color-foreground); }
   figure:hover .controls, figure:focus-within .controls, figure.paused .controls { opacity: 1; transform: none; }

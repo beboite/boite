@@ -69,6 +69,8 @@ pub(crate) struct HealthBody {
     ok: bool,
     #[serde(default)]
     version: Option<String>,
+    #[serde(default, rename = "bundleHash")]
+    bundle_hash: Option<String>,
     #[serde(default)]
     pid: Option<u32>,
 }
@@ -86,10 +88,11 @@ pub(super) enum Probe {
 }
 
 /// The pure half of `probe`: what a `/health` answer means to this shell.
-fn judge(answer: Option<HealthBody>, version: &str) -> Probe {
+fn judge(answer: Option<HealthBody>, version: &str, bundle_hash: Option<&str>) -> Probe {
     match answer {
         None => Probe::Absent,
-        Some(body) if body.version.as_deref() == Some(version) => Probe::Current,
+        Some(body) if body.version.as_deref() == Some(version)
+            && bundle_hash.is_none_or(|expected| body.bundle_hash.as_deref() == Some(expected)) => Probe::Current,
         Some(body) => Probe::Stale(body.version.unwrap_or_else(|| "(none)".to_string())),
     }
 }
@@ -98,12 +101,12 @@ fn judge(answer: Option<HealthBody>, version: &str) -> Probe {
 /// not running is `Absent` without a connection: after a reboot `core.json`
 /// names a closed port, and Windows takes 2 s to refuse one, so `health`
 /// would spend its whole timeout on it.
-pub(super) fn probe(file: &CoreFile, version: &str) -> Probe {
+pub(super) fn probe(file: &CoreFile, version: &str, bundle_hash: Option<&str>) -> Probe {
     let Some(pid) = file.pid else { return Probe::Absent };
     if !platform::process::alive(pid) {
         return Probe::Absent;
     }
-    judge(health(file.port, pid), version)
+    judge(health(file.port, pid), version, bundle_hash)
 }
 
 /// A bound on how much of a `/health` response is ever read, so a local
@@ -199,13 +202,26 @@ mod tests {
 
     #[test]
     fn a_core_of_another_version_is_stale_and_a_silent_one_is_absent() {
-        let body = |version: Option<&str>| HealthBody { ok: true, version: version.map(str::to_string), pid: Some(1) };
-        assert_eq!(judge(Some(body(Some("2.0.0"))), "2.0.0"), Probe::Current);
-        assert_eq!(judge(Some(body(Some("2.0.0-beta.1"))), "2.0.0"), Probe::Stale("2.0.0-beta.1".to_string()));
-        assert_eq!(judge(Some(body(None)), "2.0.0"), Probe::Stale("(none)".to_string()));
-        assert_eq!(judge(None, "2.0.0"), Probe::Absent);
+        let body = |version: Option<&str>| HealthBody { ok: true, version: version.map(str::to_string), pid: Some(1), bundle_hash: None };
+        assert_eq!(judge(Some(body(Some("2.0.0"))), "2.0.0", None), Probe::Current);
+        assert_eq!(judge(Some(body(Some("2.0.0-beta.1"))), "2.0.0", None), Probe::Stale("2.0.0-beta.1".to_string()));
+        assert_eq!(judge(Some(body(None)), "2.0.0", None), Probe::Stale("(none)".to_string()));
+        assert_eq!(judge(None, "2.0.0", None), Probe::Absent);
         let response = b"HTTP/1.1 200 OK\r\n\r\n{\"ok\":true,\"version\":\"1.9.0\",\"pid\":7}";
         assert_eq!(health_response(response, 7).and_then(|body| body.version).as_deref(), Some("1.9.0"));
+    }
+
+    #[test]
+    fn a_reinstall_with_the_same_version_requires_the_installed_bundle() {
+        let body = |hash: Option<&str>| HealthBody {
+            ok: true, version: Some("2.0.0".to_string()), pid: Some(1),
+            bundle_hash: hash.map(str::to_string),
+        };
+        assert_eq!(judge(Some(body(Some("installed"))), "2.0.0", Some("installed")), Probe::Current);
+        assert_eq!(judge(Some(body(Some("earlier"))), "2.0.0", Some("installed")), Probe::Stale("2.0.0".to_string()));
+        assert_eq!(judge(Some(body(None)), "2.0.0", Some("installed")), Probe::Stale("2.0.0".to_string()));
+        // Compiled sidecars and source runs retain version-based adoption.
+        assert_eq!(judge(Some(body(None)), "2.0.0", None), Probe::Current);
     }
 
     #[test]
@@ -221,7 +237,7 @@ mod tests {
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let file = CoreFile { port, host: None, token: "t".to_string(), pid: Some(pid) };
         let started = Instant::now();
-        assert_eq!(probe(&file, "2.0.0"), Probe::Absent);
+        assert_eq!(probe(&file, "2.0.0", None), Probe::Absent);
         // A refused connection alone takes HEALTH_TIMEOUT (500 ms) on Windows.
         assert!(started.elapsed() < Duration::from_millis(100), "probing a dead core took {:?}", started.elapsed());
     }

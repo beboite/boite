@@ -8,6 +8,7 @@ import type { Core } from './core.ts';
 import { homePath } from './paths.ts';
 import { invalidParams } from './errors.ts';
 import { ANTIGRAVITY_QUOTA_ID, readExtraQuota } from './quota-readers.ts';
+import type { ProbeContext } from './drivers/types.ts';
 
 const cliAccount: Account = { id: ANTIGRAVITY_QUOTA_ID, providerId: 'antigravity', label: 'Antigravity CLI', isolationDir: null, status: 'unknown', identity: null, createdAt: 0 };
 
@@ -61,16 +62,26 @@ export function codexQuotaWindows(raw: unknown): QuotaWindow[] {
   return windows;
 }
 
-/** The token stays inside this function and is sent only to Anthropic. */
+/**
+ * One HTTP request when the login is a file Boite can read. Otherwise the CLI
+ * answers for itself: on macOS Claude keeps its login in the Keychain, and an
+ * expired token is one only the CLI can refresh.
+ */
 async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> {
   const provider = core.providers.require(account.providerId);
   const env = core.accounts.accountEnv(account, provider);
   const directory = env['CLAUDE_CONFIG_DIR'] ?? process.env['CLAUDE_CONFIG_DIR'] ?? join(homePath(), '.claude');
   let credentials: ObjectValue;
   try { credentials = object(JSON.parse(await readFile(join(directory, '.credentials.json'), 'utf8'))); }
-  catch { throw new Error('Claude login could not be read. Connect an account in Providers.'); }
+  catch { return readClaudeFromCli(core, account); }
   const token = object(credentials['claudeAiOauth'])['accessToken'];
   if (typeof token !== 'string' || !token) throw new Error('This Claude account has no subscription login. Connect it in Providers.');
+  const windows = await readClaudeWithToken(token);
+  return windows ?? readClaudeFromCli(core, account);
+}
+
+/** The token stays inside this function and is sent only to Anthropic. Null when it has expired. */
+async function readClaudeWithToken(token: string): Promise<QuotaWindow[] | null> {
   let response: Response;
   try {
     response = await fetch('https://api.anthropic.com/api/oauth/usage', {
@@ -78,21 +89,31 @@ async function readClaude(core: Core, account: Account): Promise<QuotaWindow[]> 
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
   } catch { throw new Error('Claude quota request failed. Check the connection and retry.'); }
-  if (response.status === 401) throw new Error('Claude login expired. Reconnect the account in Providers.');
+  if (response.status === 401) return null;
   if (response.status === 429) throw new Error('Claude quota requests are rate limited. Retrying in five minutes.');
   if (!response.ok) throw new Error(`Claude quota request returned HTTP ${response.status}.`);
   try { return claudeQuotaWindows(await response.json()); }
   catch { throw new Error('Claude returned an invalid quota response.'); }
 }
 
+async function readClaudeFromCli(core: Core, account: Account): Promise<QuotaWindow[]> {
+  const { readClaudeQuota } = await import('./drivers/claude.ts');
+  return claudeQuotaWindows(await withQuotaProbe(core, account, 'claude', (ctx) => readClaudeQuota(ctx)));
+}
+
 async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
   const { readCodexQuota } = await import('./drivers/codex.ts');
+  return codexQuotaWindows(await withQuotaProbe(core, account, 'codex', readCodexQuota));
+}
+
+/** A CLI started for one quota read, in a scratch directory, traced and stopped whatever happens. */
+async function withQuotaProbe(core: Core, account: Account, name: string, read: (ctx: ProbeContext) => Promise<unknown>): Promise<unknown> {
   const provider = core.providers.require(account.providerId);
   const cwd = mkdtempSync(join(tmpdir(), 'boite-quota-'));
   const threadId = `quota:${account.id}`;
   const exits: Promise<void>[] = [];
   try {
-    return codexQuotaWindows(await readCodexQuota({
+    return await read({
       provider, accountId: account.id, cwd,
       accountEnv: core.accounts.accountEnv(account, provider),
       spawnChild: (cmd, args, opts) => {
@@ -102,14 +123,14 @@ async function readCodex(core: Core, account: Account): Promise<QuotaWindow[]> {
       },
       killTree: () => core.procs.killTree(threadId),
       log: () => undefined,
-    }));
+    });
   } finally {
     core.procs.killTree(threadId);
     await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the windows just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `codex quota: ${error instanceof Error ? error.message : String(error)}`));
-    await removeDir(cwd, (message) => core.log('warn', `codex quota: ${message}`));
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `${name} quota: ${error instanceof Error ? error.message : String(error)}`));
+    await removeDir(cwd, (message) => core.log('warn', `${name} quota: ${message}`));
   }
 }
 

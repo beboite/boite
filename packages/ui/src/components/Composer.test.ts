@@ -2,8 +2,8 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
+import { FakeClient } from '../lib/fake-client';
 import { RpcFailure } from '../lib/client';
-import type { FakeClient } from '../lib/fake-client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
@@ -155,7 +155,7 @@ async function type(text: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function mountOnFake(): Promise<void> {
+async function mountOnFake(delayMs?: number): Promise<void> {
   window.history.replaceState(null, '', '/?fake=1&open=recent');
   const target = document.createElement('div');
   document.body.appendChild(target);
@@ -169,6 +169,7 @@ async function mountOnFake(): Promise<void> {
   closeTour();
   running = mount(App, { target });
   await waitFor(() => store.booted && store.openThread !== null);
+  if (delayMs !== undefined) { store.attach(new FakeClient({ delayMs })); await store.connect(); }
 }
 
 /** One finished turn on the thread that is open, sent from the composer. */
@@ -602,7 +603,7 @@ test('Escape stops the running turn and sends pending input next', async () => {
   press('Enter');
   await waitFor(() => input().value === '');
   press('Escape');
-  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
   const prompts = store.openThread!.messages.filter((message) => message.role === 'user');
   expect(prompts.at(-1)?.parts).toEqual([{ type: 'text', text: 'Read this immediately' }]);
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
@@ -639,7 +640,7 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
-test('Enter in the emptied composer sends all pending prompts together now', async () => {
+test('Enter in the emptied composer holds pending input behind an approval', async () => {
   await mountOnFake();
   await store.open('t-trace');
   await type('Hold on [permission]');
@@ -653,30 +654,32 @@ test('Enter in the emptied composer sends all pending prompts together now', asy
   await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 2);
   expect(query('[data-testid=composer-queued]').textContent).toContain('Now please');
   press('Enter');
-  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  expect(store.openThread?.status).toBe('waiting');
+  expect(store.composerStates['t-trace']?.queued).toHaveLength(2);
+  await store.client!.call('permissions.answer', { requestId: store.pendingPermissions[0]!.id, decision: 'allow' });
+  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
   const prompts = store.openThread!.messages.filter((message) => message.role === 'user').slice(-1)
     .map((message) => message.parts.map((part) => (part.type === 'text' ? part.text : '')).join(''));
   expect(prompts).toEqual(['Now please\n\nAfter that']);
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
 });
 
-test('Enter with text still queues, and Send now under the pending bubbles stops the turn', async () => {
-  await mountOnFake();
+test('Send now submits a follow-up without interrupting the live agent', async () => {
+  await mountOnFake(40);
   await store.open('t-trace');
-  await type('Hold on [permission]');
+  await type('Keep reading [tools]');
   press('Enter');
-  await waitFor(() => store.openThread?.status === 'waiting');
+  await waitFor(() => store.openThread?.status === 'running');
   const rpc = vi.spyOn(store.client!, 'call');
-  await type('Queued by the button');
+  await type('Focus on this detail');
   press('Enter');
-  await type('still typing');
-  press('Enter');
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 2);
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 1);
   query<HTMLButtonElement>('[data-testid=composer-send-now]').click();
-  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0);
-  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(1);
-  await waitFor(() => !store.busy && store.composerStates['t-trace']?.queued.length === 0);
+  await waitFor(() => store.composerStates['t-trace']?.queued.length === 0 && !store.composerStates['t-trace']?.sending);
+  expect(store.openThread?.status).toBe('running');
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.steer')).toHaveLength(1);
+  expect(rpc.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  await waitFor(() => !store.busy);
 });
 
 test('goal and loop coexist above the composer with expandable agent tasks', async () => {

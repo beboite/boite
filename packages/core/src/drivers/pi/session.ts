@@ -167,11 +167,11 @@ export class PiSession {
     });
   }
 
-  /** Submit attributed coordination at pi's next tool boundary. */
-  async steer(turn: PiTurn, message: string): Promise<boolean> {
+  /** Submit input at pi's next tool boundary. */
+  async steer(turn: PiTurn, message: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
     if (this.current !== turn || turn.settled || turn.isStopped || !this.peer) return false;
     this.steered = true;
-    await this.peer.command('steer', { message });
+    await this.peer.command('steer', { message, ...(attachments.length ? { images: imagesOf(attachments) } : {}) });
     return true;
   }
 

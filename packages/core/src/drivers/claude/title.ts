@@ -40,7 +40,13 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
   const prompt = async function* (): AsyncGenerator<SDKUserMessage> {
     yield {
       type: 'user',
-      message: { role: 'user', content: titleRequest(ctx.prompt, ctx.answer) },
+      message: { role: 'user', content: [
+        { type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial) },
+        ...(ctx.attachments ?? []).map((attachment) => ({
+          type: 'image' as const,
+          source: { type: 'base64' as const, media_type: attachment.mimeType, data: attachment.data },
+        })),
+      ] },
       parent_tool_use_id: null,
     } as SDKUserMessage;
   };

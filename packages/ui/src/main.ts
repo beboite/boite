@@ -37,9 +37,18 @@ void startLocale()
     // mount is laid out, the second when it has reached the screen.
     if (quotas || window.__TAURI_INTERNALS__ === undefined) return;
     await zoomed;
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    let sent = false;
+    const ready = () => {
+      if (sent) return;
+      sent = true;
       void import('@tauri-apps/api/core').then(({ invoke }) => invoke('shell_ready')).catch(() => {
         // An older shell without the command shows its window on its own.
       });
-    }));
+    };
+    // WebView2 keeps painting in a hidden window. WebKit, on macOS and Linux,
+    // runs no frame callback for a window that is not on screen, so waiting on
+    // one held the window back until the shell's ten-second fallback.
+    if (document.visibilityState === 'hidden') ready();
+    else if (!navigator.userAgent.includes('Windows')) setTimeout(ready, 100);
+    requestAnimationFrame(() => requestAnimationFrame(ready));
   });

@@ -5,9 +5,9 @@ import { Store } from './store.svelte';
 import { RpcErrorCode, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from './client';
 
-async function ready() {
+async function ready(delayMs = 0) {
   const store = new Store();
-  const client = new FakeClient({ delayMs: 0 });
+  const client = new FakeClient({ delayMs });
   store.attach(client);
   await store.connect();
   return { store, client };
@@ -138,4 +138,41 @@ test('a late accepted activity command cannot update the replacement thread', as
     expect(state.queued).toHaveLength(0);
     expect(state.paused).toBe(false);
   } finally { store.detach(); client.close(); replacement.close(); }
+});
+
+
+test('a completed tool sends queued input into the running turn even off screen', async () => {
+  const { store, client } = await ready(40);
+  const calls = vi.spyOn(client, 'call');
+  try {
+    await store.send('[tools] Keep working', 't-trace');
+    store.composerStates['t-trace'] = queued('Use the new instructions');
+    await store.open('t-parser');
+    await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
+    await vi.waitFor(() => expect(store.composerStates['t-trace']?.queued).toHaveLength(0));
+    expect(store.threads.find(thread => thread.id === 't-trace')?.status).toBe('running');
+    expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+    expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(1);
+    const steered = calls.mock.calls.find(([method]) => method === 'turns.steer')![1];
+    expect(steered).toMatchObject({ threadId: 't-trace', prompt: 'Use the new instructions' });
+    const original = await client.call('threads.get', { threadId: 't-trace' });
+    expect(original.messages.filter(message => message.role === 'user').at(-1)).toMatchObject({ turnId: original.turns.at(-1)!.id });
+    expect(store.openThread!.id).toBe('t-parser');
+  } finally { store.detach(); client.close(); }
+});
+
+test('unsupported steering holds the queue until the running turn finishes', async () => {
+  const { store, client } = await ready(20);
+  const call = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation((method, params) =>
+    method === 'turns.steer' ? Promise.resolve({ accepted: false }) as ReturnType<typeof call> : call(method, params));
+  try {
+    await store.send('[tools]', 't-trace');
+    store.composerStates['t-trace'] = queued('After unsupported turn');
+    await vi.waitFor(() => expect(calls.mock.calls.some(([method]) => method === 'turns.steer')).toBe(true));
+    expect(store.composerStates['t-trace']?.queued).toHaveLength(1);
+    expect(store.composerStates['t-trace']?.paused).toBe(false);
+    await vi.waitFor(() => expect(calls.mock.calls.filter(([method]) => method === 'turns.start')).toHaveLength(2));
+    expect(calls.mock.calls.filter(([method]) => method === 'turns.stop')).toHaveLength(0);
+  } finally { store.detach(); client.close(); }
 });

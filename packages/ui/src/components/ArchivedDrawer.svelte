@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, Trash2 } from '@lucide/svelte';
+  import { ChevronRight, RotateCcw, Trash2 } from '@lucide/svelte';
   import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
   import { archivedThreads, restoreThread } from '../lib/archive';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
@@ -71,12 +71,12 @@
               class="ghost small"
               data-testid="archived-drawer-restore"
               disabled={restoring !== null}
-              onclick={() => void restore(thread)}>{strings.sidebar.restoreThread}</button
+              onclick={() => void restore(thread)}><RotateCcw size={13} />{strings.sidebar.restoreThread}</button
             >
             {#if canDeleteThread(store, thread)}
-              <button class="ghost small icon danger" data-testid="archived-drawer-delete"
+              <button class="ghost small danger" data-testid="archived-drawer-delete"
                 aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
-                onclick={() => void remove(thread)}><Trash2 size={14} /></button>
+                onclick={() => void remove(thread)}><Trash2 size={13} />{strings.sidebar.delete}</button>
             {/if}
           </li>
         {/each}
@@ -110,20 +110,22 @@
     list-style: none;
   }
   li {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    gap: 6px;
+    gap: 2px 6px;
     min-height: var(--row);
-    padding: 0 2px 0 22px;
+    padding: 8px 4px 8px 22px;
+    border-bottom: 1px solid var(--color-border);
     color: var(--color-muted-foreground);
     font-size: var(--text-sm);
   }
   .title {
-    flex: 1;
+    grid-column: 1 / -1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    color: var(--color-foreground);
+    line-height: 1.5;
   }
   .when {
     flex: none;
@@ -131,6 +133,8 @@
     font-size: var(--text-xs);
   }
   li button {
-    flex: none;
+    gap: 4px;
+    padding-inline: 4px;
   }
+  li:last-child { border-bottom: 0; }
 </style>

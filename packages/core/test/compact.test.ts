@@ -13,6 +13,7 @@ test('coordination instructions never become native compaction arguments', async
   } });
   const client = await h.connect();
   try {
+    await client.call('brain.configure', { path: null, enabled: false, boiteGuide: true });
     const { threadId } = await echoThread(h, client);
     h.core.coordination.configure(threadId, { mode: 'brief', resources: '', remote: false, paused: false });
     let done = client.next('turn.finished', t => t.threadId === threadId);

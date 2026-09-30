@@ -385,7 +385,7 @@
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
     if (store.busy || state.queued.length > 0 || offline) {
-      state.queued.push({ text: prompt, attachments: images, ...(references.length ? { previewReferences: references } : {}) });
+      state.queued.push({ text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) });
       state.editing = null;
       state.text = '';
       state.attachments = [];
@@ -480,23 +480,21 @@
     readingFiles === 0 && !dictating);
 
   /**
-   * What Send now does to the queue: stop the turn it waits behind, resume it
+   * What Send now does to the queue: steer the running turn, resume it
    * after a refusal held it, or nothing while a pending prompt is going out.
    */
-  let sendNow = $derived<'stop' | 'resume' | null>(
+  let sendNow = $derived<'steer' | 'resume' | null>(
     !composer?.queued.length || composer.sending || store.connection !== 'ready' || !store.openThread ? null
-      : store.busy ? 'stop' : composer.paused ? 'resume' : null
+      : store.openThread.status === 'running' ? 'steer' : store.busy ? null : composer.paused ? 'resume' : null
   );
 
   /**
-   * Send now stops the current turn and sends all queued prompts together once
-   * the thread is idle. A queue held after a refusal is resumed too.
+   * Send now submits queued prompts to the live agent without interrupting it. A queue held after a refusal is resumed too.
    */
   function sendQueuedNow() {
     const state = composer;
     if (!state || sendNow === null) return;
-    state.paused = false;
-    if (sendNow === 'stop') void store.stop();
+    void store.sendQueuedNow(key);
   }
 
   /** ArrowUp: one prompt older, or nothing when the user typed the text themselves. */

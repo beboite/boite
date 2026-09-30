@@ -59,6 +59,7 @@ function lazyDriver(protocol: Protocol, load: () => Promise<Driver>, options: { 
       return {
         done,
         get steer() { return inner?.steer?.bind(inner); },
+        get steerUser() { return inner?.steerUser?.bind(inner); },
         stop: (): void => {
           stopped = true;
           inner?.stop();

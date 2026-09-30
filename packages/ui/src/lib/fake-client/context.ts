@@ -2,6 +2,7 @@
 import {
   PROTOCOL_VERSION,
   RpcErrorCode,
+  type Attachment,
   type Account,
   type BackgroundTask,
   type AgentLetter,
@@ -177,7 +178,8 @@ export class FakeContext {
     string,
     { request: QuestionRequest; resolve: (answer: QuestionAnswer | null) => void }
   >();
-  readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void> }>();
+  readonly inFlight = new Map<ThreadId, { cancelled: boolean; done: Promise<void>; steered?: { prompt: string; attachments: Attachment[] }[] }>();
+  private readonly toolBoundaries = new Set<string>();
   /** Async answers waiting for the thread to be free, oldest first. */
   readonly heldAnswers = new Map<ThreadId, string[]>();
   /** The current output of every active fake login, also returned after reconnect. */
@@ -310,8 +312,16 @@ export class FakeContext {
   }
 
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {
-    if (!this.bus.subscribed.has(threadId)) return;
-    this.emit(event, payload);
+    if (this.bus.subscribed.has(threadId)) this.emit(event, payload);
+    if (event === 'message.part') {
+      const { messageId, partIndex, part } = payload as RpcEvents['message.part'];
+      const boundary = `${messageId}:${partIndex}`;
+      const message = this.threads.get(threadId)?.messages.find(message => message.id === messageId);
+      if (message && part.type === 'tool' && part.status !== 'running' && !this.toolBoundaries.has(boundary)) {
+        this.toolBoundaries.add(boundary);
+        this.emit('turn.toolCompleted', { threadId, turnId: message.turnId, boundary });
+      }
+    }
   }
 
   thread(threadId: ThreadId): Thread {

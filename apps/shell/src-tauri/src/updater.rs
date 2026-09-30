@@ -73,7 +73,7 @@ impl AppUpdater {
             install: Arc::new(Mutex::new(crate::update_stop::InstallState::Idle)) }
     }
     fn begin(&self) -> Result<Operation<'_>, String> {
-        if !self.snapshot.lock().unwrap().supported { return Err("Updates require an installed Windows x64 build of Boite".into()); }
+        if !self.snapshot.lock().unwrap().supported { return Err(UNSUPPORTED.into()); }
         self.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| "An app update operation is already running".to_string())?;
         Ok(Operation(&self.busy))
@@ -87,6 +87,21 @@ impl AppUpdater {
         self.pending.lock().unwrap().take();
         self.change(app, |s| { s.phase = "error".into(); s.error = Some(error); })
     }
+}
+
+const UNSUPPORTED: &str = "Updates require an installed Boite: the Windows x64 installer, a macOS application or a Linux .deb or AppImage";
+
+/// Whether this executable came from a package the updater can replace, the
+/// same packages `latest.json` names: the NSIS installer on Windows x64, the
+/// application bundle on macOS, a .deb or an AppImage on Linux x64 and ARM64.
+/// The bundler stamps the Linux package type into the binary; a bare build
+/// reports none and is left alone.
+pub fn replaceable_package() -> bool {
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+    if cfg!(windows) { return cfg!(target_arch = "x86_64"); }
+    if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) { return false; }
+    if cfg!(target_os = "macos") { return true; }
+    cfg!(target_os = "linux") && matches!(bundle_type(), Some(BundleType::Deb | BundleType::AppImage))
 }
 
 #[derive(Deserialize)]
@@ -298,7 +313,11 @@ pub async fn app_update_install(webview: Webview, app: AppHandle, state: State<'
     // engine again.
     let result = tauri::async_runtime::spawn_blocking(move || pending.update.install(bytes)).await;
     match result {
-        Ok(Ok(())) => { app.restart(); }
+        Ok(Ok(())) => {
+            // Windows never gets here: Tauri exits once the installer starts.
+            std::env::set_var(crate::RESTARTED_AFTER_UPDATE, "1");
+            app.restart();
+        }
         outcome => {
             if let Some(core) = app.try_state::<crate::local_core::CoreState>() { core.release_hold(); }
             *state.install.lock().unwrap() = crate::update_stop::InstallState::Idle;
