@@ -28,6 +28,11 @@ const option = (name: string): string | undefined => {
 };
 const CPU = Number(option('cpu') ?? 1);
 const RUNS = Number(option('runs') ?? 1);
+/** `--profile <dir>` writes a CPU profile of each measured window there, one per scenario. */
+const PROFILE = option('profile');
+/** `--trace` prints the main thread's time by trace event for each measured window. */
+const TRACE = argv.includes('--trace');
+let current = '';
 const ONLY = option('only')?.split(',').map((name) => name.trim());
 const size = /^(\d+)x(\d+)(?:@([\d.]+))?$/.exec(option('size') ?? '1280x890@1');
 if (!size) throw new Error('--size must read <width>x<height>[@<device pixel ratio>]');
@@ -48,20 +53,22 @@ async function buildBundle(outDir: string): Promise<void> {
       return `${code}\nimport { store as __store } from './lib/store.svelte.ts';\nglobalThis.__bench = { store: __store };\n`;
     },
   };
-  await build({ root: UI, plugins: [bridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true }, logLevel: 'warn' });
+  await build({ root: UI, plugins: [bridge], define: { 'import.meta.env.DEV': 'true' }, build: { outDir, emptyOutDir: true, ...(process.env.BENCH_MINIFY === '0' ? { minify: false } : {}) }, logLevel: 'warn' });
 }
 
 type Metrics = { name: string; value: number }[];
-interface Measure { fps: number; p95: number; worst: number; longTasks: number; longMs: number; mainMs: number; scrolled: number }
+interface Measure { fps: number; p95: number; worst: number; longTasks: number; longMs: number; mainMs: number; scriptMs: number; layoutMs: number; styleMs: number; scrolled: number; keys: number[] }
 
 class Page {
   #id = 0;
   #pending = new Map<number, (value: Record<string, unknown>) => void>();
+  readonly events = new Map<string, (params: Record<string, unknown>) => void>();
   constructor(private readonly socket: WebSocket) {
     socket.addEventListener('message', (event) => {
       const message: unknown = JSON.parse(String(event.data));
       if (typeof message !== 'object' || message === null) return;
-      const { id, result } = message as { id?: unknown; result?: Record<string, unknown> };
+      const { id, result, method, params } = message as { id?: unknown; result?: Record<string, unknown>; method?: string; params?: Record<string, unknown> };
+      if (method) this.events.get(method)?.(params ?? {});
       if (typeof id !== 'number') return;
       const settle = this.#pending.get(id);
       if (typeof settle !== 'function') return;
@@ -105,9 +112,21 @@ class Page {
 }
 
 const SCROLLER = `(() => { let best = null; for (const el of document.querySelectorAll('*')) { const s = getComputedStyle(el); if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 200 && (!best || el.scrollHeight > best.scrollHeight)) best = el; } return best; })()`;
-const PROMPT = 'Streaming bench line with enough words to wrap across the column. '.repeat(90);
+/**
+ * The fake agent reasons over the whole prompt, then echoes it back sixteen
+ * characters a delta, and a streaming answer shows whole paragraphs: short
+ * paragraphs keep text arriving on screen through the measured window.
+ */
+const PROMPT = 'Streaming bench paragraph with enough words to wrap across the column.\n\n'.repeat(60);
 const SETUP = `
   window.__long = [];
+  // Each key's latency: from the keydown's own timestamp to the task after the
+  // next frame, which is when what the key changed has been painted.
+  window.__keys = [];
+  document.addEventListener('keydown', (event) => {
+    const start = event.timeStamp;
+    requestAnimationFrame(() => { const channel = new MessageChannel(); channel.port1.onmessage = () => window.__keys.push(performance.now() - start); channel.port2.postMessage(0); });
+  }, true);
   try { new PerformanceObserver((list) => { for (const e of list.getEntries()) window.__long.push(e.duration); }).observe({ type: 'longtask', buffered: true }); } catch {}
   try { if (location.search.includes('tour=1')) localStorage.removeItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}); else localStorage.setItem(${JSON.stringify(ONBOARDING_STORAGE_KEY)}, ${JSON.stringify(JSON.stringify({ version: ONBOARDING_VERSION, at: 0 }))}); } catch {}
 `;
@@ -160,21 +179,54 @@ async function main(): Promise<void> {
 
     const open = async (query: string, width = W, height = H, mobile = false): Promise<void> => {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: mobile ? 2 : DPR, mobile });
+      // Each scenario starts on empty storage: a draft journal one scenario
+      // wrote, an image included, would otherwise be restored into the next.
+      await page.send('Storage.clearDataForOrigin', { origin: `http://127.0.0.1:${uiPort}`, storageTypes: 'local_storage,indexeddb' });
       await page.send('Page.navigate', { url: `http://127.0.0.1:${uiPort}/?fake=1&${query}` });
       await Bun.sleep(300);
       await page.waitFor(`document.readyState === 'complete' && globalThis.__bench?.store?.booted`);
       await Bun.sleep(800);
     };
     const stream = async (): Promise<void> => {
-      await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
+      // The recent thread of the fake may already run a turn, which would only queue this prompt.
+      await page.evaluate(`(async () => { const s = globalThis.__bench.store; if (s.busy) await s.open('t-trace'); })()`);
+      await page.waitFor(`document.querySelector('[data-testid=composer-input]') && !globalThis.__bench.store.busy`);
       await page.call(`function (text) { const input = document.querySelector('[data-testid=composer-input]'); input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); }`, PROMPT);
       await Bun.sleep(100);
       await page.evaluate(`document.querySelector('[data-testid=composer-send]').click()`);
-      await Bun.sleep(600);
+      // Measured once the answer itself is on screen, past the folded reasoning.
+      await page.waitFor(`document.querySelectorAll('.prose.live .paragraph').length >= 2`);
     };
     // A wheel up the conversation through the compositor at 2400 px/s, not awaited.
     const wheel = (width = W, height = H): void => {
       void page.send('Input.synthesizeScrollGesture', { x: Math.round(width * 0.55), y: Math.round(height * 0.4), yDistance: 9000, speed: 2400, gestureSourceType: 'mouse' }).catch(() => {});
+    };
+    // Typing into the composer at 25 keys a second, a fast typist, not awaited:
+    // each key goes through the renderer as a real keydown, keypress and input.
+    let typing = 0;
+    const type = (seconds = 3.6): void => {
+      const run = ++typing;
+      const words = 'the quick brown fox jumps over the lazy dog while the agent writes back ';
+      void (async () => {
+        const end = Date.now() + seconds * 1000;
+        for (let index = 0; Date.now() < end && run === typing; index += 1) {
+          const key = words[index % words.length]!;
+          const code = key === ' ' ? 'Space' : `Key${key.toUpperCase()}`;
+          await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, text: key, unmodifiedText: key }).catch(() => {});
+          await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code }).catch(() => {});
+          await Bun.sleep(40);
+        }
+      })();
+    };
+    const focusComposer = async (draft = ''): Promise<void> => {
+      await page.waitFor(`document.querySelector('[data-testid=composer-input]')`);
+      await page.call(`function (text) { const input = document.querySelector('[data-testid=composer-input]'); input.focus(); if (text) { input.value = text; input.dispatchEvent(new Event('input', { bubbles: true })); } input.setSelectionRange(input.value.length, input.value.length); }`, draft);
+      await Bun.sleep(300);
+    };
+    /** A pasted screenshot's worth of base64 on the draft, what every save of it carries. */
+    const attachImage = async (): Promise<void> => {
+      await page.evaluate(`(() => { const s = globalThis.__bench.store; const key = s.openThread?.id ?? 'draft'; const state = s.composerStates[key]; state.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'bench.png', data: 'iVBORw0KGgo'.repeat(140000) }]; })()`);
+      await Bun.sleep(300);
     };
     const activity = `(() => { const t = globalThis.__bench.store.openThread; t.activity = { goal: { objective: 'Verify the bench', status: 'running', iterations: 1, error: null }, loop: null, tasks: Array.from({ length: 12 }, (_, i) => ({ id: 't' + i, text: 'Bench task number ' + i + ' with a line long enough to wrap', status: i < 4 ? 'completed' : i === 4 ? 'in_progress' : 'pending' })) }; })()`;
     const openActivity = async (): Promise<void> => {
@@ -204,10 +256,23 @@ async function main(): Promise<void> {
       },
       'phone streaming': async () => { await open('open=recent&stream=tokens', 390, 844, true); await stream(); },
       'phone long scroll': async () => { await open('open=recent&long=1', 390, 844, true); wheel(390, 844); },
+      'typing': async () => { await open('open=recent'); await focusComposer(); type(); },
+      'typing in a long draft': async () => { await open('open=recent'); await focusComposer(PROMPT.repeat(2)); type(); },
+      'typing with an image': async () => { await open('open=recent'); await focusComposer(); await attachImage(); type(); },
+      'typing while streaming': async () => { await open('open=recent&stream=tokens&long=1'); await stream(); await focusComposer(); type(); },
+      'phone typing': async () => { await open('open=recent', 390, 844, true); await focusComposer(); type(); },
     };
 
     const measure = async (): Promise<Measure> => {
-      await page.evaluate(`(() => { window.__sc = ${SCROLLER}; window.__sc0 = window.__sc ? window.__sc.scrollTop : 0; })()`);
+      await page.evaluate(`(() => { window.__sc = ${SCROLLER}; window.__sc0 = window.__sc ? window.__sc.scrollTop : 0; window.__keys0 = window.__keys.length; })()`);
+      const traced: { name: string; ph: string; dur?: number; tid: number; pid: number; args?: { name?: string } }[] = [];
+      let traceDone: Promise<void> | undefined;
+      if (TRACE) {
+        page.events.set('Tracing.dataCollected', (params) => { traced.push(...(params['value'] as typeof traced)); });
+        traceDone = new Promise((done) => page.events.set('Tracing.tracingComplete', () => done()));
+        await page.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.stack', ...(process.env.BENCH_INVALIDATIONS ? ['disabled-by-default-devtools.timeline.invalidationTracking'] : []), 'blink', 'cc', 'v8.execute'] } });
+      }
+      if (PROFILE) { await page.send('Profiler.enable'); await page.send('Profiler.setSamplingInterval', { interval: 200 }); await page.send('Profiler.start'); }
       const before = await page.metrics();
       const run = await page.evaluate<{ times: number[]; long: number[] }>(`new Promise((done) => {
         const times = [];
@@ -218,6 +283,43 @@ async function main(): Promise<void> {
       })`);
       const after = await page.metrics();
       const scrolled = await page.evaluate<number>(`window.__sc ? Math.round(Math.abs(window.__sc.scrollTop - window.__sc0)) : 0`);
+      const keys = await page.evaluate<number[]>(`window.__keys.slice(window.__keys0)`);
+      const keysSeen = () => keys.length;
+      if (TRACE) {
+        await page.send('Tracing.end');
+        await traceDone;
+        // Main-thread time by event name, each event's own duration minus its children's.
+        const main = traced.find((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain');
+        const own = traced.filter((event) => main && event.pid === main.pid && event.tid === main.tid && event.ph === 'X' && typeof event.dur === 'number') as { name: string; ts: number; dur: number }[];
+        own.sort((a, b) => a.ts - b.ts || b.dur - a.dur);
+        const stack: { end: number; name: string; child: number; dur: number }[] = [];
+        const selfBy = new Map<string, number>();
+        const close = (upTo: number) => { while (stack.length && stack.at(-1)!.end <= upTo) { const done = stack.pop()!; selfBy.set(done.name, (selfBy.get(done.name) ?? 0) + done.dur - done.child); if (stack.length) stack.at(-1)!.child += done.dur; } };
+        for (const event of own) { close(event.ts); stack.push({ end: event.ts + event.dur, name: event.name, child: 0, dur: event.dur }); }
+        close(Infinity);
+        const top = [...selfBy].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([name, us]) => `${name} ${(us / 1000).toFixed(0)}`).join(', ');
+        // Layouts counted, and those a script forced: the counts hold whatever else the machine runs.
+        const layouts = traced.filter((event) => main && event.pid === main.pid && event.tid === main.tid && event.name === 'Layout' && event.ph === 'X') as { args?: { beginData?: { stackTrace?: unknown } } }[];
+        const forcedLayouts = layouts.filter((event) => event.args?.beginData?.stackTrace) as { dur?: number; args: { beginData: { stackTrace: { functionName: string }[] } } }[];
+        const forced = forcedLayouts.length;
+        if (process.env.BENCH_INVALIDATIONS) {
+          const by = new Map<string, number>();
+          for (const event of traced as { name: string; args?: { data?: { reason?: string; nodeName?: string } } }[]) {
+            if (event.name !== 'LayoutInvalidationTracking' && event.name !== 'StyleRecalcInvalidationTracking' && event.name !== 'ScheduleStyleInvalidationTracking') continue;
+            const key = `${event.name.replace('InvalidationTracking', '')}: ${event.args?.data?.reason ?? '?'} @ ${(event.args?.data?.nodeName ?? '?').slice(0, 60)}`;
+            by.set(key, (by.get(key) ?? 0) + 1);
+          }
+          for (const [key, n] of [...by].sort((a, b) => b[1] - a[1]).slice(0, 14)) console.log(`    ${n}x ${key}`);
+        }
+        if (process.env.BENCH_FORCED) {
+          const by = new Map<string, [number, number]>();
+          for (const event of forcedLayouts) { const name = event.args.beginData.stackTrace.slice(0, 3).map((frame) => frame.functionName || '(anon)').join(' < '); const [n, ms] = by.get(name) ?? [0, 0]; by.set(name, [n + 1, ms + (event.dur ?? 0) / 1000]); }
+          for (const [name, [n, ms]] of [...by].sort((a, b) => b[1][1] - a[1][1]).slice(0, 8)) console.log(`    forced ${n}x ${ms.toFixed(0)} ms: ${name}`);
+        }
+        console.log(`  trace ${current}: layouts ${layouts.length}, forced by script ${forced}, keys ${keysSeen()}; ${top}`);
+      }
+      if (PROFILE) { const { profile } = await page.send('Profiler.stop') as { profile: unknown }; await Bun.write(join(PROFILE, `${current.replaceAll(' ', '-')}.cpuprofile`), JSON.stringify(profile)); }
+      typing += 1;
       const gaps = run.times.slice(1).map((time, index) => time - run.times[index]!).sort((a, b) => a - b);
       const seconds = (run.times.at(-1)! - run.times[0]!) / 1000;
       return {
@@ -227,22 +329,29 @@ async function main(): Promise<void> {
         longTasks: run.long.length,
         longMs: run.long.reduce((sum, duration) => sum + duration, 0),
         mainMs: ((after['TaskDuration']! - before['TaskDuration']!) * 1000) / seconds,
+        scriptMs: ((after['ScriptDuration']! - before['ScriptDuration']!) * 1000) / seconds,
+        layoutMs: ((after['LayoutDuration']! - before['LayoutDuration']!) * 1000) / seconds,
+        styleMs: ((after['RecalcStyleDuration']! - before['RecalcStyleDuration']!) * 1000) / seconds,
         scrolled,
+        keys: keys.sort((a, b) => a - b),
       };
     };
 
     console.log(`# ${W}x${H}@${DPR}, CPU x${CPU}, ${new Date().toISOString().slice(0, 10)}, software compositing`);
-    console.log('scenario | variant | fps | p95 ms | worst ms | long tasks | main ms/s | main ms per 1000 px');
+    console.log('scenario | variant | fps | p95 ms | worst ms | long tasks | main ms/s (script, layout, style) | main ms per 1000 px | keys: count, median, p95, worst ms');
     for (const [name, setup] of Object.entries(scenarios)) {
       if (ONLY && !ONLY.includes(name)) continue;
       for (let run = 0; run < RUNS; run++) {
         for (const [variant, css] of Object.entries(VARIANTS)) {
           try {
+            current = `${name}-${variant}`;
             await setup();
             await page.call(`function (css) { let s = document.getElementById('bench-variant'); if (!s) { s = document.createElement('style'); s.id = 'bench-variant'; document.head.append(s); } s.textContent = css; }`, css);
             const m = await measure();
             const perPixel = m.scrolled > 0 ? ((m.mainMs * 3) / m.scrolled * 1000).toFixed(0) : '-';
-            console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} | ${perPixel}`);
+            const at = (share: number) => (m.keys[Math.min(m.keys.length - 1, Math.floor(m.keys.length * share))] ?? 0).toFixed(1);
+            const keys = m.keys.length ? `${m.keys.length}, ${at(0.5)}, ${at(0.95)}, ${at(1)}` : '-';
+            console.log(`${name} | ${variant} | ${m.fps.toFixed(1)} | ${m.p95.toFixed(0)} | ${m.worst.toFixed(0)} | ${m.longTasks} (${m.longMs.toFixed(0)} ms) | ${m.mainMs.toFixed(0)} (${m.scriptMs.toFixed(0)}, ${m.layoutMs.toFixed(0)}, ${m.styleMs.toFixed(0)}) | ${perPixel} | ${keys}`);
           } catch (error) {
             console.log(`${name} | ${variant} | failed: ${error instanceof Error ? error.message : String(error)}`);
           }
