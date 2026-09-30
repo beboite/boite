@@ -470,6 +470,14 @@
 
   // Finished and streaming messages are derived apart, so a delta never rescans the thread.
   const progress = new TurnProgress(() => messages);
+  /** One model attribution per turn, independent of the rendered window and streamed parts. */
+  const firstAssistantInTurn = $derived.by(() => {
+    const result = new Map<string, string>();
+    for (const message of messages) {
+      if (message.role === 'assistant' && !result.has(message.turnId)) result.set(message.turnId, message.id);
+    }
+    return result;
+  });
   /** What each finished turn wrote, shown once at its end; a turn still running is left alone. */
   const filesByTurn = $derived.by(() => {
     const thread = store.openThread;
@@ -577,7 +585,7 @@
           {:else if message.role === 'user'}
             <UserMessage {store} {message} {turn} {progress} {expanded} ontoggle={toggleImage} edit={atRest ? () => editMessage(message) : undefined} />
           {:else}
-            <AssistantMessage {store} {threadId} {message} {progress} {signedOut} />
+            <AssistantMessage {store} {threadId} {message} {progress} {signedOut} showModel={firstAssistantInTurn.get(message.turnId) === message.id} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id && filesByTurn.has(turn.id)}
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
