@@ -106,7 +106,7 @@
         },
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+        { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),

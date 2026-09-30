@@ -59,7 +59,7 @@
       { id: 'rename', label: strings.sidebar.rename },
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
-      { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+      { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
       // A phone has no Ctrl+F: this sheet is its way to the find bar.
       { id: 'find', label: strings.keyboard.commands.find },
       ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
