@@ -167,6 +167,7 @@ export class Core {
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
+    this.threads.focus.close();
     this.router.stopAccepting();
     this.procs.stopAccepting();
     this.requestShutdown();
