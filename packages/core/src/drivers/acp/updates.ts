@@ -62,7 +62,7 @@ export function drawUpdate(turn: AcpTurn, update: SessionNotification['update'])
 /** A permission request or an Antigravity question, put to the user; with no prompt in flight, cancelled. */
 export async function answerPermission(turn: AcpTurn | null, params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
   // `RequestPermissionResponse.outcome` is itself the tagged outcome object.
-  if (turn === null) return { outcome: { outcome: 'cancelled' } };
+  if (turn === null || turn.isStopped) return { outcome: { outcome: 'cancelled' } };
   const call = params.toolCall;
   // Antigravity carries questions on this method, using its own option ids.
   const question = turn.antigravity && isAntigravityQuestion(params);
@@ -83,6 +83,10 @@ export async function answerPermission(turn: AcpTurn | null, params: RequestPerm
     return { outcome: { outcome: 'selected', optionId: optionId! } };
   }
   const toolName = call.name ?? call.title ?? call.toolCallId;
+  if (turn.ctx.thread.permissionMode === 'yolo') {
+    const optionId = pickOption(params.options, 'allow');
+    return optionId === null ? { outcome: { outcome: 'cancelled' } } : { outcome: { outcome: 'selected', optionId } };
+  }
   const ticket = turn.ctx.requestPermission(toolName, call.rawInput ?? null, call.title ?? null);
   const index = turn.takeIndex();
   turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });

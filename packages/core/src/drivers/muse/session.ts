@@ -708,7 +708,9 @@ export class MuseSession {
   private async decideApproval(turn: MuseTurn, open: OpenApproval): Promise<void> {
     open.asking = true;
     let answer: 'allow' | 'deny' | 'abort';
-    if (this.editAllowed(turn, open)) {
+    if (turn.isStopped) {
+      answer = 'abort';
+    } else if (turn.ctx.thread.permissionMode === 'yolo' || this.editAllowed(turn, open)) {
       answer = 'allow';
     } else {
       const { toolName, input, description } = approvalCardOf(open);

@@ -234,6 +234,23 @@ describe('muse driver', () => {
     expect(tools[1]).toMatchObject({ name: 'Bash', status: 'done', output: 'ok' });
   });
 
+  test('YOLO accepts a remaining approval without a permission card', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client, { permissionMode: 'yolo' });
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[approve]' });
+    expect((await finished).status).toBe('done');
+    const parts = await lastParts(client, threadId);
+    expect(textsOf(parts)).toEqual(['allowed']);
+    expect(parts.filter(part => part.type === 'permission')).toEqual([]);
+    expect(requested).toEqual([]);
+  });
+
   test('an approval is asked, and allow and deny pick the matching choice', async () => {
     const client = await startCore();
     const threadId = await museThread(client);

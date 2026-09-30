@@ -620,6 +620,7 @@ export const strings = {
     default: 'Ask',
     acceptEdits: 'Edit freely',
     bypassPermissions: 'Auto',
+    yolo: 'YOLO',
     plan: 'Plan',
     dontAsk: 'Auto-deny'
   },
@@ -628,6 +629,7 @@ export const strings = {
     default: 'Reads freely, asks before editing a file or running a command',
     acceptEdits: 'Edits files without asking, asks before running a command',
     bypassPermissions: 'Runs everything without asking, anywhere on this computer',
+    yolo: 'Approves every tool request; skips Claude and Codex hooks',
     plan: 'Plan only, no changes',
     dontAsk: 'Deny anything that would need asking'
   },
@@ -686,6 +688,7 @@ export const strings = {
       default: 'with approval requests',
       acceptEdits: 'with edits allowed',
       bypassPermissions: 'with all permissions',
+      yolo: 'with tool approvals bypassed',
       plan: 'in plan mode',
       dontAsk: 'with automatic denial of approval requests'
     },

@@ -359,6 +359,23 @@ describe('acp driver', () => {
     expect(text).not.toContain('AAAA');
   });
 
+  test('YOLO accepts an ACP permission without a card even when the agent asks anyway', async () => {
+    const client = await startCore();
+    const threadId = await acpThread(client, undefined, 'yolo');
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[permission]' });
+    expect((await finished).status).toBe('done');
+    const parts = (await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain('allowed');
+    expect(parts.filter(part => part.type === 'permission')).toEqual([]);
+    expect(requested).toEqual([]);
+  });
+
   test('a permission is asked, answered, and the answer reaches the agent', async () => {
     const client = await startCore();
     const threadId = await acpThread(client);
@@ -1127,9 +1144,9 @@ describe('acp driver', () => {
     expect(fakeLog()).not.toContain('set_mode');
   });
 
-  test('bypassPermissions and dontAsk both land on the agent mode yolo', async () => {
+  test.each(['bypassPermissions', 'yolo'] as const)('%s lands on the agent mode yolo', async mode => {
     const client = await startCore();
-    const threadId = await acpThread(client, undefined, 'bypassPermissions');
+    const threadId = await acpThread(client, undefined, mode);
     await runTurn(client, threadId, 'first');
     await waitFor(() => setModeCount('yolo') === 1);
 

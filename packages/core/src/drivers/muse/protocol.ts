@@ -192,6 +192,7 @@ export const MODE_POSTURE: Record<PermissionMode, { approvalMode: ApprovalMode; 
   acceptEdits: { approvalMode: 'promptUnmatched', flags: [] },
   plan: { approvalMode: 'denyUnmatched', flags: ['--disable-write', '--disable-shell'] },
   bypassPermissions: { approvalMode: 'allowAll', flags: ['--disable-sandbox'] },
+  yolo: { approvalMode: 'allowAll', flags: ['--disable-sandbox'] },
   dontAsk: { approvalMode: 'allowAll', flags: ['--disable-sandbox'] },
 };
 

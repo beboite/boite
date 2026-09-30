@@ -22,8 +22,8 @@ export interface ClaudeDeps {
  * `setPermissionMode`. A session remembers the last one it applied, so a turn
  * on a warm query only sends what actually moved. None of the three is in the
  * session key, which is what lets the CLI live across the change; the one thing
- * the key still holds is whether the mode is `bypassPermissions`, because that
- * one rides on a query-start option no setter can reach (`sessionKey`).
+ * the key still holds is whether permissions and configured hooks are bypassed,
+ * because those query-start options have no live setter (`sessionKey`).
  */
 export interface LiveSetup {
   model: string | null;
@@ -34,7 +34,7 @@ export interface LiveSetup {
    * the drift back to the default is one call like any other.
    */
   effortLevel: EffortLevel | null;
-  permissionMode: PermissionMode;
+  permissionMode: Exclude<PermissionMode, 'yolo'>;
 }
 
 /** What this turn asks the running query to be, whatever the last one asked for. */
@@ -43,7 +43,7 @@ export function liveSetup(thread: { model: string | null; effort: string | null;
   return {
     model: thread.model,
     effortLevel: effort !== null && SDK_EFFORTS.includes(effort) ? (effort as EffortLevel) : null,
-    permissionMode: thread.permissionMode,
+    permissionMode: thread.permissionMode === 'yolo' ? 'bypassPermissions' : thread.permissionMode,
   };
 }
 
@@ -106,14 +106,15 @@ export class PromptQueue {
  * What a session was started with and cannot be told to change. A turn that
  * differs on any of it cannot land on the running CLI: it closes that session
  * and starts its own. The model and the effort are deliberately not in here,
- * and neither are four of the five permission modes: each has a Query setter
+ * and neither are the four modes that keep permission checks: each has a Query setter
  * that changes it on the live CLI, so a warm session follows the thread instead
  * of being dropped. What is left is what the child process was spawned with,
  * `allowDangerouslySkipPermissions` included: `setPermissionMode` moves the
  * mode, but that flag is a query-start option with no setter beside it, so a
  * query opened without it cannot be talked into `bypassPermissions` and a query
  * opened with it keeps the skip even after the mode moves away. Hence one
- * boolean rather than the mode itself: the four other modes still cross freely.
+ * permission and hook booleans rather than the mode itself: the four checked
+ * modes still cross freely, while YOLO's configured-hook switch starts a new query.
  */
 export function sessionKey(ctx: SessionContext): string {
   return JSON.stringify({
@@ -123,7 +124,8 @@ export function sessionKey(ctx: SessionContext): string {
     accountId: ctx.account.id,
     env: ctx.accountEnv,
     speed: ctx.thread.speed ?? null,
-    bypass: ctx.thread.permissionMode === 'bypassPermissions',
+    bypass: ctx.thread.permissionMode === 'bypassPermissions' || ctx.thread.permissionMode === 'yolo',
+    disableHooks: ctx.thread.permissionMode === 'yolo',
   });
 }
 

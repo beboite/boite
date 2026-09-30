@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Protocol, ProviderSummary } from '@boite/contracts';
 import { modeHint, modeLabel, modesFor, shownMode } from './permission-modes';
+import { defaultPrefs, PREFS_STORAGE_KEY, readPrefs, writePrefs } from './prefs';
 
 const provider = (protocol: Protocol, approvals = true) => ({
   id: protocol, name: protocol, shortName: protocol, protocol, source: 'shipped', available: true, executable: null, models: [],
@@ -8,13 +9,13 @@ const provider = (protocol: Protocol, approvals = true) => ({
 }) as unknown as ProviderSummary;
 
 describe('permission modes', () => {
-  it('offers the three policies to an agent that asks, the most open first', () => {
-    expect(modesFor(provider('claude-sdk'))).toEqual(['bypassPermissions', 'acceptEdits', 'default']);
-    expect(modesFor(null)).toEqual(['bypassPermissions', 'acceptEdits', 'default']);
+  it('offers YOLO beside Auto, the most open first', () => {
+    expect(modesFor(provider('claude-sdk'))).toEqual(['yolo', 'bypassPermissions', 'acceptEdits', 'default']);
+    expect(modesFor(null)).toEqual(['yolo', 'bypassPermissions', 'acceptEdits', 'default']);
   });
 
   it('drops the Codex entry that would be the same sandbox as the default', () => {
-    expect(modesFor(provider('codex-appserver'))).toEqual(['bypassPermissions', 'default']);
+    expect(modesFor(provider('codex-appserver'))).toEqual(['yolo', 'bypassPermissions', 'default']);
   });
 
   it('shows a Codex choice left on acceptEdits as the default it runs as', () => {
@@ -34,5 +35,14 @@ describe('permission modes', () => {
     expect(modeLabel('default', provider('claude-sdk'))).toBe('Ask');
     expect(modeLabel('bypassPermissions', provider('claude-sdk'))).toBe('Auto');
     expect(modeHint('bypassPermissions', null)).toContain('anywhere on this computer');
+    expect(modeLabel('yolo', provider('claude-sdk'))).toBe('YOLO');
+    expect(modeHint('yolo', null)).toContain('skips Claude and Codex hooks');
+  });
+
+  it('remembers YOLO across reloads', () => {
+    try {
+      writePrefs({ ...defaultPrefs(), permissionMode: 'yolo' });
+      expect(readPrefs().permissionMode).toBe('yolo');
+    } finally { localStorage.removeItem(PREFS_STORAGE_KEY); }
   });
 });

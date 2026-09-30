@@ -44,8 +44,8 @@ export interface SessionHooks {
  * only an idle window, a stop, a changed setup or the core going down ends it.
  * A changed model, effort or permission mode is not a changed setup: the SDK
  * has a setter for each of the three, so the CLI takes the new one in place.
- * The one exception is a move in or out of `bypassPermissions`, which needs a
- * query-start option and therefore a new query (`sessionKey`).
+ * Permission bypass and YOLO's configured-hook switch are query-start options,
+ * so crossing either boundary needs a new query (`sessionKey`).
  */
 export class ClaudeSession {
   private readonly retention = new SessionRetention();
@@ -553,7 +553,10 @@ export class ClaudeSession {
       allowDangerouslySkipPermissions: setup.permissionMode === 'bypassPermissions',
       pathToClaudeCodeExecutable: executable,
       settingSources: ['user', 'project', 'local'],
-      settings: { fastMode: ctx.thread.speed === 'fast' },
+      settings: {
+        fastMode: ctx.thread.speed === 'fast',
+        ...(ctx.thread.permissionMode === 'yolo' ? { disableAllHooks: true } : {}),
+      },
       includePartialMessages: true,
       // Every run of the user's own hooks, for the ledger Settings shows.
       includeHookEvents: true,

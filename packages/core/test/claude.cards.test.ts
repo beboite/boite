@@ -61,6 +61,39 @@ test('an async answer reaches a running Claude turn at its next PostToolUse, not
 });
 
 describe('claude driver', () => {
+  test('YOLO disables configured hooks and accepts a tool request without a permission card', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const answers: (PermissionResult | null)[] = [];
+    scripted((fake, options) => {
+      fake.emit(init('sess-yolo'));
+      void options.canUseTool!('Bash', { command: 'agent-browser --profile ./browser snapshot' }, {
+        signal: new AbortController().signal, toolUseID: 'toolu_yolo', requestId: 'req_yolo',
+      }).then(answer => {
+        answers.push(answer);
+        fake.emit(success('sess-yolo'));
+        fake.end();
+      });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'use the browser' });
+    expect((await finished).status).toBe('done');
+    expect(answers).toEqual([{ behavior: 'allow', updatedInput: { command: 'agent-browser --profile ./browser snapshot' } }]);
+    expect(requested).toEqual([]);
+    expect(calls[0]?.options).toMatchObject({
+      permissionMode: 'bypassPermissions', allowDangerouslySkipPermissions: true,
+      settings: { disableAllHooks: true },
+    });
+    expect((await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts)
+      .filter(part => part.type === 'permission')).toEqual([]);
+  });
+
   test('canUseTool routes to the permission gate and answers the CLI', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
@@ -203,9 +236,10 @@ describe('claude driver', () => {
 });
 
 describe('claude driver: questions and background work', () => {
-  test('AskUserQuestion draws one card per question and hands the answers back in the tool input', async () => {
+  test.each(['default', 'yolo'] as const)('AskUserQuestion still asks for real answers in %s', async permissionMode => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
+    await client.call('threads.update', { threadId, permissionMode });
     const input = {
       questions: [
         { question: 'Which database?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: 'relational' }, { label: 'SQLite' }] },
