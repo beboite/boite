@@ -651,7 +651,7 @@ describe('Store', () => {
     });
     const create = spy.mock.calls.find(([method]) => method === 'threads.create');
     expect(create?.[1]).toMatchObject({ projectId: 'p-notes', title: 'Fix the login', worktree: {} });
-    expect(store.openThread?.branch).toBe('boite/fix-the-login');
+    expect(store.openThread?.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
     expect(store.draft).toBeNull();
 
     // The next draft starts with the switch off: a worktree is a decision each time.

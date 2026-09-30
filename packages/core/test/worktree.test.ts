@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { slugOf, worktreeRoot } from '../src/worktree.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
+import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore } from './harness.ts';
 import type { TestCore } from './harness.ts';
 import type { CoreClient } from '../src/client.ts';
@@ -57,6 +59,89 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
+  test('one title call names the temporary branch without moving files or losing commits', async () => {
+    const restore = setDriver('echo', {
+      ...echoDriver,
+      title: async ctx => {
+        expect(ctx.nameBranch).toBe(true);
+        return JSON.stringify({ title: 'Noms de worktrees', needsRefinement: false, branch: 'fix-worktree-names' });
+      },
+    });
+    try {
+      const project = await repoProject();
+      const thread = await client.call('threads.create', {
+        projectId: project.id, providerId: 'echo', accountId: await echoAccount(),
+        title: 'les noms des worktree sont completement debiles', worktree: {},
+      });
+      expect(thread.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+      git(thread.cwd, 'commit', '-q', '--allow-empty', '-m', 'keep this work');
+      const head = git(thread.cwd, 'rev-parse', 'HEAD');
+      writeFileSync(join(thread.cwd, 'pending.txt'), 'keep this edit');
+      git(project.path, 'branch', 'boite/fix-worktree-names');
+      await client.call('threads.subscribe', { threadId: thread.id });
+      const finished = client.next('turn.finished', row => row.threadId === thread.id, 5000);
+      const named = client.next('thread.updated', row => row.id === thread.id && row.branch === 'boite/fix-worktree-names-2' && row.titleSource === 'agent', 5000);
+      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree naming' });
+      expect((await finished).status).toBe('done');
+      expect(await named).toMatchObject({ title: 'Noms de worktrees', cwd: thread.cwd, branchNamingPending: false });
+      expect(git(thread.cwd, 'branch', '--show-current').trim()).toBe('boite/fix-worktree-names-2');
+      expect(git(thread.cwd, 'rev-parse', 'HEAD')).toBe(head);
+      expect(readFileSync(join(thread.cwd, 'pending.txt'), 'utf8')).toBe('keep this edit');
+      expect(existsSync(thread.cwd)).toBe(true);
+      expect(git(project.path, 'branch', '--list', thread.branch!).trim()).toBe('');
+      expect((await client.call('worktrees.list', { projectId: project.id })).find(row => row.path === thread.cwd)?.branch).toBe('boite/fix-worktree-names-2');
+    } finally { restore(); }
+  });
+
+  test('automatic naming preserves explicitly chosen branches, including temporary-looking names', async () => {
+    const project = await repoProject();
+    const thread = await client.call('threads.create', {
+      projectId: project.id, providerId: 'echo', accountId: await echoAccount(),
+      title: 'Fix worktree names', worktree: { branch: 'boite/wt-explicit' },
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    const named = client.next('thread.updated', row => row.id === thread.id && row.titleSource === 'agent', 5000);
+    await client.call('turns.start', { threadId: thread.id, prompt: 'Fix worktree names' });
+    expect(await named).toMatchObject({ branch: 'boite/wt-explicit', branchNamingPending: false });
+    expect(git(thread.cwd, 'branch', '--show-current').trim()).toBe(thread.branch!);
+  });
+
+  test('invalid branch output keeps the title and a later retitle can name the worktree', async () => {
+    let output = 'Noms de branches\nBranch: ../outside';
+    const restore = setDriver('echo', { ...echoDriver, title: async () => output });
+    try {
+      const project = await repoProject();
+      const thread = await client.call('threads.create', {
+        projectId: project.id, providerId: 'echo', accountId: await echoAccount(), title: 'Fix naming', worktree: {},
+      });
+      await client.call('threads.subscribe', { threadId: thread.id });
+      const named = client.next('thread.updated', row => row.id === thread.id && row.titleSource === 'agent', 5000);
+      await client.call('turns.start', { threadId: thread.id, prompt: 'Fix naming' });
+      expect(await named).toMatchObject({ title: 'Noms de branches', branch: thread.branch, branchNamingPending: true });
+      expect(git(thread.cwd, 'branch', '--show-current').trim()).toBe(thread.branch!);
+      output = 'Noms de branches\nBranch: fix-naming';
+      expect(await client.call('threads.retitle', { threadId: thread.id })).toMatchObject({ branch: 'boite/fix-naming', cwd: thread.cwd, branchNamingPending: false });
+    } finally { restore(); }
+  });
+
+  test('naming does not change an agent-renamed branch or a published temporary branch', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const placed = await harness.core.worktrees.add('thr_git_names', row);
+    git(placed.path, 'branch', '-m', 'feature/chosen-by-agent');
+    expect(await harness.core.worktrees.nameBranch('thr_git_names', placed.path, placed.branch, 'generated')).toBeNull();
+    expect(git(placed.path, 'branch', '--show-current').trim()).toBe('feature/chosen-by-agent');
+    git(placed.path, 'branch', '-m', placed.branch);
+    git(project.path, 'update-ref', `refs/remotes/origin/${placed.branch}`, 'HEAD');
+    expect(await harness.core.worktrees.nameBranch('thr_git_names', placed.path, placed.branch, 'generated')).toBeNull();
+    git(project.path, 'update-ref', '-d', `refs/remotes/origin/${placed.branch}`);
+    git(project.path, 'remote', 'add', 'origin', project.path);
+    git(project.path, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(placed.path, 'branch', '--set-upstream-to=origin/main');
+    expect(await harness.core.worktrees.nameBranch('thr_git_names', placed.path, placed.branch, 'generated')).toBeNull();
+    expect(git(placed.path, 'branch', '--show-current').trim()).toBe(placed.branch);
+  });
+
   test('workspace recovery reattaches a surviving branch after its directory was removed', async () => {
     const project = await repoProject();
     const row = harness.core.projects.require(project.id);
@@ -102,13 +187,14 @@ describe('a thread in its own worktree', () => {
       title: 'Fix the login',
       worktree: {},
     });
-    expect(thread.branch).toBe('boite/fix-the-login');
-    expect(thread.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login'));
+    expect(thread.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+    const directory = thread.branch!.slice('boite/'.length);
+    expect(thread.cwd).toBe(join(worktreeRoot(project.path), directory));
     expect(existsSync(join(thread.cwd, '.git'))).toBe(true);
-    expect(thread.cwd).toBe(join(project.path, '.boite', 'worktrees', 'fix-the-login'));
+    expect(thread.cwd).toBe(join(project.path, '.boite', 'worktrees', directory));
     expect(git(project.path, 'status', '--porcelain')).toBe('');
-    expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/boite/fix-the-login');
-    expect(harness.core.journal.getThread(thread.id)?.branch).toBe('boite/fix-the-login');
+    expect(git(project.path, 'worktree', 'list', '--porcelain')).toContain(`branch refs/heads/${thread.branch}`);
+    expect(harness.core.journal.getThread(thread.id)?.branch).toBe(thread.branch);
     expect(harness.core.journal.getThread(thread.id)?.cwd).toBe(thread.cwd);
     // The git calls ran under the thread's id, so the trace has them.
     const processes = await client.call('trace.get', { threadId: thread.id });
@@ -132,7 +218,7 @@ describe('a thread in its own worktree', () => {
     expect(existsSync(original.cwd)).toBe(true);
     await client.call('settings.set', { worktreeStorage: { mode: 'project', directory } });
     const back = await create(first.id, 'Back');
-    expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', 'back'));
+    expect(back.cwd).toBe(join(first.path, '.boite', 'worktrees', back.branch!.slice('boite/'.length)));
     const listed = (await client.call('worktrees.list', { projectId: first.id })).find(w => w.branch === a.branch);
     if (!listed) throw new Error(`shared worktree ${a.branch} was not listed`);
     // Bun's realpath preserves Windows 8.3 aliases; compare the directory identity.
@@ -152,17 +238,20 @@ describe('a thread in its own worktree', () => {
     expect(git(project.path, 'status', '--porcelain')).toBe('');
   });
 
-  test('a second thread with the same title gets -2, and a wanted branch is honoured or refused', async () => {
+  test('identical prompts get distinct short names, and a wanted branch is honoured or refused', async () => {
     const project = await repoProject();
     const accountId = await echoAccount();
     const base = { projectId: project.id, providerId: 'echo' as const, accountId, title: 'Fix the login' };
-    await client.call('threads.create', { ...base, worktree: {} });
+    const first = await client.call('threads.create', { ...base, worktree: {} });
     const second = await client.call('threads.create', { ...base, worktree: {} });
-    expect(second.branch).toBe('boite/fix-the-login-2');
-    expect(second.cwd).toBe(join(worktreeRoot(project.path), 'fix-the-login-2'));
+    expect(second.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+    expect(second.branch).not.toBe(first.branch);
+    expect(second.cwd).not.toBe(first.cwd);
+    expect(second.cwd).toBe(join(worktreeRoot(project.path), second.branch!.slice('boite/'.length)));
 
     const named = await client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } });
     expect(named.branch).toBe('feature/retry');
+    expect(named.branchNamingPending).toBe(false);
     expect(named.cwd).toBe(join(worktreeRoot(project.path), 'feature-retry'));
 
     await expect(client.call('threads.create', { ...base, worktree: { branch: 'feature/retry' } })).rejects.toThrow(
@@ -227,7 +316,7 @@ describe('a thread in its own worktree', () => {
     const project = await repoProject();
     const row = harness.core.projects.require(project.id);
     const threadId = 'thr_rollback';
-    const placed = await harness.core.worktrees.add(threadId, row, 'Fix the login');
+    const placed = await harness.core.worktrees.add(threadId, row);
     expect(existsSync(placed.path)).toBe(true);
 
     await harness.core.worktrees.remove(threadId, row, placed);

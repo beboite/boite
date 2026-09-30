@@ -34,6 +34,7 @@ export interface ThreadRow {
   speed: string | null;
   cwd: string;
   branch: string | null;
+  branch_naming_pending?: number;
   permission_mode: string;
   status: string;
   unread: number;
@@ -125,6 +126,7 @@ export function toThread(row: ThreadRow): ThreadSummary {
     speed: row.speed,
     cwd: row.cwd,
     branch: row.branch,
+    branchNamingPending: row.branch_naming_pending === 1,
     permissionMode: row.permission_mode as ThreadSummary['permissionMode'],
     status: row.status as ThreadSummary['status'],
     unread: row.unread !== 0,

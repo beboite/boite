@@ -23,7 +23,8 @@ is replaced by the agent's while the first turn runs.
   alone. Each attempt takes thirty seconds at most and is spawned under the thread so
   the trace carries them. The request includes the first message and its
   images when the title provider supports images. The model returns JSON
-  with `title` and `needsRefinement`; plain titles from older hooks still
+  with `title` and `needsRefinement`, plus an English `branch` slug when an
+  automatically named worktree is pending; plain titles from older hooks still
   work and need no refinement. The title is cleaned (the first line, a `Title:`
   prefix, quotes, backticks, a trailing period, cut at sixty characters on a
   word) and saved with `titleSource: 'agent'`. A failed or empty call gets two
@@ -92,3 +93,14 @@ using assistant findings only to resolve an unnamed subject. It does not
 decode the remaining history to name the conversation.
 `bun run bench/retitle.ts` measures this path on a temporary core with
 5,000 messages and the offline echo driver.
+
+## Worktree branches
+
+New automatic worktrees start on `boite/wt-<8 characters>`. The title writer
+also returns a short English branch name in the same call, using the selected
+title model. Naming happens while the first turn runs and keeps the checkout
+path, files, commits and provider session unchanged. Explicit branch names,
+branches already renamed in Git, and branches with an upstream or known remote
+ref are preserved. Collisions receive a numeric suffix. Invalid branch output
+leaves the temporary branch usable; explicit title regeneration can retry it.
+The pending naming flag survives a core restart.

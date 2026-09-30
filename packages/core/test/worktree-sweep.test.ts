@@ -135,7 +135,7 @@ describe('worktrees.list', () => {
     const accountId = await echoAccount();
     const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId, title: 'Fix the login', worktree: {} });
     let entry = byPath(await client.call('worktrees.list', { projectId: project.id }), thread.cwd);
-    expect(entry).toMatchObject({ threadId: thread.id, threadTitle: 'Fix the login', threadArchived: false, branch: 'boite/fix-the-login' });
+    expect(entry).toMatchObject({ threadId: thread.id, threadTitle: 'Fix the login', threadArchived: false, branch: thread.branch });
 
     await client.call('threads.archive', { threadId: thread.id });
     entry = byPath(await client.call('worktrees.list', { projectId: project.id }), thread.cwd);

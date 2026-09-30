@@ -66,14 +66,16 @@ export function cleanAgentTitle(answer: string, max = AGENT_TITLE_MAX): string |
 }
 
 /** The prompt an agent is asked with: the exchange, bounded, and one instruction. */
-export function titleRequest(prompt: string, answer: string, initial = false): string {
+export function titleRequest(prompt: string, answer: string, initial = false, nameBranch = false): string {
   const user = limitTitleInput(prompt);
   const assistant = limitTitleInput(answer);
   return [
     'Write a short title for the conversation below, one line of a sidebar: 2 to 6 words, fewer than 40 characters.',
     'Name the task itself. No quotes, no trailing period, no emoji, the same language as the user.',
     'Title the user\'s subject and desired outcome. Use the assistant only to resolve an unnamed subject, never to replace the user\'s goal with an incidental finding.',
-    'Return JSON with keys title (string) and needsRefinement (boolean).',
+    nameBranch
+      ? 'Return JSON with keys title (string), needsRefinement (boolean), and branch (string). The branch names the task in English, 2 to 5 lowercase words separated by hyphens, at most 40 characters. No prefix, quotes or punctuation.'
+      : 'Return JSON with keys title (string) and needsRefinement (boolean).',
     initial
       ? 'Set needsRefinement to true only when the subject is still unknown, such as an unresolved link, "fix this", or an unexplained attachment. Otherwise set it to false.'
       : 'Use the answer to resolve a vague subject. Set needsRefinement to false.',
@@ -112,4 +114,16 @@ export function parseAgentTitle(raw: string): { title: string; needsRefinement: 
   } catch {
     return null;
   }
+}
+
+/** A branch is optional: invalid model output leaves the temporary branch intact. */
+export function cleanAgentBranch(answer: string): string | null {
+  const text = answer.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1').trim();
+  let slug: unknown;
+  if (text.startsWith('{')) {
+    try { slug = (JSON.parse(text) as { branch?: unknown } | null)?.branch; } catch { return null; }
+  } else {
+    slug = text.split('\n').map(line => line.trim()).find(line => /^Branch:/i.test(line))?.slice(7).trim();
+  }
+  return typeof slug === 'string' && slug.length <= 40 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null;
 }

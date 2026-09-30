@@ -227,13 +227,19 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => store.openThread !== null && store.draft === null);
-  expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\fix-the-login');
+  const branch = store.openThread!.branch!;
+  expect(branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+  expect(store.openThread?.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${branch.slice(6)}`);
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
-  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
-  expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
+  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe(branch);
+  expect(query('[data-testid=thread-branch]').title).toContain(branch.slice(6));
   // The chip went with the draft.
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+  const cwd = store.openThread!.cwd;
+  await waitFor(() => store.openThread?.turns.some(turn => turn.status === 'done') === true);
+  await store.retitle(store.openThread!.id);
+  await waitFor(() => query('[data-testid=thread-branch]').textContent?.trim() === 'boite/fix-the-login');
+  expect(store.openThread?.cwd).toBe(cwd);
 });
 
 test('a draft on a folder that is not a repository offers no worktree switch', async () => {

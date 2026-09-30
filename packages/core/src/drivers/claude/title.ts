@@ -41,7 +41,7 @@ export async function titleQuery(deps: ClaudeDeps, ctx: TitleContext): Promise<s
     yield {
       type: 'user',
       message: { role: 'user', content: [
-        { type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial) },
+        { type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial, ctx.nameBranch) },
         ...(ctx.attachments ?? []).map((attachment) => ({
           type: 'image' as const,
           source: { type: 'base64' as const, media_type: attachment.mimeType, data: attachment.data },
