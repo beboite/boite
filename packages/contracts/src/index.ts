@@ -2441,6 +2441,16 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
+  /**
+   * Hide a conversation and its sub-threads after stopping their work. The
+   * owner can restore their history until this core stops; shutdown or the
+   * next startup purges unrestored deletions. Files and Git branches remain.
+   */
+  'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
+  /** Owner-only conversations deleted during this core session, newest first. */
+  'threads.deleted': { params: Record<string, never>; result: ThreadSummary[] };
+  /** Undo deletion without restarting agents; restore each thread's previous archive state. Owner only. */
+  'threads.restore': { params: { threadId: ThreadId }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
   'threads.pin': { params: { threadId: ThreadId; pinned?: boolean }; result: ThreadSummary };
   'threads.markRead': { params: { threadId: ThreadId }; result: { ok: true } };
@@ -2570,7 +2580,9 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
 
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
-  'thread.removed': { threadId: ThreadId };
+  'thread.removed': { threadId: ThreadId; undoable?: boolean };
+  /** The owner-only session deletion list changed, including removal with a project. */
+  'thread.deletionsUpdated': Record<string, never>;
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
   /** What the agent still runs in the background, whole, each time it changes. */

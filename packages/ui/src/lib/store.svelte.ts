@@ -428,6 +428,8 @@ export class Store {
   move(...args: Parameters<Threads['move']>) { return this.#ctx.threads.move(...args); }
   cancelMove(...args: Parameters<Threads['cancelMove']>) { return this.#ctx.threads.cancelMove(...args); }
   archive(...args: Parameters<Threads['archive']>) { return this.#ctx.threads.archive(...args); }
+  removeThread(...args: Parameters<Threads['removeThread']>) { return this.#ctx.threads.removeThread(...args); }
+  restoreDeletedThread(...args: Parameters<Threads['restoreDeletedThread']>) { return this.#ctx.threads.restoreDeletedThread(...args); }
   openImports(...args: Parameters<Imports['openImports']>) { return this.#ctx.imports.openImports(...args); }
   closeImports(...args: Parameters<Imports['closeImports']>) { return this.#ctx.imports.closeImports(...args); }
   importSession(...args: Parameters<Imports['importSession']>) { return this.#ctx.imports.importSession(...args); }

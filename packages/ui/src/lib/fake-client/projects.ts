@@ -67,6 +67,8 @@ export function projectMethods(ctx: FakeContext) {
         });
       }
       ctx.projects = ctx.projects.filter((p) => p.id !== params.projectId);
+      for (const [id, family] of ctx.deletedThreads) if (family.threads.some(t => t.projectId === params.projectId)) ctx.deletedThreads.delete(id);
+      ctx.emit('thread.deletionsUpdated', {});
       const threads = [...ctx.threads.values()].filter((thread) => thread.projectId === params.projectId);
       // As the core: each thread is archived, and says so, before the records go.
       for (const thread of threads) {

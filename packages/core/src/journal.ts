@@ -72,6 +72,8 @@ export class Journal {
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
       ensureIndexes(this.db);
+      // A hard stop leaves markers on disk; an old session never offers undo.
+      this.purgeDeletedThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -147,6 +149,7 @@ export class Journal {
     try {
       this.flushDeltas();
       this.persistMessages();
+      this.purgeDeletedThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -165,7 +168,7 @@ export class Journal {
   /** How many of a project's own threads are archived, sub-threads left out, per project id. */
   archivedThreadCounts(): Map<string, number> {
     const rows = this.db
-      .query('SELECT project_id, COUNT(*) AS count FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL GROUP BY project_id')
+      .query('SELECT project_id, COUNT(*) AS count FROM threads WHERE archived = 1 AND parent_thread_id IS NULL AND project_id IS NOT NULL AND id NOT IN (SELECT thread_id FROM thread_deletions) GROUP BY project_id')
       .all() as { project_id: string; count: number }[];
     return new Map(rows.map((row) => [row.project_id, row.count]));
   }
@@ -255,33 +258,83 @@ export class Journal {
   }
 
   getThread(threadId: string): ThreadSummary | null {
-    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ?").get(threadId) as ThreadRow | null;
+    const row = this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions)").get(threadId) as ThreadRow | null;
     return row === null ? null : toThread(row);
   }
 
   listThreads(projectId?: string): ThreadSummary[] {
     const rows =
       projectId === undefined
-        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads ORDER BY rowid").all() as ThreadRow[])
-        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? ORDER BY rowid").all(projectId) as ThreadRow[]);
+        ? (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all() as ThreadRow[])
+        : (this.db.query("SELECT *, (SELECT MAX(created_at) FROM messages WHERE thread_id = threads.id AND role = 'user') AS last_user_message_at FROM threads WHERE project_id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions) ORDER BY rowid").all(projectId) as ThreadRow[]);
     return rows.map(toThread);
   }
 
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
-    const removed = new Set(rows.map((row) => row.id));
-    this.stream.forgetThreads(removed);
+    const ids = rows.map(row => row.id);
+    this.deleteThreads(ids);
+    return ids;
+  }
+
+  /** Hide the stopped family while keeping its rows on disk until this core stops. */
+  stageThreadDeletion(rootId: string, threads: ThreadSummary[]): void {
+    this.flushDeltas();
+    this.persistMessages();
+    const now = Date.now();
+    this.db.transaction(() => {
+      for (const thread of threads) this.db.query('INSERT INTO thread_deletions VALUES (?, ?, ?, ?)').run(thread.id, rootId, thread.archived ? 1 : 0, now);
+    })();
+    this.stream.forgetThreads(new Set(threads.map(t => t.id)));
+  }
+
+  listDeletedThreads(): ThreadSummary[] {
+    const rows = this.db.query(`SELECT t.*, (SELECT MAX(created_at) FROM messages WHERE thread_id = t.id AND role = 'user') AS last_user_message_at
+      FROM threads t JOIN thread_deletions d ON t.id = d.thread_id
+      WHERE d.root_id = t.id ORDER BY d.deleted_at DESC, d.rowid DESC`).all() as ThreadRow[];
+    return rows.map(toThread);
+  }
+
+  /** Restore the family atomically, retaining IDs, message cursors and prior archive flags. */
+  restoreDeletedThreads(rootId: string): string[] {
+    return this.db.transaction(() => {
+      const rows = this.db.query('SELECT thread_id, archived FROM thread_deletions WHERE root_id = ?').all(rootId) as { thread_id: string; archived: number }[];
+      for (const row of rows) this.db.query('UPDATE threads SET archived = ? WHERE id = ?').run(row.archived, row.thread_id);
+      this.db.query('DELETE FROM thread_deletions WHERE root_id = ?').run(rootId);
+      return rows.map(row => row.thread_id);
+    })();
+  }
+
+  private purgeDeletedThreads(): void {
+    const rows = this.db.query('SELECT thread_id FROM thread_deletions').all() as { thread_id: string }[];
+    this.deleteThreads(rows.map(row => row.thread_id));
+  }
+
+  /** Erase conversation history and its dependent records in one transaction, before client notifications. */
+  deleteThreads(threadIds: string[]): void {
+    if (threadIds.length === 0) return;
     // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
-    for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
-      this.db.query(`DELETE FROM ${table} WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
-    }
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'activity:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'move-note:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query("DELETE FROM settings WHERE key IN (SELECT 'memory-notices:' || id FROM threads WHERE project_id = ?)").run(projectId);
-    this.db.query('DELETE FROM threads WHERE project_id = ?').run(projectId);
-    return rows.map((row) => row.id);
+    this.db.transaction(() => {
+      for (const table of ['turn_requests', 'turns', 'messages', 'processes', 'coordination_letters', 'coordination_wakes', 'events']) {
+        const query = this.db.query(`DELETE FROM ${table} WHERE thread_id = ?`);
+        for (const id of threadIds) query.run(id);
+      }
+      for (const id of threadIds) {
+        // A conversation's terminal uses a separate process group and trace key.
+        this.db.query("DELETE FROM processes WHERE thread_id = 'terminal:' || ?").run(id);
+        this.db.query('DELETE FROM delegated_agents WHERE thread_id = ? OR root_id = ?').run(id, id);
+        this.db.query('DELETE FROM delegation_messages WHERE root_id = ? OR sender_id = ? OR recipient_id = ?').run(id, id, id);
+        this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
+        this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
+        this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
+        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'coordination:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        this.db.query('DELETE FROM threads WHERE id = ?').run(id);
+        this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
+      }
+    })();
+    this.stream.forgetThreads(new Set(threadIds));
   }
 
   // -- sessions -------------------------------------------------------------

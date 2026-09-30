@@ -85,6 +85,7 @@ export class ThreadStore {
   /** `threads.move`. */
   readonly moves: ThreadMove;
   private readonly recovery: ThreadRecovery;
+  private readonly removing = new Set<ThreadId>();
 
   constructor(private readonly core: Core) {
     this.runner = new TurnRunner(core, this);
@@ -431,6 +432,7 @@ export class ThreadStore {
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
     this.require(threadId);
+    if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
     if (archived) {
@@ -457,6 +459,49 @@ export class ThreadStore {
     const thread = this.require(threadId);
     if (!thread.unread) return;
     this.save({ ...thread, unread: false }, 'thread.read');
+  }
+
+  async remove(threadId: ThreadId): Promise<void> {
+    const root = this.require(threadId);
+    if (root.agentSessionId || root.parentThreadId) {
+      throw refused('threadId: delete a conversation from its parent; persistent agent sessions are managed through Agents', { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' });
+    }
+    if (this.removing.has(threadId)) throw refused('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
+    const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId);
+    for (const thread of family) this.removing.add(thread.id);
+    try {
+      this.core.workflows.stopRoot(threadId, 'Conversation deleted');
+      for (const thread of family) this.archive(thread.id, true);
+      await Promise.all(family.map(thread => this.core.scheduler.stopAndWait(thread.id)));
+      await Promise.all(family.flatMap(thread => [
+        this.core.procs.stopAndWait(thread.id),
+        this.core.procs.stopAndWait(threadTerminalId(thread.id)),
+      ]));
+      const ids = family.map(thread => thread.id);
+      this.core.journal.append(
+        { type: 'thread.removed', threadId: null, version: 1, payload: { threadIds: ids } },
+        () => this.core.journal.stageThreadDeletion(threadId, family),
+      );
+      for (const id of ids) this.core.bus.emit('thread.removed', { threadId: id, undoable: true });
+      this.core.bus.emit('thread.deletionsUpdated', {});
+      if (root.projectId !== null && this.core.journal.getProject(root.projectId)) this.core.projects.announce(root.projectId);
+    } finally {
+      for (const thread of family) this.removing.delete(thread.id);
+    }
+  }
+
+  restoreDeleted(threadId: ThreadId): ThreadSummary {
+    const root = this.core.journal.listDeletedThreads().find(t => t.id === threadId);
+    if (!root) throw notFound(`threadId: no deletion to undo in this Boite session for ${threadId}`, { threadId });
+    if (root.projectId !== null) this.core.projects.require(root.projectId);
+    const ids = this.core.journal.append(
+      { type: 'thread.restored', threadId, version: 1, payload: { threadId } },
+      () => this.core.journal.restoreDeletedThreads(threadId),
+    );
+    for (const id of ids) this.core.bus.emit('thread.created', this.withLoad(this.require(id)));
+    this.core.bus.emit('thread.deletionsUpdated', {});
+    if (root.projectId !== null) this.core.projects.announce(root.projectId);
+    return this.withLoad(this.require(threadId));
   }
 
   pin(threadId: ThreadId, pinned: boolean): ThreadSummary {

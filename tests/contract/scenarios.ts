@@ -347,6 +347,35 @@ export const SCENARIOS: Record<string, Scenario> = {
     updates.stop();
     check(answer.archived, 'the answer is not archived');
   },
+  'threads.remove hides conversations and undo restores history and the prior archive state': async (env) => {
+    const setup = await echo(env);
+    const kept = await thread(env, setup);
+    for (const archived of [false, true]) {
+      const created = await thread(env, setup);
+      await env.call('turns.start', { threadId: created.id, prompt: 'a conversation to delete' });
+      if (archived) await env.call('threads.archive', { threadId: created.id });
+      const events = record(env, ['thread.removed', 'project.updated']);
+      same(await env.call('threads.remove', { threadId: created.id }), { ok: true }, 'the removal');
+      await until('thread.removed', () => events.events.some(event => event.name === 'thread.removed' && (event.payload as { threadId: string }).threadId === created.id));
+      events.stop();
+      await refusedWith(env.call('threads.get', { threadId: created.id }), RpcErrorCode.NotFound, ['threadId']);
+      await refusedWith(env.call('threads.archive', { threadId: created.id, archived: false }), RpcErrorCode.NotFound, ['threadId']);
+      check(!(await env.call('threads.list', { includeArchived: true })).some(t => t.id === created.id), 'the removed conversation is still listed');
+      same((await env.call('threads.get', { threadId: kept.id })).id, kept.id, 'the other conversation');
+      const project = (await env.call('projects.list', {})).find(p => p.id === setup.projectId);
+      check(project !== undefined && !project.archivedThreads, 'the project is gone or still counts the removed archive');
+      check((await env.call('threads.deleted', {})).some(t => t.id === created.id), 'the session deletion is not offered for undo');
+      const restored = await env.call('threads.restore', { threadId: created.id });
+      same(restored.archived, archived, 'the restored archive flag');
+      check((await env.call('threads.get', { threadId: created.id })).messages.some(m => m.role === 'user' && m.parts.some(p => p.type === 'text' && p.text === 'a conversation to delete')), 'undo lost the conversation history');
+      check(!(await env.call('threads.deleted', {})).some(t => t.id === created.id), 'the restored conversation is still offered for undo');
+    }
+    await env.call('threads.remove', { threadId: kept.id });
+    await env.call('projects.remove', { projectId: setup.projectId });
+    check(!(await env.call('threads.deleted', {})).some(t => t.id === kept.id), 'project removal left a recoverable deletion');
+    await refusedWith(env.call('threads.restore', { threadId: kept.id }), RpcErrorCode.NotFound, ['threadId']);
+    await refusedWith(env.call('threads.remove', { threadId: 'thr_missing' }), RpcErrorCode.NotFound, ['threadId']);
+  },
   'projects.remove refuses a project an agent memory names, and keeps it': async (env) => {
     const setup = await echo(env);
     await env.call('agents.memory.save', {

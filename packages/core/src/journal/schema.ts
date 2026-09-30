@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -345,6 +345,13 @@ export function migrate(db: Database, file: string): void {
       version TEXT, source TEXT, checked_at INTEGER NOT NULL
     )`);
     version = 22;
+  }
+  if (version < 23) {
+    db.exec(`CREATE TABLE IF NOT EXISTS thread_deletions (
+      thread_id TEXT PRIMARY KEY, root_id TEXT NOT NULL,
+      archived INTEGER NOT NULL, deleted_at INTEGER NOT NULL
+    ); CREATE INDEX IF NOT EXISTS thread_deletions_root ON thread_deletions(root_id);`);
+    version = 23;
   }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);

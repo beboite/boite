@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { ChevronRight } from '@lucide/svelte';
+  import { ChevronRight, Trash2 } from '@lucide/svelte';
   import type { Project, ThreadId, ThreadSummary } from '@boite/contracts';
   import { archivedThreads, restoreThread } from '../lib/archive';
+  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -42,6 +43,15 @@
       restoring = null;
     }
   }
+
+  async function remove(thread: ThreadSummary) {
+    restoring = thread.id;
+    try {
+      if (await deleteThread(store, thread)) threads = threads?.filter(t => t.id !== thread.id) ?? null;
+    } finally {
+      restoring = null;
+    }
+  }
 </script>
 
 {#if count > 0}
@@ -63,6 +73,11 @@
               disabled={restoring !== null}
               onclick={() => void restore(thread)}>{strings.sidebar.restoreThread}</button
             >
+            {#if canDeleteThread(store, thread)}
+              <button class="ghost small icon danger" data-testid="archived-drawer-delete"
+                aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
+                onclick={() => void remove(thread)}><Trash2 size={14} /></button>
+            {/if}
           </li>
         {/each}
       </ul>

@@ -82,5 +82,8 @@ scope.onmessage = (event: { data: unknown }): void => {
     const handle = message === MSG_NEW_PROCESS && pid > 0 ? Number(symbols.OpenProcess(start.inspectAccess, 0, pid) ?? 0) : 0;
     send({ kind: 'packet', message, key, pid, handle });
   }
+  // Removing the message listener lets Bun end this Worker naturally, after
+  // the native wait has returned and every packet has been sent.
+  scope.onmessage = null;
   send({ kind: 'stopped' });
 };

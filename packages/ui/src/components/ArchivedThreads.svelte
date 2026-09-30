@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { Trash2 } from '@lucide/svelte';
   import type { ThreadId, ThreadSummary } from '@boite/contracts';
   import InfoTip from './InfoTip.svelte';
+  import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
+  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -20,6 +23,19 @@
   let restoring = $state<ThreadId | null>(null);
   /** Once per mount: a read that fails leaves the button, not a retry loop. */
   let asked = false;
+  const removed = new Set<ThreadId>();
+  $effect(() => {
+    const client = store.client;
+    const offRemove = client?.on('thread.removed', ({ threadId }) => {
+      removed.add(threadId);
+      threads = threads?.filter(t => t.id !== threadId) ?? null;
+    });
+    const offRestore = client?.on('thread.created', summary => {
+      if (!removed.delete(summary.id)) return;
+      if (summary.archived && !summary.parentThreadId && threads !== null) threads = [...threads, summary];
+    });
+    return () => { offRemove?.(); offRestore?.(); };
+  });
 
   $effect(() => {
     if (asked || (!eager && store.settingsSection?.id !== 'archived') || store.connection !== 'ready') return;
@@ -34,7 +50,7 @@
   async function load() {
     loading = true;
     try {
-      threads = await archivedThreads(store);
+      threads = (await archivedThreads(store)).filter(t => !removed.has(t.id));
     } catch (error) {
       fail(error);
     } finally {
@@ -61,6 +77,15 @@
     const project = store.projects.find((p) => p.id === thread.projectId);
     return project ? projectName(project) : '';
   }
+
+  async function remove(thread: ThreadSummary) {
+    restoring = thread.id;
+    try {
+      if (await deleteThread(store, thread)) threads = threads?.filter(t => t.id !== thread.id) ?? null;
+    } finally {
+      restoring = null;
+    }
+  }
 </script>
 
 <section class="card" id="settings-archived" data-testid="archived-threads">
@@ -86,11 +111,18 @@
               {strings.settings.archived.restore}
             </button>
           {/if}
+          {#if canDeleteThread(store, thread)}
+            <button type="button" class="ghost small icon danger" data-testid="archived-delete"
+              aria-label={strings.sidebar.delete} title={strings.sidebar.delete} disabled={restoring !== null}
+              onclick={() => void remove(thread)}><Trash2 size={14} /></button>
+          {/if}
         </li>
       {/each}
     </ul>
   {/if}
 </section>
+
+<DeletedThreads {store} {eager} />
 
 <style>
   .archived {

@@ -124,8 +124,16 @@ describeWindows('thread jobs of forgotten threads', () => {
     // Its wait has no timeout, so only the packet teardown posts can end it.
     await Bun.sleep(300);
     const started = performance.now();
-    await procs.close();
-    expect(performance.now() - started).toBeLessThan(100);
+    const terminate = Worker.prototype.terminate;
+    let forcedStops = 0;
+    Worker.prototype.terminate = function (this: Worker) { forcedStops += 1; return terminate.call(this); };
+    try {
+      await procs.close();
+      expect(performance.now() - started).toBeLessThan(100);
+      // Acknowledging the stop permits natural Worker exit; reserve forced
+      // termination for a loop that does not acknowledge shutdown.
+      expect(forcedStops).toBe(0);
+    } finally { Worker.prototype.terminate = terminate; }
   }, 30000);
 
   test('a thread spawning again after it was forgotten gets a job of its own', async () => {

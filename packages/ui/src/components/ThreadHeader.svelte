@@ -4,6 +4,7 @@
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
+  import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { moveItems, pendingLine, pickMoveItem } from '../lib/thread-move.svelte';
   import { separator, type MenuItem } from '../lib/menu';
   import { strings } from '../lib/strings';
@@ -63,7 +64,8 @@
       { id: 'find', label: strings.keyboard.commands.find },
       ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
       separator(),
-      { id: 'archive', label: strings.sidebar.archive, danger: true }
+      { id: 'archive', label: strings.sidebar.archive },
+      ...(canDeleteThread(store, thread) ? [{ id: 'delete', label: strings.sidebar.delete, danger: true }] : [])
     ];
   });
 
@@ -111,6 +113,7 @@
     // From a phone's sheet the picker hangs under the title; from a right-click, where that menu stood.
     else if (pickMoveItem(store, open, action, document.querySelector<HTMLElement>('[data-testid="thread-menu-trigger"]'))) return;
     else if (action === 'archive') void archiveThread(store, open.id);
+    else if (action === 'delete') void deleteThread(store, open);
   }
 
   function openTitleMenu(event: MouseEvent) {

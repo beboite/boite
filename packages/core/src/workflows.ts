@@ -83,7 +83,7 @@ export class Workflows {
       else if (name === 'thread.updated') {
         const thread = payload as ThreadSummary;
         if (thread.archived && !thread.parentThreadId) this.stopRoot(thread.id, 'The thread was archived.');
-      } else if (name === 'thread.removed') this.forget((payload as { threadId: string }).threadId);
+      } else if (name === 'thread.removed' && !(payload as { undoable?: boolean }).undoable) this.forget((payload as { threadId: string }).threadId);
     });
   }
 

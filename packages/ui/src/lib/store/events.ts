@@ -3,6 +3,7 @@ import type { Client, EventHandler } from '../client';
 import { finishNotifies } from '../notify';
 import { resetPullRequestSupport } from '../pull-request';
 import { rightPanel } from '../right-panel.svelte';
+import { undo } from '../undo.svelte';
 import { lastIndexById } from '../thread-rows';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
@@ -34,6 +35,7 @@ export function listen(ctx: StoreContext, client: Client): void {
           models.effortAttempts.clear();
           s.error = null;
           s.core = client.core;
+          undo.discardExpired(s, s.core?.startedAt);
           // `WsClient` writes its principal from the hello answer before it
           // reports `ready`, and this handler runs before `connect()` returns:
           // reading it here is what keeps the owner-only calls out of the very
@@ -96,19 +98,7 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.todos = { ...s.todos, [projectId]: todos };
   });
   on('thread.removed', ({ threadId }) => {
-    s.threads = s.threads.filter((t) => t.id !== threadId);
-    requests.dropRequestsOf(threadId);
-    // A thread that left Boite takes its panel layout and composer with it.
-    threads.forgetThread(threadId);
-    if (s.openThread?.id !== threadId) return;
-    s.openThread = null;
-    // The two steps `archive()` takes when the thread on screen goes: the
-    // socket lets it go, and the chat lands on the next thread rather than
-    // on the empty card.
-    void (async () => {
-      await threads.unsubscribe();
-      await s.openWhereLeft();
-    })();
+    void threads.removed(threadId).catch(error => ctx.fail(error));
   });
 
   on('turn.started', (turn) => threads.upsertTurn(turn.threadId, turn));

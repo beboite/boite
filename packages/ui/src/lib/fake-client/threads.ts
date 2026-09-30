@@ -88,6 +88,7 @@ function checkSelection(ctx: FakeContext, thread: Thread, params: RpcParams<'thr
 }
 
 export function threadMethods(ctx: FakeContext) {
+  const removing = new Set<string>();
   return {
     'threads.pullRequest': async (params) => {
       const thread = ctx.threads.get(params.threadId);
@@ -248,6 +249,7 @@ export function threadMethods(ctx: FakeContext) {
       } finally {
         ctx.retitling.delete(thread.id);
       }
+      ctx.thread(thread.id);
       const words = first.parts
         .map((part) => (part.type === 'text' ? part.text : ''))
         .join(' ')
@@ -259,12 +261,56 @@ export function threadMethods(ctx: FakeContext) {
     },
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
+      if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) await putAway(ctx, thread);
       const summary = ctx.touch(thread);
       if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);
       return summary;
+    },
+    'threads.remove': async ({ threadId }) => {
+      const root = ctx.thread(threadId);
+      if (root.agentSessionId || root.parentThreadId) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'threadId: expected a top-level conversation without agentSessionId', data: { threadId, field: 'threadId', expected: 'a top-level conversation without agentSessionId' } });
+      if (removing.has(threadId)) throw refusal('threadId: this conversation is already being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
+      const family = [...ctx.threads.values()].filter(t => t.id === threadId || t.parentThreadId === threadId);
+      const archived = family.map(t => t.archived);
+      for (const thread of family) { removing.add(thread.id); thread.archived = true; }
+      try {
+        ctx.workflows.stopRoot(threadId, 'Conversation deleted');
+        for (const thread of family) {
+          await putAway(ctx, thread);
+          ctx.touch(thread);
+        }
+        for (const thread of family) {
+          ctx.threads.delete(thread.id);
+          clearTimeout(ctx.activityTimers.get(thread.id));
+          ctx.activityTimers.delete(thread.id);
+          ctx.emit('thread.removed', { threadId: thread.id, undoable: true });
+        }
+        ctx.deletedThreads.set(threadId, { threads: family, archived });
+        ctx.emit('thread.deletionsUpdated', {});
+        if (root.projectId !== null) announceProject(ctx, root.projectId);
+        return { ok: true };
+      } finally {
+        for (const thread of family) removing.delete(thread.id);
+      }
+    },
+    'threads.deleted': async () => [...ctx.deletedThreads.values()].reverse().map(family => structuredClone(toSummary(family.threads[0]!))),
+    'threads.restore': async ({ threadId }) => {
+      const family = ctx.deletedThreads.get(threadId);
+      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no deletion to undo in this Boite session for ${threadId}`, data: { threadId } });
+      const root = family.threads.find(t => t.id === threadId)!;
+      if (root.projectId !== null && !ctx.projects.some(p => p.id === root.projectId)) throw ctx.notFound('project', root.projectId);
+      for (const [index, thread] of family.threads.entries()) {
+        thread.archived = family.archived[index]!;
+        ctx.threads.set(thread.id, thread);
+        ctx.emit('thread.created', structuredClone(toSummary(thread)));
+      }
+      ctx.deletedThreads.delete(threadId);
+      ctx.emit('thread.deletionsUpdated', {});
+      if (root.projectId !== null) announceProject(ctx, root.projectId);
+      return structuredClone(toSummary(root));
     },
     'threads.pin': async (params) => {
       const thread = ctx.thread(params.threadId);

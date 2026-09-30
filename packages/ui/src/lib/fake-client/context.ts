@@ -120,6 +120,7 @@ export class FakeContext {
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
   readonly threads = new Map<ThreadId, Thread>();
+  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[] }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
   readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
@@ -315,7 +316,7 @@ export class FakeContext {
 
   thread(threadId: ThreadId): Thread {
     const thread = this.threads.get(threadId);
-    if (!thread) throw this.notFound('thread', threadId);
+    if (!thread) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `no such thread: ${threadId}`, data: { threadId } });
     return thread;
   }
 

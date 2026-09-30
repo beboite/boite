@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { closed } from './archive-history';
 import type { ProjectId, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import { confirm } from './confirm.svelte';
 import { focusComposer } from './focus';
@@ -44,20 +45,19 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
   await store.archive(threadId);
   // Refused, the row is still there and the banner says why: nothing to take back.
   if (store.threads.some((t) => t.id === threadId)) return false;
-  closed.push({ store, threadId });
+  const entry = { store, threadId, undoId: 0 };
+  closed.push(entry);
   // The way back for a few seconds; the archived list in Settings keeps it after.
   undo.offer(fill(strings.sidebar.archivedToast, { title }), async () => {
     await restoreThread(store, threadId);
     // The thread that was on screen comes back on screen.
     if (wasOpen) await workspace.select(store, threadId);
   });
+  entry.undoId = undo.current?.id ?? 0;
   await tick();
   focusComposer();
   return true;
 }
-
-/** The threads archived from this window, newest last: what Ctrl+Shift+T walks back through. */
-const closed: { store: Store; threadId: ThreadId }[] = [];
 
 /**
  * Brings back the thread archived last and opens it, like a browser reopens

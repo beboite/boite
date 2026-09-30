@@ -611,26 +611,28 @@ function retireWorker(): void {
   retiring = running;
   running.onerror = null;
   let done = false;
-  const finish = (): void => {
-    if (done) return;
+  const finish = (force: boolean): void => {
+    // Core teardown may have taken ownership of this same stopping Worker.
+    if (done || retiring !== running) return;
     done = true;
     clearTimeout(timer);
-    running.terminate();
-    if (retiring !== running) return;
+    running.onmessage = null;
+    if (force) running.terminate();
     retiring = null;
     const again = restartWanted;
     restartWanted = false;
     if (again && refCount > 0 && completionPort !== 0) ensureWorker(completionPort);
   };
+  running.addEventListener('close', () => finish(false), { once: true });
   running.onmessage = (event: { data: unknown }): void => {
     const message = event.data as JobsWorkerMessage;
-    if (message.kind === 'stopped') finish();
+    if (message.kind === 'stopped') running.onmessage = null;
     else if (message.kind === 'packet') onWorkerMessage(message);
   };
   if (flag !== null) Atomics.store(flag, 0, 1);
   // The wait has no timeout: this packet is what wakes it to read the flag.
   if (completionPort !== 0) native?.wakeToStop(completionPort);
-  const timer = setTimeout(finish, 1000);
+  const timer = setTimeout(() => finish(true), 1000);
   if (typeof timer.unref === 'function') timer.unref();
 }
 
@@ -835,12 +837,16 @@ function teardown(): Promise<void> {
   retiring = null;
   restartWanted = false;
 
-  const release = (): void => {
+  const release = (force: boolean): void => {
     if (api !== null && port !== 0) api.close(port);
-    running?.terminate();
+    if (running !== null) {
+      running.onmessage = null;
+      running.onerror = null;
+      if (force) running.terminate();
+    }
   };
   if (running === null) {
-    release();
+    release(false);
     return Promise.resolve();
   }
   if (flag !== null) Atomics.store(flag, 0, 1);
@@ -848,19 +854,24 @@ function teardown(): Promise<void> {
   if (api !== null && port !== 0) api.wakeToStop(port);
   return new Promise<void>((resolve) => {
     let released = false;
-    const once = (): void => {
+    const once = (force: boolean): void => {
       if (released) return;
       released = true;
       clearTimeout(timer);
-      release();
+      release(force);
       resolve();
     };
     // The loop leaves on that packet and posts 'stopped'; the port closes then,
     // never while the worker may still be blocked on it. Closing it on the
     // fallback also ends a wait nothing woke.
+    // 'stopped' only acknowledges the loop. Wait for Bun's close event before
+    // a caller can dispose this core or load another isolated test context.
+    running.addEventListener('close', () => once(false), { once: true });
     running.onmessage = (event: { data: unknown }): void => {
-      if ((event.data as JobsWorkerMessage).kind === 'stopped') once();
+      const message = event.data as JobsWorkerMessage;
+      if (message.kind === 'stopped') running.onmessage = null;
+      else if (message.kind === 'packet' && message.handle !== 0) api?.close(message.handle);
     };
-    const timer = setTimeout(once, 1000);
+    const timer = setTimeout(() => once(true), 1000);
   });
 }
