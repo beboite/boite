@@ -845,6 +845,20 @@ describe('Store', () => {
     expect(store.error).toBe('sign in first');
   });
 
+  test('a manual refresh joining background discovery reports its failure without spawning another probe', async () => {
+    const { store, client } = await ready();
+    let reject!: (error: Error) => void;
+    const gate = new Promise<never>((_, fail) => { reject = fail; });
+    const calls = vi.spyOn(client, 'call').mockReturnValue(gate);
+    const background = store.probeModels('opencode', 'a-opencode');
+    const manual = store.probeModels('opencode', 'a-opencode', true);
+    expect(calls).toHaveBeenCalledTimes(1);
+    reject(new Error('agent offline'));
+    await Promise.all([background, manual]);
+    expect(store.error).toBe('agent offline');
+    expect(store.isProbing('opencode', 'a-opencode')).toBe(false);
+  });
+
   test('a probe the core refused because the account changed meanwhile is no error, and runs again', async () => {
     const { store, client } = await ready();
     const original = client.call.bind(client);
