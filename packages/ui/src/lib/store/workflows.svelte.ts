@@ -32,8 +32,8 @@ export class Workflows {
   async loadWorkflows(threadId = this.ctx.store.openThread?.id): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
-    // A machine that dropped is not asked; an effect that called this reads the
-    // connection here and calls again once the machine is back.
+    // A machine that dropped is not asked. The read is tracked on purpose: the
+    // effects that call this only load, so they run again once the machine is back.
     if (!client || !threadId || s.connection !== 'ready') return;
     const reading = this.workflowsReading;
     if (reading?.threadId === threadId) {

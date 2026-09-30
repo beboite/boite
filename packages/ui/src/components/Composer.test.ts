@@ -3,6 +3,7 @@ import { mount, unmount } from 'svelte';
 import { RpcErrorCode } from '@boite/contracts';
 import App from '../App.svelte';
 import { RpcFailure } from '../lib/client';
+import type { FakeClient } from '../lib/fake-client';
 import { defaultPrefs, PREFS_STORAGE_KEY, STASH_STORAGE_KEY } from '../lib/prefs';
 import { store } from '../lib/store.svelte';
 import { closeTour } from '../lib/onboarding.svelte';
@@ -613,8 +614,10 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   await waitFor(() => !store.busy);
   const other = store.threads.find((t) => t.id === 't-descriptors')!;
   expect(other.status).toBe('idle');
-  const rpc = vi.spyOn(store.client!, 'call');
-  store.connection = 'closed';
+  const fake = store.client as FakeClient;
+  const rpc = vi.spyOn(fake, 'call');
+  fake.drop();
+  await waitFor(() => store.connection !== 'ready');
   // Its rows turn grey and still open.
   await waitFor(() => document.querySelector('[data-thread-id="t-descriptors"]')?.closest('.thread')?.classList.contains('offline') === true);
   await store.open(other.id);
@@ -625,12 +628,15 @@ test('a thread of a machine that dropped still opens and queues its prompts unti
   press('Enter');
   await waitFor(() => input().value === '' && store.composerStates[other.id]?.queued.length === 1);
   expect(query('[data-testid=composer-queued]').textContent).toContain('Run this once you are back');
-  // Focus reads the socket's own state, which this fake keeps ready; a dropped socket sends nothing.
-  expect(rpc.mock.calls.map(([method]) => method).filter((method) => method !== 'threads.focus')).toEqual([]);
-  store.connection = 'ready';
-  await waitFor(() => store.composerStates[other.id]?.queued.length === 0);
-  const started = rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
+  expect(rpc).not.toHaveBeenCalled();
+  await fake.restore();
+  const start = () => rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
+  await waitFor(() => start() !== undefined && store.composerStates[other.id]?.queued.length === 0);
+  const started = start();
   expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back' });
+  // What the offline open skipped is read once the machine is back.
+  const asked = (method: string) => rpc.mock.calls.some(([name, params]) => name === method && (params as { threadId?: string }).threadId === other.id);
+  await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
 test('Enter in the emptied composer sends all pending prompts together now', async () => {
