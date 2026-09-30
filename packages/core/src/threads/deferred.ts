@@ -56,7 +56,8 @@ export class DeferredInput {
         .finally(() => {
           this.threads.runner.steering.delete(threadId);
           if (this.core.stopping) return;
-          if (!this.threads.runner.handles.has(threadId)) this.flushDeferred(threadId);
+          // A late rejection must not undo Stop or retry a failed turn.
+          if (!this.threads.runner.handles.has(threadId) && turnId && this.core.journal.getTurn(turnId)?.status === 'done') this.flushDeferred(threadId);
           void this.memory.flushRunning(threadId);
         });
       return;

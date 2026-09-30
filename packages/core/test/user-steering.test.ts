@@ -69,13 +69,18 @@ test('an async question answer is visible while steering and becomes one user me
 
 test('an answer held after Stop precedes the next manual prompt without replacing it', async () => {
   const { owner, threadId, turn } = await running();
-  h.core.threads.runner.handles.get(threadId)!.steer = async () => false;
+  let reject!: (accepted: boolean) => void;
+  h.core.threads.runner.handles.get(threadId)!.steer = () => new Promise(resolve => { reject = resolve; });
   const { questionId } = await owner.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser'] });
   await owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
-  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
   const stopped = owner.next('turn.finished', item => item.id === turn.id);
   await owner.call('turns.stop', { threadId }); await stopped;
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  reject(false);
+  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
+  await Bun.sleep(0);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(h.core.threads.withLoad(h.core.threads.require(threadId)).pendingAnswers).toEqual(['> Which file?\n\nParser']);
   const prompts: string[] = [];
   restore?.();
   restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
