@@ -50,6 +50,7 @@ test('editing restores changed, deleted, created and binary files, then runs the
   await writeFile(join(cwd, 'image.bin'), new Uint8Array([0, 255, 2]));
   await writeFile(join(cwd, 'script.sh'), 'before');
   await chmod(join(cwd, 'script.sh'), 0o755);
+  const originalMode = (await stat(join(cwd, 'script.sh'))).mode & 0o777;
   change = async prompt => {
     if (prompt.includes('replacement')) {
       expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
@@ -66,6 +67,7 @@ test('editing restores changed, deleted, created and binary files, then runs the
   await run('keep');
   const messageId = await run('remove this');
   await run('remove later');
+  const modeChanged = ((await stat(join(cwd, 'script.sh'))).mode & 0o777) !== originalMode;
   await writeFile(join(cwd, 'unrelated.txt'), 'outside edit');
   const rewound = await client.call('threads.rewind', { threadId, messageId });
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
@@ -73,7 +75,8 @@ test('editing restores changed, deleted, created and binary files, then runs the
   expect(await Bun.file(join(cwd, 'created.ts')).exists()).toBe(false);
   if (process.platform !== 'win32') expect((await stat(join(cwd, 'script.sh'))).mode & 0o777).toBe(0o755);
   expect(await readFile(join(cwd, 'unrelated.txt'), 'utf8')).toBe('outside edit');
-  expect(rewound.files).toEqual({ status: 'restored', count: 4 });
+  // Windows only supports the writable flag, so 0755 to 0644 may leave its mode unchanged.
+  expect(rewound.files).toEqual({ status: 'restored', count: 3 + Number(modeChanged) });
   expect(rewound.thread.messages.filter(message => message.role === 'user')).toHaveLength(1);
   await run('replacement');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('replacement');
