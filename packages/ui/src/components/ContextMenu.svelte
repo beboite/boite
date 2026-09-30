@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
+  import { Check } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { contextMenu, type ContextMenuState } from '../lib/context-menu.svelte';
   import { restoreFocus } from '../lib/focus';
@@ -128,7 +129,8 @@
           class="row"
           class:danger={item.danger}
           class:active={item.active}
-          role="menuitem"
+          role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+          aria-checked={item.checked}
           tabindex="-1"
           disabled={item.disabled}
           title={item.title}
@@ -139,7 +141,7 @@
           {#if item.glyph}
             <span class="glyph" aria-hidden="true"><item.glyph size={16} strokeWidth={1.75} /></span>
           {/if}
-          <span class="label">{item.label}</span>
+          <span class="label">{item.label}</span>{#if item.checked}<Check size={16} aria-hidden="true" />{/if}
           {#if item.hint}
             <span class="hint">{item.hint}</span>
           {/if}

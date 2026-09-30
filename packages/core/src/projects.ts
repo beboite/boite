@@ -299,9 +299,24 @@ export class ProjectStore {
       throw refused('the drafts project cannot be archived: a thread with no folder lands in it', { field: 'projectId', projectId, expected: 'a project other than the drafts' });
     }
     if ((project.archived === true) === archived) return project;
-    const next: Project = { id: project.id, name: project.name, path: project.path, createdAt: project.createdAt, ...(archived ? { archived: true } : {}) };
+    const next: Project = { id: project.id, name: project.name, path: project.path, createdAt: project.createdAt, ...(archived ? { archived: true } : {}), ...(project.worktreeDefault ? { worktreeDefault: true } : {}) };
     this.core.journal.append({ type: 'project.archived', threadId: null, version: 1, payload: { projectId, archived } }, () => {
       this.core.journal.putProject(next);
+    });
+    return this.announce(projectId);
+  }
+
+  async setWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<Project> {
+    const project = this.require(projectId);
+    if (typeof enabled !== 'boolean') throw refused('projects.setWorktreeDefault.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
+    if (enabled && (this.isDrafts(project) || await hasGitMarker(project.path) !== true)) {
+      throw refused('projects.setWorktreeDefault.projectId must name a Git repository', { field: 'projectId', projectId, expected: 'a Git repository other than the drafts project' });
+    }
+    // Re-read after the disk check so a concurrent archive retains its flag.
+    const current = this.require(projectId);
+    if ((current.worktreeDefault === true) === enabled) return current;
+    this.core.journal.append({ type: 'project.worktreeDefaultChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => {
+      this.core.journal.putProject({ ...current, worktreeDefault: enabled });
     });
     return this.announce(projectId);
   }
@@ -424,6 +439,7 @@ export function registerProjectMethods(core: Core): void {
   core.router.register('projects.drafts', () => core.projects.drafts());
   core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
   core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));
+  core.router.register('projects.setWorktreeDefault', (params) => core.projects.setWorktreeDefault(params.projectId, params.enabled));
   core.router.register('projects.archive', (params) => core.projects.archive(params.projectId, params.archived ?? true));
   core.router.register('projects.remove', async (params) => {
     await core.projects.remove(params.projectId);

@@ -506,6 +506,8 @@ export interface Project {
   name: string;
   path: string;
   createdAt: Timestamp;
+  /** Precheck Worktree in new drafts. An absent value means off; existing drafts keep their choice. */
+  worktreeDefault?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent from a core older than this
@@ -2163,6 +2165,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * Refused on the drafts project, which a thread with no folder lands in.
    */
   'projects.archive': { params: { projectId: ProjectId; archived?: boolean }; result: Project };
+  /** Owner only. Persist a project's default for new drafts and broadcast project.updated. Enabling requires a Git repository. */
+  'projects.setWorktreeDefault': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /**
    * The image of a project whose `icon.kind` is `image`, as a `data:` URL for
    * an `<img>` (an SVG drawn that way runs no script and loads nothing), at

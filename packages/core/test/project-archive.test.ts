@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Project } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { echoThread, startTestCore, testProject, waitFor } from './harness.ts';
@@ -73,4 +75,34 @@ test('the drafts project and an unknown one are refused by name', async () => {
   const drafts = await client.call('projects.drafts', {});
   await expect(client.call('projects.archive', { projectId: drafts.id })).rejects.toThrow('the drafts project cannot be archived');
   await expect(client.call('projects.archive', { projectId: 'prj_missing' })).rejects.toThrow('unknown project prj_missing');
+});
+
+test('a project worktree default is broadcast, survives archive and restore, and can be disabled', async () => {
+  mkdirSync(join(harness.dataDir, '.git'));
+  const project = await testProject(harness, client);
+  const other = await harness.connect();
+  const heard: Project[] = [];
+  other.on('project.updated', payload => heard.push(payload));
+  expect(harness.core.projects.require(project.id).worktreeDefault).toBeUndefined();
+  await client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true });
+  await waitFor(() => heard.length === 1);
+  expect(heard[0]?.worktreeDefault).toBe(true);
+  await client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true });
+  await client.call('projects.archive', { projectId: project.id });
+  expect(harness.core.journal.getProject(project.id)).toMatchObject({ archived: true, worktreeDefault: true });
+  await client.call('projects.archive', { projectId: project.id, archived: false });
+  expect((await client.call('projects.list', {})).find(p => p.id === project.id)?.worktreeDefault).toBe(true);
+  await client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: false });
+  await waitFor(() => heard.length === 4);
+  expect(heard.at(-1)?.worktreeDefault).toBeUndefined();
+});
+
+test('worktree defaults reject non-repositories, Drafts, missing projects and non-boolean values', async () => {
+  const project = await client.call('projects.add', { path: harness.dataDir });
+  await expect(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true })).rejects.toThrow('must name a Git repository');
+  const drafts = await client.call('projects.drafts', {});
+  await expect(client.call('projects.setWorktreeDefault', { projectId: drafts.id, enabled: true })).rejects.toThrow('must name a Git repository');
+  await expect(client.call('projects.setWorktreeDefault', { projectId: 'missing', enabled: true })).rejects.toThrow('unknown project missing');
+  await expect(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: 'yes' as unknown as boolean })).rejects.toThrow('enabled must be a boolean');
+  expect((await client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: false })).worktreeDefault).toBeUndefined();
 });

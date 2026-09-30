@@ -43,6 +43,8 @@ export interface Draft {
   projectId: ProjectId | null;
   /** The first send starts the thread in a git worktree of the project, on a branch of its own. */
   worktree: boolean;
+  /** The composer switch was chosen explicitly; project changes preserve it. */
+  worktreeExplicit?: true;
 }
 
 /** What the composer sends a message with. */
@@ -390,6 +392,7 @@ export class Store {
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
   loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }
+  setProjectWorktreeDefault(...args: Parameters<Projects['setProjectWorktreeDefault']>) { return this.#ctx.projects.setProjectWorktreeDefault(...args); }
   refreshProjectIcon(...args: Parameters<Projects['refreshProjectIcon']>) { return this.#ctx.projects.refreshProjectIcon(...args); }
   startDraft(...args: Parameters<Projects['startDraft']>) { return this.#ctx.projects.startDraft(...args); }
   setDraftProject(...args: Parameters<Projects['setDraftProject']>) { return this.#ctx.projects.setDraftProject(...args); }

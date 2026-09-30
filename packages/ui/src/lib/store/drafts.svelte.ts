@@ -61,7 +61,7 @@ export class Drafts {
           if (!entry?.draft || (entry.draft.projectId !== null && typeof entry.draft.projectId !== 'string')) continue;
           const input = restoreInput(entry.input, assets);
           if (input) this.saved[projectKey(entry.draft.projectId)] = {
-            draft: { projectId: entry.draft.projectId, worktree: entry.draft.worktree === true },
+            draft: { projectId: entry.draft.projectId, worktree: entry.draft.worktree === true, worktreeExplicit: true },
             choice: null, input
           };
         }
@@ -98,7 +98,7 @@ export class Drafts {
     const s = this.ctx.store;
     const saved = this.saved[projectKey(projectId)];
     this.ctx.composer.composerStates.draft = saved?.input ?? empty();
-    s.draft = saved ? { ...saved.draft } : { projectId, worktree: false };
+    s.draft = saved ? { ...saved.draft } : { projectId, worktree: s.projects.some(p => p.id === projectId && p.kind !== 'drafts' && p.repository !== false && p.worktreeDefault === true) };
     s.draftChoice = saved?.choice ?? null;
   }
 
