@@ -312,6 +312,7 @@ export class Journal {
 
   /** Erase conversation history and its dependent records in one transaction, before client notifications. */
   deleteThreads(threadIds: string[]): void {
+    if (threadIds.length === 0) return;
     // Foreign keys are off, so the ON DELETE CASCADE clauses never fire: every
     // table keyed by thread is cleared here, events included, so a removed
     // project's prompts and tool output leave the disk.
