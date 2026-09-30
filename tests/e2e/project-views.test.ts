@@ -54,18 +54,31 @@ test('recent view filters one owning project and creates its draft', async () =>
 }, 20_000);
 
 test('copy path stays readable with a long working directory in conversation menus', async () => {
-  const cwd = '/workspace/projects/a-long-project-name/worktrees/a-long-conversation-branch/packages/client';
   await page.evaluate(`localStorage.setItem('boite.locale', 'fr')`);
   await page.navigate(url);
   await page.waitFor(`globalThis.__boiteTest?.workspace.active.openThread`);
-  await page.evaluate(`(() => { const s = globalThis.__boiteTest.workspace.active; s.openThread.cwd = ${JSON.stringify(cwd)}; s.threads = s.threads.map(t => ({...t, cwd: ${JSON.stringify(cwd)}})); })()`);
+  const cwd = await page.evaluate<string>(`(() => {
+    const cwd = '/workspace/projects/a-long-project-name/worktrees/a-long-conversation-branch/packages/client';
+    const s = globalThis.__boiteTest.workspace.active;
+    s.openThread.cwd = cwd;
+    s.threads = s.threads.map(t => ({...t, cwd}));
+    return cwd;
+  })()`);
   await page.send('Browser.grantPermissions', { origin: new URL(url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   for (const opener of ['thread-row', 'thread-title', 'thread-menu-trigger']) {
     const phone = opener === 'thread-menu-trigger';
     await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 360 : 1300, height: phone ? 800 : 850, deviceScaleFactor: 1, mobile: phone });
     if (phone) await page.click(id(opener));
-    else await page.evaluate(`document.querySelector('${id(opener)}').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }))`);
+    else await page.evaluate(`(() => {
+      const { workspace } = globalThis.__boiteTest;
+      const owner = workspace.active;
+      const machine = workspace.machines.find(m => m.store === owner);
+      const target = '${opener}' === 'thread-row'
+        ? Array.from(document.querySelectorAll('${id('thread-row')}')).find(e => e.dataset.machineId === machine.id && e.dataset.threadId === owner.openThread.id)
+        : document.querySelector('${id(opener)}');
+      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 180 }));
+    })()`);
     const menu = id(phone ? 'thread-menu-trigger-menu' : 'context-menu');
     const copy = `${menu} [data-value=copy]`;
     await page.waitFor(`document.querySelector('${copy}')`);
