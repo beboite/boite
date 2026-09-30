@@ -329,8 +329,16 @@ jobs:
           for ($i = 1; $i -le 10; $i++) {
             foreach ($file in @('jobs-forget', 'thread-remove')) {
               Write-Host "Native repetition $i / $file"
-              bun test "packages/core/test/$file.test.ts"
-              if ($LASTEXITCODE -ne 0) { $failures++ }
+              $out = Join-Path $env:RUNNER_TEMP "native-$i-$file.out"
+              $err = Join-Path $env:RUNNER_TEMP "native-$i-$file.err"
+              $proc = Start-Process (Get-Command bun).Source -ArgumentList @('test', "packages/core/test/$file.test.ts") -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+              if (-not $proc.WaitForExit(30000)) {
+                Stop-Process -Id $proc.Id -Force
+                Write-Host 'Native subprocess exceeded 30 seconds'
+                $failures++
+              } elseif ($proc.ExitCode -ne 0) { $failures++ }
+              Get-Content $out
+              Get-Content $err
             }
           }
           if ($failures -gt 0) { throw "$failures native reproductions failed" }
