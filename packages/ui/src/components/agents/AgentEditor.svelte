@@ -32,7 +32,7 @@
   const defaultAccount = untrack(() => view.store.accounts.find(a => view.store.providerOf(a.providerId)?.available));
   const defaultModels = untrack(() => defaultAccount ? view.store.modelsOf(defaultAccount.providerId, defaultAccount.id) : []);
   const TOOLS = ['messages', 'missions', 'memory', 'artifacts', 'decisions', 'routines'] as const;
-  const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'] as const;
+  const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'] as const;
 
   let name = $state(profile?.name ?? group?.name ?? team?.name ?? mission?.title ?? '');
   let domain = $state(profile?.domain ?? '');
@@ -62,7 +62,7 @@
   const creating = !initial.record;
   const resourceOptions = $derived(view.snapshot?.resources.filter(r => r.scope.kind === 'mission' && r.scope.id === mission?.id || r.scope.kind === 'team' && r.scope.id === teamId || r.scope.kind === 'project' && r.scope.id === projectId) ?? []);
   const agentOptions = $derived(view.snapshot?.profiles.filter(a => a.status !== 'archived' && (!teamId || kind !== 'mission' || view.snapshot?.teams.find(t => t.id === teamId)?.members.some(m => m.agentId === a.id))) ?? []);
-  const permissionLabels = $derived<Record<ExecutionSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, dontAsk: labels.deny });
+  const permissionLabels = $derived<Record<ExecutionSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, yolo: strings.permissionMode.yolo, dontAsk: labels.deny });
   const provider = $derived(view.store.providerOf(selection.providerId));
   const effort = $derived(view.store.modelOf(selection)?.effort);
 

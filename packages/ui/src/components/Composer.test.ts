@@ -1056,7 +1056,7 @@ test('recognized slash tokens are colored without changing the editable prompt',
   }
 });
 
-test('permission menu offers three policies and preserves legacy modes until picked', async () => {
+test('permission menu offers YOLO beside Auto and preserves legacy modes until picked', async () => {
   await mountOnFake();
   await waitFor(() => !store.busy);
   for (const legacy of ['plan', 'dontAsk'] as const) {
@@ -1067,8 +1067,8 @@ test('permission menu offers three policies and preserves legacy modes until pic
   query('[data-testid=composer-mode]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
   const menu = query('[data-testid=composer-mode-menu]');
-  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Auto', 'Edit freely', 'Ask']);
-  for (const [mode, label] of [['bypassPermissions', 'Auto'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['YOLO', 'Auto', 'Edit freely', 'Ask']);
+  for (const [mode, label] of [['yolo', 'YOLO'], ['bypassPermissions', 'Auto'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
     query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
     await waitFor(() => store.openThread?.permissionMode === mode);
     expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);

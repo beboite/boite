@@ -372,6 +372,7 @@ export class CodexSession {
   }
 
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
+    if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,
@@ -629,6 +630,7 @@ export class CodexSession {
    * is one line in the log.
    */
   private async reportSkippedHooks(rpc: CodexRpc, ctx: SessionContext): Promise<void> {
+    if (ctx.thread.permissionMode === 'yolo') return;
     try {
       const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
       for (const entry of listed.data ?? []) {
@@ -797,7 +799,8 @@ export class CodexSession {
     reason: string,
   ): Promise<'accept' | 'decline' | 'cancel'> {
     const turn = this.current;
-    if (turn === null) return 'cancel';
+    if (turn === null || turn.isStopped) return 'cancel';
+    if (turn.ctx.thread.permissionMode === 'yolo') return 'accept';
     const ticket = turn.ctx.requestPermission(toolName, input, reason.length === 0 ? null : reason);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });

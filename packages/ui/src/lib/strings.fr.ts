@@ -605,6 +605,7 @@ export const fr: Translation = {
     default: 'Demander',
     acceptEdits: 'Modifier librement',
     bypassPermissions: 'Auto',
+    yolo: 'YOLO',
     plan: 'Plan',
     dontAsk: 'Tout refuser'
   },
@@ -613,6 +614,7 @@ export const fr: Translation = {
     default: 'Lit librement, demande avant de modifier un fichier ou de lancer une commande',
     acceptEdits: 'Modifie les fichiers sans demander, demande avant de lancer une commande',
     bypassPermissions: 'Exécute tout sans demander, partout sur cet ordinateur',
+    yolo: 'Autorise tous les outils ; ignore les hooks Claude et Codex',
     plan: 'Plan seulement, aucune modification',
     dontAsk: 'Refuser tout ce qui demanderait une autorisation'
   },
@@ -668,6 +670,7 @@ export const fr: Translation = {
       default: 'avec demandes d\'autorisation',
       acceptEdits: 'avec les modifications autorisées',
       bypassPermissions: 'avec toutes les permissions',
+      yolo: 'sans demandes de permission pour les outils',
       plan: 'en mode plan',
       dontAsk: 'avec refus automatique des demandes d\'autorisation'
     },

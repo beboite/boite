@@ -670,6 +670,45 @@ describe('codex driver', () => {
     expect(tools[1]).toMatchObject({ name: 'Bash', status: 'done', output: 'ok' });
   });
 
+  test.each([
+    ['[approve]', 'allowed'], ['[elicit]', 'elicit accept'], ['[permissions]', 'permissions granted'],
+  ])('YOLO accepts %s without a permission card and disables native hooks', async (prompt, expected) => {
+    const client = await startCore();
+    const threadId = await codexThread(client, 'yolo');
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt });
+    expect((await finished).status).toBe('done');
+    const parts = (await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain(expected);
+    expect(parts.filter(part => part.type === 'permission')).toEqual([]);
+    expect(requested).toEqual([]);
+    expect(fakeLog()).toContain('approvalPolicy=never sandbox=danger-full-access');
+    const trace = await client.call('trace.get', { threadId });
+    expect(trace.some(process => process.commandLine?.includes('features.hooks=false'))).toBe(true);
+  });
+
+  test('leaving YOLO restarts Codex with hooks enabled and restores approval cards', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client, 'yolo');
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[approve]' });
+    expect((await finished).status).toBe('done');
+    await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
+    expect((await answerApproval(client, threadId, 'deny')).text).toBe('denied');
+    expect(countLines('initialize')).toBe(2);
+    const processes = (await client.call('trace.get', { threadId }))
+      .filter(process => process.commandLine?.includes(FAKE_SERVER)).sort((a, b) => a.startedAt - b.startedAt);
+    expect(processes).toHaveLength(2);
+    expect(processes[0]?.commandLine).toContain('features.hooks=false');
+    expect(processes[1]?.commandLine).not.toContain('features.hooks=false');
+  });
+
   test('an approval is asked, answered, and the decision reaches the agent', async () => {
     const client = await startCore();
     const threadId = await codexThread(client);

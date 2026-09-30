@@ -6,6 +6,7 @@ import { QUESTION_OPTIONS, QUESTION_TEXT } from './conversation';
 import type { FakeContext, FakeMethods } from './context';
 
 export async function askPermission(ctx: FakeContext, thread: Thread, turn: Turn, message: Message): Promise<void> {
+  if (thread.permissionMode === 'yolo') return;
   const requestId = `req-${++ctx.seq}`;
   const partIndex = message.parts.length;
   const part: MessagePart = {

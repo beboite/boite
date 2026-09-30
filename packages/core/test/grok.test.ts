@@ -299,6 +299,7 @@ describe('grok', () => {
       ['acceptEdits', '--permission-mode acceptEdits agent stdio'],
       ['plan', '--permission-mode plan agent stdio'],
       ['bypassPermissions', 'agent --always-approve stdio'],
+      ['yolo', 'agent --always-approve stdio'],
       ['dontAsk', 'agent --always-approve stdio'],
     ];
 

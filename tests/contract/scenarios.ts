@@ -142,6 +142,26 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'YOLO keeps permission requests out of the core and fake conversation': async env => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    await env.call('threads.update', { threadId: created.id, permissionMode: 'yolo' });
+    await env.call('threads.subscribe', { threadId: created.id });
+    const seen = record(env, ['permission.requested']);
+    try {
+      const turn = await env.call('turns.start', { threadId: created.id, prompt: '[permission]' });
+      await until('YOLO turn to finish', async () => {
+        const current = await env.call('threads.get', { threadId: created.id });
+        return current.turns.find(entry => entry.id === turn.id)?.status === 'done';
+      });
+      same(seen.events, [], 'permission events');
+      const current = await env.call('threads.get', { threadId: created.id });
+      same(current.permissionMode, 'yolo', 'persisted mode');
+      same(current.messages.flatMap(message => message.parts).filter(part => part.type === 'permission'), [], 'permission cards');
+      await env.call('threads.update', { threadId: created.id, permissionMode: 'default' });
+      same((await summary(env, created.id)).permissionMode, 'default', 'restored mode');
+    } finally { seen.stop(); }
+  },
   'questions.answer refuses an answer sent for another thread': async (env) => {
     const { setup, threadId, questionId } = await asked(env);
     const other = await thread(env, setup, 'other');

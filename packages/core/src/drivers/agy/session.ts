@@ -40,6 +40,7 @@ function modeArgs(mode: PermissionMode): string[] {
     case 'plan':
       return ['--mode', 'plan'];
     case 'bypassPermissions':
+    case 'yolo':
     case 'dontAsk':
       return ['--dangerously-skip-permissions'];
     default:

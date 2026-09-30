@@ -405,6 +405,10 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         ]);
         break;
       case 'permission': {
+        if (ctx.thread.permissionMode === 'yolo') {
+          await writeText('allowed');
+          break;
+        }
         // Every card is raised before any is awaited, so `[permission:2]` is
         // two open at once: what an agent asking for two parallel tool calls
         // does, and what the thread status has to survive.

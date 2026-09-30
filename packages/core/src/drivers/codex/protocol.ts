@@ -180,6 +180,7 @@ export const MODE_POLICY: Record<PermissionMode, { approvalPolicy: AskForApprova
   acceptEdits: { approvalPolicy: 'on-request', sandbox: 'workspace-write' },
   plan: { approvalPolicy: 'never', sandbox: 'read-only' },
   bypassPermissions: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
+  yolo: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
   dontAsk: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 };
 

@@ -560,7 +560,7 @@ export type ProjectIcon =
   /** No image, but the folder reads as this stack. */
   | { kind: 'tech'; id: TechIconId };
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'yolo' | 'plan' | 'dontAsk';
 
 export type ThreadStatus =
   | 'idle'

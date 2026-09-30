@@ -28,7 +28,7 @@ beforeAll(async () => {
   await size(false);
 }, 60_000);
 
-test('commands are colored with aligned wrapping and three permission choices', async () => {
+test('commands are colored with aligned wrapping and four permission choices', async () => {
   for (const phone of [false, true]) {
     await size(phone);
     const prompt = '/loop 2 Check the queued prompts and verify every interaction. '.repeat(2) + '\n' + 'A long follow-up line. '.repeat(45);
@@ -41,7 +41,7 @@ test('commands are colored with aligned wrapping and three permission choices', 
     await page.type(id('composer-input'), '/goal Verify the composer');
     await page.click(id('composer-mode'));
     await page.waitFor(`document.querySelector('${id('composer-mode-menu')}')`);
-    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['Auto', 'Edit freely', 'Ask']);
+    expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('composer-mode-menu')} .label')).map(el => el.textContent.trim())`)).toEqual(['YOLO', 'Auto', 'Edit freely', 'Ask']);
     expect(await page.evaluate(`(() => { const r=document.querySelector('${id('composer-mode-menu')}').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })()`)).toBe(true);
     await capture(phone ? 'commands-permissions-phone' : 'commands-permissions-desktop');
     await page.evaluate(`document.querySelector('${id('composer-mode-menu')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`);
@@ -55,7 +55,7 @@ test('commands are colored with aligned wrapping and three permission choices', 
     await page.waitFor(`document.querySelector('${id('composer-mode')}').textContent.trim() === '${label}'`);
     await page.click(id('composer-mode'));
     await page.waitFor(`document.querySelector('${id('composer-mode-menu')}')`);
-    expect(await page.evaluate(`document.querySelectorAll('${id('composer-mode-menu')} [data-row]').length`)).toBe(3);
+    expect(await page.evaluate(`document.querySelectorAll('${id('composer-mode-menu')} [data-row]').length`)).toBe(4);
     expect(await page.evaluate(`document.querySelectorAll('${id('composer-mode-menu')} .active').length`)).toBe(0);
     await page.evaluate(`document.querySelector('${id('composer-mode-menu')}').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))`);
     await page.waitFor(`!document.querySelector('${id('composer-mode-menu')}')`);

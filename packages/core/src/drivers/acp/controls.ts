@@ -39,6 +39,7 @@ const MODE_CANDIDATES: Record<PermissionMode, readonly string[]> = {
   default: ['default', 'build', 'normal'],
   acceptEdits: ['acceptEdits', 'accept_edits', 'autoEdit', 'auto_edit'],
   bypassPermissions: ['bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
+  yolo: ['yolo', 'bypassPermissions', 'bypass_permissions', 'auto'],
   plan: ['plan'],
   dontAsk: ['dontAsk', 'dont_ask', 'bypassPermissions', 'bypass_permissions', 'yolo', 'auto'],
 };

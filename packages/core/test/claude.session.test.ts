@@ -242,6 +242,25 @@ describe('claude driver', () => {
     expect(calls[2]?.prompts).toEqual(['third']);
   });
 
+  test('entering and leaving YOLO replaces the warm query and restores configured hooks', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    scripted(() => undefined, answerEach('sess-yolo-switch'));
+    for (const mode of ['bypassPermissions', 'yolo', 'bypassPermissions', 'default'] as const) {
+      await client.call('threads.update', { threadId, permissionMode: mode });
+      expect(await runTurn(client, threadId, mode)).toBe('done');
+    }
+    expect(queries).toHaveLength(4);
+    expect(calls.map(call => call.options.settings)).toEqual([
+      { fastMode: false }, { fastMode: false, disableAllHooks: true }, { fastMode: false }, { fastMode: false },
+    ]);
+    expect(calls.map(call => call.options.permissionMode)).toEqual([
+      'bypassPermissions', 'bypassPermissions', 'bypassPermissions', 'default',
+    ]);
+    expect(queries.slice(0, 3).every(query => query.closes > 0)).toBe(true);
+  });
+
   test('a turn that changed nothing reaches for no setter at all', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);
