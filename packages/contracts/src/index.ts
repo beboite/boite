@@ -2384,7 +2384,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'terminals.close': { params: { id: string }; result: { ok: true } };
 
   'threads.list': { params: { projectId?: ProjectId; includeArchived?: boolean }; result: ThreadSummary[] };
-  /** Read the working branch's PR using the execution machine's GitHub CLI. */
+  /** Read the thread's own branch PR using the execution machine's GitHub CLI. Null when the thread has no branch. */
   /** `refresh`: a user asked, so what the core kept for this repository is read again, and a missing gh is tried again. */
   'threads.pullRequest': { params: { threadId: ThreadId; refresh?: boolean }; result: ThreadSummary['pullRequest'] };
   'threads.create': {

@@ -93,7 +93,7 @@ export function threadMethods(ctx: FakeContext) {
   return {
     'threads.pullRequest': async (params) => {
       const thread = ctx.threads.get(params.threadId);
-      return thread?.pullRequest ?? null;
+      return thread?.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
     },
     'threads.list': async (params) => {
       return [...ctx.threads.values()]

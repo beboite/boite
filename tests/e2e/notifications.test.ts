@@ -47,7 +47,7 @@ test('older cores do not flood sidebar errors and manual lookup explains the mis
   })()`);
   await page.waitFor(`window.__prCalls === 1`);
   expect(await page.evaluate(`document.querySelector('[data-testid="error-toast"]') === null`)).toBe(true);
-  await page.evaluate(`document.querySelector('[data-testid="thread-row"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:100,clientY:100}))`);
+  await page.evaluate(`document.querySelector('[data-thread-id="t-trace"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:100,clientY:100}))`);
   await page.waitFor(`document.querySelector('[role="menuitem"]')`);
   await page.evaluate(`Array.from(document.querySelectorAll('[role="menuitem"]')).find(e => e.textContent.includes('Refresh pull request')).click()`);
   await page.waitFor(`document.querySelector('[data-testid="error-toast"]')?.textContent.includes('Update Boite')`);

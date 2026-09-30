@@ -229,3 +229,32 @@ test('in forced colors a focused text field still shows where the keyboard is', 
     await page.send('Emulation.setEmulatedMedia', { features: [] });
   }
 }, 30_000);
+
+test('PR links belong to a thread branch and disappear after a move to a plain folder', async () => {
+  const origin = await page.evaluate<string>('location.origin');
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await page.navigate(`${origin}/?fake=1&open=recent`);
+  await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 4`);
+  await page.click('[data-thread-id="t-trace"]');
+  await page.waitFor(`document.querySelector('.thread:has([data-thread-id="t-trace"]) ${id('thread-pr')}')`);
+  await update(`
+    for (const title of ['First shared-folder conversation', 'Second shared-folder conversation']) {
+      await store.client.call('threads.create', { projectId: thread.projectId, providerId: thread.providerId, accountId: thread.accountId, model: thread.model, title });
+    }
+  `);
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
+  const sharedRowsHaveNoPr = `Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).every(row => !row.closest('.thread').querySelector('${id('thread-pr')}'))`;
+  expect(await page.evaluate(sharedRowsHaveNoPr)).toBe(true);
+  await capture('pr-links-desktop');
+  await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
+  await page.click(id('mobile-conversations'));
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-list')}').textContent.includes('#180')`)).toBe(false);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await capture('pr-links-phone');
+  await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });
+  await update(`const drafts = await store.client.call('projects.drafts', {}); await store.move('t-trace', drafts.id);`);
+  await page.waitFor(`document.querySelector('[data-thread-id="t-trace"]') && !document.querySelector('.thread:has([data-thread-id="t-trace"]) ${id('thread-pr')}')`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.threads.find(thread => thread.id === 't-trace').branch`)).toBeNull();
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.pullRequest', { threadId: 't-trace' })`)).toBeNull();
+}, 30_000);
