@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { waitFor } from './harness.ts';
 import {
+  answerEach,
   assistant,
   calls,
   claudeThread,
@@ -65,6 +66,31 @@ describe('claude driver: questions and background work', () => {
     expect(calls[0]!.prompts).toHaveLength(1);
     // Nothing left to keep it for: the cold rule closes it now.
     await waitFor(() => (queries[0] as unknown as { ended: boolean }).ended);
+  });
+
+  test('a resume that reports the dead background work of the previous CLI still answers the prompt', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const sessionId = 'sess-dead-bg';
+    // CLI 2.1.284, probed on 2026-09-30: a resumed process first reports each
+    // background task the previous process left running, closes that report
+    // with an empty result of its own, then runs the prompt.
+    scripted((fake, options) => {
+      if (options.resume !== sessionId) return;
+      fake.emit(sdk({ type: 'system', subtype: 'task_notification', session_id: sessionId, task_id: 'bash-old', tool_use_id: 'toolu_old', status: 'stopped', output_file: '', summary: "Background shell command didn't finish before the previous session ended" }));
+      fake.emit(init(sessionId));
+      fake.emit(sdk({ ...(success(sessionId) as object), num_turns: 0, duration_api_ms: 0, stop_reason: null, total_cost_usd: 0, result: '', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }));
+    }, answerEach(sessionId));
+
+    expect(await runTurn(client, threadId, 'start it')).toBe('done');
+    const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+    await client.call('turns.start', { threadId, prompt: 'merge' });
+    const turn = await finished;
+    expect(turn.status).toBe('done');
+    expect(turn.usage?.outputTokens).toBe(3);
+    expect(calls.map((call) => call.options.resume ?? null)).toEqual([null, sessionId]);
+    const answer = harness.core.journal.listMessages(threadId).filter((m) => m.turnId === turn.id && m.role === 'assistant');
+    expect(answer.flatMap((m) => m.parts)).toEqual([{ type: 'text', text: 'answer 0' }]);
   });
 
   test('Stop on an idle thread, an archive and an account switch sweep what the released CLI left', async () => {
