@@ -590,11 +590,10 @@ test('a right click on a thread row opens the context menu, and Archive removes 
 
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=archive]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
-  // t-bench waits on a permission: archiving it would drop that card, so the app asks first.
-  await waitFor(() => document.querySelector('[data-testid=confirm-ok]') !== null);
-  query<HTMLButtonElement>('[data-testid=confirm-ok]').click();
+  // t-bench waits on a permission: it still archives at once, with no dialog.
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 3);
   expect(document.querySelector('[data-thread-id="t-bench"]')).toBeNull();
+  expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
 });
 
 test('a permission left pending is read back on connect and answered from its card', async () => {
