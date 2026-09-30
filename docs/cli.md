@@ -160,8 +160,9 @@ Boite draws those cards the same way.
 Exit codes: 0, 1 on a refusal or a failure (`error: ...` on stderr), 2 on a
 usage error (the usage text on stderr).
 
-[Agent coordination](coordination.md) must be enabled by the owner before an
-agent can send messages. The directory includes only authorized contacts.
+[Agent coordination](coordination.md) defaults to Brief mode for ordinary
+conversations, across projects and mutually trusted machines. The owner can
+disable or restrict it. The directory includes only authorized contacts.
 Replies preserve their message reference and authenticated sender identity.
 
 The singular `agent` commands belong to [persistent agents](agents.md), not

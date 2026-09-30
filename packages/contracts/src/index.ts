@@ -1784,6 +1784,10 @@ export interface CoordinationConfig {
   remote: boolean;
   paused: boolean;
 }
+/** Default communication for ordinary threads; explicit owner settings take precedence. */
+export function defaultCoordinationConfig(): CoordinationConfig {
+  return { mode: 'brief', resources: '', remote: true, paused: false };
+}
 export interface AgentAddress { coreId: string; threadId: ThreadId }
 export interface AgentContact extends AgentAddress {
   title: string;
