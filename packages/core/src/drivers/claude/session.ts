@@ -66,6 +66,15 @@ export class ClaudeSession {
    * took over before that run finished: they close that run, not the turn.
    */
   private foreignResults = 0;
+  /** No `init` yet: what the CLI writes before it is about an earlier process. */
+  private beforeInit = true;
+  /**
+   * A resume found background tasks the previous CLI left running. The CLI
+   * reports each one before its first `init`, then closes that report with one
+   * empty result (`num_turns` 0) before it runs the prompt (CLI 2.1.284,
+   * probed on 2026-09-30). That result is not the turn's.
+   */
+  private replayResult = false;
   private linger: Timer | null = null;
 
   private query: Query | null = null;
@@ -332,6 +341,7 @@ export class ClaudeSession {
     const sessionId = (message as { session_id?: string }).session_id;
     if (typeof sessionId === 'string' && sessionId.length > 0) this.sessionId = sessionId;
     if (message.type === 'system') this.noteTasks(message);
+    if (this.replayed(message)) return;
     // Counted once here, with or without a turn: an adopted message is handed
     // to the turn that opens for it later.
     if (message.type === 'system' && message.subtype === 'hook_response') (this.head()?.ctx ?? this.ctx).hook?.(hookReport(message));
@@ -364,6 +374,15 @@ export class ClaudeSession {
       if (turn.sessionLost) this.close(null);
       this.endTurn(turn);
     }
+  }
+
+  /** True for the empty result that closes a resume's report of dead background tasks. */
+  private replayed(message: SDKMessage): boolean {
+    if (message.type === 'system' && message.subtype === 'init') this.beforeInit = false;
+    if (message.type === 'system' && message.subtype === 'task_notification' && this.beforeInit) this.replayResult = true;
+    if (message.type !== 'result' || !this.replayResult) return false;
+    this.replayResult = false;
+    return message.num_turns === 0;
   }
 
   private endTurn(turn: ClaudeTurn): void {
@@ -458,6 +477,7 @@ export class ClaudeSession {
     this.orphans = [];
     this.woken = false;
     this.foreignResults = 0;
+    this.replayResult = false;
     // The CLI no longer tracks what it ran in the background. The command itself
     // can outlive it (Windows kills no tree): the registry's orphan sweep, which
     // the core schedules when it releases the thread, stops that.
