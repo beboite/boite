@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import type { HarnessUpdate, OsProfile, ProviderDescriptor, ProviderId, ProviderSelfUpdate } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { forgetProbes } from '../drivers/index.ts';
@@ -92,6 +93,15 @@ async function capture(reader: { read(): Promise<{ done: boolean; value?: Uint8A
   }
   const text = Buffer.concat(chunks);
   return text.subarray(Math.max(0, text.length - OUTPUT_MAX_BYTES)).toString('utf8');
+}
+
+/** stderr carries the failure; stdout often only announces the updater. */
+function failureSummary(stdout: string, stderr: string): string | undefined {
+  const lines = (output: string): string[] => stripVTControlCharacters(output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const errors = lines(stderr);
+  const output = errors.length > 0 ? errors : lines(stdout);
+  // npm ends with its log location, after the error explaining the failed operation.
+  return output.find((line) => /\berror:|\b(?:EACCES|EPERM)\b.*(?:permission denied|operation not permitted)/i.test(line)) ?? output.at(-1);
 }
 
 async function npmLatest(name: string): Promise<string> {
@@ -436,7 +446,7 @@ export class HarnessUpdates {
       if (ran === 'late' || timedOut) throw new Error(`${target.descriptor.name} did not answer \`${args.join(' ')}\` within ${Math.round(timeoutMs / 1000)} s`);
       const [stdout, stderr, code] = ran;
       if (code !== 0) {
-        const last = `${stderr}\n${stdout}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0).at(-1);
+        const last = failureSummary(stdout, stderr);
         throw new Error(`\`${args.join(' ')}\` exited with ${code}${last === undefined ? '' : `: ${last.slice(0, 300)}`}`);
       }
       return `${stdout}\n${stderr}`;
