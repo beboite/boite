@@ -284,11 +284,12 @@ compositing, the case a WebView2 without acceleration meets:
 - An entrance animation belongs to what arrives live. A paragraph eases in
   only while its answer streams, and a message rises only when it lands at the
   bottom being watched, not when a scroll up the history mounts it again.
-- Scrolling reads layout as little as it can: the reading anchor is taken
-  once a scroll rests for 120 ms (a pointer or a key still takes it at once),
-  the outline rail follows once per frame, and a message's height comes from
-  its `ResizeObserver` entry. A wheel up a 400-message thread went from 467 to
-  392 ms of main thread per 1,000 px.
+- Scrolling reads layout as little as it can: the outline rail follows once
+  per frame, and a message's height comes from its `ResizeObserver` entry. A
+  wheel up a 400-message thread went from 340 to 310 ms of main thread per
+  1,000 px. The reading anchor is still read right after each scroll event:
+  read a frame or a timer later, a tap that left the thread right after a
+  scroll brought it back on the next message.
 
 `packages/ui/src/render-cost.test.ts` fails on a blur outside the named
 surfaces or on any `inset: 0` rule, on an endless animation of anything else,
