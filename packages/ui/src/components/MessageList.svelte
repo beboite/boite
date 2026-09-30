@@ -23,6 +23,7 @@
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
+  import { glides } from '../lib/motion';
 
   let {
     store,
@@ -135,11 +136,24 @@
   let scrollTop = $state(savedReading?.top ?? 0);
   let readingAnchor = savedReading?.anchor;
   let restoringAnchor = Boolean(savedReading?.anchor && !savedReading.pinned);
-  function rememberAnchor() {
-    if (!viewport?.isConnected || !viewport.clientHeight || restoringAnchor) return;
+  /** Reads the message at the top edge. False when the rendered window does not reach that edge yet. */
+  function rememberAnchor(): boolean {
+    if (!viewport?.isConnected || !viewport.clientHeight || restoringAnchor) return true;
     const top = viewport.getBoundingClientRect().top;
-    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
-    if (node?.dataset.mid) readingAnchor = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+    for (const node of viewport.querySelectorAll<HTMLElement>('[data-mid]')) {
+      const box = node.getBoundingClientRect();
+      if (box.bottom <= top) continue;
+      if (node.dataset.mid) readingAnchor = { id: node.dataset.mid, offset: box.top - top };
+      return box.top <= top + 1;
+    }
+    return false;
+  }
+  /** Typing in a field never leaves the thread: a chord, Enter, Escape or a key outside a field reads the anchor. */
+  function rememberBeforeKey(event: KeyboardEvent) {
+    const target = event.target;
+    const field = target instanceof HTMLElement && (target.isContentEditable || target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement);
+    if (field && !event.ctrlKey && !event.metaKey && !event.altKey && event.key !== 'Enter' && event.key !== 'Escape') return;
+    rememberAnchor();
   }
   function restoreAnchor() {
     if (!restoringAnchor || !readingAnchor || !viewport) return;
@@ -152,10 +166,10 @@
   onMount(() => {
     // Capture the settled layout before a navigation click removes this list.
     document.addEventListener('pointerdown', rememberAnchor, true);
-    document.addEventListener('keydown', rememberAnchor, true);
+    document.addEventListener('keydown', rememberBeforeKey, true);
     return () => {
       document.removeEventListener('pointerdown', rememberAnchor, true);
-      document.removeEventListener('keydown', rememberAnchor, true);
+      document.removeEventListener('keydown', rememberBeforeKey, true);
     };
   });
   let restoredReading = false;
@@ -167,7 +181,7 @@
   });
   let viewHeight = $state(0);
   let navigationTarget = $state<string | null>(null);
-  function releaseNavigation() { releaseAnchor(); navigationTarget = null; }
+  function releaseNavigation() { releaseAnchor(); navigationTarget = null; endGlide(false); }
   const activePrompt = $derived.by(() => {
     void measured;
     const total = totals(timeline);
@@ -180,6 +194,7 @@
 
   function jumpToMessage(id: string) {
     releaseAnchor();
+    endGlide(false);
     const box = viewport;
     const index = timeline.findIndex(message => message.id === id);
     if (!box || index < 0) return;
@@ -353,6 +368,11 @@
     const pending = new Map<Element, ResizeObserverEntry>();
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) pending.set(entry.target, entry);
+      // A pinned conversation follows what grows at its bottom in this same
+      // frame: the observer runs after layout, so the height costs no extra
+      // layout, and the new line is painted already in view instead of up to
+      // a tenth of a second later.
+      if (following()) box.scrollTop = box.scrollHeight;
       if (frame) return;
       // Applying slot heights inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
@@ -381,19 +401,82 @@
   function onscroll() {
     const box = viewport;
     if (!box) return;
+    // Read at the event, before this scroll renders the window's new messages:
+    // the layout is still the one the frame drew, so reading it costs nothing.
+    // Deferred to the next frame or to a timer, the read let a navigation that
+    // followed a scroll at once restore the message below (tests/e2e/mobile.test.ts).
+    const covered = rememberAnchor();
+    // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
+    if (holding && box.scrollTop < scrollTop - 1) leftBottom = true;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget) return;
-    pinned = atBottom(box);
+    // A scroll past the rendered window has nothing at the top edge yet: read
+    // again once the window has rendered there.
+    if (!covered) void tick().then(rememberAnchor);
+    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (gliding) {
+      if (distance > 1) return;
+      endGlide(false);
+    }
+    // Only the very bottom takes back a list the wheel took up.
+    if (distance <= 1) leftBottom = false;
+    pinned = !leftBottom && atBottom(box);
     if (restoringAnchor) pinned = false;
-    // Read right after each event, once the window has rendered. Deferred to
-    // the next frame or to a timer, the read let a navigation that followed a
-    // scroll at once restore the message below (tests/e2e/mobile.test.ts).
-    void tick().then(rememberAnchor);
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
     if (pinned) markSeen();
     pullOlder(box);
+  }
+
+  /**
+   * A wheel turned up leaves the bottom at once. Waiting for the 80 px that
+   * unpin it let a streaming answer pull the first notches of a smooth wheel
+   * back down, frame after frame.
+   */
+  let leftBottom = false;
+  function onwheel(event: WheelEvent) {
+    releaseNavigation();
+    const box = viewport;
+    if (event.deltaY >= 0 || !box || box.scrollTop <= 0 || box.scrollHeight <= box.clientHeight + 1) return;
+    // A tool output or a code well that can still scroll up takes the wheel itself.
+    if (scrollsFirst(event.target, box)) return;
+    leftBottom = true;
+    if (pinned) { pinned = false; behind = true; }
+  }
+
+  /** Whether something between the pointer and the list scrolls up before the list does. */
+  function scrollsFirst(target: EventTarget | null, box: HTMLElement): boolean {
+    for (let node = target instanceof Element ? target : null; node && node !== box; node = node.parentElement) {
+      if (node.scrollTop <= 0 || node.scrollHeight <= node.clientHeight) continue;
+      const overflow = getComputedStyle(node).overflowY;
+      if (overflow === 'auto' || overflow === 'scroll') return true;
+    }
+    return false;
+  }
+
+  /**
+   * A finger, a text selection or the scrollbar under the pointer holds the
+   * list where it is: the answer grows below until they let go.
+   */
+  let holding = false;
+  function hold(event: PointerEvent | TouchEvent) {
+    releaseNavigation();
+    // A finger is followed by its touch events: the browser cancels its pointer as soon as it pans.
+    const finger = !('pointerType' in event);
+    if (!finger && event.pointerType === 'touch') return;
+    holding = true;
+    const ends = finger ? ['touchend', 'touchcancel'] : ['pointerup', 'pointercancel'];
+    const release = () => {
+      holding = false;
+      for (const name of ends) window.removeEventListener(name, release, true);
+    };
+    for (const name of ends) window.addEventListener(name, release, true);
+  }
+
+  /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
+  function following(): boolean {
+    return pinned && !navigationTarget && !gliding && !holding;
   }
 
   // -- paging ----------------------------------------------------------------
@@ -433,17 +516,74 @@
   }
   // -- end paging ------------------------------------------------------------
 
+  /** The glide "Jump to latest" starts: its scroll events neither unpin the list nor bring the button back. */
+  let gliding = false;
+  let glideTimer = 0;
+  let glideFrame = 0;
+  const GLIDE_MS = 380;
+
   function jump() {
     releaseAnchor();
     const box = viewport;
     if (!box) return;
     navigationTarget = null;
-    pinned = true;
     behind = false;
     markSeen();
-    box.scrollTop = box.scrollHeight;
-    scrollTop = box.scrollTop;
+    leftBottom = false;
+    const bottom = box.scrollHeight - box.clientHeight;
+    if (!glides() || bottom - box.scrollTop <= 1) {
+      pinned = true;
+      box.scrollTop = box.scrollHeight;
+      scrollTop = box.scrollTop;
+      return;
+    }
+    // A long way down cuts to the last screen and a half first: gliding the
+    // whole way would mount, lay out and paint every message it crossed.
+    const lead = Math.round(box.clientHeight * 1.5);
+    if (bottom - box.scrollTop > lead) box.scrollTop = bottom - lead;
+    // Each frame stands a shrinking distance above the bottom as it is now.
+    // A native smooth scroll aims at the bottom measured when it starts, and
+    // the messages it mounts on the way are measured and move that bottom.
+    const away = box.scrollHeight - box.clientHeight - box.scrollTop;
+    const start = performance.now();
+    gliding = true;
+    clearTimeout(glideTimer);
+    cancelAnimationFrame(glideFrame);
+    const step = (now: number) => {
+      if (!gliding) return;
+      const progress = Math.min(1, (now - start) / GLIDE_MS);
+      // The app's ease-out-quint, which every panel and menu moves on.
+      const left = away * Math.pow(1 - progress, 5);
+      box.scrollTop = box.scrollHeight - box.clientHeight - left;
+      if (progress < 1) glideFrame = requestAnimationFrame(step);
+      else endGlide(true);
+    };
+    glideFrame = requestAnimationFrame(step);
+    // A page in the background draws no frames: the glide still ends.
+    glideTimer = window.setTimeout(() => endGlide(true), GLIDE_MS + 500);
   }
+
+  /**
+   * The glide is over: arrived or out of time, the list pins again and follows
+   * what the answer adds. Taken over by the reader, it stays where it stopped.
+   */
+  function endGlide(arrived: boolean) {
+    if (!gliding) return;
+    gliding = false;
+    clearTimeout(glideTimer);
+    cancelAnimationFrame(glideFrame);
+    const box = viewport;
+    if (!box) return;
+    if (arrived) {
+      box.scrollTop = box.scrollHeight;
+      scrollTop = box.scrollTop;
+    }
+    pinned = arrived || atBottom(box);
+    behind = !pinned;
+    if (pinned) markSeen();
+  }
+
+  $effect(() => () => { clearTimeout(glideTimer); cancelAnimationFrame(glideFrame); });
 
   /**
    * A message arriving, and the bottom one growing no more than ten times a
@@ -458,12 +598,15 @@
     const opened = shown !== threadId;
     shown = threadId;
     if (opened || pinned) {
-      box.scrollTop = box.scrollHeight;
-      scrollTop = box.scrollTop;
+      // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
+      if (opened || untrack(following)) {
+        box.scrollTop = box.scrollHeight;
+        scrollTop = box.scrollTop;
+      }
       pinned = true;
       behind = false;
       untrack(markSeen);
-    } else {
+    } else if (!gliding) {
       behind = true;
     }
   });
@@ -480,7 +623,7 @@
   /** The window moving under a pinned viewport changes the spacers: take the bottom again. */
   $effect(() => {
     void view;
-    if (!pinned) return;
+    if (!untrack(following)) return;
     const box = viewport;
     if (!box) return;
     box.scrollTop = box.scrollHeight;
@@ -572,7 +715,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} {onscroll} {onwheel} ontouchstart={hold} onpointerdown={hold} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -660,6 +803,14 @@
        already take their own space in the composer below this viewport. */
     padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
+  }
+
+  /* The scrollbar's room is kept on both sides from the first message: a
+     reply that first overflows the window no longer shifts the column
+     sideways mid-answer, and the column stays centred over the composer.
+     A finger's scrollbar floats over the text and takes no room. */
+  @media (pointer: fine) {
+    .timeline { scrollbar-gutter: stable both-edges; }
   }
 
   .column {

@@ -684,6 +684,11 @@ body {
   height: 100%;
 }
 
+/* A tap shows the control's own pressed state, never the browser's grey box. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   margin: 0;
   background: var(--color-background);
