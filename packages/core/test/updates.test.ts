@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,7 +65,8 @@ function writeDescriptor(
 /**
  * A global npm install of the fixture under `<dataDir>/npm`, the Unix layout:
  * the package in `lib/node_modules/@boite-test/fake-agent`, its link in `bin`.
- * Returns the link, the program PATH would find.
+ * Returns the link, the program PATH would find, and the directories as the
+ * core reads them: through their links, `/private/var` for macOS's `/var`.
  */
 function npmLayout(dataDir: string): { prefix: string; scope: string; link: string } {
   const prefix = join(dataDir, 'npm');
@@ -78,7 +79,7 @@ function npmLayout(dataDir: string): { prefix: string; scope: string; link: stri
   chmodSync(script, 0o755);
   const link = join(prefix, 'bin', 'fake-agent');
   symlinkSync(script, link);
-  return { prefix, scope, link };
+  return { prefix: realpathSync(prefix), scope: realpathSync(scope), link };
 }
 
 /** Unix permissions decide the writability tests; root writes through them. */
@@ -243,9 +244,12 @@ describe('harness updates', () => {
   });
 
   test.skipIf(!unixUser)('an npm install is updated into its own prefix, and one this user cannot write is refused before its updater runs', async () => {
-    const { client, state } = await start('command', 'update-npm', undefined, (dataDir) => ({ kind: 'file', value: npmLayout(dataDir).link }));
-    const prefix = join(harness!.dataDir, 'npm');
-    const scope = join(prefix, 'lib', 'node_modules', '@boite-test');
+    let layout!: ReturnType<typeof npmLayout>;
+    const { client, state } = await start('command', 'update-npm', undefined, (dataDir) => {
+      layout = npmLayout(dataDir);
+      return { kind: 'file', value: layout.link };
+    });
+    const { prefix, scope } = layout;
     await client.call('providers.updates', { refresh: true });
     const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
     await client.call('providers.update', { providerId: 'update-fake' });
