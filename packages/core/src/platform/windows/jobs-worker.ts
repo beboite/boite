@@ -5,7 +5,7 @@
  * millisecond and nothing is missed, where polling loses a process that lived
  * less than one interval.
  */
-import { dlopen, FFIType, ptr } from 'bun:ffi';
+import { dlopen, FFIType } from 'bun:ffi';
 
 export interface JobsWorkerStart {
   /** The completion port handle. Handles are process wide, so a Worker thread shares them. */
@@ -46,7 +46,7 @@ scope.onmessage = (event: { data: unknown }): void => {
   try {
     symbols = dlopen('kernel32.dll', {
       GetQueuedCompletionStatus: {
-        args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u32],
+        args: [FFIType.u64, FFIType.buffer, FFIType.buffer, FFIType.buffer, FFIType.u32],
         returns: FFIType.i32,
       },
       OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.u64 },
@@ -63,7 +63,7 @@ scope.onmessage = (event: { data: unknown }): void => {
 
   send({ kind: 'ready' });
   while (Atomics.load(stop, 0) === 0) {
-    const ok = symbols.GetQueuedCompletionStatus(BigInt(start.port), ptr(out, 0), ptr(out, 8), ptr(out, 16), start.waitMs);
+    const ok = symbols.GetQueuedCompletionStatus(BigInt(start.port), out.subarray(0, 4), out.subarray(8, 16), out.subarray(16, 24), start.waitMs);
     if (ok === 0) continue;
     const key = Number(view.getBigUint64(8, true));
     // Key 0 is no job: it is the main thread waking this wait to stop. One left

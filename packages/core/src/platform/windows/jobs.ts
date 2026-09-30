@@ -8,7 +8,7 @@
  * normal priority, with normal priority during bounded agent initialization.
  */
 import { cpus, totalmem } from 'node:os';
-import { dlopen, FFIType, ptr } from 'bun:ffi';
+import { dlopen, FFIType } from 'bun:ffi';
 import type { TraceCapability } from '@boite/contracts';
 import type { JobsWorkerMessage, JobsWorkerStart } from './jobs-worker.ts';
 import { workerEntry } from './worker-entry.ts';
@@ -86,9 +86,9 @@ const CONSOLE_HOSTS = new Set(['conhost.exe', 'openconsole.exe']);
 function loadKernel32() {
   return dlopen('kernel32.dll', {
     CreateJobObjectW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u64 },
-    SetInformationJobObject: { args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
+    SetInformationJobObject: { args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32], returns: FFIType.i32 },
     QueryInformationJobObject: {
-      args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32, FFIType.ptr],
+      args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32, FFIType.ptr],
       returns: FFIType.i32,
     },
     AssignProcessToJobObject: { args: [FFIType.u64, FFIType.u64], returns: FFIType.i32 },
@@ -99,16 +99,16 @@ function loadKernel32() {
     OpenProcess: { args: [FFIType.u32, FFIType.i32, FFIType.u32], returns: FFIType.u64 },
     CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
     GetLastError: { args: [], returns: FFIType.u32 },
-    QueryFullProcessImageNameW: { args: [FFIType.u64, FFIType.u32, FFIType.ptr, FFIType.ptr], returns: FFIType.i32 },
-    GetExitCodeProcess: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
+    QueryFullProcessImageNameW: { args: [FFIType.u64, FFIType.u32, FFIType.buffer, FFIType.buffer], returns: FFIType.i32 },
+    GetExitCodeProcess: { args: [FFIType.u64, FFIType.buffer], returns: FFIType.i32 },
     GetProcessTimes: {
-      args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
+      args: [FFIType.u64, FFIType.buffer, FFIType.buffer, FFIType.buffer, FFIType.buffer],
       returns: FFIType.i32,
     },
-    K32GetProcessMemoryInfo: { args: [FFIType.u64, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
-    GetProcessIoCounters: { args: [FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
+    K32GetProcessMemoryInfo: { args: [FFIType.u64, FFIType.buffer, FFIType.u32], returns: FFIType.i32 },
+    GetProcessIoCounters: { args: [FFIType.u64, FFIType.buffer], returns: FFIType.i32 },
     ReadProcessMemory: {
-      args: [FFIType.u64, FFIType.u64, FFIType.ptr, FFIType.u64, FFIType.ptr],
+      args: [FFIType.u64, FFIType.u64, FFIType.buffer, FFIType.u64, FFIType.buffer],
       returns: FFIType.i32,
     },
   });
@@ -117,7 +117,7 @@ function loadKernel32() {
 function loadNtdll() {
   return dlopen('ntdll.dll', {
     NtQueryInformationProcess: {
-      args: [FFIType.u64, FFIType.i32, FFIType.ptr, FFIType.u32, FFIType.ptr],
+      args: [FFIType.u64, FFIType.i32, FFIType.buffer, FFIType.u32, FFIType.buffer],
       returns: FFIType.i32,
     },
   });
@@ -142,9 +142,9 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
     lastError: (): number => k32.GetLastError(),
     createJob: (): number => asHandle(k32.CreateJobObjectW(null, null)),
     setJobInfo: (job: number, klass: number, buffer: Uint8Array): boolean =>
-      k32.SetInformationJobObject(nativeHandle(job), klass, ptr(buffer), buffer.byteLength) !== 0,
+      k32.SetInformationJobObject(nativeHandle(job), klass, buffer, buffer.byteLength) !== 0,
     queryJobInfo: (job: number, klass: number, buffer: Uint8Array): boolean =>
-      k32.QueryInformationJobObject(nativeHandle(job), klass, ptr(buffer), buffer.byteLength, null) !== 0,
+      k32.QueryInformationJobObject(nativeHandle(job), klass, buffer, buffer.byteLength, null) !== 0,
     assign: (job: number, proc: number): boolean =>
       k32.AssignProcessToJobObject(nativeHandle(job), nativeHandle(proc)) !== 0,
     terminateJob: (job: number, exitCode: number): boolean =>
@@ -159,25 +159,25 @@ function nativeApi(k32: Kernel32, nt: Ntdll | null) {
       k32.CloseHandle(nativeHandle(handle));
     },
     imageName: (proc: number, buffer: Uint16Array, size: Uint32Array): boolean =>
-      k32.QueryFullProcessImageNameW(nativeHandle(proc), 0, ptr(buffer), ptr(size)) !== 0,
+      k32.QueryFullProcessImageNameW(nativeHandle(proc), 0, buffer, size) !== 0,
     exitCode: (proc: number, out: Uint32Array): boolean =>
-      k32.GetExitCodeProcess(nativeHandle(proc), ptr(out)) !== 0,
+      k32.GetExitCodeProcess(nativeHandle(proc), out) !== 0,
     processTimes: (proc: number, out: Uint8Array): boolean =>
-      k32.GetProcessTimes(nativeHandle(proc), ptr(out, 0), ptr(out, 8), ptr(out, 16), ptr(out, 24)) !== 0,
+      k32.GetProcessTimes(nativeHandle(proc), out.subarray(0, 8), out.subarray(8, 16), out.subarray(16, 24), out.subarray(24, 32)) !== 0,
     memoryInfo: (proc: number, out: Uint8Array): boolean =>
-      k32.K32GetProcessMemoryInfo(nativeHandle(proc), ptr(out), out.byteLength) !== 0,
+      k32.K32GetProcessMemoryInfo(nativeHandle(proc), out, out.byteLength) !== 0,
     ioCounters: (proc: number, out: Uint8Array): boolean =>
-      k32.GetProcessIoCounters(nativeHandle(proc), ptr(out)) !== 0,
+      k32.GetProcessIoCounters(nativeHandle(proc), out) !== 0,
     readMemory: (proc: number, address: bigint, into: Uint8Array): boolean => {
       const read = new Uint8Array(8);
       return (
-        k32.ReadProcessMemory(nativeHandle(proc), address, ptr(into), BigInt(into.byteLength), ptr(read)) !== 0
+        k32.ReadProcessMemory(nativeHandle(proc), address, into, BigInt(into.byteLength), read) !== 0
       );
     },
     basicInfo: (proc: number, out: Uint8Array): boolean => {
       if (nt === null) return false;
       const returned = new Uint32Array(1);
-      return nt.NtQueryInformationProcess(nativeHandle(proc), 0, ptr(out), out.byteLength, ptr(returned)) === 0;
+      return nt.NtQueryInformationProcess(nativeHandle(proc), 0, out, out.byteLength, returned) === 0;
     },
   };
 }
