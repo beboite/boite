@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -6,6 +7,7 @@ import type { HarnessUpdate } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
+import { npmInstallOf } from '../src/providers/npm.ts';
 import { compareVersions, inside, readVersion } from '../src/providers/updates.ts';
 import { holdAccountTurns, echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -20,14 +22,20 @@ afterEach(async () => {
 });
 
 /** A user descriptor whose updater is the fixture, reading its newest version the way `source` says. */
-function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', updater: string, updateEnv?: Record<string, string>): string {
+function writeDescriptor(
+  dataDir: string,
+  source: 'command' | 'npm' | 'none',
+  updater: string,
+  updateEnv?: Record<string, string>,
+  program: { kind: 'path' | 'file'; value: string } = { kind: 'path', value: 'bun' },
+): string {
   const dir = join(dataDir, 'providers');
   mkdirSync(dir, { recursive: true });
   const state = join(dataDir, 'fake-version.txt');
   writeFileSync(state, '1.0.0');
   const profile = {
     detect: {},
-    executable: [{ kind: 'path', value: 'bun', ...(updateEnv === undefined ? {} : { updateEnv }) }],
+    executable: [{ ...program, ...(updateEnv === undefined ? {} : { updateEnv }) }],
     update: {
       versionArgs: [FAKE, state, '--version'],
       ...(source === 'command' ? { latestArgs: [FAKE, state, 'check'] } : source === 'npm' ? { latestNpm: '@boite-test/fake-agent' } : {}),
@@ -54,7 +62,34 @@ function writeDescriptor(dataDir: string, source: 'command' | 'npm' | 'none', up
   return state;
 }
 
-async function start(source: 'command' | 'npm' | 'none', updater = 'update', updateEnv?: Record<string, string>): Promise<{ client: CoreClient; state: string }> {
+/**
+ * A global npm install of the fixture under `<dataDir>/npm`, the Unix layout:
+ * the package in `lib/node_modules/@boite-test/fake-agent`, its link in `bin`.
+ * Returns the link, the program PATH would find.
+ */
+function npmLayout(dataDir: string): { prefix: string; scope: string; link: string } {
+  const prefix = join(dataDir, 'npm');
+  const scope = join(prefix, 'lib', 'node_modules', '@boite-test');
+  const bin = join(scope, 'fake-agent', 'bin');
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(join(prefix, 'bin'), { recursive: true });
+  const script = join(bin, 'agent');
+  writeFileSync(script, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+  chmodSync(script, 0o755);
+  const link = join(prefix, 'bin', 'fake-agent');
+  symlinkSync(script, link);
+  return { prefix, scope, link };
+}
+
+/** Unix permissions decide the writability tests; root writes through them. */
+const unixUser = process.platform !== 'win32' && process.getuid?.() !== 0;
+
+async function start(
+  source: 'command' | 'npm' | 'none',
+  updater = 'update',
+  updateEnv?: Record<string, string>,
+  program?: (dataDir: string) => { kind: 'path' | 'file'; value: string },
+): Promise<{ client: CoreClient; state: string }> {
   harness = await startTestCore();
   // Only the fixture: a check must never run the agents of the machine the tests run on.
   harness.core.updates.only = new Set(['update-fake']);
@@ -62,7 +97,7 @@ async function start(source: 'command' | 'npm' | 'none', updater = 'update', upd
     expect(name).toBe('@boite-test/fake-agent');
     return '1.1.0';
   };
-  const state = writeDescriptor(harness.dataDir, source, updater, updateEnv);
+  const state = writeDescriptor(harness.dataDir, source, updater, updateEnv, program?.(harness.dataDir));
   const client = await harness.connect();
   const loaded = await client.call('providers.reload', {});
   expect(loaded.rejected).toEqual([]);
@@ -86,6 +121,20 @@ describe('harness updates', () => {
     expect(readVersion('nothing here')).toBeNull();
     expect(inside(join('a', 'codex'), join('a', 'codex', 'bin', 'agent'))).toBe(true);
     expect(inside(join('a', 'codex'), join('a', 'codex-other', 'agent'))).toBe(false);
+  });
+
+  test.skipIf(process.platform === 'win32')('a global npm install is found through its link, scoped or not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'boite-npm-'));
+    try {
+      const { prefix, link } = npmLayout(dir);
+      expect(npmInstallOf(link)).toEqual({ prefix, packageDir: join(prefix, 'lib', 'node_modules', '@boite-test', 'fake-agent') });
+      expect(npmInstallOf('/usr/lib/node_modules/opencode-ai/bin/opencode.exe')).toEqual({ prefix: '/usr', packageDir: '/usr/lib/node_modules/opencode-ai' });
+      // pnpm and Bun keep their globals elsewhere, and a native install is no npm install.
+      expect(npmInstallOf('/home/u/.bun/install/global/node_modules/x/bin/x')).toBeNull();
+      expect(npmInstallOf('/home/u/.local/share/claude/versions/2.1.285')).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('an agent that checks by itself is read, updated by its own updater, and traced', async () => {
@@ -190,6 +239,35 @@ describe('harness updates', () => {
     await client.call('providers.update', { providerId: 'update-fake' });
     expect(only(await changed)).toMatchObject({ current: '1.2.0', message: null });
     expect(readFileSync(state, 'utf8')).toBe('1.2.0');
+    await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
+  });
+
+  test.skipIf(!unixUser)('an npm install is updated into its own prefix, and one this user cannot write is refused before its updater runs', async () => {
+    const { client, state } = await start('command', 'update-npm', undefined, (dataDir) => ({ kind: 'file', value: npmLayout(dataDir).link }));
+    const prefix = join(harness!.dataDir, 'npm');
+    const scope = join(prefix, 'lib', 'node_modules', '@boite-test');
+    await client.call('providers.updates', { refresh: true });
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await client.call('providers.update', { providerId: 'update-fake' });
+    await changed;
+    // npm's own configuration named another prefix, or none: the updater still targets this copy.
+    expect(readFileSync(`${state}.prefix`, 'utf8')).toBe(prefix);
+
+    writeFileSync(state, '1.0.0');
+    rmSync(`${state}.prefix`);
+    await client.call('providers.updates', { refresh: true });
+    chmodSync(scope, 0o555);
+    try {
+      const failed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'failed', 20000);
+      await client.call('providers.update', { providerId: 'update-fake' });
+      const update = only(await failed);
+      expect(update.message).toContain(`installed under ${prefix}`);
+      expect(update.message).toContain(`cannot write ${scope}`);
+      expect(readFileSync(state, 'utf8')).toBe('1.0.0');
+      expect(existsSync(`${state}.prefix`)).toBe(false);
+    } finally {
+      chmodSync(scope, 0o755);
+    }
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
@@ -340,6 +418,23 @@ describe('harness updates', () => {
       expect(delay).toBeLessThanOrEqual(6 * 60 * 60 * 1000);
       // Seven hours later the reading is stale, and the check comes after the usual ten minutes.
       expect(second.updates.firstDelay(Date.now() + 7 * 60 * 60 * 1000)).toBe(10 * 60 * 1000);
+    } finally {
+      await second.close();
+    }
+  });
+
+  test.skipIf(process.platform === 'win32')('a kept reading of a program PATH no longer finds is dropped, and read at the usual first check', async () => {
+    const { client } = await start('npm');
+    expect(only(await client.call('providers.updates', { refresh: true }))).toMatchObject({ current: '1.0.0', latest: '1.1.0' });
+    // The core now finds another copy of the agent, such as one moved first on its PATH.
+    const { link } = npmLayout(harness!.dataDir);
+    writeDescriptor(harness!.dataDir, 'npm', 'update', undefined, { kind: 'file', value: link });
+
+    const second = new Core({ dataDir: harness!.dataDir, token: newToken() });
+    try {
+      expect(second.updates.refreshRestored()).toBe(true);
+      expect(await second.updates.list()).toEqual([]);
+      expect(second.procs.liveCount('update:update-fake')).toBe(0);
     } finally {
       await second.close();
     }
