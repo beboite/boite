@@ -7,6 +7,314 @@ on:
   workflow_dispatch:
     inputs:
       windows-probe:
+        type: boolean
+        default: false
+        description: Run the Windows native shutdown reproductions only.
+  workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        description: Required only when sign-updates is enabled.
+        required: false
+    inputs:
+      windows-probe:
+        type: boolean
+        default: false
+      force:
+        type: boolean
+        default: true
+      skip-server:
+        type: boolean
+        default: false
+      channel:
+        type: string
+        default: stable
+      version:
+        type: string
+        default: ''
+      sign-updates:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.workflow == 'ci' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+
+env:
+  CARGO_BUILD_JOBS: 8
+
+jobs:
+  changes:
+    if: ${{ !inputs.windows-probe }}
+    runs-on: ubuntu-24.04
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      web: ${{ steps.filter.outputs.web }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      portable: ${{ steps.filter.outputs.portable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
+        run: bun scripts/ci/changes.ts
+      - run: bun scripts/check-docs.ts
+      - run: bun test scripts/ci ./bench ./apps/shell/scripts
+      # Missing sentences are warnings here and in the nightly; release.yml refuses them.
+      - run: bun scripts/ci/translations.ts
+      - run: bun run check:architecture
+      - run: bun test scripts/architecture
+      - name: Validate workflows
+        if: steps.filter.outputs.workflows == 'true'
+        run: |
+          curl --fail --location --retry 3 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint"
+
+  core:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run --cwd packages/core test
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      # Caches are saved on main only: a pull request's copy is visible to that
+      # pull request alone and would evict the ones every pull request restores.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
+          restore-keys: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-
+      - run: bun run check
+      - run: bun run --cwd packages/ui test --maxWorkers=8
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: apps/shell/src-tauri -> target
+          shared-key: desktop-release-v1
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Set nightly artifact version
+        if: inputs.channel == 'nightly' && inputs.version != ''
+        env:
+          NIGHTLY_VERSION: ${{ inputs.version }}
+        run: bun scripts/ci/nightly-build.ts
+      - name: Build installer once
+        env:
+          BUILD_CHANNEL: ${{ inputs.channel || 'stable' }}
+          BOITE_SIGN_UPDATES: ${{ inputs.sign-updates && '1' || '0' }}
+          # Only a published installer reports to the analytics relay; a pull
+          # request's build stays silent (docs/analytics.md).
+          BOITE_RELEASE_TELEMETRY: ${{ inputs.sign-updates && '1' || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+        run: |
+          if ($env:BUILD_CHANNEL -eq 'nightly') {
+            bun run build:shell:nightly
+          } elseif ($env:BUILD_CHANNEL -eq 'stable') {
+            bun run build:shell
+          } else {
+            throw "Unsupported build channel: $env:BUILD_CHANNEL"
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run apps/shell/scripts/stage-sidecar.ts
+      - name: Check bundle size budgets
+        run: bun scripts/ci/budgets.ts
+      - name: Windows installer regression tests
+        run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
+      - run: bun run test:shell --release
+      - name: Native shell end-to-end tests
+        if: needs.changes.outputs.e2e == 'true'
+        env:
+          BOITE_E2E_PREBUILT_UI: '1'
+        run: bun test tests/e2e/shell.test.ts
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: windows-installer
+          path: |
+            apps/shell/src-tauri/target/release/bundle/nsis/*.exe
+            apps/shell/src-tauri/target/release/bundle/nsis/*.sig
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - uses: ./.github/actions/upload-artifact
+        if: failure() || cancelled()
+        with:
+          name: desktop-failure-captures
+          path: tests/e2e/.artifacts/
+          include-hidden-files: true
+          retention-days: 7
+
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true' && needs.changes.outputs.e2e == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: windows-2025
+    timeout-minutes: 35
+    env:
+      BOITE_E2E_PREBUILT_UI: '1'
+      BOITE_E2E_FAKE_UI: tests/e2e/.artifacts/fake-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Set nightly test version
+        if: inputs.channel == 'nightly' && inputs.version != ''
+        env:
+          NIGHTLY_VERSION: ${{ inputs.version }}
+        run: bun scripts/ci/nightly-build.ts
+      - run: bun run build:ui
+      - name: Prepare end-to-end tests
+        run: bun tests/e2e/lib/warm.ts $env:BOITE_E2E_FAKE_UI
+      # Each runner has its own Vite cache. Files stay sequential within a shard.
+      # The native shell file runs against the installer in the desktop job.
+      - name: Browser and core end-to-end tests
+        run: |
+          $files = @(Get-ChildItem tests/e2e -Recurse -Filter *.test.ts | Where-Object { $_.FullName -ne (Join-Path $PWD 'tests/e2e/shell.test.ts') } | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { throw 'No browser or core E2E files found' }
+          bun test @files --shard=${{ matrix.shard }}/3
+      - uses: ./.github/actions/upload-artifact
+        if: failure() || cancelled()
+        with:
+          name: e2e-${{ matrix.shard }}-failure-captures
+          path: tests/e2e/.artifacts/
+          include-hidden-files: true
+          retention-days: 7
+
+  desktop-portable:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.portable) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install Linux shell dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb dbus-x11 xdg-utils
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: apps/shell/src-tauri -> target
+          shared-key: desktop-portable-v1
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: bun run stage:core
+      - run: bun run test:shell --release
+      - name: Build and test installed Linux package
+        if: runner.os == 'Linux'
+        run: |
+          bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --bundles deb
+          sudo dpkg -i apps/shell/src-tauri/target/release/bundle/deb/*.deb
+          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts /usr/bin/boite-shell
+      - name: Bundle and test Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          bun apps/shell/scripts/tauri.ts bundle --config src-tauri/tauri.bundle.conf.json --bundles appimage --verbose
+          mkdir "$RUNNER_TEMP/appimage"
+          appimage=$(realpath apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage)
+          (cd "$RUNNER_TEMP/appimage" && "$appimage" --appimage-extract > /dev/null)
+          if [ "$(uname -m)" = aarch64 ]; then
+            cmp packages/core/dist/boite-core "$RUNNER_TEMP/appimage/squashfs-root/usr/bin/boite-core"
+          fi
+          dbus-run-session -- xvfb-run -a bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/appimage/squashfs-root/AppRun"
+      - name: Build and test macOS application bundle
+        if: runner.os == 'macOS'
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: |
+          bun apps/shell/scripts/tauri.ts build --config src-tauri/tauri.bundle.conf.json --bundles app
+          cp -R apps/shell/src-tauri/target/release/bundle/macos/Boite.app "$RUNNER_TEMP/Boite.app"
+          bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
+          ditto -c -k --keepParent "$RUNNER_TEMP/Boite.app" "$RUNNER_TEMP/Boite-macos.zip"
+      - name: Diagnose Linux packaging failures
+        if: failure() && runner.os == 'Linux'
+        run: |
+          patchelf --version
+          for binary in packages/core/dist/boite-core apps/shell/src-tauri/target/release/bundle/appimage/Boite.AppDir/usr/bin/boite-core; do
+            if [ -f "$binary" ]; then
+              file "$binary"
+              ldd "$binary" || true
+            fi
+          done
+      - uses: ./.github/actions/upload-artifact
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            apps/shell/src-tauri/target/release/bundle/deb/*.deb
+            apps/shell/src-tauri/target/release/bundle/appimage/*.AppImage
+            ${{ runner.temp }}/Boite-macos.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  server:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/server.yml
+
+  windows-probe:
     if: github.event_name == 'workflow_dispatch' && inputs.windows-probe
     strategy:
       fail-fast: false
