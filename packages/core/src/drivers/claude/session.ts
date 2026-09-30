@@ -170,7 +170,15 @@ export class ClaudeSession {
     this.pending = this.pending.then(() => this.follow(turn));
   }
 
-  /** A turn on a warm query: its setup first, its prompt after, or it moves house. */
+  /** User follow-ups enter the active query's stream with its existing setup. */
+  async steer(turn: ClaudeTurn, text: string, attachments: TurnContext['attachments'] = []): Promise<boolean> {
+    if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || this.closing || this.ended) return false;
+    // The CLI reads this live stream while working, without interrupting its agent loop.
+    this.prompts.push(text, attachments);
+    return true;
+  }
+
+  /** Apply the next turn's settings before its prompt enters the warm stream. */
   private async follow(turn: ClaudeTurn): Promise<void> {
     if (turn.isStopped || this.closing || this.ended) return;
     // The query is built after the SDK import: a turn that arrives during it

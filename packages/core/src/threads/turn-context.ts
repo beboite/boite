@@ -88,6 +88,7 @@ export class TurnContexts {
         this.core.bus.emit('message.delta', { threadId, messageId, partIndex, text });
       },
       part: (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
+        const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;
         const part = stamp(messageId, partIndex, raw);
         this.core.journal.append(
           { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
@@ -96,6 +97,7 @@ export class TurnContexts {
           },
         );
         this.core.bus.emit('message.part', { threadId, messageId, partIndex, part });
+        if (boundary) this.core.bus.emit('turn.toolCompleted', { threadId, turnId: turn.id, boundary: `${messageId}:${partIndex}` });
       },
       complete: (messageId: MessageId, state: Message['state']): void => {
         this.core.journal.append(

@@ -1,4 +1,4 @@
-import type { AgentCommand, MessageId, ToolDocument, Usage } from '@boite/contracts';
+import type { ImageAttachment, AgentCommand, MessageId, ToolDocument, Usage } from '@boite/contracts';
 import { newId } from '../ids.ts';
 import type { Driver, TitleContext, TurnContext, TurnHandle, TurnResult } from './types.ts';
 
@@ -125,6 +125,8 @@ function countWords(text: string): number {
 
 interface RunState {
   stopped: boolean;
+  ended: boolean;
+  input: { text: string; attachments: ImageAttachment[] }[];
   waiters: Set<() => void>;
 }
 
@@ -180,10 +182,15 @@ export function echoTitle(prompt: string): string | null {
 export const echoDriver: Driver = {
   protocol: 'echo',
   startTurn(ctx: TurnContext): TurnHandle {
-    const state: RunState = { stopped: false, waiters: new Set() };
+    const state: RunState = { stopped: false, ended: false, input: [], waiters: new Set() };
     const done = run(ctx, state);
     return {
       done,
+      async steer(text, attachments = []) {
+        if (state.stopped || state.ended) return false;
+        state.input.push({ text, attachments });
+        return true;
+      },
       stop(): void {
         state.stopped = true;
         for (const wake of [...state.waiters]) wake();
@@ -474,13 +481,20 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         const index = takeIndex();
         ctx.emit.part(messageId, index, { type: 'error', message: ERROR_MESSAGE });
         ctx.emit.complete(messageId, 'error');
+        state.ended = true;
         return { status: 'error', sessionId, usage: usage(), error: ERROR_MESSAGE };
       }
+    }
+    while (!state.stopped && state.input.length) {
+      const input = state.input.shift()!;
+      for (const image of input.attachments) await writeText(`[image ${image.mimeType}, ${Buffer.from(image.data, 'base64').length} bytes] `);
+      await writeText(input.text);
     }
     const notice = state.stopped ? null : ctx.coordination?.();
     if (notice) await writeText(notice);
   }
 
+  state.ended = true;
   ctx.emit.complete(messageId, 'complete');
   ctx.context({ tokens: contextTokens, window: CONTEXT_WINDOW });
   return { status: state.stopped ? 'stopped' : 'done', sessionId, usage: usage(), promptCache: PROMPT_CACHE };

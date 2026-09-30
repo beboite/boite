@@ -341,14 +341,19 @@ marker, since the agent knows.
 Enter during a running turn queues the message and its attachments. Each pending
 message shows above the composer as a user bubble with a dashed outline. Up in
 an empty composer takes the newest pending message out of the queue for editing;
-clicking a pending message does the same. Enter again in the emptied composer,
-or Send now under the bubbles, stops the current turn. All messages already
-queued then go into the next turn together, in their original order, with their
+clicking a pending message does the same. On Claude, Codex, pi and echo, the
+queue sends after the next completed tool, even when another conversation is
+open. Enter again in the emptied composer, or Send now under the bubbles,
+submits it immediately without stopping the agent. Permissions and blocking
+questions hold it until answered. Other drivers keep it for the next turn.
+Messages already queued go together in their original order, with their
 attachments and preview references. Messages added during that send wait for
-the following turn. Escape stops the current turn too. An Escape that closes something first (a popover, a menu, a
+the next delivery. A changed model or account keeps input for its next turn.
+Escape stops the current turn. An Escape that closes something first (a popover, a menu, a
 confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
-Escape is needed to stop. A failed send preserves the queue for an explicit retry.
+Escape is needed to stop. A failed send preserves the input for an explicit retry.
+An unconfirmed provider submission is never retried automatically.
 
 The core can open a turn by itself as the previous one ends: answers to an
 asynchronous question that could not be steered in, or an agent resuming on its

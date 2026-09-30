@@ -1,5 +1,6 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
 import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { RETITLE_DELAY_MS } from './providers';
@@ -337,6 +338,7 @@ export function threadMethods(ctx: FakeContext) {
       ctx.bus.subscribed.delete(params.threadId);
       return { ok: true };
     },
+    'turns.steer': async params => steerUser(ctx, params),
     'turns.start': async (params) => {
       if (ctx.thread(params.threadId).agentSessionId) throw refusal('persistent agent sessions accept work through Agents');
       requireFakeCwd(ctx, ctx.thread(params.threadId));

@@ -3,6 +3,7 @@ import type { ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
 import { PullRequests } from '../pull-requests.ts';
+import { steerUser } from './user-steering.ts';
 
 /**
  * A turn in a folder that is gone is refused by that folder. An archived
@@ -72,6 +73,7 @@ export function registerThreadMethods(core: Core): void {
     core.activity.pauseAll(params.threadId);
     return { stopped: core.threads.stopTurn(params.threadId) };
   });
+  core.router.register('turns.steer', params => steerUser(core, core.threads, params));
   core.router.register('permissions.list', (params) => core.threads.listPermissions(params.threadId));
   core.router.register('permissions.answer', (params) => {
     core.threads.answerPermission({ requestId: params.requestId, decision: params.decision });

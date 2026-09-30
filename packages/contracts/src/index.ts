@@ -2460,6 +2460,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
+  /** Sends user input into the active turn; false leaves it queued for a later boundary or turn. */
+  'turns.steer': { params: { threadId: ThreadId; turnId: TurnId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId: string }; result: { accepted: boolean } };
   'turns.stop': { params: { threadId: ThreadId }; result: { stopped: boolean } };
 
   /**
@@ -2589,6 +2591,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
+  /** A small broadcast lets queued input advance even when its conversation is off screen. */
+  'turn.toolCompleted': { threadId: ThreadId; turnId: TurnId; boundary: string };
   'turn.finished': Turn;
 
   /** Subscribed threads only, from here to `permission.resolved`. */

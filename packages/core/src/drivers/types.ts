@@ -200,7 +200,9 @@ export interface TurnHandle {
   done: Promise<TurnResult>;
   stop(): void;
   /** False means not ready, rejection means uncertain dispatch and must not be replayed. */
-  steer?(message: string): Promise<boolean>;
+  steer?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
+  /** Native user input, when system coordination uses a separate tool-boundary hook. */
+  steerUser?(message: string, attachments?: ImageAttachment[]): Promise<boolean>;
 }
 
 /**

@@ -120,7 +120,7 @@ async function stream(
   thread: Thread,
   turn: Turn,
   prompt: string,
-  record: { cancelled: boolean },
+  record: { cancelled: boolean; steered?: { prompt: string; attachments: Attachment[] }[] },
   attachments: Attachment[] = [],
   modelPrompt: string = prompt
 ): Promise<void> {
@@ -235,6 +235,15 @@ async function stream(
   const spawn = SPAWN_MARKER.exec(prompt);
   if (!record.cancelled && spawn && spawn[1]) {
     await spawnProcess(ctx, thread, spawn[1]);
+  }
+
+  for (const input of record.steered ?? []) {
+    if (record.cancelled) break;
+    const partIndex = message.parts.length;
+    const text = input.attachments.map(attachment => `[${attachment.kind} ${attachment.mimeType}] `).join('') + input.prompt;
+    const part: MessagePart = { type: 'text', text };
+    message.parts.push(part);
+    ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part });
   }
 
   if (!record.cancelled && prompt === '[compact]') {

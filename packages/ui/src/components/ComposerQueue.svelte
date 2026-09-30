@@ -21,8 +21,8 @@
     disabled: boolean;
     /** A refusal held the queue: nothing goes until the user says so. */
     paused: boolean;
-    /** What Send now would do: stop the turn, resume the held queue, or nothing. */
-    sendNow: 'stop' | 'resume' | null;
+    /** What Send now would do: steer the turn, resume the held queue, or nothing. */
+    sendNow: 'steer' | 'resume' | null;
     onrestore: (at: number) => void;
     onsendnow: () => void;
   } = $props();
@@ -47,7 +47,7 @@
     <span>{paused ? strings.composer.queuedPaused : strings.composer.queued}</span>
     {#if sendNow}
       <button type="button" class="ghost small" data-testid="composer-send-now"
-        title={sendNow === 'stop' ? strings.composer.sendNowHint : strings.composer.retryQueuedHint}
+        title={sendNow === 'steer' ? strings.composer.sendNowHint : strings.composer.retryQueuedHint}
         onclick={onsendnow}>{strings.composer.sendNow}</button>
     {/if}
   </div>
