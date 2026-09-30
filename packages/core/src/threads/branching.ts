@@ -65,7 +65,7 @@ export class ThreadBranching {
       });
     }
 
-    // A user message opens its turn, so what stays ends on a whole turn.
+    // A live follow-up can cut inside a turn; its final checkpoint is then too late.
     const kept = this.core.journal.listMessagePage(threadId, { beforeRowid: rowid, limit: 1 }).messages[0] ?? null;
     const removed = this.core.journal.messageIdsFrom(threadId, rowid);
     // The thread moved after the kept turn: its checkpoint belongs to the old
@@ -256,6 +256,12 @@ export class ThreadBranching {
     if (turn === null || checkpoint === null || cwd !== thread.cwd) return null;
     if (turn.status === 'queued' || turn.status === 'running') return null;
     if (turn.execution?.accountId !== thread.accountId || turn.execution.providerId !== thread.providerId) return null;
+    // Native checkpoints cover the provider's entire turn, including later input and output.
+    // Message order cannot identify a precise native cut once user input joins mid-turn.
+    let users = 0;
+    for (const message of this.core.journal.walkTurnMessages(thread.id, turnId)) {
+      if (message.role === 'user' && ++users > 1) return null;
+    }
     return { sessionId: checkpoint.sessionId, sessionResumeAt: checkpoint.entry, session: 'native' };
   }
 

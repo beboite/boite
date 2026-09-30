@@ -354,6 +354,8 @@ confirmation, the command palette, a rename field) only closes it, and the focus
 goes back to where it was, or to the composer when that is gone, so a second
 Escape is needed to stop. A failed send preserves the input for an explicit retry.
 An unconfirmed provider submission is never retried automatically.
+Edits and forks of turns with live follow-ups start a fresh native session
+carrying the kept message history.
 
 The core can open a turn by itself as the previous one ends: answers to an
 asynchronous question that could not be steered in, or an agent resuming on its

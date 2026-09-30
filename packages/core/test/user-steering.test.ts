@@ -23,7 +23,7 @@ async function running() {
   const started = owner.next('turn.started', turn => turn.threadId === threadId);
   const turn = await owner.call('turns.start', { threadId, prompt: 'Keep working' });
   await started;
-  return { owner, threadId, turn, inputs, context: () => ctx, finish: () => finish({ status: 'done', sessionId: null, usage: null }) };
+  return { owner, threadId, turn, inputs, context: () => ctx, finish: () => finish({ status: 'done', sessionId: 'native-session', usage: null, checkpoint: { sessionId: 'native-session', entry: 'after-follow-up' } }) };
 }
 
 test('a tool boundary reaches an unsubscribed client and follow-ups join the running turn once', async () => {
@@ -74,4 +74,21 @@ test('uncertain provider submissions are never retried', async () => {
   const repeated = await owner.call('turns.steer', params).catch(error => error);
   expect(repeated.message).toContain('unconfirmed');
   expect(inputs).toHaveLength(1);
+});
+
+test('forking or editing a follow-up cannot resume a checkpoint beyond its message', async () => {
+  const { owner, threadId, turn, context, finish } = await running();
+  const reply = context().emit.startMessage('assistant');
+  context().emit.part(reply, 0, { type: 'text', text: 'Before the follow-up' });
+  context().emit.complete(reply, 'complete');
+  expect(await owner.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Change direction', clientRequestId: 'follow_up_cut' })).toEqual({ accepted: true });
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await completed;
+  const messageId = h.core.journal.listMessages(threadId).at(-1)!.id;
+  const fork = await owner.call('threads.fork', { threadId, messageId });
+  expect(fork.sessionId).toBeNull();
+  expect(h.core.threads.get(fork.id).messages.at(-1)?.parts).toEqual([{ type: 'text', text: 'Change direction' }]);
+  const rewound = await owner.call('threads.rewind', { threadId, messageId });
+  expect(rewound.session).toBe('seeded');
+  expect(rewound.thread.messages.map(message => message.role)).toEqual(['user', 'assistant']);
 });
