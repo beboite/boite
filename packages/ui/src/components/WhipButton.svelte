@@ -46,7 +46,7 @@
 </script>
 
 <button type="button" class="ghost icon whip" class:active={whip.held}
-  data-testid={mobile ? 'whip-button-mobile' : 'whip-button'} disabled={hitting}
+  data-testid={mobile ? 'whip-button-mobile' : 'whip-button'} disabled={hitting && !whip.held}
   title={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
   aria-label={whip.held ? strings.experiments.whip.drop : strings.experiments.whip.action}
   aria-pressed={whip.held} onclick={hit}>
@@ -57,7 +57,7 @@
 </button>
 
 <style>
-  .whip { flex: none; color: var(--color-muted-foreground); }
+  .whip { position: relative; z-index: calc(var(--z-whip) + 1); flex: none; color: var(--color-muted-foreground); }
   .whip.active { color: var(--color-foreground); background: var(--color-surface-2); }
   @media (max-width: 720px) {
     .whip { width: var(--touch-target); height: var(--touch-target); }

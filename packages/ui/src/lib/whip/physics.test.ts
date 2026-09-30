@@ -24,8 +24,18 @@ describe("whip rope", () => {
     const rope = new WhipRope(400, 600, 0);
     expect(rope.points).toHaveLength(WHIP.segments);
     expect(rope.points[0]!).toMatchObject({ x: 400, y: 600 });
+    // Compressed links buckle into a zigzag when the solver first unfolds them.
+    for (let i = 0; i < rope.points.length - 1; i++) {
+      const a = rope.points[i]!;
+      const b = rope.points[i + 1]!;
+      expect(Math.hypot(b.x - a.x, b.y - a.y)).toBeCloseTo(segmentLength(i), 0);
+    }
     // The arc goes up and to the right, so every other point is higher.
     expect(rope.points.slice(1).every((p) => p.y < 600)).toBe(true);
+    const phone = new WhipRope(22, 800, 0, { width: 390, height: 844 });
+    expect(phone.points.every(point => point.x >= 0 && point.x <= 390 && point.y >= 0 && point.y <= 800)).toBe(true);
+    const rightEdge = new WhipRope(368, 800, 0, { width: 390, height: 844 });
+    expect(rightEdge.points.every(point => point.x >= 0 && point.x <= 390 && point.y >= 0 && point.y <= 800)).toBe(true);
     expect(segmentLength(0)).toBeGreaterThan(segmentLength(WHIP.segments - 1));
   });
 

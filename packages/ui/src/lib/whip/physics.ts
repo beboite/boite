@@ -61,7 +61,6 @@ export const WHIP = {
 
   // Initial arc
   arcWidth: 260,
-  arcHeight: 185,
 
   // Drawing
   lineWidthHandle: 7,
@@ -99,6 +98,7 @@ export class WhipRope {
   // Annotated: WHIP is `as const`, so the initialiser alone would type this as
   // the literal -1.12 and refuse every angle the spring produces.
   private handleAngle: number = WHIP.baseTargetAngle;
+  private restingAngle: number = WHIP.baseTargetAngle;
   private handleAngVel = 0;
   private prevAimX: number;
   private prevAimY: number;
@@ -109,14 +109,52 @@ export class WhipRope {
     y: number,
     /** Wall-clock ms at spawn. Passed in so nothing here reads a clock. */
     private spawnedAt: number,
+    bounds?: WhipBounds,
   ) {
     this.prevAimX = x;
     this.prevAimY = y;
-    this.points = [];
-    for (let i = 0; i < WHIP.segments; i++) {
-      const t = i / (WHIP.segments - 1);
-      const px = x + t * WHIP.arcWidth;
-      const py = y - Math.sin(t * Math.PI * 0.75) * WHIP.arcHeight;
+    // Put the opening arc on the side with room, especially at phone widths.
+    const right = !bounds || bounds.width - x >= x;
+    const direction = right ? 1 : -1;
+    const room = bounds ? (right ? bounds.width - x : x) : WHIP.arcWidth;
+    const width = Math.min(WHIP.arcWidth, Math.max(40, room - 12));
+    this.restingAngle = right ? WHIP.baseTargetAngle : -Math.PI - WHIP.baseTargetAngle;
+    this.handleAngle = this.restingAngle;
+
+    // Sample by distance, not by curve parameter. The old arc packed 540px of
+    // rope into 380px: the distance solver unfolded it into teeth on frame one.
+    const lengths = Array.from({ length: WHIP.segments - 1 }, (_, i) => segmentLength(i));
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    const sample = (height: number) => {
+      const points = [{ x, y, distance: 0 }];
+      for (let i = 1; i <= 256; i++) {
+        const t = i / 256;
+        const px = x + direction * t * width;
+        const py = y - Math.sin(t * Math.PI * 0.75) * height;
+        const previous = points[i - 1]!;
+        points.push({ x: px, y: py, distance: previous.distance + Math.hypot(px - previous.x, py - previous.y) });
+      }
+      return points;
+    };
+    let low = 0;
+    let high = total;
+    for (let i = 0; i < 16; i++) {
+      const height = (low + high) / 2;
+      if (sample(height)[256]!.distance < total) low = height;
+      else high = height;
+    }
+    const arc = sample((low + high) / 2);
+    this.points = [{ x, y, px: x, py: y }];
+    let distance = 0;
+    let index = 1;
+    for (const length of lengths) {
+      distance += length;
+      while (index < arc.length - 1 && arc[index]!.distance < distance) index++;
+      const a = arc[index - 1]!;
+      const b = arc[index]!;
+      const t = clamp((distance - a.distance) / (b.distance - a.distance), 0, 1);
+      const px = lerp(a.x, b.x, t);
+      const py = lerp(a.y, b.y, t);
       this.points.push({ x: px, y: py, px, py });
     }
   }
@@ -197,7 +235,7 @@ export class WhipRope {
       -WHIP.handleAimClamp,
       WHIP.handleAimClamp,
     );
-    const err = wrapPi(WHIP.baseTargetAngle + delta - this.handleAngle);
+    const err = wrapPi(this.restingAngle + delta - this.handleAngle);
     this.handleAngVel += err * WHIP.handleSpring;
     this.handleAngVel *= WHIP.handleAngularDamping;
     this.handleAngle = wrapPi(this.handleAngle + this.handleAngVel);

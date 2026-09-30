@@ -71,6 +71,21 @@ async function verifyRope(capture: string, touch = false) {
   await page.waitFor(`document.querySelector('${canvas}') === null`);
 }
 
+async function rethrowFromControl() {
+  await page.click(button);
+  await page.waitFor(`document.querySelector('[data-testid=whip-canvas]')`);
+  await settled();
+  await page.click(button);
+  await page.waitFor(`document.querySelector('${button}').getAttribute('aria-pressed') === 'false'`);
+  // Real pointer clicks must reach the control above the falling canvas.
+  expect(await page.evaluate(`!!document.querySelector('[data-testid=whip-canvas]')`)).toBe(true);
+  await page.click(button);
+  await page.waitFor(`document.querySelector('${button}').getAttribute('aria-pressed') === 'true'`);
+  await settled();
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await page.waitFor(`document.querySelector('[data-testid=whip-canvas]') === null`);
+}
+
 beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
@@ -99,6 +114,7 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
   await page.evaluate(`globalThis.__boiteTest.setTheme('dark')`);
   expect(await shake()).toBe(true);
   await verifyRope('whip-rope-dark.png');
+  await rethrowFromControl();
   // Escape releases the toy without triggering the app's underlying shortcuts.
   expect(await shake()).toBe(true);
   await page.waitFor(`document.querySelector('[data-testid=whip-canvas]')`);
@@ -140,6 +156,7 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-agents-phone.png'));
   expect(await shake()).toBe(true);
   await verifyRope('whip-rope-phone.png', true);
+  await rethrowFromControl();
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click(button);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);

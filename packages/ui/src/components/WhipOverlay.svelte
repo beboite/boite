@@ -62,7 +62,7 @@
       if (rope) rope.dropping = true;
       return;
     }
-    if (rope) return;
+    if (rope && !rope.dropping) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       whip.held = false;
       return;
@@ -73,7 +73,7 @@
     ink = colors.getPropertyValue('--color-foreground').trim();
     outline = colors.getPropertyValue('--color-background').trim();
     primeCrackSound();
-    rope = new WhipRope(pointerX, pointerY, performance.now());
+    rope = new WhipRope(pointerX, pointerY, performance.now(), { width: window.innerWidth, height: window.innerHeight });
     start();
   });
 
