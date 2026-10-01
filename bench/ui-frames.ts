@@ -304,7 +304,9 @@ async function main(): Promise<void> {
       const keys = await page.evaluate<number[]>(`window.__keys.slice(window.__keys0)`);
       if (TRACE) {
         await page.send('Tracing.end');
-        await traceDone;
+        // Bounded like every command: a trace that never completes fails its scenario, not the whole run.
+        let late: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([traceDone, new Promise<never>((_, reject) => { late = setTimeout(() => reject(new Error('Tracing.tracingComplete got no answer in 30 s')), 30_000); })]).finally(() => clearTimeout(late));
         // Main-thread time by event name, each event's own duration minus its children's.
         const main = traced.find((event) => event.name === 'thread_name' && event.args?.name === 'CrRendererMain');
         const onMain = (event: TraceEvent) => main !== undefined && event.pid === main.pid && event.tid === main.tid && event.ph === 'X';
