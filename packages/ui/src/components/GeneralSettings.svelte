@@ -61,7 +61,7 @@
     {#if inShell}<ShellSettings />{/if}
     <div class="switch-row">
       <span class="text">
-        <span>{strings.onboarding.label}</span><InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} />
+        <span>{strings.onboarding.label}</span>
       </span>
       <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>{strings.settings.tourReplay}</button>
     </div>

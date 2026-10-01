@@ -45,18 +45,18 @@
   {#if !limitsOnly}
   <header>
     <div>
-      <h1>{strings.settings.tabs.resources}<InfoTip topic={strings.settings.tabs.resources} text={strings.protection.intro} /></h1>
+      <h1>{strings.settings.tabs.resources}</h1>
     </div>
   </header>
 
   <section class="card" id="settings-quiet">
     <h2>{strings.protection.quiet}<InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
-      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span><InfoTip topic={strings.settings.focusGuard} text={strings.settings.focusGuardHint} /></span>
+      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
       <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-mute-agents" class="switch-row">
-      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span><InfoTip topic={strings.settings.muteAgents} text={strings.settings.muteAgentsHint} /></span>
+      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span></span>
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
@@ -68,16 +68,12 @@
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
-      <span class="text" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}{#if limitsOnly}<InfoTip topic={strings.settings.memoryProtection} text="{strings.settings.memoryProtectionHint} {strings.settings.memoryAutoHint}" />{/if}</span>
-      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" aria-describedby={limitsOnly ? undefined : `${uid}-memory-protection-hint`} type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
+      <span class="text"><span id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
+      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
         const input = event.currentTarget;
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
       }} />
     </label>
-    {#if !limitsOnly}
-      <p class="hint memory-explanation" id="{uid}-memory-protection-hint">{strings.settings.memoryProtectionHint}</p>
-      <p class="hint memory-explanation">{strings.settings.memoryAutoHint}</p>
-    {/if}
     <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
       <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
       <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
@@ -93,7 +89,7 @@
     </form>
   </section>
   <section class="card" data-testid="memory-status">
-    <h2>{strings.resources.memory}<InfoTip topic={strings.resources.memory} text={strings.resources.memoryHint} /></h2>
+    <h2>{strings.resources.memory}</h2>
     {#if store.memory}
       <dl class="memory-reading">
         <div><dt>{strings.resources.agents}</dt><dd>{bytes(store.memory.agentBytes)}{#if memoryEnabled}{' / '}{bytes(store.memory.limits.budgetMb * 1048576)}{/if}</dd></div>
@@ -153,7 +149,6 @@
 </div>
 
 <style>
-  .memory-explanation { margin: 8px 0 16px; font-size: var(--text-sm); line-height: 1.5; }
   .memory-reading { display: flex; flex-wrap: wrap; gap: 16px 32px; margin: 0; font-size: var(--text-sm); }
   dt { color: var(--color-muted-foreground); }
   dd { margin: 6px 0 0; font-variant-numeric: tabular-nums; }
