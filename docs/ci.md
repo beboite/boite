@@ -183,6 +183,9 @@ New E2E files enter that list automatically.
 Files stay sequential within each shard: two and three parallel workers sharing
 a Windows runner produced navigation and startup hook timeouts on 2026-09-24.
 Every file still takes its own ports, data directory and browser profile.
+Headless Chromium uses CPU compositing on CI, with software GL disabled,
+instead of forcing Direct3D 11 on a hosted runner. Launch failures retain a
+bounded stderr log alongside the captures, and an exited browser fails promptly.
 Assertions and test deadlines are unchanged. The matrix has `fail-fast: false`,
 so a failing shard does not prevent the others from reporting their failures.
 `CI required` also requires the E2E matrix; a failure, cancellation or unexpected

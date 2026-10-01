@@ -637,15 +637,22 @@ marks the project and the composer shows the two ways out, checking again and
 removing the project. `tests/e2e/folder-gone.test.ts` captures both widths, and
 the shared contract scenario runs the rule on the core and the fake client.
 
-`tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
-through ANGLE, muted, in a throwaway profile, and drives it over CDP.
+`tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, muted, in a
+throwaway profile, and drives it over CDP. Local Windows runs use the real GPU
+through ANGLE. With `CI=true`, the browser uses CPU compositing and disables
+software GL, so it needs neither Direct3D nor SwiftShader. A failed launch writes
+the last 16 KiB of browser stderr to `.artifacts/browser-<pid>.log` and includes
+it in the error. A browser that exits before opening CDP reports its exit code
+immediately instead of waiting for the 30-second connection deadline.
 `page.screenshot(path)` writes a PNG, and the suite puts its own under
 `tests/e2e/.artifacts/`, which is git-ignored. That is the proof for anything
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
-`page.close()` kills the browser's process tree without blocking the other
-closes, waits up to 30 s for the browser to exit, then removes its profile,
+`page.close()` asks Chromium to close over CDP before removing its profile.
+On POSIX, shutdown also sends SIGTERM so Chrome can reap its children. After
+two seconds, a stalled browser falls back to the captured-PID process kill,
+waits up to 30 s for the browser to exit, then removes its profile,
 retrying for 15 s while Windows still holds a file. A directory it cannot
 remove is printed as `e2e: left <path>`. The test preload removes `boite-e2e-*`
 directories older than an hour, which an interrupted run left in the temp
