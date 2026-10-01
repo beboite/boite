@@ -77,6 +77,26 @@ test('an old endpoint connection cannot update a newer workspace lifecycle', asy
   expect(endpoints.readEnvironments().some((saved) => saved.url === endpoint.url)).toBe(false);
 });
 
+test('a pairing link replaces the key of a machine that never stopped connecting', async () => {
+  const { w, a } = await setup();
+  const url = 'https://core.test';
+  a.endpointUrl = url;
+  w.machines = [{ id: url, label: 'This PC', store: a }];
+  const connect = vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    this.connection = 'ready';
+  });
+  // Answering: the link is refused and the working connection is left alone.
+  expect(await w.pair(`${url}/?grant=g1`, '')).toBe(false);
+  expect(w.error).toBe('This machine is already connected.');
+  expect(connect).not.toHaveBeenCalled();
+  // Retrying a refused key forever, as a phone whose session is gone does.
+  a.connection = 'connecting';
+  expect(await w.pair(`${url}/?grant=g2`, '')).toBe(true);
+  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' });
+  expect(w.error).toBeNull();
+  expect(w.machines).toHaveLength(1);
+});
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt++) {
     if (check()) return;

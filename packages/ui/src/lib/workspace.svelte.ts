@@ -226,7 +226,10 @@ export class Workspace {
     }
     const { id, host } = identity;
     const existing = this.machines.find((m) => m.id === id);
-    if (existing && existing.store.connection !== 'closed') {
+    // Only a machine that answered is a duplicate. One still retrying holds a
+    // key its core refuses, and on a phone that machine is the page's own,
+    // which cannot be removed: the new link has to be able to replace the key.
+    if (existing && existing.store.connection === 'ready') {
       this.error = strings.machines.duplicate;
       return false;
     }
@@ -237,7 +240,11 @@ export class Workspace {
     target.visible = this.active === target;
     const machine: Machine = existing ?? { id, label: label?.trim() || host, store: target };
     if (!existing) this.machines = [...this.machines, machine];
-    await target.connectEndpoint({ ...endpoint, url: id });
+    const connecting = target.connectEndpoint({ ...endpoint, url: id });
+    const client = target.client;
+    await connecting;
+    // A later add replaced this attempt's client: the outcome is that one's to report.
+    if (target.client !== client) return false;
     if (!this.#current(lifecycle) || !this.machines.some((m) => m.store === target)) {
       if (!this.machines.some((m) => m.store === target)) {
         target.client?.close();
