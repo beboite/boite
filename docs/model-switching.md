@@ -45,6 +45,10 @@ the first answer lands, and the descriptor's list if that answer fails.
 Reopening the picker after five minutes refreshes that account's catalog, and a
 catalog restored from storage is also revalidated. These reads replace the
 displayed models and their legacy flags without changing per-provider defaults.
+Before creating a thread with a named model, the composer awaits the owning
+core's catalog even when the client already has cached rows. A restarted remote
+core reads the agent's models first; a core with a catalog reuses it. The selected
+model, effort and speed are preserved, and a failed read leaves the draft unsent.
 The refresh button forces a new probe; concurrent requests share one
 operation. A failed read keeps the visible list and backs off for five minutes;
 the refresh button can retry immediately.

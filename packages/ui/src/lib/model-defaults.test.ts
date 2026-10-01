@@ -81,13 +81,13 @@ test('a configured default survives reconnect and wins over the previous thread 
   next.detach();
 });
 
-test('the first draft probes its default and preserves a later explicit selection', async () => {
+test('the first ACP draft probes its default model scale and preserves a later explicit selection', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();
   store.attach(client);
   await store.connect();
   const provider = store.providerOf('claude')!;
-  provider.protocol = 'codex-appserver';
+  provider.protocol = 'acp';
   provider.models = [{ id: 'default', name: 'Default', default: true }];
   const account = store.accountsOf(provider.id)[0]!;
   store.prefs.providerId = provider.id;
@@ -102,7 +102,7 @@ test('the first draft probes its default and preserves a later explicit selectio
   // Changing permissions must not skip the first model probe.
   store.remember({ ...store.defaultChoice()!, permissionMode: 'bypassPermissions' });
   const prepared = await store.prepareDraftChoice(store.defaultChoice()!);
-  expect(call).toHaveBeenCalledWith('providers.probe', { providerId: provider.id, accountId: account.id });
+  expect(call).toHaveBeenCalledWith('providers.probe', { providerId: provider.id, accountId: account.id, model: 'claude-opus-5' });
   expect(prepared).toMatchObject({ model: 'claude-opus-5', effort: 'high' });
   const explicit = { ...prepared!, effort: 'low' };
   store.remember(explicit);
@@ -114,4 +114,72 @@ test('the first draft probes its default and preserves a later explicit selectio
   expect(store.error).toContain('unavailable-model');
   call.mockRestore();
   store.detach();
+});
+
+test('a cached remote model waits for the restarted core catalog before creating its thread', async () => {
+  const first = new Store();
+  first.attach(new FakeClient({ delayMs: 0 }));
+  await first.connect();
+  const accountId = first.accountsOf('codex')[0]!.id;
+  await first.probeModels('codex', accountId);
+  const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', speed: 'fast', permissionMode: 'plan' as const };
+  first.remember(choice);
+  first.detach();
+
+  // The browser retains its catalog while a restarted remote core has none.
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
+  store.startDraft(store.projects[0]!.id);
+  store.remember(choice);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'providers.probe') await gate;
+    return original(method, params);
+  });
+  try {
+    const submitted = store.submit('Create without opening the picker', choice);
+    expect(calls).toHaveBeenCalledWith('providers.probe', { providerId: 'codex', accountId });
+    expect(calls.mock.calls.some(([method]) => method === 'threads.create')).toBe(false);
+    release();
+    expect(await submitted).toBe(true);
+    expect(store.error).toBeNull();
+    expect(store.openThread).toMatchObject(choice);
+    expect(store.openThread!.turns.at(-1)?.execution).toMatchObject(choice);
+  } finally {
+    release();
+    store.detach();
+  }
+});
+
+test('a failed catalog read preserves the draft and its cached selection', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store();
+  store.attach(client);
+  await store.connect();
+  const accountId = store.accountsOf('codex')[0]!.id;
+  await store.probeModels('codex', accountId);
+  const choice = { providerId: 'codex', accountId, model: 'codex-demo', effort: 'high', permissionMode: 'default' as const };
+  store.startDraft(store.projects[0]!.id);
+  store.remember(choice);
+  const draft = store.draft;
+  const original = client.call.bind(client);
+  const calls = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    if (method === 'providers.probe') throw new Error('remote catalog unavailable');
+    return original(method, params);
+  });
+  try {
+    expect(await store.submit('Keep this draft', choice)).toBe(false);
+    expect(store.error).toBe('remote catalog unavailable');
+    expect(store.draft).toBe(draft);
+    expect(store.draftChoice).toEqual(choice);
+    expect(calls.mock.calls.some(([method]) => method === 'threads.create' || method === 'turns.start')).toBe(false);
+    expect(store.modelsOf('codex', accountId).some(model => model.id === choice.model)).toBe(true);
+  } finally {
+    store.detach();
+  }
 });
