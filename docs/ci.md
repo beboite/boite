@@ -163,7 +163,11 @@ The later account connection changes raised the core limit to 904,000 bytes
 ([measurements](performance.md)).
 The resource audit retains those limits, shortens scope-class prefixes and
 loads settings synchronization on first use to reduce emitted bytes while
-keeping readable core function names in errors. Timings are not gated:
+keeping readable core function names in errors. On 2026-10-01 automatic
+compaction (its timers, checks and settings validation), on top of the handover
+of running turns, built a 904,139-byte core on the Windows desktop job, 139
+bytes over; the core limit moved to 995,000 bytes, about 10% above it. Timings
+are not gated:
 they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.

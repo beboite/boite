@@ -1,6 +1,6 @@
 <script lang="ts">
   import TelemetrySettings from './TelemetrySettings.svelte';
-  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
+  import { ArchiveRestore, ArrowLeft, Bell, Brain, ChevronRight, Coins, Compass, FlaskConical, Gauge, Minimize2, Monitor, Palette, Mic, ShieldCheck } from '@lucide/svelte';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import { strings } from '../lib/strings';
@@ -17,6 +17,7 @@
   import BrainPage from './BrainPage.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import AutoCompactSettings from './AutoCompactSettings.svelte';
   import InfoTip from './InfoTip.svelte';
 
   let { store }: { store: Store } = $props();
@@ -29,12 +30,15 @@
   let archived = $state(false);
   let archivePage = $derived(archived || (store.settingsTab === 'general' && store.settingsSection?.id === 'archived'));
   let worktreesPage = $derived(store.owner && store.settingsTab === 'general' && store.settingsSection?.id === 'worktrees');
+  /** The one card of the desktop's Advanced page that is about conversations, not about the machine. */
+  let compactPage = $derived(store.owner && store.settingsTab === 'advanced' && store.settingsSection?.id === 'auto-compact');
   let page = $derived((store.owner && (store.settingsTab === 'brain' || store.settingsTab === 'resources')) || store.settingsTab === 'appearance' || store.settingsTab === 'machines' || store.settingsTab === 'voice' || store.settingsTab === 'usage' || store.settingsTab === 'limits' || store.settingsTab === 'experiments'
-    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : 'home');
+    ? store.settingsTab : phone ? 'phone' : archivePage ? 'archived' : worktreesPage ? 'worktrees' : compactPage ? 'auto-compact' : 'home');
   let machine = $derived(workspace.machines.find(machine => machine.store === store));
   let title = $derived(page === 'brain' ? strings.brain.heading : page === 'phone' ? strings.mobile.settingsPhone
     : page === 'archived' ? strings.settings.archived.heading
     : page === 'worktrees' ? strings.settings.worktrees.heading
+    : page === 'auto-compact' ? strings.settings.autoCompact
     : page === 'voice' ? strings.speech.heading : page === 'appearance' ? strings.settings.tabs.appearance
     : page === 'usage' ? strings.usage.heading : page === 'limits' ? strings.usage.limits
     : page === 'resources' ? strings.settings.tabs.resources
@@ -103,6 +107,9 @@
             <button class="ghost row" data-testid="mobile-settings-worktrees" onclick={() => store.showSettings('general', 'worktrees')}>
               <Monitor size={20} /><span>{strings.settings.worktrees.heading}</span><ChevronRight size={18} />
             </button>
+            <button class="ghost row" data-testid="mobile-settings-auto-compact" onclick={() => store.showSettings('advanced', 'auto-compact')}>
+              <Minimize2 size={20} /><span>{strings.settings.autoCompact}</span><ChevronRight size={18} />
+            </button>
           {/if}
         </div>
       </section>
@@ -138,6 +145,8 @@
         <ExperimentsPage />
       {:else if page === 'worktrees'}
         <div class="page"><WorktreesCard {store} /></div>
+      {:else if page === 'auto-compact'}
+        <div class="page"><AutoCompactSettings {store} /></div>
       {:else if page === 'archived'}
         <div class="page archived-page">
           <ArchivedThreads {store} eager />

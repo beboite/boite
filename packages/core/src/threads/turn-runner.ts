@@ -173,6 +173,7 @@ export class TurnRunner {
     await this.threads.spawns.finished(finished);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
+    if (sameSession) this.threads.autoCompact.turnFinished(next, finished);
     const woke = this.threads.deferred.pendingWakes.get(threadId);
     if (woke !== undefined) {
       this.threads.deferred.pendingWakes.delete(threadId);

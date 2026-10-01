@@ -34,7 +34,7 @@ export async function stopTurn(ctx: FakeContext, threadId: ThreadId): Promise<bo
   return stopped;
 }
 
-export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = []): Turn {
+export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, attachments: Attachment[] = [], operation?: 'compact' | 'delegation', activityKind?: 'goal' | 'loop', queuedTurn?: Turn, previewReferences: PreviewReference[] = [], automatic = false): Turn {
   // The real transport serializes Svelte proxies before they reach the core.
   previewReferences = JSON.parse(JSON.stringify(previewReferences)) as PreviewReference[];
   const thread = ctx.thread(threadId);
@@ -64,6 +64,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
       effort: thread.effort, speed: thread.speed ?? null, permissionMode: thread.permissionMode, sessionId: thread.sessionId,
       sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
       ...(operation ? { operation } : {}),
+      ...(automatic ? { automatic: true as const } : {}),
   };
   const turn: Turn = queuedTurn ?? {
     id: `turn-${++ctx.seq}`, threadId, status: 'running', queuedAt: at,
@@ -76,10 +77,11 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
     id: `m-${++ctx.seq}`,
     threadId,
     turnId: turn.id,
-    role: 'user',
+    // A compaction the fake core opened by itself is Boite's message, as the core's is.
+    role: automatic ? 'system' : 'user',
     // The images ride after the text, the order the core journals them in.
     parts: [
-      { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
+      { type: 'text', text: activityKind ? `/${activityKind} ${prompt}` : previewPrompt(prompt, previewReferences), ...(automatic ? { displayText: 'Automatic compaction' } : {}), ...(previewReferences.length ? { displayText: prompt, previewReferences: structuredClone(previewReferences) } : {}), ...(activityKind ? { activity: { kind: activityKind, iteration: (thread.activity?.[activityKind]?.iterations ?? 0) + 1 } } : {}), ...(moved ? { moved: structuredClone(moved) } : {}) },
       ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
         type: 'image',
         mimeType: attachment.mimeType,
@@ -250,7 +252,7 @@ async function stream(
   }
 
   if (!record.cancelled && prompt === '[compact]') {
-    const part: MessagePart = { type: 'compaction', trigger: 'manual', preTokens: thread.context?.tokens ?? null, postTokens: compactAfter };
+    const part: MessagePart = { type: 'compaction', trigger: turn.execution?.automatic ? 'auto' : 'manual', preTokens: thread.context?.tokens ?? null, postTokens: compactAfter };
     const partIndex = message.parts.length;
     message.parts.push(part);
     ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part });
@@ -290,6 +292,7 @@ async function stream(
   pushScheduler(ctx, turn, 'finished');
   // A move the agent asked for during the turn happens now, as the core's turn runner does.
   applyWaitingMove(ctx, thread.id);
+  autoCompact(ctx, thread, turn);
   if (turn.execution?.operation === 'delegation' && thread.parentThreadId) {
     const root = thread.parentThreadId;
     const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n').trim().slice(0, 4000);
@@ -325,4 +328,32 @@ function pushScheduler(ctx: FakeContext, turn: Turn, phase: 'running' | 'finishe
     ctx.scheduler.running = ctx.scheduler.running.filter((r) => r.turnId !== turn.id);
   }
   ctx.emit('scheduler.updated', structuredClone(ctx.scheduler));
+}
+
+/** How long the fake core leaves a finished turn alone before it compacts, as `AUTO_COMPACT.settleMs` does. */
+export const FAKE_AUTO_COMPACT_SETTLE_MS = 400;
+
+/**
+ * The `autoCompact` setting, for what a fake thread can show: it has no
+ * background work and no prompt cache, so only `turn-end` and the threshold
+ * apply. A turn that opens first keeps the thread busy and the timer does nothing.
+ */
+function autoCompact(ctx: FakeContext, thread: Thread, turn: Turn): void {
+  // Checked when the turn ends and again when the timer fires, on the setting and the thread as they are then.
+  const wanted = (now: Thread): boolean => {
+    const rule = ctx.settings.autoCompact;
+    if (!rule || !rule.moments.includes('turn-end') || (rule.tokens !== null && (now.context?.tokens ?? 0) < rule.tokens)) return false;
+    return now.activity?.goal?.status !== 'active' && now.activity?.loop?.status !== 'active';
+  };
+  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId || !wanted(thread)) return;
+  setTimeout(() => {
+    // A closed client keeps its threads for a reconnection: nothing is added to them meanwhile.
+    if (ctx.bus.state === 'closed') return;
+    // The thread may be gone by now; a refused compaction leaves it as it was.
+    try {
+      const now = ctx.thread(thread.id);
+      if (now.archived || now.status !== 'idle' || !now.sessionId || now.turns.at(-1)?.id !== turn.id || !wanted(now)) return;
+      startTurn(ctx, thread.id, '[compact]', [], 'compact', undefined, undefined, [], true);
+    } catch { /* see above */ }
+  }, FAKE_AUTO_COMPACT_SETTLE_MS);
 }

@@ -824,6 +824,8 @@ export type TurnExecution = Pick<ThreadSummary,
    * the agent carries on (`docs/restart-handoff.md`).
    */
   operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
+  /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
+  automatic?: true;
 };
 
 export interface Turn {
@@ -1352,6 +1354,11 @@ export interface Settings {
    * longer write one falls back to that too.
    */
   titleModel?: TitleModel | null;
+  /**
+   * When the core compacts a conversation by itself, between two turns. Null
+   * or missing: never, each agent keeps its own behaviour. Missing on older cores.
+   */
+  autoCompact?: AutoCompact | null;
 }
 
 export type WorktreeStorage =
@@ -3005,7 +3012,8 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
-export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
+import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
