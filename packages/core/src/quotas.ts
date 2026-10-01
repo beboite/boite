@@ -79,16 +79,26 @@ async function readClaude(core: Core, account: Account): Promise<QuotaReading> {
   catch { return readClaudeFromCli(core, account); }
   const token = object(credentials['claudeAiOauth'])['accessToken'];
   if (typeof token !== 'string' || !token) throw new Error('This Claude account has no subscription login. Connect it in Providers.');
-  const reading = await readClaudeWithToken(token);
+  const reading = await readClaudeWithToken(token, core.updates.current(account.providerId));
   return reading ?? readClaudeFromCli(core, account);
 }
 
+/**
+ * Anthropic reports banked resets only to a CLI recent enough to spend one:
+ * any other caller of `cedar_ember=1` is answered `eligible: false` with the
+ * reason `cli_version`. So the request names the installed CLI, as the CLI
+ * would, once its version is known.
+ */
+export function claudeUsageAgent(version: string | null): Record<string, string> {
+  return version !== null && /^[\w.+-]{1,40}$/.test(version) ? { 'User-Agent': `claude-cli/${version} (external, cli)` } : {};
+}
+
 /** The token stays inside this function and is sent only to Anthropic. Null when it has expired. */
-async function readClaudeWithToken(token: string): Promise<QuotaReading | null> {
+async function readClaudeWithToken(token: string, version: string | null): Promise<QuotaReading | null> {
   let response: Response;
   try {
     response = await fetch('https://api.anthropic.com/api/oauth/usage?cedar_ember=1', {
-      headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json', ...claudeUsageAgent(version) },
       signal: AbortSignal.timeout(15_000), redirect: 'error',
     });
   } catch { throw new Error('Claude quota request failed. Check the connection and retry.'); }

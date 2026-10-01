@@ -266,7 +266,10 @@ fallback may omit reset grants and paid usage details. Codex quotas come from
 `account/rateLimits/read`, without starting a conversation.
 
 These reads also collect banked resets. Claude requests `cedar_ember=1` on
-its GET usage request and counts eligible, usable, unpaused, unexpired grants
+its GET usage request with the user agent `claude-cli/<version>`, the installed
+CLI's version from the update check: Anthropic answers any other caller
+`eligible: false` with the reason `cli_version`, so no reset shows before that
+version is known. It counts eligible, usable, unpaused, unexpired grants
 only when the reported next grant is available. Codex uses the reported count
 of reset credits even when the optional details are absent. Only counts and
 expiration times reach the client. Boite never redeems a reset or changes paid
