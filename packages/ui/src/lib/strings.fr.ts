@@ -832,6 +832,7 @@ export const fr: Translation = {
     receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à', 
     userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
     receivedStatus: 'Reçu',
+    machineNotConnected: 'Connectez cette machine dans les réglages pour ouvrir son fil.',
     status: {
       queued: "En attente d'envoi", received: 'Reçu par le cœur destinataire', delivered: "Transmis à l'agent destinataire",
       uncertain: 'Transmission incertaine. Boite ne la réessaiera pas.', expired: 'Expiré', rejected: 'Refusé'

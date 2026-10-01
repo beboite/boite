@@ -1922,6 +1922,8 @@ export interface AgentLetter {
   from: AgentContact;
   to: AgentAddress;
   toTitle: string;
+  toProject?: string;
+  toMachine?: string;
   text: string;
   replyTo: string | null;
   createdAt: Timestamp;

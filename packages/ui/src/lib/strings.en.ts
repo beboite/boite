@@ -877,6 +877,7 @@ export const strings = {
     receivedFrom: 'Received from', sentTo: 'Your agent sent to', 
     userSentTo: 'You sent to', userMessageVia: 'User message via',
     receivedStatus: 'Received',
+    machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     status: {
       queued: 'Queued in the outbox', received: 'Received by the recipient core', delivered: 'Submitted to the recipient agent',
       uncertain: 'Submission outcome uncertain. Boite will not replay it.', expired: 'Expired', rejected: 'Rejected'
