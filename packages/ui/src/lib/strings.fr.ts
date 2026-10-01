@@ -234,7 +234,7 @@ export const fr: Translation = {
     intro: 'Chaque machine exécute ses propres agents sur ses propres fichiers.',
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: 'Sur l\'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d\'appairage et collez-le ici. Le contrôle total, là-bas, laisse cette machine gérer ses comptes et ses réglages.',
-    labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
+    linkReaches: 'Ce lien connecte à {host}.', linkReplaces: 'Ce lien connecte à {host}, listée ici sous le nom {machine}. Il remplace la clé enregistrée pour elle.', linkConnected: 'Ce lien vise {host}, déjà connectée ici sous le nom {machine}.', labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
     remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
     removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
     open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
@@ -1856,6 +1856,7 @@ export const fr: Translation = {
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",
+    unpaired: "Cet appareil n'a pas de clé pour cette machine. Collez un lien d'appairage créé là-bas dans Ajouter une machine.",
     pairingLink: "Ce n'est pas un lien d'appairage. Collez le lien affiché par Nouveau lien d'appairage sur l'autre machine ; il commence par http et contient ?grant=."
   },
 

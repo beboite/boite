@@ -511,8 +511,13 @@ export class WsClient implements ObservableClient {
               (this.#principal === 'session' || (this.#paired && grant === null)) &&
               error instanceof RpcFailure &&
               error.code === RpcErrorCode.Unauthorized;
+            // A key another machine refused stays refused: only the core this
+            // shell started changes its token under a client, on a restart, and
+            // that one is followed through the retries.
+            const refused = this.#remote && error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized;
             const permanent =
               revoked ||
+              refused ||
               (error instanceof RpcFailure &&
                 (error.code === RpcErrorCode.InvalidParams || (grant !== null && error.code === RpcErrorCode.Unauthorized)));
             if (permanent) this.close();
