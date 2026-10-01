@@ -1538,8 +1538,6 @@ export const fr: Translation = {
     },
     deleted: {
       heading: 'Conversations supprimées',
-      intro: 'Restaurez les conversations pendant {days} jours après leur suppression, même après un redémarrage de Boite.',
-      keptIntro: 'Les conversations supprimées restent récupérables après un redémarrage de Boite, sans purge automatique.',
       retentionLabel: 'Jours avant la suppression définitive',
       retentionHint: 'À compter de la suppression. 0 conserve les conversations sans limite. Réduire le délai concerne aussi les conversations déjà supprimées.',
       retentionError: 'Saisissez un nombre entier entre 0 et 3650 jours.',

@@ -1603,8 +1603,6 @@ export const strings = {
     },
     deleted: {
       heading: 'Deleted conversations',
-      intro: 'Restore conversations for {days} days after deletion, including after restarting Boite.',
-      keptIntro: 'Deleted conversations remain recoverable after restarting Boite, with no automatic purge.',
       retentionLabel: 'Days before permanent deletion',
       retentionHint: 'Counted from deletion. 0 keeps conversations indefinitely. Shortening the delay also applies to conversations already deleted.',
       retentionError: 'Enter a whole number between 0 and 3650 days.',

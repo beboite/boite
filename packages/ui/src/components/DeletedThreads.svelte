@@ -4,6 +4,7 @@
   import { exactTime, projectName } from '../lib/format';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
+  import InfoTip from './InfoTip.svelte';
 
   let { store, eager = false }: { store: Store; eager?: boolean } = $props();
   const uid = $props.id();
@@ -69,15 +70,13 @@
 {#if store.owner}
   <section class="card" data-testid="deleted-threads">
     <h2>{strings.settings.deleted.heading}</h2>
-    <p class="muted">{retention === 0 ? strings.settings.deleted.keptIntro : fill(strings.settings.deleted.intro, { days: String(retention) })}</p>
     <form class="retention" onsubmit={(event) => { event.preventDefault(); void saveRetention(); }}>
-      <label for="{uid}-days">{strings.settings.deleted.retentionLabel}</label>
+      <label for="{uid}-days">{strings.settings.deleted.retentionLabel}<InfoTip topic={strings.settings.deleted.retentionLabel} text={strings.settings.deleted.retentionHint} /></label>
       <div class="retention-actions">
-        <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby="{uid}-hint" data-testid="deleted-retention-days" />
+        <input id="{uid}-days" type="number" min="0" max="3650" step="1" bind:value={days} oninput={() => { dirty = true; }} aria-invalid={!valid} aria-describedby={valid ? undefined : `${uid}-error`} data-testid="deleted-retention-days" />
         <button type="submit" disabled={!valid || !dirty || saving || !store.settings || store.connection !== 'ready'} data-testid="deleted-retention-save">{strings.settings.save}</button>
       </div>
-      <p id="{uid}-hint" class="muted">{strings.settings.deleted.retentionHint}</p>
-      {#if !valid}<p class="field-error" role="alert">{strings.settings.deleted.retentionError}</p>{/if}
+      {#if !valid}<p id="{uid}-error" class="field-error" role="alert">{strings.settings.deleted.retentionError}</p>{/if}
     </form>
     {#if threads === null}
       <button type="button" data-testid="deleted-show" disabled={loading || store.connection !== 'ready'} onclick={() => void load()}>
