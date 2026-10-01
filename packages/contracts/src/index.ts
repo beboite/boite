@@ -2109,8 +2109,26 @@ export interface TerminalState {
   sequence?: number;
 }
 
+/** The server on one machine, independently of the desktop application's updater. */
+export interface ServerUpdateStatus {
+  mode: 'systemd' | 'docker' | 'manual';
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'waiting' | 'installing' | 'error';
+  currentVersion: string;
+  version: string | null;
+  channel: 'stable' | 'nightly';
+  publishedAt: string | null;
+  checkedAt: Timestamp | null;
+  received: number;
+  total: number | null;
+  error: string | null;
+}
+
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
+  'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
+  /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
+  'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };
+  'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
@@ -2845,6 +2863,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
     exitCode: number | null;
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  'core.updateChanged': ServerUpdateStatus;
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };
   /** Portable brain switches changed. The folder stays on its host. */

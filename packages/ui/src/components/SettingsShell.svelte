@@ -24,7 +24,8 @@
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import { providerGroups } from '../lib/provider-family';
-  import { workspace } from '../lib/workspace.svelte';
+import { workspace } from '../lib/workspace.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
 
   let { store }: { store: Store } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
@@ -63,6 +64,7 @@
       { id: 'archived', label: strings.settings.archived.heading },
       ...(store.owner ? [{ id: 'worktrees', label: strings.settings.worktrees.heading }] : []),
       { id: 'app', label: strings.settings.app },
+      ...(showAppUpdateUi() ? [{ id: 'updates', label: strings.appUpdate.heading }] : []),
       ...(store.owner ? [{ id: 'privacy', label: strings.telemetry.heading }] : [])
     ],
     appearance: [{ id: 'theme', label: strings.settings.display }, { id: 'reading', label: strings.settings.reading }, { id: 'workspace', label: strings.settings.workspace }, { id: 'buttons', label: strings.controls.heading }],

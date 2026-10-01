@@ -280,6 +280,27 @@ export const strings = {
     quitHoldHint: 'or press it twice'
   },
 
+  serverUpdate: {
+    heading: 'Server',
+    updates: 'Updates',
+    current: 'Up to date',
+    waiting: 'Waiting for work to finish',
+    installing: 'Restarting the server',
+    reconnecting: 'Reconnecting',
+    progress: 'Server update download',
+    release: 'What\'s new',
+    details: 'Details',
+    timing: 'Installation waits for agents and background work to finish. You can keep chatting or cancel while it waits.',
+    backup: 'Conversations and settings are backed up. If startup fails, the previous version is restored.',
+    reconnect: 'Connected devices reconnect automatically.',
+    confirmTitle: 'Update {machine}?',
+    confirmBody: 'Version {version} will install when work finishes. Your conversations are backed up.',
+    manualTitle: 'Manual update',
+    docker: 'After agents finish, run this in the Compose directory:',
+    manual: 'Use the guide to update this installation.',
+    legacy: 'Update it once manually to enable this button.',
+    guide: 'Update guide'
+  },
   appUpdate: {
     released: 'Released {time}',
     changelog: 'Changelog on GitHub',
@@ -298,7 +319,7 @@ export const strings = {
     downloading: 'Downloading {received} of {total}',
     downloaded: 'Downloaded {received}',
     ready: 'Version {version} is ready to install.',
-    waiting: 'Waiting for work on this computer to finish. You can keep chatting or cancel the update.',
+    waiting: 'Waiting for work to finish',
     installing: 'Starting the installer',
     current: 'Boite is up to date.',
     failed: 'The update failed.',
@@ -311,8 +332,9 @@ export const strings = {
     retry: 'Try again',
     download: 'Download',
     install: 'Install and restart',
+    readyAction: 'Update',
     installTitle: 'Install the Boite update?',
-    installBody: 'Boite will wait for agent turns and background work on this computer to finish, then install the update and restart. You can keep chatting and cancel the update while it waits.',
+    installBody: 'Boite will update and restart when work finishes. You can cancel while it waits.',
   },
 
   connection: {

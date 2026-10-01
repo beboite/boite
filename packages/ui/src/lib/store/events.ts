@@ -42,11 +42,15 @@ export function listen(ctx: StoreContext, client: Client): void {
           // reading it here is what keeps the owner-only calls out of the very
           // first load, and what refreshes it after a reconnect.
           s.principal = client.principal;
+          ctx.serverUpdater.reset();
+          if (s.owner && !s.localCore) void ctx.serverUpdater.load();
           void s.reload();
         }
       })
     );
   }
+
+  on('core.updateChanged', snapshot => ctx.serverUpdater.apply(snapshot));
 
   // Rows are patched in place: a load tick on one running thread must not
   // hand the sidebar a new array and re-render every other row.
