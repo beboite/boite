@@ -1926,6 +1926,7 @@ export const strings = {
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
+    unpaired: 'This device holds no key for this machine. Paste a pairing link made there under Add a machine.',
     pairingLink: 'That is not a pairing link. Paste the link shown by New pairing link on the other machine; it starts with http and contains ?grant=.'
   },
 

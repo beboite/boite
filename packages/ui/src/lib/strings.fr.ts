@@ -1856,6 +1856,7 @@ export const fr: Translation = {
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",
+    unpaired: "Cet appareil n'a pas de clé pour cette machine. Collez un lien d'appairage créé là-bas dans Ajouter une machine.",
     pairingLink: "Ce n'est pas un lien d'appairage. Collez le lien affiché par Nouveau lien d'appairage sur l'autre machine ; il commence par http et contient ?grant=."
   },
 

@@ -39,6 +39,11 @@ function profiles(): Record<string, { label: string; icon?: MachineIconName }> {
   try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
 
+/** What a machine that has not answered yet is called: its address, never "This PC". */
+function hostOf(url: string | null): string | undefined {
+  try { return url === null ? undefined : new URL(url).host; } catch { return undefined; }
+}
+
 /** A connection's URL is also its identity in the workspace and saved list. */
 function endpointIdentity(endpoint: Endpoint): { id: string; host: string } | null {
   try {
@@ -67,7 +72,7 @@ export class Workspace {
   #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[]): Machine {
     const machine: Machine = {
       id: store.endpointUrl ?? 'local',
-      label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname) ?? strings.machines.local,
+      label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
       store
     };
     this.restoreProfile(machine);
