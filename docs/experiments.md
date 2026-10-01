@@ -42,13 +42,19 @@ after a core restart, and with this experiment switched off. Paired phones can
 download the published snapshot. They cannot publish or browse arbitrary host
 files through the file APIs.
 
-With the experiment enabled, answers support Markdown file links, bare web
+Published images, videos and audio appear directly in the conversation without
+enabling this experiment. Media keeps its aspect ratio within a bounded card;
+videos have playback, seeking and fullscreen controls and never autoplay.
+Images open in a keyboard-accessible viewer with zoom, fit and download controls.
+If decoding fails, the card keeps its download and offers a retry.
+
+With the experiment enabled, answers also support Markdown file links, bare web
 URLs, local absolute paths, `file:///` links, and file paths inside inline code.
 Wrap the link destination in angle brackets for paths with spaces, such as
 `<reports/review one.pdf>`. Source references
 can carry `:line` or `#Lline`. Files resolve against the message's thread and
 owning machine. Links outside its working directory are refused. Published
-PDFs, images, audio and video have inline previews. Other files remain downloadable.
+PDFs have an optional inline preview. Other files remain downloadable.
 Remote images are links, so reading an answer does not fetch a tracking image.
 Executable URL schemes and arbitrary HTML are not rendered.
 

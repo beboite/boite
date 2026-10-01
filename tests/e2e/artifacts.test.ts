@@ -53,6 +53,8 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       const downloaded = await page.evaluate<string>('fetch(document.querySelector("[data-testid=artifact-download]").href).then(r => r.text())');
       expect(downloaded).toBe(pdf.toString());
       expect(await page.evaluate(`document.querySelector('[data-testid=text-part] a[href="https://example.com/review"]') !== null`)).toBe(true);
+      // Published images are already visible; their preview needs no extra click.
+      await page.waitFor('document.querySelector("[data-testid=artifact-enlarge] img")?.naturalWidth === 192');
       // An attached picture opens full size from its name, over the whole window.
       await page.evaluate('Array.from(document.querySelectorAll("[data-testid=artifact-launch]")).find(b => b.textContent.includes("preview.png")).click()');
       await page.waitFor('document.querySelector("[data-testid=image-viewer] img")?.naturalWidth === 192');

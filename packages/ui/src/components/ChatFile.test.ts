@@ -33,14 +33,18 @@ function query<T extends Element>(selector: string): T {
 }
 
 test('a picture opens full size from its preview and from its name, and Escape closes it', async () => {
-  writeExperiments(['chat-artifacts']);
+  writeExperiments([]);
   running = mount(ChatFile, { target: document.body, props: { file: photo } });
   flushSync();
-  query<HTMLButtonElement>('[data-testid=artifact-preview]').click();
-  flushSync();
+  expect(document.querySelector('[data-testid=artifact-preview]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=artifact-enlarge]').click();
   flushSync();
   expect(query<HTMLImageElement>('[data-testid=image-viewer] img').getAttribute('src')).toBe('blob:attachment');
+  query<HTMLButtonElement>('button[aria-label="Zoom in"]').click(); flushSync();
+  expect(query('button[aria-label="Fit image"]').textContent).toContain('150%');
+  query<HTMLButtonElement>('[data-testid=image-viewer-close]').focus();
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  expect(query('[data-testid=image-viewer]').contains(document.activeElement)).toBe(true);
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   flushSync();
   expect(document.querySelector('[data-testid=image-viewer]')).toBeNull();
@@ -73,18 +77,30 @@ test('in the shell the name saves and opens the file, and Download saves it with
 });
 
 test('a disk snapshot uses its owning store and streams its download without a full-body fetch', async () => {
-  writeExperiments(['chat-artifacts']);
+  writeExperiments([]);
   const invoke = vi.fn(async () => ({ path: 'C:/Downloads/clip.mp4', opened: false }));
   window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
   const url = `http://127.0.0.1:4311/file/${'a'.repeat(64)}`;
   const readArtifact = vi.fn(async () => ({ ok: true, value: { name: 'clip.mp4', mimeType: 'video/mp4', bytes: 24 * 1024 * 1024, url } }));
   const store = { readArtifact } as unknown as Store;
   running = mount(ChatFile, { target: document.body, props: { store, threadId: 'thread', messageId: 'message', file: { type: 'artifact', id: 'artifact', mimeType: 'video/mp4', name: 'clip.mp4', bytes: 24 * 1024 * 1024 } } });
-  await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-preview]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('video')).not.toBeNull());
   expect(readArtifact).toHaveBeenCalledWith('thread', 'message', 'artifact', undefined);
-  query<HTMLButtonElement>('[data-testid=artifact-preview]').click(); flushSync();
   expect(query<HTMLVideoElement>('video').src).toBe(url);
+  expect(query<HTMLVideoElement>('video').autoplay).toBe(false);
+  expect(query<HTMLVideoElement>('video').controls).toBe(true);
+  expect(query<HTMLVideoElement>('video').playsInline).toBe(true);
   query<HTMLAnchorElement>('[data-testid=artifact-download]').click();
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('save_attachment_url', { name: 'clip.mp4', url, open: false }, undefined));
   expect(readArtifact).toHaveBeenLastCalledWith('thread', 'message', 'artifact', 'a'.repeat(64));
+});
+
+test('a media decoding failure keeps download available and can retry the preview', () => {
+  running = mount(ChatFile, { target: document.body, props: { file: photo } }); flushSync();
+  query('img').dispatchEvent(new Event('error')); flushSync();
+  expect(query('[role=status]').textContent).toContain('could not be previewed');
+  expect(query<HTMLAnchorElement>('[data-testid=artifact-download]').download).toBe(photo.name);
+  query<HTMLButtonElement>('[role=status] button').click(); flushSync();
+  expect(document.querySelector('img')).not.toBeNull();
+  expect(document.querySelector('[role=status]')).toBeNull();
 });

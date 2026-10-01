@@ -184,11 +184,13 @@ thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
 
 `attach` saves a snapshot referenced by an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread
-must have a turn and must not be archived. The optional rich preview is under
-the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
+must have a turn and must not be archived. Images, videos and audio appear
+inline by default. PDF and local file previews are under the
+[Chat files and previews experiment](experiments.md#chat-files-and-previews).
 
-In the desktop app, clicking the file's name or icon saves it in the system's
-Downloads folder and opens it. The shell's `save_attachment` command opens only
+Clicking an image opens the zoomable viewer. For other files in the desktop app,
+clicking the name or icon saves it in the system's Downloads folder and opens it.
+The shell's attachment commands open only
 pictures, PDF, text, audio, video and office documents. It shows any other type
 selected in its folder, so an agent cannot run a program through that click.
 The download button saves the file without opening it. Files above 5 MB stream
