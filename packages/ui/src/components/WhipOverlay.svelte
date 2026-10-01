@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { whip } from '../lib/whip.svelte';
   import { playCrack, closeCrackAudio, primeCrackSound } from '../lib/whip/crack';
+  import { shakeWindow, cancelShake } from '../lib/whip/shake';
   import { WhipRope, WHIP, segmentBezier, type Point } from '../lib/whip/physics';
 
   // The frame loop exists only while a rope is visible.
@@ -28,6 +29,7 @@
     if (!motion.matches) return;
     rope = null;
     whip.held = false;
+    cancelShake();
     cancelAnimationFrame(frame);
     frame = 0;
   }
@@ -52,6 +54,7 @@
       window.removeEventListener("keydown", onKey, true);
       if (frame) cancelAnimationFrame(frame);
       closeCrackAudio();
+      cancelShake();
       whip.held = false;
       motion.removeEventListener("change", stopForReducedMotion);
     };
@@ -97,7 +100,11 @@
         carried -= STEP_MS;
         if (current.step(pointerX, pointerY, bounds, now)) cracked = true;
       }
-      if (cracked) playCrack();
+      // The crack is the hit: the noise and the shake land together.
+      if (cracked) {
+        playCrack();
+        void shakeWindow().catch(onerror);
+      }
 
       if (current.gone(bounds)) {
         rope = null;

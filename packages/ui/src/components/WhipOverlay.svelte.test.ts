@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { whip } from '../lib/whip.svelte';
+import { playCrack } from '../lib/whip/crack';
 import WhipButton from './WhipButton.svelte';
 import WhipOverlay from './WhipOverlay.svelte';
 
@@ -10,6 +11,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   flushSync(() => { whip.held = false; });
   vi.restoreAllMocks();
+  vi.mocked(playCrack).mockClear();
 });
 
 function toy() {
@@ -27,20 +29,38 @@ function toy() {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
   const onerror = vi.fn();
   const overlay = flushSync(() => mount(WhipOverlay, { target, props: { onerror } }));
-  const control = flushSync(() => mount(WhipButton, { target, props: { onerror } }));
+  const control = flushSync(() => mount(WhipButton, { target }));
   cleanups.push(async () => { finish(); await unmount(control); await unmount(overlay); target.remove(); });
   const button = target.querySelector('button')!;
   const click = () => flushSync(() => { button.click(); });
   const tick = (now: number) => flushSync(() => { frames.shift()!(now); });
-  return { button, click, tick, finish, onerror };
+  return { button, click, tick, finish, animate, onerror };
 }
 
-test('the footer can drop during its shake and restore Escape shortcuts', async () => {
-  const { button, click, finish } = toy();
+test('throwing does not shake; the crack of a flick does, with its sound', async () => {
+  const { click, tick, animate, onerror } = toy();
+  click();
+  expect(whip.held).toBe(true);
+  const start = performance.now();
+  // A still rope, well past the opening grace: the click alone moves nothing.
+  for (let frame = 1; frame <= 40; frame++) tick(start + frame * 1000 / 60);
+  await Promise.resolve();
+  expect(animate).not.toHaveBeenCalled();
+  expect(playCrack).not.toHaveBeenCalled();
+  for (let frame = 41; frame <= 280 && !vi.mocked(playCrack).mock.calls.length; frame++) {
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 500 + Math.sin(frame / 1.5) * 200, clientY: 400 }));
+    tick(start + frame * 1000 / 60);
+  }
+  expect(playCrack).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(animate).toHaveBeenCalledOnce());
+  expect(onerror).not.toHaveBeenCalled();
+});
+
+test('the footer drops the rope and restores Escape shortcuts', () => {
+  const { button, click } = toy();
   click();
   expect(whip.held).toBe(true);
   expect(button.disabled).toBe(false);
-  expect(button.getAttribute("aria-busy")).toBe("true");
   click();
   expect(whip.held).toBe(false);
   const shortcut = vi.fn();
@@ -51,18 +71,11 @@ test('the footer can drop during its shake and restore Escape shortcuts', async 
     expect(shortcut).toHaveBeenCalledOnce();
     expect(escape.defaultPrevented).toBe(false);
   } finally { window.removeEventListener('keydown', shortcut); }
-  finish();
-  await vi.waitFor(() => expect(button.getAttribute("aria-busy")).toBe("false"));
-  expect(button.disabled).toBe(false);
 });
 
 test('a throw during a fall replaces the rope and stays held after the old fall would finish', async () => {
-  const { click, tick, finish, onerror } = toy();
+  const { click, tick, onerror } = toy();
   click();
-  finish();
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
   click();
   expect(whip.held).toBe(false);
   click();
