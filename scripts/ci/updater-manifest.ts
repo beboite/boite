@@ -15,6 +15,8 @@ export const TARGETS: ReadonlyArray<readonly [string, RegExp]> = [
   ['linux-aarch64-deb', /_arm64\.deb$/],
   ['darwin-x86_64', /_x64\.app\.tar\.gz$/],
   ['darwin-aarch64', /_aarch64\.app\.tar\.gz$/],
+  ['linux-x86_64-server', /^boite-server_[\w.-]+_x64\.zip$/],
+  ['linux-aarch64-server', /^boite-server_[\w.-]+_arm64\.zip$/],
 ];
 
 /** Downloads a person installs by hand; the updater never fetches them. */

@@ -240,6 +240,8 @@ test.each(['connected', 'disabled', 'disconnected'] as const)('Boite guide reach
   };
   const first = await run('Hello');
   expect(first).toContain('boite where');
+  expect(first).toContain('Task tracking is optional.');
+  expect(first).toContain('Use it only when steps help you and the user.');
   if (state === 'connected') {
     expect(first).toContain('Shared convention');
     expect(first.indexOf('Shared convention')).toBeLessThan(first.indexOf('boite where'));

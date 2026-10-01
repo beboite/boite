@@ -7,6 +7,7 @@ const names = [
   `Boite_${version}_amd64.AppImage`, `Boite_${version}_aarch64.AppImage`,
   `Boite_${version}_amd64.deb`, `Boite_${version}_arm64.deb`,
   `Boite_${version}_x64.app.tar.gz`, `Boite_${version}_aarch64.app.tar.gz`,
+  `boite-server_${version}_x64.zip`, `boite-server_${version}_arm64.zip`,
 ];
 const signed = names.map((file) => ({ file, signature: 'c2lnbmF0dXJl\n' }));
 
@@ -26,7 +27,7 @@ test('unsigned, incomplete or ambiguous release inputs cannot produce a manifest
   expect(() => updaterManifest('2.0.0', 'beboite/boite', signed.map((p, i) => (i ? p : { ...p, signature: '' })), '', date)).toThrow('signature');
   expect(() => updaterManifest('../main', 'beboite/boite', signed, '', date)).toThrow('semantic version');
   expect(() => updaterManifest('2.0.0', 'beboite/boite', [...signed.slice(1), { file: '../Boite_x64-setup.exe', signature: 'YWJj' }], '', date)).toThrow('filename');
-  expect(() => updaterManifest('2.0.0', 'beboite/boite', signed.slice(0, -1), '', date)).toThrow('darwin-aarch64');
+  expect(() => updaterManifest('2.0.0', 'beboite/boite', signed.slice(0, -1), '', date)).toThrow('linux-aarch64-server');
   expect(() => updaterManifest('2.0.0', 'beboite/boite', [...signed, signed[0]!], '', date)).toThrow('second payload');
 });
 
