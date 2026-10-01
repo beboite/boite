@@ -1,5 +1,12 @@
 # Experiments
 
+`open-chat-links` adds desktop file opening to chat links. An explicit click in
+the main UI opens a local file or folder in its associated application, including
+Windows shortcuts and absolute paths outside the checkout. It is off by default
+and independent of `chat-artifacts`. It only applies to the owning local core;
+remote-machine links keep their preview behavior. Pages in the integrated browser
+and agent RPCs cannot invoke this native action. Network and device paths are refused.
+
 Enable these separately in Settings > Experiments. Switches are off by default
 and belong to this client device. They do not change another machine's settings.
 A phone has its own Experiments row under Settings, This phone.

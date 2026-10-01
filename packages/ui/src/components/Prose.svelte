@@ -6,11 +6,12 @@
   import { experimentOn } from '../lib/experiments.svelte';
   import type { Store } from '../lib/store.svelte';
   import ChatFile from './ChatFile.svelte';
-  import { executableLink, localFileDirectory, openLocalFile } from '../lib/local-files';
+  import { executableLink, localFileDirectory, openLocalFile, openChatFile } from '../lib/local-files';
 
   let { text, live = false, store, threadId }: { text: string; live?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
-  const rich = $derived(experimentOn('chat-artifacts'));
+  const directLinks = $derived(experimentOn('open-chat-links'));
+  const rich = $derived(experimentOn('chat-artifacts') || directLinks);
   let opening = false;
   function follow(event: MouseEvent): void {
     const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
@@ -27,10 +28,10 @@
     }
     event.preventDefault();
     const directory = localFileDirectory(store, threadId);
-    if (directory && executableLink(anchor.dataset.filePath) && !anchor.dataset.fileLine) {
+    if (directory && (directLinks || (executableLink(anchor.dataset.filePath) && !anchor.dataset.fileLine))) {
       if (opening) return;
       opening = true;
-      void openLocalFile(directory, anchor.dataset.filePath).catch(reason => {
+      void (directLinks ? openChatFile : openLocalFile)(directory, anchor.dataset.filePath).catch(reason => {
         if (store) store.error = reason instanceof Error ? reason.message : String(reason);
       }).finally(() => { opening = false; });
       return;
