@@ -42,7 +42,7 @@ export class DeferredInput {
         .then(submitted => {
           if (this.core.stopping) return;
           if (!submitted) return;
-          if (turnId) this.recordAnswer(threadId, turnId, text);
+          if (turnId) this.threads.runner.userInputAt.set(turnId, this.recordAnswer(threadId, turnId, text));
           const held = this.deferredAnswers.get(threadId) ?? [];
           const index = held.indexOf(text);
           if (index >= 0) held.splice(index, 1);
@@ -75,11 +75,12 @@ export class DeferredInput {
     if (thread) this.core.bus.emit('thread.updated', withLoad(this.core, thread));
   }
 
-  private recordAnswer(threadId: ThreadId, turnId: string, text: string, createdAt = Date.now()): void {
+  private recordAnswer(threadId: ThreadId, turnId: string, text: string, createdAt = Date.now()): number {
     const message: Message = { id: newId('msg_'), threadId, turnId, role: 'user', state: 'complete', createdAt, parts: [{ type: 'text', text }] };
     this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => this.core.journal.putMessage(message));
     this.core.bus.emit('message.started', message);
     this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+    return createdAt;
   }
 
   /** Journal held answers before the manual prompt that will carry them. */
@@ -120,7 +121,7 @@ export class DeferredInput {
     const held = this.deferredAnswers.get(threadId);
     if (held === undefined) return null;
     const turnId = this.core.journal.listTurns(threadId).findLast(turn => turn.status === 'running')?.id;
-    if (turnId) this.recordAnswer(threadId, turnId, held.join('\n\n'));
+    if (turnId) this.threads.runner.userInputAt.set(turnId, this.recordAnswer(threadId, turnId, held.join('\n\n')));
     this.deferredAnswers.delete(threadId);
     this.changed(threadId);
     return `The user answered while you were working:\n\n${held.join('\n\n')}`;

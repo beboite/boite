@@ -21,6 +21,11 @@
   // earlier ones keep their nodes, folded or not.
   const scan = new ParagraphScan();
   let blocks = $derived(scan.blocks(current.text, live));
+  // A provider can open a reasoning block and never send its text: the label
+  // still says the agent is thinking, and there is nothing to unfold. A click
+  // meanwhile is kept, so the text unfolds when it arrives.
+  let empty = $derived(text.trim().length === 0);
+  let shown = $derived(open && !empty);
 </script>
 
 <div class="thinking" data-testid="thinking-part">
@@ -28,8 +33,8 @@
     type="button"
     class="ghost head"
     data-testid="thinking-toggle"
-    aria-expanded={open}
-    title={open ? strings.chat.thinkingHide : strings.chat.thinkingShow}
+    aria-expanded={empty ? undefined : shown}
+    title={empty ? undefined : shown ? strings.chat.thinkingHide : strings.chat.thinkingShow}
     onclick={() => (open = !open)}
   >
     <span class="glyph"><Brain size={15} strokeWidth={1.75} /></span>
@@ -37,10 +42,12 @@
     {#if live}
       <span class="dot" aria-label={strings.chat.streaming}></span>
     {/if}
-    <span class="caret" class:open aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+    {#if !empty}
+      <span class="caret" class:open={shown} aria-hidden="true"><ChevronRight size={12} strokeWidth={2} /></span>
+    {/if}
   </button>
 
-  <div class="fold" class:open inert={!open}>
+  <div class="fold" class:open={shown} inert={!shown}>
     <div class="clip">
       {#if built}
         <div class="body" data-testid="thinking-text">
