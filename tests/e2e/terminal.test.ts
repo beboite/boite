@@ -3,10 +3,12 @@ import { BrowserPage, freePort } from "./lib/cdp";
 import { startUi } from "./lib/ui";
 
 async function settled(page: BrowserPage): Promise<void> {
+  await page.evaluate("document.fonts.ready");
+  // ResizeObserver updates the drawer after the new viewport has been laid out.
+  await page.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   await page.evaluate(
     `Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`,
   );
-  await page.evaluate("document.fonts.ready");
 }
 
 /** A chord the way a keyboard sends it, so it walks through xterm when it holds the focus. */
