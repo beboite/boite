@@ -773,6 +773,8 @@ export const strings = {
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'No output',
+    toolExitCode: 'Exit code {code}',
+    toolCommandFailed: 'Command reported failure. Expand to read the full output.',
     /** Under an expanded tool input that opened cut to six lines. */
     showAll: 'Show all',
     toolStatus: {

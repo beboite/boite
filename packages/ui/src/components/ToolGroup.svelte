@@ -45,6 +45,7 @@
     inputText={part.inputText}
     output={part.output}
     status={part.status}
+    exitCode={part.exitCode}
     documents={part.documents ?? []}
     startedAt={part.startedAt ?? null}
     finishedAt={part.finishedAt ?? null}

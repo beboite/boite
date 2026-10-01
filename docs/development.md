@@ -826,6 +826,11 @@ in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
 edit with its diff. Failed and denied calls stay outside groups, with an
 output preview that remains visible when the call is closed.
 
+Failed commands preview a diagnostic such as the failing test or merge conflict,
+rather than the first output line. Codex command cards retain the provider's exit
+code and show it on failures; older messages and providers without that field
+keep their reported status. Output text and stderr never determine that status.
+
 Answered questions collapse to the actual answer. Expanding restores the
 question and the full answer without enabling another submission. Thinking
 uses one stable label; its current heading remains in the expanded detail.

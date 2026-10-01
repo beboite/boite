@@ -741,6 +741,8 @@ export const fr: Translation = {
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'Aucune sortie',
+    toolExitCode: 'Code de sortie {code}',
+    toolCommandFailed: 'La commande a signalé un échec. Dépliez pour lire la sortie complète.',
     showAll: 'Tout afficher',
     toolStatus: {
       running: 'en cours',
