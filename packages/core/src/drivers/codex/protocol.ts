@@ -119,6 +119,8 @@ export interface CodexModelListResponse {
 export interface CodexItem {
   type: string;
   id: string;
+  /** Completed agent messages carry their final public text. */
+  text?: string;
   status?: string;
   command?: string;
   cwd?: string | null;

@@ -4,7 +4,7 @@
   import type { AgentLetter, Message, MoveNotice, ThreadLink } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import TurnSummary from './TurnSummary.svelte';
+  import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
   import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
@@ -793,13 +793,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <TurnSummary
-              {turn}
-              activeTool={message.parts.some((part) => part.type === 'tool' && part.status === 'running')}
-              waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
-              background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
-              stop={() => void store.stop()}
-            >
+            <MessageTurnSummary {store} {threadId} {turn} {message}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
@@ -807,7 +801,7 @@
                   fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
                 />
               {/snippet}
-            </TurnSummary>
+            </MessageTurnSummary>
           {/if}
         </article>
       {/each}

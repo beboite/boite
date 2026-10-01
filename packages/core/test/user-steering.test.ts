@@ -159,6 +159,10 @@ test('a follow-up cuts the running answer, so what the agent writes next lands a
   emit.part(reply, 1, { type: 'tool', toolId: 'build-1', name: 'Bash', input: {}, output: 'ok', status: 'done' });
   emit.part(reply, 3, { type: 'tool', toolId: 'read-2', name: 'Read', input: {}, output: 'ok', status: 'done' });
   expect(shape()).toEqual([['user', 'complete', 'Keep working'], ['assistant', 'complete', 'Before|done'], ['user', 'complete', 'Also reorder the buttons'], ['assistant', 'streaming', 'After|done']]);
+  // Activity follows the routed segment too, rather than treating its thinking delta as generic work.
+  emit.part(reply, 4, { type: 'thinking', text: '' });
+  emit.delta(reply, 4, 'Continuing after the follow-up');
+  expect(h.core.threads.get(threadId).progress?.phase).toBe('thinking');
   emit.complete(reply, 'complete');
   const completed = owner.next('turn.finished', item => item.id === turn.id);
   finish(); await completed;

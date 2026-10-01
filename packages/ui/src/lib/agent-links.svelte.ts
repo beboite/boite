@@ -8,6 +8,7 @@ import { untrack } from 'svelte';
 import type { CoordinationPeer } from '@boite/contracts';
 import { workspace, type Machine } from './workspace.svelte';
 import { fill, strings } from './strings';
+import { bridgeMachines, closeBridges, forgetBridge, pruneBridges } from './agent-link-bridge';
 
 const UNLINKED_KEY = 'boite.agent-links.unlinked';
 
@@ -45,7 +46,7 @@ export function isUnlinked(coreA: string, coreB: string): boolean {
 
 /** A loopback contact cannot be dialled by another machine. The authenticated
  * connection can supply its HTTPS origin when no public address was configured. */
-function reachableIdentity(machine: Machine, identity: CoordinationPeer): CoordinationPeer {
+function reachableIdentity(machine: Machine, identity: CoordinationPeer, bridge = false): CoordinationPeer {
   const usable = (raw: string): string | null => {
     try {
       const url = new URL(raw);
@@ -54,8 +55,9 @@ function reachableIdentity(machine: Machine, identity: CoordinationPeer): Coordi
     } catch { return null; }
   };
   const url = usable(identity.url) ?? usable(machine.store.endpointUrl ?? '');
+  if (!url && bridge) return { ...identity, viaClient: true };
   if (!url) throw new Error(fill(strings.machines.agentLinkAddressRequired, { machine: machine.label }));
-  return { ...identity, url };
+  return { ...identity, url, viaClient: false };
 }
 
 /**
@@ -71,8 +73,8 @@ export async function linkMachines(a: Machine, b: Machine): Promise<void> {
   let previousB: CoordinationPeer | undefined;
   try {
     [aIdentity, bIdentity] = await Promise.all([a.store.coordinationIdentity(), b.store.coordinationIdentity()]);
-    aIdentity = reachableIdentity(a, aIdentity);
-    bIdentity = reachableIdentity(b, bIdentity);
+    aIdentity = reachableIdentity(a, aIdentity, true);
+    bIdentity = reachableIdentity(b, bIdentity, true);
     const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
     previousA = peersA.find(p => p.coreId === bIdentity!.coreId);
     previousB = peersB.find(p => p.coreId === aIdentity!.coreId);
@@ -80,13 +82,19 @@ export async function linkMachines(a: Machine, b: Machine): Promise<void> {
     trustedA = true;
     await b.store.trustCoordinationPeer(aIdentity);
     trustedB = true;
+    if (!await bridgeMachines(a, b, aIdentity.coreId, bIdentity.coreId)) {
+      // Older cores can still use direct HTTPS links, but cannot relay an unpublished local core.
+      reachableIdentity(a, aIdentity); reachableIdentity(b, bIdentity);
+    }
     await Promise.all([a.store.checkCoordinationPeer(bIdentity.coreId), b.store.checkCoordinationPeer(aIdentity.coreId)]);
   } catch (cause) {
+    forgetBridge(a, b);
     let message = cause instanceof Error ? cause.message : String(cause);
-    try {
-      if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); }
-      if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); }
-    } catch (rollback) { message += ` ${rollback instanceof Error ? rollback.message : String(rollback)}`; }
+    const rollbacks = await Promise.allSettled([
+      (async () => { if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); } })(),
+      (async () => { if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); } })(),
+    ]);
+    for (const rollback of rollbacks) if (rollback.status === 'rejected') message += ` ${rollback.reason instanceof Error ? rollback.reason.message : String(rollback.reason)}`;
     throw new Error(message);
   }
 }
@@ -114,6 +122,7 @@ class AgentAutoLink {
 
   async sweep(): Promise<void> {
     const ready = ownerMachines();
+    pruneBridges(ready);
     const ids = new Set(ready.map(machine => machine.id));
     // A machine that dropped is tried again when it comes back: its identity or address may have changed.
     for (const key of [...this.#tried]) {
@@ -142,26 +151,32 @@ class AgentAutoLink {
       // Two connections to one core are one machine.
       if (left.coreId === right.coreId || isUnlinked(left.coreId, right.coreId)) return;
       const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
-      if (peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId)) return;
-      await linkMachines(a, b);
+      if (peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId)) {
+        await bridgeMachines(a, b, left.coreId, right.coreId);
+        // Persisted trust is configuration, not proof that either signed route still works.
+        await Promise.all([a.store.checkCoordinationPeer(right.coreId), b.store.checkCoordinationPeer(left.coreId)]);
+      } else await linkMachines(a, b);
       this.version += 1;
     } catch (cause) {
       this.failures = { ...this.failures, [key]: cause instanceof Error ? cause.message : String(cause) };
+      this.version += 1;
     }
   }
 
   /** Watches the owner machines for the life of the app; the returned function stops it. */
   start(): () => void {
-    return $effect.root(() => {
+    const stop = $effect.root(() => {
       $effect(() => {
         ownerMachines().map(machine => machine.id).join('\0');
         untrack(() => { void this.sweep(); });
       });
     });
+    return () => { stop(); closeBridges(); };
   }
 
   /** Tests start from nothing tried. */
   reset(): void {
+    closeBridges();
     this.#tried.clear();
     this.failures = {};
   }

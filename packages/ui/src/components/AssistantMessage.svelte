@@ -80,7 +80,7 @@
       {#if part.type === 'text'}
         {@const shownText = message.role === 'system' ? promptText(part) : visibleAnswer(part.text)}
         {#if shownText.length > 0 || index === caretAt}
-          <Prose text={shownText} live={index === caretAt} {store} {threadId} />
+          <Prose text={shownText} live={index === caretAt && part.complete !== true} {store} {threadId} />
         {/if}
 
       {:else if part.type === 'file'}

@@ -711,8 +711,10 @@ describe('pi driver', () => {
     const client = await startCore();
     const threadId = await piThread(client);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    const progress = client.next('thread.updated', thread => thread.id === threadId && thread.progress?.phase === 'retrying');
     await client.call('turns.start', { threadId, prompt: '[retry]' });
     const done = await finished;
+    expect((await progress).progress?.detail).toBe('1/3');
     expect(done.status).toBe('done');
     expect(done.error).toBeNull();
     const thread = await client.call('threads.get', { threadId });
@@ -835,8 +837,10 @@ describe('pi driver', () => {
     const client = await startCore();
     const threadId = await piThread(client);
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
+    const progress = client.next('thread.updated', thread => thread.id === threadId && thread.progress?.phase === 'compacting');
     await client.call('turns.start', { threadId, prompt: '[compacted] go on' });
     expect((await finished).status).toBe('done');
+    expect((await progress).progress?.phase).toBe('compacting');
     const thread = await client.call('threads.get', { threadId });
     const parts = thread.messages.flatMap((message) => message.parts);
     expect(parts).toContainEqual({ type: 'compaction', trigger: 'auto', preTokens: 180000, postTokens: 30000 });

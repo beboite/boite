@@ -56,6 +56,7 @@ test('load ticks keep team snapshots quiet while semantic changes notify every s
     for (const child of children) {
       const thread = h.core.threads.require(child.thread.id);
       h.core.bus.emit('thread.updated', { ...thread, pendingAnswers: ['An answer awaiting delivery'], load: { processes: 8, cpuPercent: 25, memoryBytes: 100_000_000 } });
+      h.core.bus.emit('thread.updated', { ...thread, progress: { turnId: 'observed-turn', phase: 'thinking', detail: null, at: Date.now() } });
     }
     await Bun.sleep(0);
     expect(changed).toEqual([]);

@@ -168,7 +168,8 @@ export function coordinationMethods(ctx: FakeContext) {
       const matches: AgentMatch[] = [];
       for (const { contact, core } of reachable(ctx, params.threadId)) {
         const fields = { title: contact.title, project: contact.project ?? '', branch: contact.branch ?? '', agent: contact.agent ?? '', resources: contact.resources } as const;
-        const chat = chatOf(core.thread(contact.threadId)).filter(entry => entry.role !== 'system').map(entry => entry.text);
+        const canRead = core === ctx || core.peers.get(ctx.identity.coreId)?.readThreads === true;
+        const chat = canRead ? chatOf(core.thread(contact.threadId)).filter(entry => entry.role !== 'system').map(entry => entry.text) : [];
         const matched = new Set<AgentMatch['matched'][number]>();
         const chatWords: string[] = [];
         const all = words.every(word => {
@@ -188,6 +189,7 @@ export function coordinationMethods(ctx: FakeContext) {
     'collaboration.read': async (params) => {
       const found = reachable(ctx, params.threadId).find(entry => entry.contact.coreId === params.target.coreId && entry.contact.threadId === params.target.threadId);
       if (!found) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `target: ${params.target.threadId} is not a contact this thread may reach; see boite agents list` });
+      if (found.core !== ctx && found.core.peers.get(ctx.identity.coreId)?.readThreads !== true) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agents on this machine are not allowed to read conversations; enable their access in Machines on the destination' });
       const limit = params.limit ?? 30;
       const entries = chatOf(found.core.thread(found.contact.threadId)).filter(entry => (params.before === undefined || entry.at < params.before) && (entry.text.length > 0 || entry.tools.length > 0));
       return { contact: found.contact, entries: entries.slice(-limit), more: entries.length > limit };
@@ -207,7 +209,7 @@ export function coordinationMethods(ctx: FakeContext) {
       const { coreId } = params;
       const peer = ctx.peers.get(coreId);
       const target = cores.get(coreId);
-      if (!peer || !target || !target.peers.has(ctx.identity.coreId) || target.identity.url !== peer.url) {
+      if (!peer || !target || !target.peers.has(ctx.identity.coreId) || !peer.viaClient && target.identity.url !== peer.url) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'machine is unreachable or mutual trust is missing' });
       }
       return { ok: true };
@@ -219,13 +221,30 @@ export function coordinationMethods(ctx: FakeContext) {
       const loopback = url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
       if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || (url.protocol !== 'https:' && !loopback)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'peer.url: expected HTTPS origin, or numeric loopback HTTP' });
       if (!peer.coreId || !peer.publicKey || peer.coreId === ctx.identity.coreId) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'peer: expected another core public identity' });
-      ctx.peers.set(peer.coreId, structuredClone(peer));
-      return structuredClone(peer);
+      for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `peer.${field}: expected a boolean` });
+      const previous = ctx.peers.get(peer.coreId);
+      const saved = { ...peer, readThreads: peer.readThreads ?? previous?.readThreads ?? false, viaClient: peer.viaClient ?? previous?.viaClient ?? false };
+      ctx.peers.set(peer.coreId, structuredClone(saved));
+      return structuredClone(saved);
     },
     'collaboration.untrust': async (params) => {
       const { coreId } = params;
       ctx.peers.delete(coreId);
       return { ok: true };
+    },
+    'collaboration.bridge.register': async (params) => {
+      if (!ctx.peers.has(params.coreId)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'coreId: expected a machine trusted for coordination' });
+      if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'enabled: expected a boolean' });
+      // Fake cores already exchange messages directly in memory; no socket route is needed.
+      return { ok: true };
+    },
+    'collaboration.bridge.forward': async (params) => {
+      if (typeof params.body !== 'string' || new TextEncoder().encode(params.body).byteLength > 262144) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'body: expected at most 262144 bytes' });
+      // Fake public identities have no signing keys. Only the simulated in-memory transport can authenticate them.
+      return { status: 403, body: ctx.peers.has(params.coreId) ? 'invalid signed message' : 'unknown peer', signature: '' };
+    },
+    'collaboration.bridge.reply': async (_params) => {
+      throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'requestId: expected a request sent to this owner connection' });
     },
   } satisfies Partial<FakeMethods>;
 }

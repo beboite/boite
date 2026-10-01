@@ -49,6 +49,7 @@ import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } 
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { ThreadFocus } from './threads/focus.ts';
+import { ProgressState } from './threads/progress.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -78,6 +79,7 @@ export class ThreadStore {
   /** Builds what a driver gets for a turn. */
   readonly contexts: TurnContexts;
   readonly focus: ThreadFocus;
+  readonly progress: ProgressState;
   /** Permission and question cards. */
   readonly cards: ThreadCards;
   /** Held asynchronous answers and wakes. */
@@ -99,6 +101,7 @@ export class ThreadStore {
     this.runner = new TurnRunner(core, this);
     this.contexts = new TurnContexts(core, this);
     this.focus = new ThreadFocus(core);
+    this.progress = new ProgressState(core);
     this.cards = new ThreadCards(core, this);
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);

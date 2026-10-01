@@ -51,6 +51,9 @@ export function drawUpdate(turn: AcpTurn, update: SessionNotification['update'])
     case 'plan':
       turn.ctx.tasks?.(update.entries.map((entry, index) => ({ id: String(index), text: entry.content, status: entry.status })));
       break;
+    case 'compaction_update':
+      turn.ctx.reportProgress?.(update.status === 'in_progress' ? 'compacting' : 'working', update.error ?? null);
+      break;
     default:
       // user_message_chunk, plan, plan_update, plan_removed,
       // config_option_update, session_info_update and the compaction
