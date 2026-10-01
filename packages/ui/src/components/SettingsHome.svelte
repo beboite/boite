@@ -28,6 +28,9 @@
   } = $props();
 
   let query = $state('');
+  let field = $state<HTMLInputElement>();
+  /** The result Enter opens: the arrows move it, a new query puts it back on top. */
+  let active = $state(0);
 
   /** "Clavier" finds "clavier", "Récents" finds "recents": case and accents never decide a match. */
   const fold = (text: string): string => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -69,10 +72,20 @@
     if (store.connection === 'ready') void store.loadSessions();
   });
 
+  // Settings opens to be searched: the keyboard lands in the field. A touch
+  // screen would answer with its keyboard over the tiles, so it waits for a tap.
+  $effect(() => {
+    if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) field?.focus({ preventScroll: true });
+  });
+
   function onkey(event: KeyboardEvent) {
-    if (event.key === 'Enter' && results[0]) {
+    const picked = results[Math.min(active, results.length - 1)];
+    if (event.key === 'Enter' && picked) {
       event.preventDefault();
-      onopen(results[0]);
+      onopen(picked);
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && results.length > 0) {
+      event.preventDefault();
+      active = (Math.min(active, results.length - 1) + (event.key === 'ArrowDown' ? 1 : results.length - 1)) % results.length;
     } else if (event.key === 'Escape' && query) {
       event.preventDefault();
       event.stopPropagation();
@@ -88,7 +101,7 @@
 
   <label class="search">
     <Search size={16} strokeWidth={1.75} />
-    <input type="search" bind:value={query} placeholder={strings.settings.search} aria-label={strings.settings.search} data-testid="settings-search" onkeydown={onkey} spellcheck="false" autocomplete="off" />
+    <input type="search" bind:this={field} bind:value={query} oninput={() => (active = 0)} placeholder={strings.settings.search} aria-label={strings.settings.search} data-testid="settings-search" onkeydown={onkey} spellcheck="false" autocomplete="off" />
   </label>
 
   {#if query.trim()}
@@ -96,8 +109,8 @@
       <p class="hint" data-testid="settings-search-empty">{strings.settings.searchEmpty}</p>
     {:else}
       <div class="card flush results" data-testid="settings-search-results">
-        {#each results as entry (`${entry.tab}:${entry.section}:${entry.label}`)}
-          <button type="button" class="ghost result" data-testid="settings-search-result" onclick={() => onopen(entry)}>
+        {#each results as entry, index (`${entry.tab}:${entry.section}:${entry.label}`)}
+          <button type="button" class="ghost result" class:active={index === Math.min(active, results.length - 1)} data-testid="settings-search-result" onpointermove={() => (active = index)} onclick={() => onopen(entry)}>
             <span class="label">{entry.label}</span>
             {#if entry.trail}<span class="trail">{entry.trail}</span>{/if}
             <ChevronRight size={15} />
@@ -107,6 +120,7 @@
     {/if}
   {:else}
     {#each groups as group, index (index)}
+      <h2>{strings.settings.homeGroups[group[0]!.group]}</h2>
       <div class="tiles">
         {#each group as tile (tile.id)}
           {@const Icon = tile.icon}
@@ -132,7 +146,7 @@
     max-width: var(--settings-width);
     height: 40px;
     padding: 0 12px;
-    margin-bottom: 28px;
+    margin-bottom: 24px;
     border: 1px solid var(--color-edge);
     border-radius: var(--radius-md);
     background: var(--color-surface-2);
@@ -149,6 +163,13 @@
     gap: 8px;
     max-width: var(--settings-width);
     margin-bottom: 24px;
+  }
+
+  h2 {
+    margin-bottom: 8px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-muted-foreground);
   }
 
   .tile {
@@ -182,7 +203,7 @@
     color: var(--color-muted-foreground);
   }
 
-  .text { display: grid; gap: 2px; min-width: 0; }
+  .text { display: grid; flex: 1; gap: 2px; min-width: 0; }
   .label { font-weight: 500; overflow-wrap: anywhere; }
   .status { font-size: var(--text-sm); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status.call { color: var(--color-accent); }
@@ -200,6 +221,7 @@
     color: var(--color-foreground);
     text-align: left;
   }
+  button.result.active { background: var(--color-hover); }
   .result + .result { border-top: 1px solid var(--color-border); }
   .result .label { flex: none; max-width: 60%; }
   .result .trail { flex: 1; min-width: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
