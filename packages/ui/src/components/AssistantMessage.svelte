@@ -64,7 +64,7 @@
 {#if message.role === 'system'}
   <div class="system-attribution" data-testid="message-system">{strings.chat.system}</div>
 {/if}
-{#if thought?.host === message.id}<ThinkingPart text={thought.text} live={thought.live} />{/if}
+{#if thought?.host === message.id && (thought.live || thought.text.trim().length > 0)}<ThinkingPart text={thought.text} live={thought.live} />{/if}
 <div class="parts">
   {#each runs as run (run.kind === 'memory' ? run.key : runKey(run))}
     {#if run.kind === 'memory'}

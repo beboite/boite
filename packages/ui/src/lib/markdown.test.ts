@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { renderMarkdown, withCaret } from './markdown';
+import { renderBlock, renderMarkdown, withCaret } from './markdown';
 
 describe('renderMarkdown', () => {
   test('inline code keeps emphasis and links literal', () => {
@@ -71,4 +71,16 @@ describe('withCaret', () => {
     expect(withCaret('<blockquote><p>q</p></blockquote>', 'C')).toBe('<blockquote><p>qC</p></blockquote>');
     expect(withCaret('<p>a</p><hr>', 'C')).toBe('<p>a</p><hr><p>C</p>');
   });
+});
+
+test('a kept block is the same markup, kept apart for plain and rich rendering', () => {
+  const block = 'See `packages/ui/src/app.css` and [the notes](docs/performance.md) for **why**.';
+  const plain = renderMarkdown(block, false);
+  const rich = renderMarkdown(block, true);
+  expect(rich).not.toBe(plain);
+  // Asked in both orders and again: each flag gets its own rendering back from the cache.
+  expect(renderBlock(block, true)).toBe(rich);
+  expect(renderBlock(block, false)).toBe(plain);
+  expect(renderBlock(block, true)).toBe(rich);
+  expect(renderBlock(block, false)).toBe(plain);
 });

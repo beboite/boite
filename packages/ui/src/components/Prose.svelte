@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { renderMarkdown } from '../lib/markdown';
+  import { renderBlock } from '../lib/markdown';
   import { ParagraphScan, answerText } from '../lib/message-display';
   import { strings } from '../lib/strings';
   import { experimentOn } from '../lib/experiments.svelte';
@@ -93,7 +93,8 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="prose" class:live data-testid="text-part" bind:this={host} onclick={follow}>
   {#each blocks as block, index (index)}
-    <div class="paragraph" data-testid="paragraph">{@html renderMarkdown(block, rich)}</div>
+    <!-- A streaming answer shows finished paragraphs only (`ParagraphScan`): every block here is final and kept. -->
+    <div class="paragraph" data-testid="paragraph">{@html renderBlock(block, rich)}</div>
   {/each}
 </div>
 {#if selected && rich}

@@ -171,11 +171,6 @@ test('leaving a long conversation right after a scroll returns to that scroll', 
   await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
-  // ResizeObserver restores the anchor on a frame after the list closes.
-  await page.waitFor(`(() => {
-    const restored = ${visibleAnchor};
-    return restored.id === ${JSON.stringify(anchor.id)} && Math.abs(restored.offset - ${anchor.offset}) < 10;
-  })()`, 5_000);
   const restoredAnchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   expect(restoredAnchor.id).toBe(anchor.id);
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
