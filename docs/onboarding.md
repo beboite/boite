@@ -79,9 +79,11 @@ counts as much as finishing the last one: the tour is not asked twice.
 
 ## The question
 
-The second screen asks who is at the keyboard, in the user's words rather than
-a feature list: "I'm not a developer! Don't confuse me with code and
-commands!" or "I'm a developer, give me the works." The answer is a preset,
+The second screen asks "Do you write code?", answered "No, I'm not a
+developer" or "Yes, I'm a developer". Under each answer, one line says what it
+changes on screen: where the app opens, what the side panel shows, which tools
+are in view and, for the first, that the agent asks before it acts. The line
+under both says it only sets the starting layout. The answer is a preset,
 not a mode. It writes settings that already exist, and no component reads the
 answer itself:
 
