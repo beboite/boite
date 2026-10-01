@@ -324,7 +324,7 @@ export const strings = {
     downloaded: 'Downloaded {received}',
     ready: 'Version {version} is ready to install.',
     waiting: 'Waiting for work to finish',
-    installing: 'Starting the installer',
+    installing: 'Agents finish their current step, then the installer starts',
     current: 'Boite is up to date.',
     failed: 'The update failed.',
     lastChecked: 'Checked at {time}',
@@ -338,7 +338,7 @@ export const strings = {
     install: 'Install and restart',
     readyAction: 'Update',
     installTitle: 'Install the Boite update?',
-    installBody: 'Boite will update and restart when work finishes. You can cancel while it waits.',
+    installBody: 'Agents finish their current tool call, 30 seconds at most. Boite then updates, restarts and resumes them.',
   },
 
   connection: {

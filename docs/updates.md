@@ -59,32 +59,35 @@ payload to disk and releases the download buffer. Progress events are limited
 to ten per second. Installation checks the payload against its retained digest
 before handing those bytes to Tauri's installer.
 
-Installing requires a click and an in-app confirmation. Boite then waits for
-the local core to become idle. Running and queued turns finish normally;
-permission cards remain answerable, and the app stays usable. Cancel restores
-the downloaded update without downloading it again. New work extends the
-wait. There is no deadline that interrupts an agent.
+Installing requires a click and an in-app confirmation. Boite does not wait
+for the threads to finish. The shell sends the owner-authenticated
+`POST /shutdown-for-update` with the expected core PID, and the core starts a
+[restart handoff](restart-handoff.md): each running turn ends the tool call it
+is in, 30 seconds at most, then stops. Queued turns stay queued. The core that
+starts after the installation resumes those threads and runs the queued turns.
 
-The shell polls the owner-authenticated `POST /shutdown-if-idle` with the
-expected core PID. The core refuses admission while a turn, queued execution,
-RPC, signed peer request or tracked process is active, or while a provider reports background work.
-This includes terminals and warm provider sessions: close a terminal or let
-the session expire before expecting installation. A paused task that has not
-started remains stored for a later explicit resume.
+The request commits the installation: there is nothing to cancel once it is
+sent. The shell allows 60 seconds for the core to exit and never force-kills
+it for an update. No installer runs if the request is refused or the exit
+cannot be confirmed. The shell holds reconnects until installation takes over,
+so the window cannot relaunch the old executable. An installation failure
+releases that hold; the core then starts again and resumes the threads as it
+would after the update. Remote cores are not touched by the desktop updater.
 
-Peer bodies awaiting authentication do not block admission. They are limited
-to 262144 bytes and five seconds; a peer authenticated after admission is refused.
+A core released before the handoff answers 404 to that request. The shell then
+falls back to the earlier rule, once, for that update: it polls
+`POST /shutdown-if-idle` and the core refuses while a turn, queued execution,
+RPC, signed peer request or tracked process is active, or while a provider
+reports background work, terminals and warm provider sessions included. The
+app stays usable, new work extends the wait, and Cancel restores the downloaded
+update without downloading it again. Once admitted, the core drains and exits
+within 12 seconds. Peer bodies awaiting authentication do not block that
+admission; they are limited to 262144 bytes and five seconds, and a peer
+authenticated after admission is refused.
 
-Admission and the refusal of new executions happen in the same event-loop
-turn. Once admitted, cancellation ends and the core drains and exits. The
-shell allows up to 12 seconds for that exit and never force-kills it for an
-update. No installer runs if admission or exit cannot be confirmed. The shell
-holds reconnects until installation takes over, so the window cannot relaunch
-the old executable. An installation failure releases that hold. Remote cores
-are not touched by the desktop updater.
-
-The Windows installer requires the same idle admission for an update or a
-manual reinstall. Its hooks (`windows/hooks.nsh` and
+The Windows installer run by hand, for an update or a reinstall, still requires
+idle admission: the in-app update has stopped the core before the installer
+starts. Its hooks (`windows/hooks.nsh` and
 `windows/stop-core.ps1`) first close a running shell, with the installer's own
 "Boite is running" question: an open window would start the core again within
 seconds, from the file about to be replaced. They then find the
@@ -109,8 +112,8 @@ packaged shell, and checks that busy and legacy cores remain running.
 The first silent upgrade from a core without idle admission needs an explicit
 stop after its work finishes, followed by a manual installer. An older in-app
 updater retains its previous interrupting behavior until it is replaced.
-This change postpones replacement of the whole application; it does not load
-a new core or UI alongside agents executing on the old version.
+An update replaces the whole application; it does not load a new core or UI
+alongside agents executing on the old version.
 
 Both in-app updates and downloaded Windows installers replace an existing
 installation in place. They keep its Start menu and desktop shortcuts intact

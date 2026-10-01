@@ -124,12 +124,13 @@ impl CoreState {
         }
     }
 
-    /// Waits for startup before holding reconnects, then asks for an idle-only stop.
-    /// Busy work remains usable. Cancellation never stops the core.
+    /// Waits for startup before holding reconnects, then asks the core to hand its turns to the
+    /// next one and stop. A core too old for that is asked for an idle-only stop, which
+    /// cancellation can still call off.
     pub(crate) fn wait_for_install(&self, control: &Mutex<crate::update_stop::InstallState>, committed: impl Fn()) -> Result<bool, String> {
         current_endpoint(self)?;
         self.held.store(true, Ordering::SeqCst);
-        let stopped = crate::update_stop::stop_when_idle(&self.launch.directory, control, committed);
+        let stopped = crate::update_stop::stop_for_update(&self.launch.directory, control, committed);
         // The stop leaves the exit of a core this shell started to its `Child`.
         reap_child(self);
         if !matches!(stopped, Ok(true)) {

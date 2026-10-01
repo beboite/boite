@@ -811,8 +811,10 @@ export type TurnExecution = Pick<ThreadSummary,
   /**
    * `background`: the agent resumed on its own after background work it
    * started finished; the turn carries no prompt of the user's.
+   * `resume`: the core restarted over a running turn and opened this one so
+   * the agent carries on (`docs/restart-handoff.md`).
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
 };
 
 export interface Turn {

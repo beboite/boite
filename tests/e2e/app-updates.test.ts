@@ -130,7 +130,7 @@ test('the update popup closes outside and by keyboard, and confirms installation
   await page.waitFor(`document.querySelector('${id('confirm-ok')}') === null`);
   await openUpdate();
   await page.waitFor(`document.querySelector('${id('app-update-install')}') === null`);
-  expect(await page.text(id('app-update-status'))).toContain("Démarrage");
+  expect(await page.text(id('app-update-status'))).toContain("l'installation démarre");
 }, 30_000);
 
 test('hiding the reminder persists without losing the update button or installation', async () => {
