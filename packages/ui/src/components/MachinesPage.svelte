@@ -195,17 +195,17 @@
           </button>
         {/if}
         {#if sync.reports[machine.id]}
-
           {@const done = sync.reports[machine.id]!}
-          <div class="sync-report" role="status" data-testid="machine-sync-report">
-            <p>{fill(strings.machines.synced, { source: done.source })}</p>
-            {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
-            {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
-            {#if done.report.providers.length > 0}
-              <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-              <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
-            {/if}
-          </div>
+          {#if done.report.keybindings === null || done.report.brain === 'absent' || done.report.providers.length > 0}
+            <div class="sync-report" role="status" data-testid="machine-sync-report">
+              {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
+              {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
+              {#if done.report.providers.length > 0}
+                <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
+                <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+              {/if}
+            </div>
+          {/if}
         {/if}
         {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
         {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
