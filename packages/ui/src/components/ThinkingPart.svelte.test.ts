@@ -50,3 +50,20 @@ test('a folded reasoning renders each new paragraph once and keeps the earlier o
   const rendered = render.mock.calls.reduce((sum, [source]) => sum + source.length, 0);
   expect(rendered).toBeLessThan(props.text.length * 2);
 });
+
+test('a reasoning with no text offers nothing to unfold', () => {
+  const props = $state({ text: '', live: true });
+  running = mount(ThinkingPart, { target: document.body, props });
+  flushSync();
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid=thinking-toggle]')!;
+  toggle.click();
+  flushSync();
+  expect(toggle.querySelector('.caret')).toBeNull();
+  expect(toggle.hasAttribute('aria-expanded')).toBe(false);
+  expect(document.querySelector('.fold')!.classList.contains('open')).toBe(false);
+
+  props.text = 'Reading the file.';
+  flushSync();
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('.fold')!.classList.contains('open')).toBe(true);
+});
