@@ -39,6 +39,12 @@ test('the owner app relays signed reads, preserves directional grants on reload,
     await page.evaluate('globalThis.__boiteTest.workspace.machines[0].label = "Client PC"');
     // Wait for the app's automatic link, not a manually installed test relay.
     await page.waitFor(`globalThis.__boiteTest.workspace.machines[0].store.coordinationPeers().then(peers => peers.some(peer => peer.coreId === ${JSON.stringify(cardServer!.coreId)}))`);
+    // Trust is published before both signed relay routes finish registering.
+    // Probe the routes before checking a destination's read permission.
+    await page.waitFor(`Promise.all([
+      globalThis.__boiteTest.workspace.machines[0].store.checkCoordinationPeer(${JSON.stringify(cardServer!.coreId)}),
+      globalThis.__boiteTest.workspace.machines[1].store.checkCoordinationPeer(${JSON.stringify(cardPC!.coreId)})
+    ]).then(() => true).catch(() => false)`);
     const address = { coreId: cardPC!.coreId, threadId: threads[0]!.id };
     await expect(server.call('collaboration.read', { threadId: threads[1]!.id, target: address })).rejects.toThrow('not allowed to read');
     await page.click('[data-testid=nav-settings]'); await page.click('[data-testid=settings-tab-machines]');
