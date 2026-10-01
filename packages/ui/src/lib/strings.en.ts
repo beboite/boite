@@ -259,7 +259,7 @@ export const strings = {
     syncOpenProviders: 'Open its providers',
     autoLinkFailed: 'Not linked automatically: {reason}',
     agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
-    reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'The app relays signed messages between owner connections. A public HTTPS address also lets agents communicate while this app is closed.',
+    reciprocalLink: 'Configured on both machines', oneSidedLink: 'Configured on one machine only', agentLinkReachable: 'Signed connection verified', publicIdentityHint: 'The app relays signed messages between owner connections. A public HTTPS address also lets agents communicate while this app is closed.',
   },
   app: {
     name: 'Boite',
@@ -719,7 +719,8 @@ export const strings = {
     /** The footer of a turn: `Working 12s`, then `Worked 4m 41s`. */
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
-    progress: { starting: 'Starting agent', thinking: 'Thinking', compacting: 'Compacting context', retrying: 'Retrying request', tool: 'Running tool', working: 'Receiving activity' },
+    progress: { starting: 'Starting agent', thinking: 'Thinking', compacting: 'Compacting context', retrying: 'Retrying request', tool: 'Running tool', working: 'Receiving activity', waiting: 'Waiting for provider' },
+    providerSignal: 'Provider signal {time} ago',
     lastActivity: 'Last activity {time} ago',
     noActivity: 'No new activity for {time}',
     activityTrace: 'View trace',

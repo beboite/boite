@@ -268,7 +268,7 @@ export const fr: Translation = {
     syncOpenProviders: 'Ouvrir ses fournisseurs',
     autoLinkFailed: 'Liaison automatique impossible : {reason}',
     agentLinkAddressRequired: 'Mettez les deux machines à jour pour utiliser le relais de l’app, ou définissez une adresse HTTPS joignable pour {machine} dans les réglages généraux.',
-    reciprocalLink: 'Confiance mutuelle', oneSidedLink: 'Confiance sur cette machine seulement', publicIdentityHint: 'L’app relaie les messages signés entre les connexions propriétaires. Une adresse HTTPS publique permet aussi aux agents de communiquer quand cette app est fermée.',
+    reciprocalLink: 'Configuré sur les deux machines', oneSidedLink: 'Configuré sur une machine seulement', agentLinkReachable: 'Connexion signée vérifiée', publicIdentityHint: 'L’app relaie les messages signés entre les connexions propriétaires. Une adresse HTTPS publique permet aussi aux agents de communiquer quand cette app est fermée.',
   },
   app: {
     name: 'Boite',
@@ -698,7 +698,8 @@ export const fr: Translation = {
     cacheTokens: '{read} lus depuis le cache, {write} écrits dedans',
     workingFor: 'Travaille depuis {time}',
     workedFor: 'A travaillé {time}',
-    progress: { starting: 'Démarrage de l\'agent', thinking: 'Réflexion', compacting: 'Compaction du contexte', retrying: 'Nouvelle tentative', tool: 'Exécution d\'un outil', working: 'Activité reçue' },
+    progress: { starting: 'Démarrage de l\'agent', thinking: 'Réflexion en cours', compacting: 'Compaction du contexte', retrying: 'Nouvelle tentative', tool: 'Outil en cours', working: 'Activité reçue', waiting: 'En attente du fournisseur' },
+    providerSignal: 'Signal du fournisseur il y a {time}',
     lastActivity: 'Dernière activité il y a {time}',
     noActivity: 'Aucune nouvelle activité depuis {time}',
     activityTrace: 'Voir la trace',

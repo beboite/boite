@@ -55,6 +55,31 @@ test('coordination steers the current Codex turn without creating a user turn', 
 });
 
 let harness: TestCore | null = null;
+
+test('Codex reasoning without summaries remains visible through tool completion and reconnect without creating text', async () => {
+  const client = await startCore(), threadId = await codexThread(client);
+  const thinking = client.next('thread.updated', thread => thread.id === threadId && thread.progress?.phase === 'thinking');
+  await client.call('turns.start', { threadId, prompt: '[silent-reasoning]' });
+  expect((await thinking).progress?.at).toEqual(expect.any(Number));
+  await waitFor(() => fakeLog().includes('silent tool complete'));
+  const reopened = await harness!.connect();
+  await reopened.call('threads.subscribe', { threadId });
+  const snapshot = await reopened.call('threads.get', { threadId });
+  expect(snapshot.progress?.phase).toBe('waiting');
+  const parts = snapshot.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts);
+  expect(parts.filter(part => part.type === 'text')).toEqual([{ type: 'text', text: 'Message already stored.', complete: true }]);
+  expect(parts.filter(part => part.type === 'thinking')).toEqual([]);
+  expect(parts.filter(part => part.type === 'tool')).toHaveLength(1);
+  expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done', output: 'Filesystem copied' });
+  expect(JSON.stringify(snapshot)).not.toContain('opaque-do-not-render');
+  const at = snapshot.progress!.at;
+  await Bun.sleep(1100);
+  const afterSignal = await reopened.call('threads.get', { threadId });
+  expect(afterSignal.progress?.at).toBe(at);
+  expect(afterSignal.progress?.providerAt).toBeGreaterThan(snapshot.progress!.providerAt!);
+  expect(afterSignal.messages).toEqual(snapshot.messages);
+  await client.call('turns.stop', { threadId });
+});
 let logFile = '';
 
 afterEach(async () => {

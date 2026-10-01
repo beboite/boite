@@ -90,10 +90,11 @@ export async function linkMachines(a: Machine, b: Machine): Promise<void> {
   } catch (cause) {
     forgetBridge(a, b);
     let message = cause instanceof Error ? cause.message : String(cause);
-    try {
-      if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); }
-      if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); }
-    } catch (rollback) { message += ` ${rollback instanceof Error ? rollback.message : String(rollback)}`; }
+    const rollbacks = await Promise.allSettled([
+      (async () => { if (trustedA && bIdentity) { if (previousA) await a.store.trustCoordinationPeer(previousA); else await a.store.untrustCoordinationPeer(bIdentity.coreId); } })(),
+      (async () => { if (trustedB && aIdentity) { if (previousB) await b.store.trustCoordinationPeer(previousB); else await b.store.untrustCoordinationPeer(aIdentity.coreId); } })(),
+    ]);
+    for (const rollback of rollbacks) if (rollback.status === 'rejected') message += ` ${rollback.reason instanceof Error ? rollback.reason.message : String(rollback.reason)}`;
     throw new Error(message);
   }
 }
@@ -152,12 +153,13 @@ class AgentAutoLink {
       const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
       if (peersA.some(peer => peer.coreId === right.coreId) && peersB.some(peer => peer.coreId === left.coreId)) {
         await bridgeMachines(a, b, left.coreId, right.coreId);
-        return;
-      }
-      await linkMachines(a, b);
+        // Persisted trust is configuration, not proof that either signed route still works.
+        await Promise.all([a.store.checkCoordinationPeer(right.coreId), b.store.checkCoordinationPeer(left.coreId)]);
+      } else await linkMachines(a, b);
       this.version += 1;
     } catch (cause) {
       this.failures = { ...this.failures, [key]: cause instanceof Error ? cause.message : String(cause) };
+      this.version += 1;
     }
   }
 

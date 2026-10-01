@@ -6,9 +6,11 @@
   import { fill, strings } from '../lib/strings';
   import { workspace, type Machine } from '../lib/workspace.svelte';
   import { agentAutoLink, forgetUnlinked, linkMachines, rememberUnlinked } from '../lib/agent-links.svelte';
+  import { loadMachineLinks, type LinkHealth } from '../lib/agent-link-health';
 
   let identities = $state<Record<string, CoordinationPeer>>({});
   let peers = $state<Record<string, CoordinationPeer[]>>({});
+  let health = $state<Record<string, Record<string, LinkHealth>>>({});
   let error = $state<string | null>(null);
   let busy = $state('');
   let refreshVersion = 0;
@@ -18,7 +20,7 @@
     return machines.find(machine => identities[machine.id]?.coreId === peer.coreId)?.label ?? peer.name;
   }
   let pairs = $derived.by(() => {
-    const result: { a: Machine; b: Machine; linkedA: boolean; linkedB: boolean }[] = [];
+    const result: { a: Machine; b: Machine; linkedA: boolean; linkedB: boolean; reachable: boolean; failure: string | undefined }[] = [];
     for (let a = 0; a < machines.length; a += 1) for (let b = a + 1; b < machines.length; b += 1) {
       const left = machines[a]!;
       const right = machines[b]!;
@@ -27,6 +29,8 @@
       result.push({
         a: left,
         b: right,
+        reachable: Boolean(rightId && leftId && health[left.id]?.[rightId]?.ok && health[right.id]?.[leftId]?.ok),
+        failure: (rightId && health[left.id]?.[rightId]?.error) || (leftId && health[right.id]?.[leftId]?.error) || undefined,
         linkedA: Boolean(rightId && peers[left.id]?.some(peer => peer.coreId === rightId)),
         linkedB: Boolean(leftId && peers[right.id]?.some(peer => peer.coreId === leftId))
       });
@@ -44,6 +48,7 @@
         refreshVersion += 1;
         identities = {};
         peers = {};
+        health = {};
         error = null;
       }
     });
@@ -54,14 +59,11 @@
     const current = machines;
     error = null;
     try {
-      const rows = await Promise.all(current.map(async machine => ({
-        id: machine.id,
-        identity: await machine.store.coordinationIdentity(),
-        peers: await machine.store.coordinationPeers()
-      })));
+      const rows = await Promise.all(current.map(loadMachineLinks));
       if (version !== refreshVersion) return;
       identities = Object.fromEntries(rows.map(row => [row.id, row.identity]));
       peers = Object.fromEntries(rows.map(row => [row.id, row.peers]));
+      health = Object.fromEntries(rows.map(row => [row.id, row.health]));
     } catch (cause) {
       if (version !== refreshVersion) return;
       error = cause instanceof Error ? cause.message : String(cause);
@@ -126,8 +128,11 @@
     <div class="rows">
       {#each pairs as pair (`${pair.a.id}:${pair.b.id}`)}
         <div class="row" data-testid="agent-link-pair">
-          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small class:link-failure={Boolean(agentAutoLink.failureOf(pair.a, pair.b))}>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : agentAutoLink.failureOf(pair.a, pair.b) ? fill(strings.machines.autoLinkFailed, { reason: agentAutoLink.failureOf(pair.a, pair.b)! }) : strings.machines.linkAgents}</small></span>
-          <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} />{strings.machines.linkAgents}</button>
+          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : strings.machines.linkAgents}</small>
+            {#if pair.reachable}<small>{strings.machines.agentLinkReachable}</small>
+            {:else if pair.failure || agentAutoLink.failureOf(pair.a, pair.b)}<small class="link-failure">{fill(strings.machines.autoLinkFailed, { reason: pair.failure ?? agentAutoLink.failureOf(pair.a, pair.b)! })}</small>{/if}
+          </span>
+          <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB && pair.reachable} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} />{strings.machines.linkAgents}</button>
         </div>
       {/each}
     </div>
@@ -139,7 +144,10 @@
       {#each peers[machine.id] ?? [] as peer (peer.coreId)}
         <div class="row peer" data-testid="agent-peer">
           <div class="peer-main">
-            <span><strong>{machine.label} → {peerLabel(peer)}</strong><small>{peer.viaClient ? strings.machines.agentLinkViaApp : peer.url}</small></span>
+            <span><strong>{machine.label} → {peerLabel(peer)}</strong><small>{peer.viaClient ? strings.machines.agentLinkViaApp : peer.url}</small>
+              {#if health[machine.id]?.[peer.coreId]?.ok}<small>{strings.machines.agentLinkReachable}</small>
+              {:else if health[machine.id]?.[peer.coreId]?.error}<small class="link-failure">{health[machine.id]![peer.coreId]!.error}</small>{/if}
+            </span>
             <button class="ghost icon-only" aria-label={strings.machines.unlinkAgent} title={strings.machines.unlinkAgent} disabled={Boolean(busy)} onclick={() => void unlink(machine, peer)}><Unlink size={14} /></button>
           </div>
           <label class="read-access">

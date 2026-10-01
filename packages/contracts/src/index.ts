@@ -657,9 +657,11 @@ export interface PromptCache {
 /** Latest observed execution event of the current turn, never a synthetic heartbeat. */
 export interface ThreadProgress {
   turnId: TurnId;
-  phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working';
+  phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working' | 'waiting';
   detail: string | null;
   at: Timestamp;
+  /** Latest provider signal, including status notifications that do not advance activity. */
+  providerAt?: Timestamp | null;
 }
 
 export interface ThreadSummary {
@@ -954,7 +956,7 @@ export interface PendingMove {
 }
 
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }

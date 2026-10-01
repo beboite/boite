@@ -230,6 +230,28 @@ async function runTurn(turnId: string, text: string): Promise<void> {
   }
   if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
+  if (text.includes('[silent-reasoning]')) {
+    notify('item/agentMessage/delta', { threadId, turnId, itemId: 'stored-answer', delta: 'Message already stored.' });
+    notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'stored-answer', text: 'Message already stored.' } });
+    for (let index = 0; index < 35; index++) {
+      const item = { type: 'reasoning', id: `private-reasoning-${index}`, summary: [], encryptedContent: 'opaque-do-not-render' };
+      notify('item/started', { threadId, turnId, item });
+      await Bun.sleep(Number(process.env['CODEX_FAKE_SILENT_DELAY'] ?? 8));
+      notify('item/completed', { threadId, turnId, item });
+    }
+    notify('item/started', { threadId, turnId, item: commandItem('silent-tool', 'inProgress', null) });
+    await Bun.sleep(100);
+    notify('item/completed', { threadId, turnId, item: commandItem('silent-tool', 'completed', 'Filesystem copied') });
+    log('silent tool complete');
+    for (let index = 0; index < 15; index++) {
+      await Bun.sleep(100);
+      notify('thread/status/changed', { threadId, status: { type: 'active', activeFlags: [] } });
+    }
+    await awaitInterrupt(turnId);
+    waiting.delete(turnId); interrupted.delete(turnId);
+    notify('turn/completed', { threadId, turn: turnRecord(turnId, 'interrupted') });
+    return;
+  }
   const say = (chunk: string): void => {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: chunk });
   };

@@ -116,6 +116,8 @@ export interface TurnContext {
   log(level: 'info' | 'warn' | 'error', message: string): void;
   /** Actual provider progress, not a timer heartbeat; the core stamps receipt time. */
   reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
+  /** A provider signal that need not mean execution advanced. */
+  reportProviderEvent?(): void;
   /**
    * The `/name` commands the agent takes, whole, whenever the driver learns or
    * relearns them: the core keeps the list per thread and tells the clients

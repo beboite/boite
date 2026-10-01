@@ -103,3 +103,15 @@ test('a finished turn ignores retained provider progress', () => {
   expect(document.querySelector('[data-testid=turn-progress]')).toBeNull();
   expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
 });
+
+test('provider signals do not imply new execution progress or text', () => {
+  const now = Date.now();
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', startedAt: now - 120_000, finishedAt: null, usage: null }),
+    progress: { turnId: 'turn-1', phase: 'waiting', detail: null, at: now - 75_000, providerAt: now },
+  } });
+  flushSync();
+  expect(text('turn-progress')).toBe('Waiting for provider');
+  expect(text('turn-last-activity')).toBe('No new activity for 1m 15s');
+  expect(text('turn-provider-signal')).toBe('Provider signal 0s ago');
+});

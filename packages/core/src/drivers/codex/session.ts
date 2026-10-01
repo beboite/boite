@@ -533,6 +533,7 @@ export class CodexSession {
     const turn = this.current;
     if (turn === null) return;
     if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;
+    turn.ctx.reportProviderEvent?.();
     switch (method) {
       case 'turn/started': {
         const record = params['turn'] as CodexTurnRecord | undefined;
@@ -541,7 +542,7 @@ export class CodexSession {
       }
       case 'item/agentMessage/delta':
         if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
-        turn.writeText(textOf(params['delta']));
+        turn.writeText(textOf(params['delta']), typeof params['itemId'] === 'string' ? params['itemId'] : undefined);
         break;
       case 'item/commandExecution/outputDelta':
         if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
@@ -555,15 +556,23 @@ export class CodexSession {
         break;
       }
       case 'item/reasoning/textDelta':
+        turn.ctx.reportProgress?.('thinking');
         turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:content:${String(params['contentIndex'] ?? 0)}`);
         break;
       case 'item/reasoning/summaryTextDelta':
+        turn.ctx.reportProgress?.('thinking');
         turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:summary:${String(params['summaryIndex'] ?? 0)}`);
         break;
       case 'item/started':
       case 'item/completed': {
         const item = params['item'] as CodexItem | undefined;
         if (item === undefined || typeof item.id !== 'string') break;
+        if (item.type === 'reasoning') {
+          // Presence is activity even with summary=[]; encrypted content is never read.
+          turn.ctx.reportProgress?.('thinking');
+          break;
+        }
+        if (item.type === 'contextCompaction' && method === 'item/started') turn.ctx.reportProgress?.('compacting');
         if (item.type === 'contextCompaction' && method === 'item/completed') {
           turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
           break;
@@ -575,8 +584,15 @@ export class CodexSession {
           }
           break;
         }
+        if (item.type === 'agentMessage' && method === 'item/completed' && typeof item.text === 'string') {
+          turn.completeText(item.id, item.text);
+          break;
+        }
         const view = toolViewOf(item, method === 'item/completed');
-        if (view !== null) turn.upsertTool(item.id, view);
+        if (view !== null) {
+          turn.upsertTool(item.id, view);
+          if (method === 'item/completed' && view.status !== 'running') turn.ctx.reportProgress?.('waiting');
+        }
         break;
       }
       case 'turn/completed': {

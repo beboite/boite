@@ -48,6 +48,14 @@ the user removes there stays removed until the user links the pair again by
 hand. HTTP is accepted only on numeric loopback for two cores on the same
 computer.
 
+A connected machine in the app does not by itself establish agent coordination.
+Machines shows saved reciprocal configuration separately from a successful
+signed connection check. A failed check remains visible even when both cores
+have saved peer cards, and Link agents can repair that pair. Each core keeps
+its identity, trusted peers and read permissions in its data directory across
+restarts and updates. The app recreates its session-scoped relay when both owner
+connections reconnect; it checks the saved identities in both directions.
+
 Across projects and machines is enabled by default for ordinary conversations.
 Both endpoints must allow it: disabling it restricts discovery and messages to
 that conversation's project on the same core. A machine link never overrides

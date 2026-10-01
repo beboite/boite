@@ -48,6 +48,8 @@ test('linking two connected machines establishes reciprocal public trust', async
   expect((await first.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-second']);
   expect((await second.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-first']);
   expect(document.querySelectorAll('[data-testid="agent-peer"]')).toHaveLength(2);
+  expect(document.querySelector('[data-testid="agent-link-pair"]')?.textContent).toContain('Configured on both machines');
+  expect(document.querySelector('[data-testid="agent-link-pair"]')?.textContent).toContain('Signed connection verified');
 
   document.querySelector<HTMLButtonElement>('[data-testid="agent-peer"] button')!.click();
   await settle();
@@ -192,4 +194,44 @@ test('an older destination displays an unavailable permission without implying a
   await settle();
   const box = document.querySelector<HTMLInputElement>('[data-testid="agent-peer-read"]')!;
   expect(box.disabled).toBe(true); expect(box.checked).toBe(false);
+});
+
+test('persisted mutual trust is checked again and an unreachable link remains repairable', async () => {
+  const first = await machine('first', 'First'), second = await machine('second', 'Second');
+  await first.trustCoordinationPeer({ ...await second.coordinationIdentity(), readThreads: true });
+  await second.trustCoordinationPeer(await first.coordinationIdentity());
+  const check = vi.spyOn(first, 'checkCoordinationPeer').mockRejectedValue(new Error('First cannot verify Second'));
+  const reverse = vi.spyOn(second, 'checkCoordinationPeer');
+  const a = { id: 'first', label: 'First', store: first }, b = { id: 'second', label: 'Second', store: second };
+  workspace.machines = [a, b];
+  await agentAutoLink.sweep();
+  expect(check).toHaveBeenCalledWith('core-second');
+  expect(reverse).toHaveBeenCalledWith('core-first');
+  expect(agentAutoLink.failureOf(a, b)).toContain('First cannot verify Second');
+  component = mount(RemoteCoordination, { target: document.body });
+  await vi.waitFor(() => {
+    flushSync();
+    expect(document.querySelector('[data-testid="agent-link-pair"]')?.textContent).toContain('First cannot verify Second');
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="agent-link"]')?.disabled).toBe(false);
+  });
+  expect((await first.coordinationPeers())[0]?.coreId).toBe('core-second');
+  check.mockRestore();
+  document.querySelector<HTMLButtonElement>('[data-testid="agent-link"]')!.click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="agent-link"]')?.disabled).toBe(true);
+    expect(document.querySelector('[data-testid="agent-link-pair"]')?.textContent).not.toContain('First cannot verify Second');
+  });
+  expect((await first.coordinationPeers())[0]?.readThreads).toBe(true);
+  expect((await second.coordinationPeers())[0]?.readThreads).toBe(false);
+});
+
+test('a failed link attempts both trust rollbacks even if the first rollback fails', async () => {
+  const first = await machine('first', 'First'), second = await machine('second', 'Second');
+  vi.spyOn(first, 'checkCoordinationPeer').mockRejectedValue(new Error('link failed'));
+  vi.spyOn(first, 'untrustCoordinationPeer').mockRejectedValue(new Error('First rollback failed'));
+  const rollback = vi.spyOn(second, 'untrustCoordinationPeer');
+  await expect(linkMachines({ id: 'first', label: 'First', store: first }, { id: 'second', label: 'Second', store: second })).rejects.toThrow('First rollback failed');
+  expect(rollback).toHaveBeenCalledWith('core-first');
+  expect(await second.coordinationPeers()).toEqual([]);
 });

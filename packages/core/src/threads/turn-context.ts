@@ -183,6 +183,7 @@ export class TurnContexts {
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       emit,
       reportProgress: progress,
+      reportProviderEvent: () => this.threads.progress.contact(threadId, turn.id),
       log: (level, message) => {
         this.core.log(level, message);
       },

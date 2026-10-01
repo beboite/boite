@@ -37,6 +37,7 @@
   const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
   const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
   const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
+  const providerAge = $derived(observed?.providerAt == null ? null : Math.max(0, now - observed.providerAt));
 
   // The clock only ticks while the turn runs and the page is on screen.
   $effect(() => {
@@ -59,6 +60,10 @@
       <span data-testid="turn-progress" title={observed.detail ?? undefined}>{activityLabel}{observed.detail ? `: ${observed.detail}` : ''}</span>
       <span class="dot" aria-hidden="true">·</span>
       <span class:quiet={quiet >= 60_000} data-testid="turn-last-activity">{fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) })}</span>
+      {#if providerAge !== null && observed.providerAt! > observed.at}
+        <span class="dot" aria-hidden="true">·</span>
+        <span data-testid="turn-provider-signal">{fill(strings.chat.providerSignal, { time: elapsed(providerAge) })}</span>
+      {/if}
       {#if trace}<button type="button" class="activity-trace" data-testid="turn-activity-trace" onclick={trace}>{strings.chat.activityTrace}</button>{/if}
     {/if}
     {#if turn.finishedAt !== null}
