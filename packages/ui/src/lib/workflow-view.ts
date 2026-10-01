@@ -63,11 +63,11 @@ export function nodeProgress(node: WorkflowNode): { done: number; total: number;
   return { done: count('done'), total: node.instances.length, running: count('running'), failed: count('failed') + count('stopped') };
 }
 
-/** The route a step runs on: its first execution's once started, its profile's before. */
+/** The route a step runs on: its first execution's once started, its profile's before. Null before a step without profile starts: it takes the conversation's model. */
 export function routeOf(node: WorkflowNode, profiles: DelegationProfile[]): { providerId: string; model: string; profile: string } | null {
   const started = node.instances.find(inst => inst.providerId !== null);
   const profile = profiles.find(entry => entry.id === node.profileId);
-  if (started?.providerId) return { providerId: started.providerId, model: started.model ?? profile?.model ?? '', profile: profile?.name ?? node.profileId };
+  if (started?.providerId) return { providerId: started.providerId, model: started.model ?? profile?.model ?? '', profile: profile?.name ?? node.profileId ?? '' };
   return profile ? { providerId: profile.providerId, model: profile.model, profile: profile.name } : null;
 }
 

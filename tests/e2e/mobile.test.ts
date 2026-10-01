@@ -275,14 +275,14 @@ test('a phone pins and archives a thread without a right-click, from the header 
   const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
   const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
   expect(trigger.height).toBeGreaterThanOrEqual(44);
-  // Agents and Terminal move into the title's sheet, so the title keeps most of the row.
+  // Subagents and Terminal sit in the title's sheet, so the title keeps most of the row.
   expect(trigger.width).toBeGreaterThan(200);
-  expect(await page.evaluate(`['agents-toggle', 'terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
+  expect(await page.evaluate(`['terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
   expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'coordination', 'find', 'move', 'archive', 'delete']);
-  // No team on this thread: the entry offers to start one, as the desktop title menu does.
-  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Hand work to other agents');
+  // The entry reads the same with or without subagents, as on the desktop title menu.
+  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Subagents');
   await capture('mobile-thread-menu.png');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);

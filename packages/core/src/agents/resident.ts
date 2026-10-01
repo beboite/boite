@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentProfile, AgentRuntimeConfig, AgentScope, AgentSelection, AgentWork, RpcParams } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { refused } from '../errors.ts';
@@ -22,7 +21,7 @@ export class ResidentAgents {
     if (saved) return { ...saved, defaultRoute: agent.selection };
     const model = agent.selection.model ?? this.core.providers.require(agent.selection.providerId).models.find(m => m.default)?.id ?? this.core.providers.require(agent.selection.providerId).models[0]?.id;
     if (!model) throw refused('default model: choose a model for this agent');
-    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:structuredClone(DEFAULT_DELEGATION_CONFIG), compactAfterTurns:12,maxRunMinutes:10 };
+    return { defaultRoute:{...agent.selection,model}, allowedRoutes:[{...agent.selection,model,id:'default',name:'Default'}], subagents:{enabled:false,paused:false,profiles:[]}, compactAfterTurns:12,maxRunMinutes:10 };
   }
   grants(): AgentAccountGrant[] { return (this.core.journal.getSetting('agents:account-grants') as AgentAccountGrant[] | undefined) ?? []; }
   accountAllowed(agentId: string, accountId: string): boolean { const grant=this.grants().find(g=>g.accountId===accountId); return !grant || grant.agentIds===null || grant.agentIds.includes(agentId); }

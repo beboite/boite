@@ -51,9 +51,10 @@ function planError<T>(run: () => T): T {
 }
 
 /**
- * The core runs the graph: every step is an ordinary child thread on an
- * owner-approved delegation profile, with concurrency set by the plan
- * and no orchestrating model. A run is one JSON record; every change reloads
+ * The core runs the graph: every step is an ordinary child thread on the
+ * conversation's own model, or on a delegation profile the step names, with
+ * concurrency set by the plan and no orchestrating model. A workflow needs no
+ * enabled team; only a team the owner paused holds its runs. A run is one JSON record; every change reloads
  * it from SQLite, because a turn can finish synchronously
  * inside the `startTurn` that started it.
  */
@@ -88,6 +89,10 @@ export class Workflows {
   }
 
   owns(threadId: string): boolean { return this.stepOf.has(threadId); }
+  /** Whether the conversation has a run that can still start steps. */
+  active(rootId: string): boolean {
+    return this.core.journal.db.query("SELECT 1 FROM workflow_runs WHERE root_id = ? AND status IN ('running', 'paused') LIMIT 1").get(rootId) !== null;
+  }
 
   // -- records ---------------------------------------------------------------
 
@@ -139,8 +144,7 @@ export class Workflows {
   }
   private team(rootId: string): DelegationConfig {
     const config = this.core.delegation.config(rootId);
-    if (!config.enabled) throw refused('workflows run on delegation profiles: the owner enables delegation for this thread in Agents first');
-    if (config.paused) throw refused('delegation is paused for this thread; the owner resumes it in Agents');
+    if (config.enabled && config.paused) throw refused('subagents are paused for this thread; the owner resumes them in Subagents > Settings');
     return config;
   }
   private request(scope: string, requestId: unknown, fingerprint: string): WorkflowRun | null {
@@ -202,7 +206,7 @@ export class Workflows {
   }
 
   private node(step: WorkflowStepPlan, after: string[]): WorkflowNode {
-    return { id: step.id, title: step.title ?? step.id, profileId: step.profile, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
+    return { id: step.id, title: step.title ?? step.id, profileId: step.profile ?? null, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
   }
 
   extend(params: RpcParams<'workflows.extend'>, principal: Principal): WorkflowRun {
@@ -262,8 +266,8 @@ export class Workflows {
     if (run.status !== 'running') return;
     if (this.settleNodes(run)) this.save(run);
     const config = this.core.delegation.config(run.rootThreadId);
-    if (!config.enabled || config.paused) {
-      this.save({ ...run, status: 'paused', error: 'Delegation is paused or disabled for this thread. Resume to continue.' });
+    if (config.enabled && config.paused) {
+      this.save({ ...run, status: 'paused', error: 'Subagents are paused for this thread. Resume to continue.' });
       return;
     }
     // Open every step whose dependencies ended; a skip can open the next one.
@@ -349,12 +353,13 @@ export class Workflows {
     const retry = inst.threadId !== null;
     let threadId = inst.threadId;
     if (threadId === null) {
-      const profile = config.profiles.find(p => p.id === node.profileId);
-      if (!profile) return failNow(`profile ${node.profileId} is no longer approved for this thread`);
       try {
+        const root = this.core.threads.require(run.rootThreadId);
+        // No profile named: the step is one more conversation on the model the user already chose here.
+        const profile = this.core.delegation.route(root, config, node.profileId);
+        if (!profile) return failNow(`profile ${node.profileId} is no longer a profile of this thread`);
         const provider = this.core.providers.require(profile.providerId);
         assertDriverRunnable(provider.protocol, this.core.providers.summary(provider.id), this.core.accounts.require(profile.accountId), () => this.core.providers.launcherScriptOnly(provider.id));
-        const root = this.core.threads.require(run.rootThreadId);
         const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
         const key = inst.key;
         threadId = this.core.delegation.createChild(root, profile, title, id => {
@@ -447,6 +452,10 @@ export class Workflows {
   private turnFinished(turn: Turn): void {
     const entry = this.stepOf.get(turn.threadId);
     if (!entry) {
+      // A failed turn of the conversation holds its runs, whether or not it has a team.
+      if (turn.status !== 'done' && turn.status !== 'stopped') {
+        for (const run of this.runsWhere("root_id = ? AND status = 'running'", turn.threadId)) this.save({ ...run, status: 'paused', error: 'A turn of the conversation failed. Resume to continue.' });
+      }
       // The root finished a turn of its own: an undelivered result may go now.
       const pending = this.runsWhere("root_id = ? AND status IN ('done', 'failed') AND json_extract(data, '$.delivered') = 0", turn.threadId);
       if (pending.length) setTimeout(() => { for (const run of pending) this.deliver(run.id); }, 0).unref?.();
@@ -567,10 +576,10 @@ export class Workflows {
     }
   }
 
-  /** A held summary goes again once the owner enables or resumes the team. */
+  /** A held summary goes again once the owner resumes the team. */
   private redeliver(rootId: string): void {
     const config = this.core.delegation.config(rootId);
-    if (!config.enabled || config.paused) return;
+    if (config.enabled && config.paused) return;
     const held = this.runsWhere("root_id = ? AND status IN ('done', 'failed', 'paused') AND json_extract(data, '$.delivered') = 0", rootId)
       .filter(run => run.status === 'paused'
         ? run.nodes.every(node => node.status === 'done' || node.status === 'skipped')
@@ -635,9 +644,8 @@ export class Workflows {
   /** An owner resume also resumes the team the steps run in; an agent cannot. */
   private resumeTeam(rootId: string, principal: Principal): void {
     const config = this.core.delegation.config(rootId);
-    if (!config.enabled) throw refused('delegation is disabled for this thread; the owner enables it in Agents');
-    if (!config.paused) return;
-    if (principal !== 'owner') throw refused('delegation is paused for this thread; the owner resumes it');
+    if (!config.enabled || !config.paused) return;
+    if (principal !== 'owner') throw refused('subagents are paused for this thread; the owner resumes them');
     this.core.delegation.configure(rootId, { ...config, paused: false });
   }
 

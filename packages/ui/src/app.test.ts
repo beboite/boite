@@ -971,10 +971,9 @@ test("a header button's right click hides it, and the Appearance page brings it 
   await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') === null);
   expect(work.current.hidden).toEqual(['header.terminal']);
 
-  // The same button's menu, on another one, leads to the page that lists them all.
-  // Team shows once that team has loaded.
-  await waitFor(() => document.querySelector('[data-testid=agents-toggle]') !== null);
-  query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  // The same menu, on another button, leads to the page that lists them all.
+  await waitFor(() => document.querySelector('.context-control') !== null);
+  query('.context-control').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
   await waitFor(() => document.querySelector('[data-testid=settings-buttons]') !== null);

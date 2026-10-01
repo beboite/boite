@@ -108,15 +108,15 @@ test('rolled-back child notifications preserve team snapshots and stopped admiss
   } finally { off(); }
 });
 
-test('disabled workflows are explained to every driver instead of silently falling back to native agents', async () => {
+test('a conversation without a team is offered workflows when the request names one, with no refusal and no set-up step', async () => {
   const runs = scripted();
   const { h, owner, threadId } = await setup({ enabled: false, profiles: [] });
   await owner.call('turns.start', { threadId, prompt: 'Run a dynamic workflow' });
   await waitFor(() => runs.has(threadId));
-  expect(runs.get(threadId)!.ctx.prompt).toContain('Boite delegation and workflows are disabled');
-  expect(runs.get(threadId)!.ctx.prompt).toContain('Do not substitute native subagents');
-  expect(runs.get(threadId)!.ctx.prompt).toContain('Team');
-  expect(h.core.delegation.instructions(threadId)).toContain('owner');
+  const prompt = runs.get(threadId)!.ctx.prompt;
+  for (const part of ['boite workflow help', 'boite workflow run', "this conversation's model"]) expect(prompt).toContain(part);
+  for (const part of ['disabled', 'owner must', 'Do not substitute', 'Team settings']) expect(prompt).not.toContain(part);
+  expect(h.core.delegation.instructions(threadId, 'Fix the parser')).toBe('');
   runs.get(threadId)!.finish();
 });
 
@@ -250,7 +250,7 @@ test('agent tokens can only delegate inside their own owner-enabled family, neve
     const other = (await echoThread(h, owner, 'Unrelated')).threadId;
     await expect(agent.call('delegation.send', { threadId, toThreadId: other, text: 'no', requestId: 'outside' })).rejects.toThrow('direct child');
     await expect(worker.call('delegation.stop', { threadId: child.thread.id, agentId: other })).rejects.toThrow('only itself');
-    await expect(owner.call('delegation.spawn', { threadId: other, profileId: 'worker', task: 'Off', requestId: 'off' })).rejects.toThrow('disabled');
+    await expect(owner.call('delegation.spawn', { threadId: other, profileId: 'worker', task: 'Off', requestId: 'off' })).rejects.toThrow('profileId: expected conversation');
     const letter = await worker.call('delegation.send', { threadId: child.thread.id, toThreadId: threadId, text: 'Need a path', requestId: 'ask' });
     expect(letter.from.threadId).toBe(child.thread.id);
     await expect(worker.call('delegation.send', { threadId: child.thread.id, toThreadId: threadId, text: 'Forged completion', requestId: 'result:fake' })).rejects.toThrow('reserved');
@@ -338,6 +338,50 @@ test('stop all cancels queued and running children and blocks automatic wakeups 
   expect(h.core.delegation.get(threadId).turnsUsed).toBe(2);
 });
 
+test('a conversation delegates to its own model with nothing configured, and no stop or restart pauses a team with nothing pending', async () => {
+  const runs = scripted();
+  const h = await startTestCore(); cores.push(h);
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner, 'Parent');
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    await owner.call('turns.start', { threadId, prompt: 'Hand the review to a subagent' });
+    await waitFor(() => runs.has(threadId));
+    expect(runs.get(threadId)!.ctx.prompt).toContain('boite delegate spawn');
+    expect(h.core.delegation.instructions(threadId, 'Fix the parser')).toBe('');
+    // A stopped turn of a conversation that delegated nothing leaves the team usable.
+    await owner.call('turns.stop', { threadId });
+    await waitFor(() => h.core.threads.require(threadId).status !== 'running');
+    expect(h.core.delegation.config(threadId)).toEqual({ enabled: true, paused: false, profiles: [] });
+    const child = await agent.call('delegation.spawn', { threadId, profileId: 'conversation', task: 'Review', requestId: 'plain' });
+    const parent = h.core.threads.require(threadId);
+    expect([child.thread.providerId, child.thread.accountId, child.thread.model]).toEqual([parent.providerId, parent.accountId, parent.model]);
+    await waitFor(() => runs.has(child.thread.id));
+    const first = runs.get(threadId);
+    runs.get(child.thread.id)!.finish('Reviewed');
+    // The result wakes the parent, which had nothing to switch on to receive it.
+    await waitFor(() => runs.get(threadId) !== first);
+    expect(runs.get(threadId)!.ctx.prompt).toContain('Reviewed');
+    runs.get(threadId)!.finish();
+    await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+    // The child finished and its result was delivered: stopping a later turn pauses nothing.
+    await owner.call('turns.stop', { threadId });
+    expect(h.core.delegation.config(threadId).paused).toBe(false);
+    // A profile an owner already saved under the built-in id keeps its own route.
+    const mine = { id: 'conversation', name: 'Mine', providerId: 'echo', accountId: parent.accountId, model: parent.model!, effort: 'low' };
+    await owner.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [mine] } });
+    expect((await agent.call('delegation.spawn', { threadId, profileId: 'conversation', task: 'Again', requestId: 'mine' })).thread.effort).toBe('low');
+    // That child is still working, so Stop all pauses; the owner's resume leaves nothing pending for a restart.
+    await owner.call('delegation.stop', { threadId });
+    expect(h.core.delegation.config(threadId).paused).toBe(true);
+    await owner.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [mine] } });
+  } finally { agent.close(); }
+  await h.core.close();
+  const restarted = new Core({ dataDir: h.dataDir, token: h.token });
+  try { expect(restarted.delegation.get(threadId).config.paused).toBe(false); }
+  finally { await restarted.close(); }
+});
+
 test('archiving the parent stops its children and restart preserves the team while pausing spending', async () => {
   scripted(); const { h, owner, threadId, spawn, config } = await setup(); const child = await spawn();
   await owner.call('threads.archive', { threadId });
@@ -345,13 +389,17 @@ test('archiving the parent stops its children and restart preserves the team whi
   expect(h.core.delegation.get(threadId).config.paused).toBe(true);
   await owner.call('threads.archive', { threadId, archived: false });
   await owner.call('delegation.configure', { threadId, config });
+  // Mail the team still owes its parent is what a restart must not deliver by itself.
+  await owner.call('delegation.send', { threadId, toThreadId: child.thread.id, text: 'One more file', requestId: 'more' });
+  h.core.journal.db.query("UPDATE delegation_messages SET status = 'received' WHERE root_id = ?").run(threadId);
+  expect((h.core.journal.db.query("SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND status = 'received'").get(threadId) as { n: number }).n).toBeGreaterThan(0);
   await h.core.close();
   const restarted = new Core({ dataDir: h.dataDir, token: h.token });
   try {
     const view = restarted.delegation.get(threadId);
     expect(view.config.paused).toBe(true);
     expect(view.agents[0]?.thread.parentThreadId).toBe(threadId);
-    expect(view.turnsUsed).toBe(1);
+    expect(view.turnsUsed).toBe(2);
   } finally { await restarted.close(); }
 });
 
