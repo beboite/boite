@@ -69,8 +69,10 @@ test('agent deliverables and file links open in chat on desktop and paired phone
       await page.screenshot(join(import.meta.dir, '.artifacts', `artifacts-${mobile ? 'phone' : 'desktop'}.png`));
       if (!mobile) {
         await page.click(`a[data-file-path=${JSON.stringify(picturePath)}]`);
-        await page.waitFor('Array.from(document.querySelectorAll("[data-testid=artifact-content] img")).some(img => img.complete && img.naturalWidth > 0)');
-        expect(await page.evaluate('document.querySelector("[data-testid=artifact-content] img").naturalWidth')).toBe(192);
+        // The published picture is already loaded. Wait for the preview opened by this link.
+        const linkedImage = '[data-testid="chat-file"]:has([data-testid="artifact-preview"]) [data-testid="artifact-content"] img';
+        await page.waitFor(`document.querySelector(${JSON.stringify(linkedImage)})?.naturalWidth > 0`);
+        expect(await page.evaluate(`document.querySelector(${JSON.stringify(linkedImage)}).naturalWidth`)).toBe(192);
         await page.screenshot(join(import.meta.dir, '.artifacts', 'artifacts-image-desktop.png'));
         await page.evaluate('Array.from(document.querySelectorAll("[data-testid=chat-file]")).find(card => card.textContent.includes("handoff.pdf")).querySelector("[data-testid=artifact-preview]").click()');
         await page.waitFor('document.querySelector("[data-testid=artifact-content] iframe")');
