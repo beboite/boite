@@ -65,6 +65,8 @@ async function buildBundle(outDir: string): Promise<void> {
 }
 
 type Metrics = { name: string; value: number }[];
+/** The only events the bench listens to: what `--trace` collects and the signal that it is complete. */
+const TRACE_EVENTS = new Set(['Tracing.dataCollected', 'Tracing.tracingComplete']);
 /** What `--trace` reads from Chrome's trace events. */
 interface TraceEvent {
   name: string; ph: string; ts: number; dur?: number; tid: number; pid: number;
@@ -81,7 +83,10 @@ class Page {
       const message: unknown = JSON.parse(String(event.data));
       if (typeof message !== 'object' || message === null) return;
       const { id, result, method, params } = message as { id?: unknown; result?: Record<string, unknown>; method?: string; params?: Record<string, unknown> };
-      if (method) this.events.get(method)?.(params ?? {});
+      if (method && TRACE_EVENTS.has(method)) {
+        const listener = this.events.get(method);
+        if (typeof listener === 'function') listener(params ?? {});
+      }
       if (typeof id !== 'number') return;
       const settle = this.#pending.get(id);
       if (typeof settle !== 'function') return;
