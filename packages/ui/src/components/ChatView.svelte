@@ -9,22 +9,19 @@
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
   import AgentDock from './AgentDock.svelte';
-  import CoordinationPanel from './CoordinationPanel.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
 
   let { store }: { store: Store } = $props();
 
   let thread = $derived(store.openThread);
-  // Whether other agents can reach this conversation. Off, it takes no room
-  // here: the setting lives in the Agents panel.
+  // The timeline still needs agent messages after reload, even with settings hidden.
   let threadId = $derived(thread?.id);
   let agentSession = $derived(!!thread?.agentSessionId);
   $effect(() => {
     const id = threadId;
     if (id && !agentSession) untrack(() => void store.loadCoordination(id, false));
   });
-  let reachable = $derived(!!threadId && !agentSession && store.coordination?.self.threadId === threadId && store.coordination.config.mode !== 'off');
   let project = $derived(store.openProject);
   let draftChoice = $derived(store.defaultChoice());
   let draftModel = $derived(store.modelOf(draftChoice));
@@ -87,7 +84,6 @@
 
 
     {#if thread}
-      {#if reachable}{#key thread.id}<CoordinationPanel {store} threadId={thread.id} />{/key}{/if}
       <!-- One timeline per thread: the heights it measured and the ids that
            already played the rise belong to that thread alone, and kept across
            a switch they grew for every message the page had ever shown. -->

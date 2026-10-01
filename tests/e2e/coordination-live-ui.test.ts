@@ -32,7 +32,7 @@ test('a signed message from another core appears as a forwarded bubble and survi
     page = await BrowserPage.launch({ url: pairingUrlOf(cores[0]!) });
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await page.click(`[data-testid="thread-row"][data-thread-id="${threads[0]!.id}"]`);
-    await page.waitFor('document.querySelector("[data-testid=coordination-panel]")');
+    await page.waitFor('document.querySelector("[data-testid=thread-menu-trigger]")');
     const letter = await sender.call('collaboration.send', {
       threadId: threads[1]!.id,
       to: { coreId: recipientCard.coreId, threadId: threads[0]!.id },
@@ -51,15 +51,17 @@ test('a signed message from another core appears as a forwarded bubble and survi
       expect(await page!.evaluate(`document.querySelector(${JSON.stringify(selector)}).closest('[data-role="user"]') === null`)).toBe(true);
     };
     await checkBubble();
-    await page.click('[data-testid=coordination-panel] > summary');
+    await page.click('[data-testid=thread-menu-trigger]');
+    await page.click('[data-value=coordination]');
     await page.waitFor('document.querySelector("[data-testid=coordination-mode-on]").getAttribute("aria-checked") === "true"');
-    await page.waitFor('document.querySelector("[data-testid=coordination-panel]").open && document.querySelector("[data-testid=coordination-panel]").getBoundingClientRect().height > 150');
+    await page.waitFor('document.querySelector("[data-testid=coordination-dialog]").open');
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores.png'));
     await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await checkBubble();
     await page.evaluate('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
     await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-real-cores-phone.png'));
+    await page.click('[data-testid=coordination-close]');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await page.send('Page.reload', {});
     await page.click(`[data-testid="thread-row"][data-thread-id="${threads[0]!.id}"]`);

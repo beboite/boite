@@ -5,22 +5,19 @@
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
 
-  /**
-   * `embedded` is the Agents panel's copy, where the setting always lives; the
-   * conversation shows its own copy only while other agents can reach it.
-   */
-  let { store, threadId, embedded = false }: { store: Store; threadId: string; embedded?: boolean } = $props();
+  // Expanded is the thread menu's dialog; embedded is the Agents panel row.
+  let { store, threadId, embedded = false, expanded = false }: { store: Store; threadId: string; embedded?: boolean; expanded?: boolean } = $props();
   const fallback = defaultCoordinationConfig();
   let view = $derived(store.coordination?.self.threadId === threadId ? store.coordination : null);
   let config = $derived(view?.config ?? fallback);
   // No budget sets Brief and Team apart any more: both are On, and a saved Team stays as it is.
   let on = $derived(config.mode !== 'off');
   let summary = $derived(on ? strings.coordination.summaryOn : strings.coordination.summaryOff);
-  // The conversation loads it when it opens; a second copy does not ask again.
-  onMount(() => { if (store.coordination?.self.threadId !== threadId) void store.loadCoordination(threadId, false); });
+  // Read settings on demand; the dialog also needs contacts immediately.
+  onMount(() => { if (expanded || store.coordination?.self.threadId !== threadId) void store.loadCoordination(threadId, expanded); });
 
   function toggleSettings(event: Event): void {
-    if ((event.currentTarget as HTMLDetailsElement).open) void store.loadCoordination(threadId, true);
+    if (!expanded && (event.currentTarget as HTMLDetailsElement).open) void store.loadCoordination(threadId, true);
   }
 
   function configure(patch: Partial<CoordinationConfig>): void {
@@ -51,7 +48,7 @@
   }
 </script>
 
-<details class="coordination disclosure" class:embedded data-testid={embedded ? 'coordination-settings' : 'coordination-panel'} ontoggle={toggleSettings}>
+<details class="coordination disclosure" class:embedded class:expanded open={expanded} data-testid={embedded ? 'coordination-settings' : 'coordination-panel'} ontoggle={toggleSettings}>
   <summary>
     <Network size={14} strokeWidth={1.75} />
     <span>{strings.coordination.heading}</span>
@@ -196,8 +193,11 @@
   .coordination.embedded { flex: none; width: auto; margin: 0; border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; background: transparent; }
   .coordination.embedded > summary { padding: 0 16px; border-radius: 0; }
   .coordination.embedded .body { padding: 0 16px 14px; }
+  .coordination.expanded { width: 100%; margin: 0; border: 0; background: transparent; }
+  .coordination.expanded > summary { display: none; }
+  .coordination.expanded .body { border: 0; max-height: none; }
   @media (max-width: 720px) {
-    .coordination:not(.embedded) { width: calc(100% - 20px); margin-top: 6px; }
+    .coordination:not(.embedded):not(.expanded) { width: calc(100% - 20px); margin-top: 6px; }
     .body { padding: 0 10px 12px; }
   }
 </style>
