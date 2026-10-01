@@ -1,5 +1,7 @@
 /** The state one fake core keeps, and the plumbing every domain module shares. */
+import { observeProgress } from './progress';
 import {
+  DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   PROTOCOL_VERSION,
   RpcErrorCode,
   type Attachment,
@@ -33,6 +35,7 @@ import {
   type RpcResult,
   type SchedulerState,
   type Settings,
+  type ServerUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -59,6 +62,7 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
+import { initialServerUpdate } from './server-update';
 import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
@@ -67,6 +71,8 @@ export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
+  /** Exhausted quotas with read-only extras for visual checks. */
+  quotaExtras?: boolean;
   /**
    * Characters per streamed delta, like the echo driver's 16, so a per-delta
    * cost shows. Unset streams an answer in five deltas; `?fake=1&stream=tokens` sets 16.
@@ -95,6 +101,7 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  serverUpdate: ServerUpdateStatus = initialServerUpdate();
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   readonly plugins: FakePlugins;
@@ -113,6 +120,8 @@ export class FakeContext {
   worktrees: FakeWorktree[] = [];
   /** The `pathKey` of each worktree `worktrees.remove` took, so a thread left in one is refused a turn. */
   readonly removedWorktrees = new Set<string>();
+  /** The `pathKey` of each folder `FakeClient.loseFolder` took: the fake's stand-in for a deleted repository. */
+  readonly goneFolders = new Set<string>();
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
   importable: (ImportableSession & { projectId: string })[] = [];
   providers: ProviderSummary[] = [];
@@ -121,7 +130,7 @@ export class FakeContext {
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
   readonly threads = new Map<ThreadId, Thread>();
-  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[] }>();
+  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
   readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
@@ -193,6 +202,7 @@ export class FakeContext {
   readonly delayMs: number;
   readonly chunkSize: number | undefined;
   readonly long: boolean;
+  readonly quotaExtras: boolean;
   /**
    * Two agents behind their newest release, one by each route, so the notices
    * have a subject (`provider-installs.ts`).
@@ -200,6 +210,7 @@ export class FakeContext {
   readonly harnessUpdates: HarnessUpdate[] = initialHarnessUpdates();
 
   constructor(options: FakeClientOptions = {}) {
+    this.quotaExtras = options.quotaExtras ?? (typeof location !== 'undefined' && new URLSearchParams(location.search).get('quotaExtras') === '1');
     this.bus = new FakeBus(options.principal ?? 'owner');
     this.agents = new FakeAgents(revision => this.emit('agents.changed', { revision }), {
       create: (agent, sessionId, work) => createAgentSession(this, agent, sessionId, work),
@@ -239,6 +250,7 @@ export class FakeContext {
       publicKey: `fake-public-key-${coreId}`
     };
     this.settings = {
+      threadDeletionRetentionDays: DEFAULT_THREAD_DELETION_RETENTION_DAYS,
       warmProcessMinutes: 0,
       worktreeStorage: { mode: 'project', directory: null },
       listenOnLan: false,
@@ -246,6 +258,7 @@ export class FakeContext {
       agentMemoryBudgetPercent: 60,
       threadMemoryCapMb: 0,
       memoryReserveMb: 0,
+      memoryProtection: true,
       focusGuard: true,
       muteAgents: true,
       reapOrphans: true,
@@ -312,6 +325,7 @@ export class FakeContext {
   }
 
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {
+    observeProgress(this, threadId, event, payload);
     if (this.bus.subscribed.has(threadId)) this.emit(event, payload);
     if (event === 'message.part') {
       const { messageId, partIndex, part } = payload as RpcEvents['message.part'];

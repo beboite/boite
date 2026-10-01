@@ -547,8 +547,21 @@ that is known.
 
 ## Permission modes
 
-Boite has five: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `dontAsk`.
+Boite has six: `default`, `acceptEdits`, `plan`, `bypassPermissions`, `yolo`, `dontAsk`.
 Each protocol takes them differently, and the difference is not cosmetic.
+
+YOLO is separate from Auto (`bypassPermissions`). It selects the agent's most
+permissive execution mode and automatically accepts tool approval requests that
+still reach Boite, without a permission card. Claude runs with
+`bypassPermissions` and `disableAllHooks: true`, disabling configured and plugin
+hooks while retaining Boite's SDK callbacks for tool reporting and incoming
+answers. Codex runs with approvals set to `never`, full filesystem access and
+`features.hooks=false`. Entering or leaving YOLO replaces their warm process,
+so turning it off restores the user's hook configuration. No settings file is
+rewritten. ACP and Muse use their native unrestricted mode and Boite accepts
+remaining approval requests; ACP has no standard hook-disable call. Antigravity
+uses its permission-skip flag. Questions seeking input still ask for real
+answers; YOLO does not invent form values or complete a device sign-in.
 
 - ACP standardises the call, `session/set_mode`, and standardises none of the ids
   inside `availableModes`: the same mode is spelled `acceptEdits`,
@@ -594,8 +607,8 @@ Each protocol takes them differently, and the difference is not cosmetic.
   says so once in the log. A driver that waited for a permission question there
   would wait forever.
 
-The composer offers three of the five and names each by what the agent may do
-without asking (`lib/permission-modes.ts`): Ask, Edit freely, No confirmation.
+The composer offers four of the six and names each by what the agent may do
+without asking (`lib/permission-modes.ts`): Ask, Edit freely, Auto and YOLO.
 The list follows the agent. Codex loses Edit freely, which is the same pair as
 its default, and its default reads "This folder", because workspace-write lets
 it edit and run commands there without a card. An agent whose

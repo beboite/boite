@@ -7,7 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
   const uid = $props.id();
 
   let cpuCap = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
@@ -15,6 +15,7 @@
   let memoryBudget = $state(untrack(() => store.settings?.agentMemoryBudgetPercent ?? 60));
   let memoryReserve = $state(untrack(() => store.settings?.memoryReserveMb ?? 0));
   const resources = $derived([...store.resources].sort((a, b) => b.load.memoryBytes - a.load.memoryBytes));
+  const memoryEnabled = $derived(store.settings?.memoryProtection !== false);
   let confirming = $state<ThreadId | null>(null);
 
   async function kill(threadId: ThreadId) {
@@ -41,20 +42,21 @@
 </script>
 
 <div class="page" data-testid="resources-page">
+  {#if !limitsOnly}
   <header>
     <div>
-      <h1>{strings.settings.tabs.resources}<InfoTip topic={strings.settings.tabs.resources} text={strings.protection.intro} /></h1>
+      <h1>{strings.settings.tabs.resources}</h1>
     </div>
   </header>
 
   <section class="card" id="settings-quiet">
     <h2>{strings.protection.quiet}<InfoTip topic={strings.protection.quiet} text={strings.protection.windows} /></h2>
     <label for="{uid}-focus-guard" class="switch-row">
-      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span><InfoTip topic={strings.settings.focusGuard} text={strings.settings.focusGuardHint} /></span>
+      <span class="text"><span id="{uid}-focus-guard-name">{strings.settings.focusGuard}</span></span>
       <input id="{uid}-focus-guard" aria-labelledby="{uid}-focus-guard-name" type="checkbox" role="switch" data-testid="setting-focus-guard" checked={store.settings?.focusGuard ?? true} onchange={(event) => void store.saveSettings({focusGuard: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-mute-agents" class="switch-row">
-      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span><InfoTip topic={strings.settings.muteAgents} text={strings.settings.muteAgentsHint} /></span>
+      <span class="text"><span id="{uid}-mute-agents-name">{strings.settings.muteAgents}</span></span>
       <input id="{uid}-mute-agents" aria-labelledby="{uid}-mute-agents-name" type="checkbox" role="switch" data-testid="setting-mute-agents" checked={store.settings?.muteAgents ?? true} onchange={(event) => void store.saveSettings({muteAgents: event.currentTarget.checked})} />
     </label>
     <label for="{uid}-reap-orphans" class="switch-row">
@@ -62,32 +64,41 @@
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
     </label>
   </section>
+  {/if}
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
-    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve}); }}>
+    <label for="{uid}-memory-protection" class="switch-row">
+      <span class="text"><span id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span><InfoTip topic={strings.settings.memoryProtection} text={strings.settings.memoryProtectionHint} /></span>
+      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
+        const input = event.currentTarget;
+        if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
+      }} />
+    </label>
+    <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
       <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
-      <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
-        {#if store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}
+      <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
+        {#if memoryEnabled && store.memory}<span class="hint" data-testid="memory-budget-resolved">{strings.resources.resolved(store.memory.limits.budgetMb)}</span>{/if}
       </label>
-      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input aria-label={strings.settings.threadMemoryCapMb} data-testid="memory-cap" type="number" min="0" required bind:value={memoryCap} />
-        {#if memoryCap === 0 && store.memory}<span class="hint" data-testid="memory-cap-auto">{strings.resources.auto(store.memory.limits.threadMemoryCapMb)}</span>{/if}
+      <label><span class="name">{strings.settings.threadMemoryCapMb}<InfoTip topic={strings.settings.threadMemoryCapMb} text={strings.settings.threadMemoryCapHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.threadMemoryCapMb} data-testid="memory-cap" type="number" min="0" required bind:value={memoryCap} />
+        {#if memoryEnabled && memoryCap === 0 && store.memory}<span class="hint" data-testid="memory-cap-auto">{strings.resources.auto(store.memory.limits.threadMemoryCapMb)}</span>{/if}
       </label>
-      <label><span class="name">{strings.settings.memoryReserveMb}<InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
-        {#if memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
+      <label><span class="name">{strings.settings.memoryReserveMb}<InfoTip topic={strings.settings.memoryReserveMb} text={strings.settings.memoryReserveHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.memoryReserveMb} data-testid="memory-reserve" type="number" min="0" required bind:value={memoryReserve} />
+        {#if memoryEnabled && memoryReserve === 0 && store.memory}<span class="hint" data-testid="memory-reserve-auto">{strings.resources.auto(store.memory.limits.memoryReserveMb)}</span>{/if}
       </label>
       <button type="submit" class="primary">{strings.settings.save}</button>
     </form>
   </section>
   <section class="card" data-testid="memory-status">
-    <h2>{strings.resources.memory}<InfoTip topic={strings.resources.memory} text={strings.resources.memoryHint} /></h2>
+    <h2>{strings.resources.memory}</h2>
     {#if store.memory}
       <dl class="memory-reading">
-        <div><dt>{strings.resources.agents}</dt><dd>{bytes(store.memory.agentBytes)} / {bytes(store.memory.limits.budgetMb * 1048576)}</dd></div>
-        <div><dt>{strings.resources.available}</dt><dd>{store.memory.availableBytes === null ? strings.resources.unknown : bytes(store.memory.availableBytes)} / {bytes(store.memory.limits.memoryReserveMb * 1048576)}</dd></div>
-        <div><dt>{strings.resources.state}</dt><dd data-state={store.memoryState}>{strings.resources.states[store.memoryState ?? store.memory.state]}</dd></div>
+        <div><dt>{strings.resources.agents}</dt><dd>{bytes(store.memory.agentBytes)}{#if memoryEnabled}{' / '}{bytes(store.memory.limits.budgetMb * 1048576)}{/if}</dd></div>
+        <div><dt>{strings.resources.available}</dt><dd>{store.memory.availableBytes === null ? strings.resources.unknown : bytes(store.memory.availableBytes)}{#if memoryEnabled}{' / '}{bytes(store.memory.limits.memoryReserveMb * 1048576)}{/if}</dd></div>
+        <div><dt>{strings.resources.state}</dt><dd data-state={memoryEnabled ? store.memoryState : 'ok'}>{memoryEnabled ? strings.resources.states[store.memoryState ?? store.memory.state] : strings.resources.protectionOff}</dd></div>
       </dl>
     {:else}<p class="hint">{strings.resources.unknown}</p>{/if}
   </section>
+  {#if !limitsOnly}
   <div class="group-heading" id="settings-tasks">
     <h2 class="tasks-heading">{strings.protection.tasks}<span class="live-dot" aria-hidden="true"></span></h2>
   </div>
@@ -134,6 +145,7 @@
       </table></div>
     </section>
   {/each}
+  {/if}
 </div>
 
 <style>

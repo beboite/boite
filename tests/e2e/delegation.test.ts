@@ -18,7 +18,8 @@ beforeAll(async () => {
   await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'review', name: 'Reviewer', providerId: 'echo', accountId: account.id, model: 'echo', effort: null }] } });
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
   await page.click(`[data-testid="thread-row"][data-thread-id="${threadId}"]`);
-  await page.click('[data-testid="agents-toggle"]');
+  await page.click('[data-testid=thread-menu-trigger]');
+  await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor('!!document.querySelector("[data-testid=delegation-launch]")');
 }, 60_000);
 afterAll(async () => { await page?.close(); owner?.close(); await core?.stop(); }, 30_000);
@@ -33,7 +34,7 @@ test('launch, inspect, forward and stop a real delegated thread from the panel',
   expect(view.agents[0]!.thread.parentThreadId).toBe(threadId);
   await page.click('[data-testid="panel-close"]');
   await page.waitFor('!document.querySelector("[data-testid=right-panel]")');
-  expect(await page.text('[data-testid="delegation-activity"]')).toContain('Started 1 agent');
+  expect(await page.text('[data-testid="delegation-activity"]')).toContain('Started 1 subagent');
   expect(await page.text('[data-testid="delegation-progress"]')).toContain('0/1 completed');
   expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-activity] [data-testid=agent-elapsed]")')).toBe(true);
   await page.click('[data-testid="delegation-activity"]');

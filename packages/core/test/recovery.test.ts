@@ -125,6 +125,36 @@ describe('crash recovery', () => {
     }
   });
 
+  test('an asynchronous question still open is answerable on the next start', async () => {
+    const harness = await startTestCore();
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client);
+    const skipped = await echoThread(harness, client, 'skipped thread');
+    for (const id of [threadId, skipped.threadId]) {
+      const finished = client.next('turn.finished', (turn) => turn.threadId === id, 10000);
+      await client.call('turns.start', { threadId: id, prompt: 'hello' });
+      await finished;
+    }
+    const { questionId } = await client.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser', 'Renderer'] });
+    const gone = await client.call('questions.ask', { threadId: skipped.threadId, text: 'Skipped?' });
+    await client.call('questions.skip', { threadId: skipped.threadId, questionId: gone.questionId });
+
+    client.close();
+    await stopWithoutCleanup(harness);
+
+    const next = new Core({ dataDir: harness.dataDir, token: harness.token });
+    try {
+      expect(next.threads.cards.listQuestions().map((question) => question.id)).toEqual([questionId]);
+      next.threads.cards.answerQuestion({ threadId, questionId, optionIds: ['2'] });
+      const card = next.threads.get(threadId).messages.flatMap((message) => message.parts).find((part) => part.type === 'question');
+      expect(card).toMatchObject({ questionId, answer: { optionIds: ['2'] } });
+      expect(next.threads.cards.listQuestions()).toEqual([]);
+    } finally {
+      await next.close();
+      await removeDir(harness.dataDir);
+    }
+  });
+
   test('a core that starts on a clean journal recovers nothing', async () => {
     const harness = await startTestCore();
     const client = await harness.connect();

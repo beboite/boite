@@ -38,13 +38,13 @@ export function resourceMethods(ctx: FakeContext) {
       const totalMb = 32768;
       const budget = Math.floor(totalMb * ctx.settings.agentMemoryBudgetPercent / 100 / 256) * 256;
       return {
-        state: ctx.memoryState,
+        state: ctx.settings.memoryProtection === false ? 'ok' : ctx.memoryState,
         agentBytes: resources(ctx).reduce((sum, thread) => sum + thread.load.memoryBytes, 0),
         availableBytes: (ctx.memoryState === 'critical' ? 2048 : 16384) * 1048576,
         limits: {
-          budgetMb: budget,
-          threadMemoryCapMb: Math.min(ctx.settings.threadMemoryCapMb || Math.floor(budget / 2 / 256) * 256, budget),
-          memoryReserveMb: ctx.settings.memoryReserveMb || Math.max(totalMb * 0.1, 3072),
+          budgetMb: ctx.settings.memoryProtection === false ? 0 : budget,
+          threadMemoryCapMb: ctx.settings.memoryProtection === false ? 0 : Math.min(ctx.settings.threadMemoryCapMb || Math.floor(budget / 2 / 256) * 256, budget),
+          memoryReserveMb: ctx.settings.memoryProtection === false ? 0 : ctx.settings.memoryReserveMb || Math.max(totalMb * 0.1, 3072),
         },
       };
     },

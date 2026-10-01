@@ -298,6 +298,7 @@ describe('agy driver', () => {
     for (const [mode, expected] of [
       ['acceptEdits', 'mode=accept-edits skip=false'],
       ['bypassPermissions', 'mode=default skip=true'],
+      ['yolo', 'mode=default skip=true'],
       ['dontAsk', 'mode=default skip=true'],
       ['default', 'mode=default skip=false'],
     ] as const) {

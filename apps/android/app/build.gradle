@@ -1,0 +1,233 @@
+/*
+ * Copyright 2019 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import groovy.xml.MarkupBuilder
+import groovy.json.JsonSlurper
+
+plugins {
+    id 'com.android.application'
+}
+
+// The wrapper holds no address of its own: the core it opens is a build
+// parameter, so the repository names no deployment. `-PboiteHost=` is the bare
+// hostname the TWA trusts, the one serving /.well-known/assetlinks.json.
+// `-PboiteVersion=` is the release version (package.json's when absent) and
+// `-PboiteVersionCode=` the integer Android compares on update, which must grow
+// from one published APK to the next: CI passes the commit count of main.
+def boiteHost = (findProperty('boiteHost') ?: '').toString().trim()
+if (!(boiteHost ==~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/)) {
+    throw new GradleException("-PboiteHost must be a bare lowercase hostname such as boite.example.com, got '$boiteHost'")
+}
+def appVersionName = (findProperty('boiteVersion') ?:
+        new JsonSlurper().parse(file("$rootDir/../../package.json")).version).toString()
+def appVersionCode = (findProperty('boiteVersionCode') ?: '1').toString()
+if (!(appVersionCode ==~ /^[1-9][0-9]{0,8}$/)) {
+    throw new GradleException("-PboiteVersionCode must be a positive integer under 10^9, got '$appVersionCode'")
+}
+appVersionCode = appVersionCode.toInteger()
+
+def twaManifest = [
+    applicationId: 'com.boite.two',
+    hostName: boiteHost,
+    launchUrl: '/',
+    name: 'Boite',
+    launcherName: 'Boite',
+    // packages/ui/public/manifest.webmanifest
+    themeColor: '#FBFBFC',
+    themeColorDark: '#0A0A0A',
+    navigationColor: '#FBFBFC',
+    navigationColorDark: '#0A0A0A',
+    navigationDividerColor: '#FBFBFC',
+    navigationDividerColorDark: '#0A0A0A',
+    backgroundColor: '#FBFBFC',
+    enableNotifications: true,
+    shortcuts: [],
+    splashScreenFadeOutDuration: 300,
+    generatorApp: 'bubblewrap-cli',
+    // Without a verified assetlinks.json the page opens in a Custom Tab with
+    // an address bar instead of failing.
+    fallbackType: 'customtabs',
+    enableSiteSettingsShortcut: 'true',
+    orientation: 'default',
+]
+
+android {
+    compileSdkVersion 36
+    namespace "com.boite.two"
+    defaultConfig {
+        applicationId twaManifest.applicationId
+        minSdkVersion 23
+        targetSdkVersion 35
+        versionCode appVersionCode
+        versionName appVersionName
+
+        // The name for the application
+        resValue "string", "appName", twaManifest.name
+
+        // The name for the application on the Android Launcher
+        resValue "string", "launcherName", twaManifest.launcherName
+
+        // The URL that will be used when launching the TWA from the Android Launcher
+        def launchUrl = "https://" + twaManifest.hostName + twaManifest.launchUrl
+        resValue "string", "launchUrl", launchUrl
+
+        
+
+        
+            // The URL the Web Manifest for the Progressive Web App that the TWA points to. This
+            // is used by Chrome OS and Meta Quest to open the Web version of the PWA instead of
+            // the TWA, as it will probably give a better user experience for non-mobile devices.
+            resValue "string", "webManifestUrl", "https://${twaManifest.hostName}/manifest.webmanifest"
+        
+
+        
+            // This is used by Meta Quest.
+            resValue "string", "fullScopeUrl", "https://${twaManifest.hostName}/"
+        
+
+        
+
+        // The hostname is used when building the intent-filter, so the TWA is able to
+        // handle Intents to open host url of the application.
+        resValue "string", "hostName", twaManifest.hostName
+
+        // The site half of Digital Asset Links; the core serves the app half.
+        // Android string resources drop bare double quotes, hence the escapes.
+        resValue "string", "assetStatements",
+                ('[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"web","site":"https://' +
+                        twaManifest.hostName + '"}}]').replace('"', '\\"')
+
+        // This attribute sets the status bar color for the TWA. It can be either set here or in
+        // `res/values/colors.xml`. Setting in both places is an error and the app will not
+        // compile. If not set, the status bar color defaults to #FFFFFF - white.
+        resValue "color", "colorPrimary", twaManifest.themeColor
+
+        // This attribute sets the dark status bar color for the TWA. It can be either set here or in
+        // `res/values/colors.xml`. Setting in both places is an error and the app will not
+        // compile. If not set, the status bar color defaults to #000000 - white.
+        resValue "color", "colorPrimaryDark", twaManifest.themeColorDark
+
+        // This attribute sets the navigation bar color for the TWA. It can be either set here or
+        // in `res/values/colors.xml`. Setting in both places is an error and the app will not
+        // compile. If not set, the navigation bar color defaults to #FFFFFF - white.
+        resValue "color", "navigationColor", twaManifest.navigationColor
+
+        // This attribute sets the dark navigation bar color for the TWA. It can be either set here
+        // or in `res/values/colors.xml`. Setting in both places is an error and the app will not
+        // compile. If not set, the navigation bar color defaults to #000000 - black.
+        resValue "color", "navigationColorDark", twaManifest.navigationColorDark
+
+        // This attribute sets the navbar divider color for the TWA. It can be either 
+        // set here or in `res/values/colors.xml`. Setting in both places is an error and the app 
+        // will not compile. If not set, the divider color defaults to #00000000 - transparent.
+        resValue "color", "navigationDividerColor", twaManifest.navigationDividerColor
+
+        // This attribute sets the dark navbar divider color for the TWA. It can be either 
+        // set here or in `res/values/colors.xml`. Setting in both places is an error and the 
+        //app will not compile. If not set, the divider color defaults to #000000 - black.
+        resValue "color", "navigationDividerColorDark", twaManifest.navigationDividerColorDark
+
+        // Sets the color for the background used for the splash screen when launching the
+        // Trusted Web Activity.
+        resValue "color", "backgroundColor", twaManifest.backgroundColor
+
+        // Defines a provider authority for the Splash Screen
+        resValue "string", "providerAuthority", twaManifest.applicationId + '.fileprovider'
+
+        // The enableNotification resource is used to enable or disable the
+        // TrustedWebActivityService, by changing the android:enabled and android:exported
+        // attributes
+        resValue "bool", "enableNotification", twaManifest.enableNotifications.toString()
+
+        twaManifest.shortcuts.eachWithIndex { shortcut, index ->
+            resValue "string", "shortcut_name_$index", "$shortcut.name"
+            resValue "string", "shortcut_short_name_$index", "$shortcut.short_name"
+        }
+
+        // The splashScreenFadeOutDuration resource is used to set the duration of fade out animation in milliseconds
+        // to be played when removing splash screen. The default is 0 (no animation).
+        resValue "integer", "splashScreenFadeOutDuration", twaManifest.splashScreenFadeOutDuration.toString()
+
+        resValue "string", "generatorApp", twaManifest.generatorApp
+
+        resValue "string", "fallbackType", twaManifest.fallbackType
+
+        resValue "bool", "enableSiteSettingsShortcut", twaManifest.enableSiteSettingsShortcut
+        resValue "string", "orientation", twaManifest.orientation
+
+        
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    lint {
+        checkReleaseBuilds false
+    }
+}
+
+task generateShorcutsFile {
+    assert twaManifest.shortcuts.size() < 5, "You can have at most 4 shortcuts."
+    twaManifest.shortcuts.eachWithIndex { s, i ->
+        assert s.name != null, 'Missing `name` in shortcut #' + i
+        assert s.short_name != null, 'Missing `short_name` in shortcut #' + i
+        assert s.url != null, 'Missing `icon` in shortcut #' + i
+        assert s.icon != null, 'Missing `url` in shortcut #' + i
+    }
+
+    def shortcutsFile = new File("$projectDir/src/main/res/xml", "shortcuts.xml")
+
+    def xmlWriter = new StringWriter()
+    def xmlMarkup = new MarkupBuilder(new IndentPrinter(xmlWriter, "    ", true))
+
+    xmlMarkup
+        .'shortcuts'('xmlns:android': 'http://schemas.android.com/apk/res/android') {
+            twaManifest.shortcuts.eachWithIndex { s, i ->
+                'shortcut'(
+                        'android:shortcutId': 'shortcut' + i,
+                        'android:enabled': 'true',
+                        'android:icon': '@drawable/' + s.icon,
+                        'android:shortcutShortLabel': '@string/shortcut_short_name_' + i,
+                        'android:shortcutLongLabel': '@string/shortcut_name_' + i) {
+                    'intent'(
+                            'android:action': 'android.intent.action.MAIN',
+                            'android:targetPackage': twaManifest.applicationId,
+                            'android:targetClass': twaManifest.applicationId + '.LauncherActivity',
+                            'android:data': s.url)
+                    'categories'('android:name': 'android.intent.category.LAUNCHER')
+                }
+            }
+        }
+    shortcutsFile.text = xmlWriter.toString() + '\n'
+}
+
+preBuild.dependsOn(generateShorcutsFile)
+
+repositories {
+    
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    
+        implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'
+    
+}

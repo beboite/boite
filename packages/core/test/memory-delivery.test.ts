@@ -25,6 +25,20 @@ afterEach(async () => {
 });
 
 describe('memory events and admission', () => {
+  test('a notice retains the live message boundary in broadcast and reopened history', async () => {
+    const core = harness.core;
+    const client = await harness.connect();
+    await client.call('threads.subscribe', { threadId });
+    const received: MemoryEvent[] = [];
+    client.on('thread.memory', payload => received.push(payload));
+    const turn = core.threads.startTurn(threadId, '[sleep:60000]');
+    core.journal.putMessage({ id: 'memory-anchor', threadId, turnId: turn.id, role: 'assistant', state: 'streaming', createdAt: Date.now(), parts: [{ type: 'text', text: 'Working' }] });
+    core.bus.emit('resources.memory', event('killed'));
+    await waitFor(() => received.length === 1);
+    expect(received[0]?.anchor).toEqual({ messageId: 'memory-anchor', partIndex: 1 });
+    core.journal.setMessagePart('memory-anchor', 1, { type: 'text', text: 'Later output' });
+    expect((await client.call('threads.get', { threadId })).memoryEvents?.at(-1)?.anchor).toEqual(received[0]?.anchor);
+  });
   test('a queued turn starts under critical pressure when its account login hold ends', async () => {
     const core = harness.core;
     const running = core.threads.startTurn(threadId, '[sleep:60000]');

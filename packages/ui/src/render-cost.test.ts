@@ -114,3 +114,18 @@ test('no :has() takes the whole app for its subject', () => {
   const offending = sources(SRC).filter((path) => global.test(styleOf(path).replace(/\/\*[\s\S]*?\*\//g, ''))).map(relative);
   expect(offending).toEqual([]);
 });
+
+/**
+ * The active prompt changes every few lines of a scroll, and the rail's bar for
+ * it eased its width: a layout on every frame of every scroll, half of the
+ * layouts a wheel up a long thread ran. A marker's bar eases a transform.
+ */
+test('the outline rail eases its prompt bars without laying the page out', () => {
+  const css = styleOf(join(SRC, 'components/MessageOutline.svelte')).replace(/\/\*[\s\S]*?\*\//g, '');
+  const bars = [...css.matchAll(/\.marker(?:\.active)?\s+i\s*\{([^{}]*)\}/g)].map((match) => match[1]!);
+  expect(bars.length).toBeGreaterThan(1);
+  for (const body of bars) {
+    expect(body).not.toMatch(/(?:^|;)\s*width\s*:\s*calc/);
+    expect(body).not.toMatch(/transition\s*:[^;]*\b(?:width|height|margin|padding)\b/);
+  }
+});

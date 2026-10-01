@@ -40,10 +40,11 @@ one stays open, which the nightly reservation and a manual release rely on.
 | Shell files or end-to-end tests | Windows shell tests, installer build and full end-to-end suite; Linux x64 and macOS ARM64 shell builds and Rust tests |
 | Dockerfile, .dockerignore, docker/ | Docker smoke tests on native x64 and ARM64 |
 | UI files | Type checks, UI tests, desktop checks and Docker smoke tests |
+| `apps/android/`, `android.yml`, `scripts/ci/android-apk.ts` | Unsigned APK build |
 | `bench/`, `telemetry/`, `scripts/architecture/` | Type checks and UI tests: `bun run check` covers the benches and the telemetry Worker |
 | Core, contracts, dependencies, shared build files, workflows, unknown paths | All checks, including core tests on Windows, Linux and macOS |
 | Version tag | Complete checks, then a draft release for Windows, Linux and macOS |
-| Nightly with an unpublished commit | Complete checks, signed nightly installers for all three systems, development server image, prerelease |
+| Nightly with an unpublished commit | Complete checks, signed nightly installers for all three systems, signed or reused APK, development server image, prerelease |
 
 Pull requests against any branch run CI. A newer commit cancels an older run of
 that same PR. New main commits also cancel superseded ordinary CI runs.
@@ -162,7 +163,11 @@ The later account connection changes raised the core limit to 904,000 bytes
 ([measurements](performance.md)).
 The resource audit retains those limits, shortens scope-class prefixes and
 loads settings synchronization on first use to reduce emitted bytes while
-keeping readable core function names in errors. Timings are not gated:
+keeping readable core function names in errors. On 2026-10-01 automatic
+compaction (its timers, checks and settings validation), on top of the handover
+of running turns, built a 904,139-byte core on the Windows desktop job, 139
+bytes over; the core limit moved to 995,000 bytes, about 10% above it. Timings
+are not gated:
 they vary too much on shared runners.
 The tested installer becomes the release artifact, with no second release build.
 CI sets `BOITE_E2E_PREBUILT_UI=1` to test the UI already built for that installer.
@@ -178,6 +183,9 @@ New E2E files enter that list automatically.
 Files stay sequential within each shard: two and three parallel workers sharing
 a Windows runner produced navigation and startup hook timeouts on 2026-09-24.
 Every file still takes its own ports, data directory and browser profile.
+Headless Chromium uses CPU compositing on CI, with software GL disabled,
+instead of forcing Direct3D 11 on a hosted runner. Launch failures retain a
+bounded stderr log alongside the captures, and an exited browser fails promptly.
 Assertions and test deadlines are unchanged. The matrix has `fail-fast: false`,
 so a failing shard does not prevent the others from reporting their failures.
 `CI required` also requires the E2E matrix; a failure, cancellation or unexpected
@@ -318,6 +326,11 @@ succeed does `server-manifest.yml` promote those digests to `nightly`, the versi
 tag and the commit tag. A failed check leaves the published channel unchanged;
 an unchanged commit skips both verification and image builds. Ordinary server
 publication uses the same manifest workflow immediately after its builds.
+
+The nightly also publishes a signed Android APK, or takes the previous
+release's back when `apps/android/`, the host and the signing key are
+unchanged. A failed APK job fails the nightly like any other check.
+[android.md](android.md) covers the reuse rule, `ANDROID_HOST` and the key.
 
 On 2026-09-29, `gh run view 36531647917 --json jobs` showed verification's last
 build finishing at 06:44:34 UTC and the server build starting at 06:44:48. The

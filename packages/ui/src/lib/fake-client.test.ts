@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName, type Turn } from '@boite/contracts';
+import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 
 afterEach(() => vi.useRealTimers());
 
@@ -146,7 +147,11 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
     await client.call('delegation.configure', { threadId: 't-trace', config });
     const params = { threadId: 't-trace', profileId: 'echo', task: 'Review the boundary', requestId: 'spawn-1' };
     const first = await client.call('delegation.spawn', params);
-    expect(await client.call('delegation.spawn', params)).toEqual(first);
+    const repeated = await client.call('delegation.spawn', params);
+    // Execution can advance between idempotent reads; every durable field still agrees.
+    const { progress: _firstProgress, ...firstThread } = first.thread;
+    const { progress: _repeatedProgress, ...repeatedThread } = repeated.thread;
+    expect({ ...repeated, thread: repeatedThread }).toEqual({ ...first, thread: firstThread });
     expect(first.thread.parentThreadId).toBe('t-trace');
     await expect(client.call('delegation.spawn', { ...params, task: 'Different work' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 
@@ -368,11 +373,19 @@ test('coordination stays scoped to its core and paired devices can only inspect 
 
   const [a, b] = await Promise.all([first.call('collaboration.identity', {}), second.call('collaboration.identity', {})]);
   await Promise.all([first.call('collaboration.trust', { peer: b }), second.call('collaboration.trust', { peer: a })]);
-  expect(await first.call('collaboration.peers', {})).toEqual([b]);
+  expect(await first.call('collaboration.peers', {})).toEqual([{ ...b, readThreads: false, viaClient: false }]);
   await second.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: 'Build VM', remote: true, paused: false } });
   await expect(first.call('collaboration.check', { coreId: b.coreId })).resolves.toEqual({ ok: true });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
+  await expect(first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).rejects.toThrow('not allowed to read');
+  await second.call('collaboration.trust', { peer: { ...a, readThreads: true } });
+  expect((await first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).entries.length).toBeGreaterThan(0);
+  await expect(phone.call('collaboration.bridge.register', { coreId: a.coreId, enabled: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
+  const project = (await first.call('projects.list', {})).find(project => project.id === 'p-boite')!;
+  expect(letter.from.project).toBe(project.name);
+  expect(letter.toProject).toBe(project.name);
+  expect(letter.toMachine).toBe('Second');
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
   await first.call('collaboration.untrust', { coreId: b.coreId });
@@ -509,7 +522,7 @@ test('fake settings store a pasted address as its origin and refuse what the cor
   });
   expect(saved.publicUrl).toBe('https://boite.example.com');
   expect(saved.browserOrigins).toEqual(['http://192.168.1.20:8777']);
-  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
+  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { threadDeletionRetentionDays: 0.5 }, { threadDeletionRetentionDays: 3651 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
     await expect(client.call('settings.set', patch)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
   }
   client.close();
@@ -788,5 +801,86 @@ test('fake hook counters move the way the core ledger moves them', async () => {
     expect(after.blocked - before.blocked).toBe(1);
     expect(after.skipped - before.skipped).toBe(1);
     expect(after.failed).toBe(before.failed);
+  } finally { client.close(); }
+});
+
+test('deleted fake conversations survive closing and reconnecting with their history and archive flags', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const history = (await client.call('threads.get', { threadId: 't-trace' })).messages;
+    await client.call('threads.archive', { threadId: 't-trace' });
+    await client.call('threads.remove', { threadId: 't-trace' });
+    const deletion = (await client.call('threads.deleted', {}))[0]!;
+    expect(deletion.deletedAt).toBe(Date.now());
+    client.close();
+    vi.setSystemTime(Date.now() + 5 * 86_400_000);
+    await client.connect();
+    expect((await client.call('threads.deleted', {}))[0]?.id).toBe('t-trace');
+    expect((await client.call('threads.restore', { threadId: 't-trace' })).archived).toBe(true);
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(history);
+  } finally { client.close(); }
+});
+
+test('fake retention keeps indefinite deletions and applies a shorter saved delay to existing deletions', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('settings.set', { threadDeletionRetentionDays: 0 });
+    await client.call('threads.remove', { threadId: 't-trace' });
+    vi.setSystemTime(Date.now() + 40 * 86_400_000);
+    expect((await client.call('threads.deleted', {})).map(t => t.id)).toEqual(['t-trace']);
+    let notifications = 0;
+    client.on('thread.deletionsUpdated', () => { notifications++; });
+    await client.call('settings.set', { threadDeletionRetentionDays: 7 });
+    expect(await client.call('threads.deleted', {})).toEqual([]);
+    expect(notifications).toBe(1);
+    await expect(client.call('threads.restore', { threadId: 't-trace' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+  } finally { client.close(); }
+});
+
+test('the fake core compacts by itself at the end of a turn once the threshold is reached', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const threadId = 't-trace';
+    const finished = (operation?: string) => new Promise<Turn>(resolve => {
+      const off = client.on('turn.finished', turn => { if (turn.threadId === threadId && turn.execution?.operation === operation) { off(); resolve(turn); } });
+    });
+    await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['turn-end'] } });
+    let done = finished();
+    await client.call('turns.start', { threadId, prompt: 'first' });
+    await done;
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    expect((await client.call('threads.get', { threadId })).turns.some(turn => turn.execution?.operation === 'compact')).toBe(false);
+
+    await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['turn-end'] } });
+    const compacted = finished('compact');
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'second' });
+    await done;
+    expect((await compacted).execution?.automatic).toBe(true);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.findLast(message => message.role === 'system')?.parts[0]).toMatchObject({ displayText: 'Automatic compaction' });
+    expect(thread.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'compaction', trigger: 'auto' });
+
+    // The timer checks again: a threshold raised, or a client closed, during the delay starts nothing.
+    const count = async () => (await client.call('threads.get', { threadId })).turns.filter(turn => turn.execution?.operation === 'compact').length;
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'third' });
+    await done;
+    await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['turn-end'] } });
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    expect(await count()).toBe(1);
+    await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['turn-end'] } });
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'fourth' });
+    await done;
+    client.close();
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    await client.connect();
+    expect(await count()).toBe(1);
   } finally { client.close(); }
 });

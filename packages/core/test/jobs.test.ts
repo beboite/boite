@@ -112,6 +112,13 @@ describeWindows('windows job objects', () => {
       expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2220, priority: 0x4000, bytes: Math.floor(resolved.threadMemoryCapMb * 1048576 * 1.1 / 4096) * 4096 });
       expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
     }
+    await client.call('settings.set', { memoryProtection: false });
+    expect(memoryLimitOfJob(null)).toMatchObject({ flags: 0x2000, bytes: 0 });
+    expect(memoryLimitOfJob('memory-cap')).toEqual({ flags: 0x2020, priority: 0x4000, bytes: 0 });
+    expect(cpuRateOfGlobalJob()).toEqual({ flags: 5, rate: 7500 });
+    await client.call('settings.set', { memoryProtection: true });
+    expect(memoryLimitOfJob(null)?.flags).toBe(0x2200);
+    expect(memoryLimitOfJob('memory-cap')?.flags).toBe(0x2220);
     harness.core.procs.killTree('memory-cap');
     await child.exited;
   });

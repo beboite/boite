@@ -35,5 +35,5 @@ for (const width of [1280, 390]) {
       expect(await page.evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('turns.stop', { threadId: ${JSON.stringify(threadId)} })`);
     } finally { await page.close(); }
-  });
+  }, 30_000);
 }

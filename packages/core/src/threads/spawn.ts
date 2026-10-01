@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentSpawn, CoordinationMode, Message, RpcParams, ThreadId, ThreadLink, ThreadSummary, Turn } from '@boite/contracts';
+import type { AgentSpawn, Message, RpcParams, ThreadId, ThreadLink, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { invalidParams, messageOf, refused } from '../errors.ts';
 import { newId } from '../ids.ts';
@@ -7,11 +7,9 @@ import type { ThreadStore } from '../threads.ts';
 import { saveThread, withLoad } from './records.ts';
 
 const HOUR = 3_600_000;
-/** Threads one thread's agent may start per rolling hour, by its coordination mode. */
-export const SPAWN_LIMIT: Record<Exclude<CoordinationMode, 'off'>, number> = { brief: 3, team: 12 };
 /** On the new thread: who started it, and whether its first answer went back yet. */
 const ORIGIN = 'spawn-origin:';
-/** On the starting thread: what it started, for the budget and for retries. */
+/** On the starting thread: what it started, for retries. */
 const LEDGER = 'spawns:';
 
 interface Origin { origin: ThreadLink; reported: boolean }
@@ -68,11 +66,6 @@ export class ThreadSpawns {
       throw refused(`a thread an agent started cannot start another until the user writes in it; ask the agent of ${starter.origin.threadId} that started it`, { threadId, field: 'threadId', expected: 'a thread the user has written in' });
     }
     const now = Date.now();
-    const recent = ledger.filter((entry) => entry.at > now - HOUR);
-    const limit = SPAWN_LIMIT[config.mode];
-    if (recent.length >= limit) {
-      throw refused(`agent.spawn: ${recent.length} threads started in the last hour, the ${config.mode} limit; only the owner changes the mode`, { threadId, field: 'coordination', limit });
-    }
 
     const base = {
       projectId: target.id, providerId: caller.providerId, accountId: caller.accountId, title,

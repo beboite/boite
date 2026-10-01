@@ -1,12 +1,12 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
 import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
-import { announceProject, archiveProject } from './project-archive';
+import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
 import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
@@ -63,6 +63,28 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
   closeTerminal(ctx, `terminal:${thread.id}`);
 }
 
+/** Like the resident core, expire stopped families from their deletion date. */
+export function purgeDeletedThreads(ctx: FakeContext): void {
+  const days = ctx.settings.threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
+  if (days === 0) return;
+  const before = Date.now() - days * 86_400_000;
+  let changed = false;
+  for (const [id, family] of ctx.deletedThreads) {
+    if (family.deletedAt > before) continue;
+    ctx.deletedThreads.delete(id);
+    for (const thread of family.threads) {
+      ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && p.threadId !== `terminal:${thread.id}`);
+      ctx.coordination.delete(thread.id);
+      ctx.moveNotes.delete(thread.id);
+      ctx.delegationConfigs.delete(thread.id);
+      ctx.delegationAgents.delete(thread.id);
+      ctx.delegationLetters.delete(thread.id);
+    }
+    changed = true;
+  }
+  if (changed) ctx.emit('thread.deletionsUpdated', {});
+}
+
 /**
  * The core's model and effort checks on `threads.update`, run before
  * anything changes: the model when it changes or the account does, and the
@@ -104,6 +126,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.create': async (params) => {
       const project = ctx.projects.find((p) => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
+      requireFakeFolder(ctx, project);
       const provider = ctx.providers.find(entry => entry.id === params.providerId);
       if (!provider) throw ctx.notFound('provider', params.providerId);
       const account = ctx.accounts.find((entry) => entry.id === params.accountId);
@@ -118,7 +141,7 @@ export function threadMethods(ctx: FakeContext) {
       if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
       const at = ctx.now();
       const title = params.title !== undefined && params.title.length > 0 ? params.title : 'New thread';
-      // The core's own placement: a branch named after the title, the
+      // The core's own placement: a short temporary branch and the
       // worktree in the configured storage. No git here, only the two strings.
       if (params.worktree !== undefined && project.kind === 'drafts') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'a draft has no worktree: the drafts folder is not a git repository', data: { projectId: project.id } });
       const placed = params.worktree === undefined ? null : fakeWorktree(project.path, title, params.worktree.branch, ctx.settings.worktreeStorage, project.id);
@@ -139,6 +162,7 @@ export function threadMethods(ctx: FakeContext) {
         speed: params.speed ?? null,
         cwd: placed?.path ?? draftFolder ?? (params.cwd || project.path),
         branch: placed?.branch ?? null,
+        branchNamingPending: placed?.namingPending ?? false,
         permissionMode: params.permissionMode ?? 'default',
         status: 'idle',
         unread: false,
@@ -261,7 +285,7 @@ export function threadMethods(ctx: FakeContext) {
           ctx.activityTimers.delete(thread.id);
           ctx.emit('thread.removed', { threadId: thread.id, undoable: true });
         }
-        ctx.deletedThreads.set(threadId, { threads: family, archived });
+        ctx.deletedThreads.set(threadId, { threads: family, archived, deletedAt: Date.now() });
         ctx.emit('thread.deletionsUpdated', {});
         if (root.projectId !== null) announceProject(ctx, root.projectId);
         return { ok: true };
@@ -269,10 +293,14 @@ export function threadMethods(ctx: FakeContext) {
         for (const thread of family) removing.delete(thread.id);
       }
     },
-    'threads.deleted': async () => [...ctx.deletedThreads.values()].reverse().map(family => structuredClone(toSummary(family.threads[0]!))),
+    'threads.deleted': async () => {
+      purgeDeletedThreads(ctx);
+      return [...ctx.deletedThreads.values()].reverse().map(family => ({ ...structuredClone(toSummary(family.threads[0]!)), deletedAt: family.deletedAt }));
+    },
     'threads.restore': async ({ threadId }) => {
+      purgeDeletedThreads(ctx);
       const family = ctx.deletedThreads.get(threadId);
-      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no deletion to undo in this Boite session for ${threadId}`, data: { threadId } });
+      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no recoverable deletion for ${threadId}`, data: { threadId } });
       const root = family.threads.find(t => t.id === threadId)!;
       if (root.projectId !== null && !ctx.projects.some(p => p.id === root.projectId)) throw ctx.notFound('project', root.projectId);
       for (const [index, thread] of family.threads.entries()) {
@@ -446,7 +474,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread: Thread = {
         id, projectId: source.projectId, title, titleSource: source.titleSource,
         providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
-        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, permissionMode: source.permissionMode,
+        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
         status: 'idle', unread: false, archived: false, pinned: false,
         sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
         createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
@@ -459,7 +487,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread = ctx.thread(params.threadId);
       const root = thread.parentThreadId ?? thread.id;
       let childrenStopped = 0;
-      if (thread.parentThreadId || delegationConfig(ctx, root).enabled || (ctx.delegationAgents.get(root)?.length ?? 0) > 0) {
+      if (thread.parentThreadId || (ctx.delegationAgents.get(root)?.length ?? 0) > 0) {
         childrenStopped = await stopDelegation(ctx, root, thread.parentThreadId ? thread.id : undefined);
         ctx.emit('delegation.changed', { threadId: root });
       }

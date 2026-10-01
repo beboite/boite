@@ -69,13 +69,18 @@ test('an async question answer is visible while steering and becomes one user me
 
 test('an answer held after Stop precedes the next manual prompt without replacing it', async () => {
   const { owner, threadId, turn } = await running();
-  h.core.threads.runner.handles.get(threadId)!.steer = async () => false;
+  let reject!: (accepted: boolean) => void;
+  h.core.threads.runner.handles.get(threadId)!.steer = () => new Promise(resolve => { reject = resolve; });
   const { questionId } = await owner.call('questions.ask', { threadId, text: 'Which file?', options: ['Parser'] });
   await owner.call('questions.answer', { threadId, questionId, optionIds: ['1'] });
-  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
   const stopped = owner.next('turn.finished', item => item.id === turn.id);
   await owner.call('turns.stop', { threadId }); await stopped;
   await waitFor(() => h.core.threads.require(threadId).status === 'idle');
+  reject(false);
+  await waitFor(() => !h.core.threads.runner.steering.has(threadId));
+  await Bun.sleep(0);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect((await owner.call('threads.get', { threadId })).pendingAnswers).toEqual(['> Which file?\n\nParser']);
   const prompts: string[] = [];
   restore?.();
   restore = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
@@ -135,4 +140,31 @@ test('forking or editing a follow-up cannot resume a checkpoint beyond its messa
   const rewound = await owner.call('threads.rewind', { threadId, messageId });
   expect(rewound.session).toBe('seeded');
   expect(rewound.thread.messages.map(message => message.role)).toEqual(['user', 'assistant']);
+});
+
+test('a follow-up cuts the running answer, so what the agent writes next lands after it', async () => {
+  const { owner, threadId, turn, context, finish } = await running();
+  const emit = context().emit;
+  const reply = emit.startMessage('assistant');
+  emit.part(reply, 0, { type: 'text', text: 'Before' });
+  emit.part(reply, 1, { type: 'tool', toolId: 'build-1', name: 'Bash', input: {}, output: null, status: 'running' });
+  expect(await owner.call('turns.steer', { threadId, turnId: turn.id, prompt: 'Also reorder the buttons', clientRequestId: 'follow_up_split' })).toEqual({ accepted: true });
+  emit.part(reply, 2, { type: 'text', text: '' });
+  emit.delta(reply, 2, 'After');
+  const shape = () => h.core.journal.listMessages(threadId).filter(message => message.turnId === turn.id).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    .map(message => [message.role, message.state, message.parts.map(part => part.type === 'text' ? part.text : part.type === 'tool' ? part.status : part.type).join('|')]);
+  h.core.journal.flushDeltas();
+  // The tool that was running when the follow-up arrived keeps its message open.
+  expect(shape()).toEqual([['user', 'complete', 'Keep working'], ['assistant', 'streaming', 'Before|running'], ['user', 'complete', 'Also reorder the buttons'], ['assistant', 'streaming', 'After']]);
+  emit.part(reply, 1, { type: 'tool', toolId: 'build-1', name: 'Bash', input: {}, output: 'ok', status: 'done' });
+  emit.part(reply, 3, { type: 'tool', toolId: 'read-2', name: 'Read', input: {}, output: 'ok', status: 'done' });
+  expect(shape()).toEqual([['user', 'complete', 'Keep working'], ['assistant', 'complete', 'Before|done'], ['user', 'complete', 'Also reorder the buttons'], ['assistant', 'streaming', 'After|done']]);
+  // Activity follows the routed segment too, rather than treating its thinking delta as generic work.
+  emit.part(reply, 4, { type: 'thinking', text: '' });
+  emit.delta(reply, 4, 'Continuing after the follow-up');
+  expect(h.core.threads.get(threadId).progress?.phase).toBe('thinking');
+  emit.complete(reply, 'complete');
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await completed;
+  expect(shape().map(row => row[1])).toEqual(['complete', 'complete', 'complete', 'complete']);
 });

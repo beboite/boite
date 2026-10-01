@@ -114,12 +114,18 @@ export interface TurnContext {
   warmProcessMinutes: number;
   emit: EmitSink;
   log(level: 'info' | 'warn' | 'error', message: string): void;
+  /** Actual provider progress, not a timer heartbeat; the core stamps receipt time. */
+  reportProgress?(phase: import('@boite/contracts').ThreadProgress['phase'], detail?: string | null): void;
+  /** A provider signal that need not mean execution advanced. */
+  reportProviderEvent?(): void;
   /**
    * The `/name` commands the agent takes, whole, whenever the driver learns or
    * relearns them: the core keeps the list per thread and tells the clients
    * when it changed. Names are deduplicated, the first wins.
    */
   commands(list: AgentCommand[]): void;
+  /** Subscription quotas observed by a host, without a probe or a paid turn. */
+  quota?(reading: import('@boite/contracts').QuotaReading, observedAt: number): void;
   tasks?(list: import('@boite/contracts').AgentTask[]): void;
   /**
    * What the agent still runs in the background, whole, whenever it changed.
@@ -255,6 +261,8 @@ export interface TitleContext {
   answer: string;
   /** Initial naming runs in parallel with the first turn; later calls can resolve its subject. */
   initial?: boolean;
+  /** Also request an English branch slug for an automatically named worktree. */
+  nameBranch?: boolean;
   /** Images from the first user message, omitted for a writer that cannot read them. */
   attachments?: ImageAttachment[];
   /**

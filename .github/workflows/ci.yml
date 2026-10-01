@@ -35,6 +35,10 @@ on:
       skip-server:
         type: boolean
         default: false
+      # The nightly builds, signs and publishes the APK itself.
+      skip-android:
+        type: boolean
+        default: false
       channel:
         type: string
         default: stable
@@ -63,6 +67,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       desktop: ${{ steps.filter.outputs.desktop }}
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
+      android: ${{ steps.filter.outputs.android == 'true' && !inputs.skip-android }}
       e2e: ${{ steps.filter.outputs.e2e }}
       portable: ${{ steps.filter.outputs.portable }}
     steps:
@@ -359,6 +364,18 @@ jobs:
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
       - name: Collect release bundles
         run: bun scripts/ci/desktop-bundles.ts "$RUNNER_TEMP/desktop-bundles"
+      - name: Bundle and sign standalone Linux server
+        if: runner.os == 'Linux'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+        run: |
+          if [ -n "${THROWAWAY_UPDATER_KEY:-}" ]; then
+            unset TAURI_SIGNING_PRIVATE_KEY
+            export TAURI_SIGNING_PRIVATE_KEY_PATH="$THROWAWAY_UPDATER_KEY"
+          fi
+          file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
+          version=$(bun -e 'console.log(require("./package.json").version)')
+          bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
       - name: Diagnose Linux packaging failures
         if: failure() && runner.os == 'Linux'
         run: |
@@ -386,10 +403,15 @@ jobs:
       packages: write
     uses: ./.github/workflows/server.yml
 
+  android:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    uses: ./.github/workflows/android.yml
+
   required:
     name: CI required
     if: always()
-    needs: [changes, core, web, desktop, e2e, desktop-portable, server]
+    needs: [changes, core, web, desktop, e2e, desktop-portable, server, android]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all applicable checks
@@ -400,7 +422,7 @@ jobs:
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           assert jobs['changes']['result'] == 'success', jobs
-          for name in ('core', 'web', 'desktop', 'desktop-portable', 'server'):
+          for name in ('core', 'web', 'desktop', 'desktop-portable', 'server', 'android'):
               required = jobs['changes']['outputs']['desktop' if name == 'desktop-portable' else name] == 'true'
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           e2e_required = jobs['changes']['outputs']['desktop'] == 'true' and jobs['changes']['outputs']['e2e'] == 'true'

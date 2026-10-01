@@ -10,6 +10,7 @@
 import {
   RpcErrorCode,
   type Account,
+  type Project,
   type ProviderSummary,
   type RpcEventName,
   type RpcEvents,
@@ -26,6 +27,8 @@ export interface ContractEnv {
   newFolder(): Promise<string>;
   /** A path where no folder is. */
   missingFolder(): string;
+  /** Takes a folder `newFolder` made off the disk, as a repository deleted outside the app. */
+  removeFolder(path: string): Promise<void>;
   /** The same folder spelt in another case, or null where the file system tells case apart. */
   otherCase(path: string): string | null;
 }
@@ -142,6 +145,34 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'YOLO keeps permission requests out of the core and fake conversation': async env => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    await env.call('threads.update', { threadId: created.id, permissionMode: 'yolo' });
+    await env.call('threads.subscribe', { threadId: created.id });
+    const seen = record(env, ['permission.requested']);
+    try {
+      const turn = await env.call('turns.start', { threadId: created.id, prompt: '[permission]' });
+      await until('YOLO turn to finish', async () => {
+        const current = await env.call('threads.get', { threadId: created.id });
+        return current.turns.find(entry => entry.id === turn.id)?.status === 'done';
+      });
+      same(seen.events, [], 'permission events');
+      const current = await env.call('threads.get', { threadId: created.id });
+      same(current.permissionMode, 'yolo', 'persisted mode');
+      same(current.messages.flatMap(message => message.parts).filter(part => part.type === 'permission'), [], 'permission cards');
+      await env.call('threads.update', { threadId: created.id, permissionMode: 'default' });
+      same((await summary(env, created.id)).permissionMode, 'default', 'restored mode');
+    } finally { seen.stop(); }
+  },
+  'server status is readable by the owner and a stale update cannot install': async env => {
+    const status = await env.call('core.updateStatus', {});
+    check(typeof status.currentVersion === 'string' && status.currentVersion.length > 0, 'server status includes the installed version');
+    check(status.version === null || typeof status.version === 'string', 'server update version is nullable');
+    await refusedWith(env.call('core.updateInstall', { version: '0.0.0-stale' }), RpcErrorCode.Refused);
+    const cancelled = await env.call('core.updateCancel', {});
+    same(cancelled.currentVersion, status.currentVersion, 'cancellation preserves the running version');
+  },
   'questions.skip removes only its own pending card without another turn': async (env) => {
     const { setup, threadId, questionId } = await asked(env);
     const other = await thread(env, setup, 'other');
@@ -308,6 +339,26 @@ export const SCENARIOS: Record<string, Scenario> = {
   'projects.add refuses a folder that does not exist': async (env) => {
     const path = env.missingFolder();
     await refusedWith(env.call('projects.add', { path }), RpcErrorCode.Refused, ['path']);
+  },
+  'a project whose folder was deleted reads missing and refuses a new thread or a turn': async (env) => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    const listedBefore = (await env.call('projects.list', {})).find((entry) => entry.id === setup.projectId);
+    check(listedBefore?.missing !== true, 'a folder that is there is not missing');
+    const updates = record(env, ['project.updated']);
+    try {
+      await env.removeFolder(setup.projectPath);
+      const listed = (await env.call('projects.list', {})).find((entry) => entry.id === setup.projectId);
+      same(listed?.missing, true, 'the listed project');
+      same(listed?.repository, false, 'a folder that is gone is no repository');
+      const data = await refusedWith(thread(env, setup, 'after'), RpcErrorCode.Refused, ['projectId', 'path', 'expected']);
+      same(data.path, setup.projectPath, 'the refusal names the folder');
+      await refusedWith(env.call('turns.start', { threadId: created.id, prompt: 'hello' }), RpcErrorCode.Refused, ['cwd', 'expected']);
+      await until('project.updated says missing', () => updates.events.some((event) => (event.payload as Project).id === setup.projectId && (event.payload as Project).missing === true));
+      // What is left of it can still be put away: the project and its thread are removed.
+      await env.call('projects.remove', { projectId: setup.projectId });
+      check(!(await env.call('projects.list', {})).some((entry) => entry.id === setup.projectId), 'the project is still listed');
+    } finally { updates.stop(); }
   },
   'projects.add answers the same project for the same folder': async (env) => {
     const added = record(env, ['project.added']);

@@ -77,6 +77,55 @@ call and incur usage. The driver does not invent a post-compaction token count.
 The protocol operations follow the [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server#trigger-thread-compaction)
 and [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md#compact).
 
+## Automatic compaction
+
+`Settings.autoCompact` is `{ tokens, moments }` or null, set by the owner under
+Settings, Advanced, or on a phone under Settings, Automatic compaction. Null is
+the default: the core never compacts by itself, and each
+agent keeps its own mid-turn compaction, which this setting does not change.
+
+`tokens` is the size the meter must read, between 1000 and 10 000 000, or null
+for no size condition. It is a count and not a share of the window, so one
+number covers every model: a model that never reaches it is never compacted,
+and neither is an agent that reports no reading.
+
+`moments` lists when the core checks. All three sit between two turns, because
+the core cannot cut into a running one:
+
+| Moment | When it fires | What it costs the user |
+|---|---|---|
+| `turn-end` | 2 s after an answer that left nothing running | a message sent right after waits for the compaction |
+| `background` | 2 s after an answer that left a command or a monitor running | nothing: the agent was waiting anyway, and its wake opens right after |
+| `cache-expiry` | 60 s before the thread's [prompt cache](prompt-cache.md) lapses, if the thread is still idle | nothing while the user answers within the cache lifetime |
+
+`cache-expiry` is the cheapest one to leave on. The compaction reads the
+conversation at the cached price, and the message that follows a long pause
+starts from the short version, where it would have paid for the whole context
+again. It needs a thread whose cache lifetime is known, on the model and
+account that wrote it.
+
+A finished turn arms one timer for its thread, at the first chosen moment that
+applies. Any turn that opens before it fires disarms it, and the 2 s leave a
+client's queued prompt, a wake and a held answer the time to open theirs. When
+it fires the core checks again and compacts only when all of this holds:
+
+- the turn ended `done`, and was not itself a compaction;
+- the thread is idle, not archived, has a native session, and is neither a
+  delegated agent's nor a resident agent's (those compact by `compactAfterTurns`);
+- the reading is at or above `tokens`;
+- the agent can compact, as for the manual button;
+- no goal or loop is active, no delegated agent or workflow of the thread is
+  at work, and no wake or held answer waits: each of those opens a turn by
+  itself, and a compaction in flight would refuse it.
+
+The compaction is the turn `threads.compact` schedules, with
+`execution.automatic: true`. Its opening message is Boite's (`system`,
+`Automatic compaction`), its divider says `auto`, and it sends no notification.
+A threshold below what the agent keeps after compacting makes every turn end
+compact again. The timers live in memory: a core restart drops them, and the
+next finished turn arms a new one. The in-memory client implements `turn-end`
+and the threshold only; it has no background work and no cache to wait on.
+
 ## Editing a message and forking
 
 `threads.rewind { threadId, messageId }` removes a user message and everything
@@ -95,7 +144,9 @@ the rewind is pending still sends the replacement to the original thread on
 its owning machine.
 
 The core saves private file checkpoints before and after each conversation
-turn, for every driver. Editing restores the changes made by the removed
+turn, for every driver. Unchanged files reuse their saved hashes after checking
+size, mode, inode and nanosecond modification/change timestamps, with metadata
+retained for at most four thread folders. Editing restores the changes made by the removed
 turns before truncating their messages. It preserves unrelated files and
 refuses a conflict with outside edits before changing either files or history.
 Git projects include tracked files and non-ignored untracked files; HEAD and

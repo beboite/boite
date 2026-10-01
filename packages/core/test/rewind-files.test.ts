@@ -1,6 +1,6 @@
-import { chmod, mkdir, readFile, stat, writeFile, rm, symlink, readlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, writeFile, rm, symlink, readlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { CodeCheckpoints } from '../src/threads/code-checkpoints.ts';
@@ -50,6 +50,7 @@ test('editing restores changed, deleted, created and binary files, then runs the
   await writeFile(join(cwd, 'image.bin'), new Uint8Array([0, 255, 2]));
   await writeFile(join(cwd, 'script.sh'), 'before');
   await chmod(join(cwd, 'script.sh'), 0o755);
+  const originalMode = (await stat(join(cwd, 'script.sh'))).mode & 0o777;
   change = async prompt => {
     if (prompt.includes('replacement')) {
       expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
@@ -66,6 +67,7 @@ test('editing restores changed, deleted, created and binary files, then runs the
   await run('keep');
   const messageId = await run('remove this');
   await run('remove later');
+  const modeChanged = ((await stat(join(cwd, 'script.sh'))).mode & 0o777) !== originalMode;
   await writeFile(join(cwd, 'unrelated.txt'), 'outside edit');
   const rewound = await client.call('threads.rewind', { threadId, messageId });
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('kept');
@@ -73,7 +75,8 @@ test('editing restores changed, deleted, created and binary files, then runs the
   expect(await Bun.file(join(cwd, 'created.ts')).exists()).toBe(false);
   if (process.platform !== 'win32') expect((await stat(join(cwd, 'script.sh'))).mode & 0o777).toBe(0o755);
   expect(await readFile(join(cwd, 'unrelated.txt'), 'utf8')).toBe('outside edit');
-  expect(rewound.files).toEqual({ status: 'restored', count: 4 });
+  // Windows only supports the writable flag, so 0755 to 0644 may leave its mode unchanged.
+  expect(rewound.files).toEqual({ status: 'restored', count: 3 + Number(modeChanged) });
   expect(rewound.thread.messages.filter(message => message.role === 'user')).toHaveLength(1);
   await run('replacement');
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('replacement');
@@ -85,7 +88,13 @@ test('git checkpoints restore the dirty starting state without changing HEAD, th
   await writeFile(join(cwd, '.gitignore'), 'ignored.txt\n');
   await writeFile(join(cwd, 'app.ts'), 'staged');
   expect((await git(h.core, threadId, cwd, ['add', '.'])).code).toBe(0);
-  expect((await git(h.core, threadId, cwd, ['commit', '--quiet', '-m', 'fixture'])).code).toBe(0);
+  // The fixture must not depend on the runner having a configured Git identity.
+  const committed = Bun.spawnSync({
+    cmd: ['git', 'commit', '--quiet', '-m', 'fixture'], cwd,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'boite test', GIT_AUTHOR_EMAIL: 'test@boite.invalid', GIT_COMMITTER_NAME: 'boite test', GIT_COMMITTER_EMAIL: 'test@boite.invalid' },
+    stdout: 'pipe', stderr: 'pipe', windowsHide: true,
+  });
+  if (!committed.success) throw new Error(committed.stderr.toString());
   await writeFile(join(cwd, 'app.ts'), 'dirty staged');
   expect((await git(h.core, threadId, cwd, ['add', 'app.ts'])).code).toBe(0);
   await writeFile(join(cwd, 'app.ts'), 'dirty unstaged');
@@ -112,6 +121,19 @@ test('a change made between the removed turns is preserved and refuses the rewin
   await expect(client.call('threads.rewind', { threadId, messageId })).rejects.toThrow('app.ts changed between');
   expect(h.core.threads.get(threadId).messages.filter(message => message.role === 'user')).toHaveLength(2);
   expect(await readFile(join(cwd, 'app.ts'), 'utf8')).toBe('agent');
+});
+
+test('cached checkpoints preserve an outside edit with the same size and restored modification time', async () => {
+  const path = join(cwd, 'app.ts');
+  await writeFile(path, 'before');
+  await run('keep');
+  const initial = await stat(path);
+  await writeFile(path, 'manual');
+  await utimes(path, initial.atime, initial.mtime);
+  change = async () => { await writeFile(path, 'agent!'); };
+  const messageId = await run('change');
+  expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
+  expect(await readFile(path, 'utf8')).toBe('manual');
 });
 
 test('legacy turns and oversized files report unavailable backups while preserving their files', async () => {
@@ -187,6 +209,28 @@ test('permanently removing a project removes its private file checkpoints', asyn
   await expect(stat(folder)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
+test('project removal still reaches connected clients when checkpoint cleanup fails', async () => {
+  await run('save');
+  const projectId = h.core.threads.require(threadId).projectId!;
+  const observer = await h.connect();
+  const cleanup = spyOn(h.core.threads.codeCheckpoints, 'discard').mockRejectedValue(new Error('checkpoint locked'));
+  try {
+    const removed = observer.next('project.removed', project => project.projectId === projectId);
+    await client.call('projects.remove', { projectId });
+    expect((await removed).projectId).toBe(projectId);
+    expect((await observer.call('projects.list', {})).some(project => project.id === projectId)).toBe(false);
+  } finally { cleanup.mockRestore(); observer.close(); }
+});
+
+test('an unavailable working directory warns but still rewinds the messages', async () => {
+  const messageId = await run('save');
+  await rm(cwd, { recursive: true });
+  const result = await client.call('threads.rewind', { threadId, messageId });
+  expect(result.files?.status).toBe('unavailable');
+  expect(result.files?.reason).toContain('working directory');
+  expect(result.thread.messages).toEqual([]);
+});
+
 test('restoring can replace a file with its former directory and nested files', async () => {
   await mkdir(join(cwd, 'src'));
   await writeFile(join(cwd, 'src', 'app.ts'), 'before');
@@ -199,11 +243,32 @@ test('restoring can replace a file with its former directory and nested files', 
 test('Stop during checkpoint preparation prevents the provider from starting', async () => {
   let calls = 0;
   change = async () => { calls += 1; };
-  const turn = h.core.threads.startTurn(threadId, 'stop before start');
-  expect(h.core.threads.stopTurn(threadId)).toBe(true);
-  await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
-  expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
-  expect(calls).toBe(0);
+  const held = Promise.withResolvers<void>();
+  const preparation = spyOn(h.core.threads.codeCheckpoints, 'begin').mockReturnValue(held.promise);
+  try {
+    const turn = h.core.threads.startTurn(threadId, 'stop before start');
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'running');
+    expect(h.core.threads.stopTurn(threadId)).toBe(true);
+    held.resolve();
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+    expect(h.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+    expect(calls).toBe(0);
+  } finally { held.resolve(); preparation.mockRestore(); }
+});
+
+test('rewinding a created file tolerates an empty parent directory that cannot be removed', async () => {
+  if (process.platform === 'win32') return;
+  change = async () => {
+    await mkdir(join(cwd, 'src'));
+    await writeFile(join(cwd, 'src', 'created.ts'), 'agent');
+  };
+  const messageId = await run('create');
+  await chmod(cwd, 0o555);
+  try {
+    expect((await client.call('threads.rewind', { threadId, messageId })).files).toEqual({ status: 'restored', count: 1 });
+    expect(await Bun.file(join(cwd, 'src', 'created.ts')).exists()).toBe(false);
+    expect(h.core.threads.get(threadId).messages).toEqual([]);
+  } finally { await chmod(cwd, 0o755); }
 });
 
 test('restoring a former file removes only the empty directories created in its place', async () => {

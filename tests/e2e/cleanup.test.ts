@@ -20,22 +20,39 @@ test.skipIf(process.platform !== 'win32')('a directory still locked for a few se
   writeFileSync(file, 'held');
   // What a Chromium still exiting does to its profile: a file open with no
   // sharing, which no delete gets through until the process lets go.
-  const holder = Bun.spawn(['powershell', '-NoProfile', '-NonInteractive', '-Command',
-    `$f = [IO.File]::Open('${file}', 'Open', 'ReadWrite', 'None'); 'locked'; Start-Sleep -Milliseconds 3500; $f.Close()`],
-  { stdout: 'pipe', stderr: 'ignore', windowsHide: true });
+  // Hold the native handle here: PowerShell startup and its stdout pipe made
+  // the readiness handshake hang before this test even reached removal.
+  const { dlopen, FFIType, ptr } = await import('bun:ffi');
+  const api = dlopen('kernel32.dll', {
+    CreateFileW: { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u64], returns: FFIType.u64 },
+    CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
+    GetLastError: { args: [], returns: FFIType.u32 },
+  });
+  const path = Buffer.from(`${file}\0`, 'utf16le');
+  // GENERIC_READ, no sharing, OPEN_EXISTING. HANDLE is an integer, not an FFI pointer.
+  const handle = api.symbols.CreateFileW(ptr(path), 0x80000000, 0, null, 3, 0, 0);
+  if (BigInt(handle) === 0xffffffffffffffffn) {
+    const error = api.symbols.GetLastError();
+    api.close();
+    rmSync(dir, { recursive: true, force: true });
+    throw new Error(`CreateFileW could not lock ${file}: Windows error ${error}`);
+  }
+  let held = true;
+  const release = () => {
+    if (held) api.symbols.CloseHandle(handle);
+    held = false;
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const reader = holder.stdout.getReader();
-    let said = '';
-    while (!said.includes('locked')) {
-      const chunk = await reader.read();
-      if (chunk.done) throw new Error('the lock holder exited before it held the file');
-      said += new TextDecoder().decode(chunk.value);
-    }
+    expect(() => rmSync(dir, { recursive: true, force: true })).toThrow();
+    timer = setTimeout(release, 3_500);
     expect(await removeDirectory(dir)).toBe(true);
+    expect(held).toBe(false);
     expect(existsSync(dir)).toBe(false);
   } finally {
-    holder.kill();
-    await holder.exited;
+    clearTimeout(timer);
+    release();
+    api.close();
     rmSync(dir, { recursive: true, force: true });
   }
 }, 20_000);

@@ -2,18 +2,24 @@ import { expect, test } from 'bun:test';
 import { affectedChecks, ciMode, needsCodeChecks, needsWorkflowLint, plan } from './changes.ts';
 
 test('checks follow runtime boundaries and combine changed paths', () => {
-  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ core: false, web: false, desktop: true, server: false });
-  expect(affectedChecks(['Dockerfile'])).toEqual({ core: false, web: false, desktop: false, server: true });
-  expect(affectedChecks(['packages/ui/src/app.css'])).toEqual({ core: false, web: true, desktop: true, server: true });
-  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ core: true, web: true, desktop: true, server: true });
-  expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ core: false, web: false, desktop: true, server: true });
+  expect(affectedChecks(['apps/shell/src-tauri/src/main.rs'])).toEqual({ core: false, web: false, desktop: true, server: false, android: false });
+  expect(affectedChecks(['Dockerfile'])).toEqual({ core: false, web: false, desktop: false, server: true, android: false });
+  expect(affectedChecks(['packages/ui/src/app.css'])).toEqual({ core: false, web: true, desktop: true, server: true, android: false });
+  expect(affectedChecks(['packages/core/src/main.ts'])).toEqual({ core: true, web: true, desktop: true, server: true, android: true });
+  expect(affectedChecks(['tests/e2e/ui.test.ts', 'docker/compose.yml'])).toEqual({ core: false, web: false, desktop: true, server: true, android: false });
+});
+
+test('only the wrapper and its own pipeline build the APK', () => {
+  for (const file of ['apps/android/app/build.gradle', '.github/workflows/android.yml', 'scripts/ci/android-apk.ts']) {
+    expect(affectedChecks([file])).toEqual({ core: false, web: false, desktop: false, server: false, android: true });
+  }
 });
 
 test('benches, telemetry and architecture scripts only need the type checks', () => {
   for (const file of ['bench/retitle.ts', 'telemetry/src/index.ts', 'telemetry/wrangler.toml', 'scripts/architecture/check.ts']) {
-    expect(affectedChecks([file])).toEqual({ core: false, web: true, desktop: false, server: false });
+    expect(affectedChecks([file])).toEqual({ core: false, web: true, desktop: false, server: false, android: false });
   }
-  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ core: true, web: true, desktop: true, server: true });
+  expect(affectedChecks(['bench/retitle.ts', 'packages/core/src/main.ts'])).toEqual({ core: true, web: true, desktop: true, server: true, android: true });
 });
 
 test('shared inputs and unknown files fail open to every check', () => {
@@ -60,5 +66,5 @@ test('a pull request skips the extra architectures, a main push skips what the p
   const full = plan(all, 'full');
   expect(full).toMatchObject({ core: true, e2e: true });
   expect(JSON.parse(full.portable)).toHaveLength(4);
-  expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ core: false, web: false, desktop: false, server: false });
+  expect(plan(affectedChecks(['README.md']), 'warm')).toMatchObject({ core: false, web: false, desktop: false, server: false, android: false });
 });

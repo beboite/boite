@@ -92,6 +92,7 @@ export class Store {
   get client(): Client | null {
     return this.#ctx.client;
   }
+  get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
   // Wiring
@@ -128,6 +129,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.serverUpdater.reset();
     ctx.drafts.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;
@@ -391,6 +393,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
   loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }
@@ -460,6 +463,7 @@ export class Store {
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
   get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
+  get promptFocus() { return this.#ctx.composer.promptFocus; }
   steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }
   sendQueuedNow(...args: Parameters<Composer['sendQueuedNow']>) { return this.#ctx.composer.sendQueuedNow(...args); }
   stop(...args: Parameters<Composer['stop']>) { return this.#ctx.composer.stop(...args); }

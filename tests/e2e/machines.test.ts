@@ -117,6 +117,8 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await capture('link-confirm.png');
     await page.click(id('confirm-ok'));
     await page.waitFor(`document.querySelector('[data-thread-id="${ta.id}"]')`);
+    await page.click(`[data-thread-id="${ta.id}"]`);
+    await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
     const grant = await b.call('pairing.grant', { role: 'owner' });
@@ -126,10 +128,21 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.waitFor(
       `document.querySelectorAll('${id('machine-card')}').length === 2 && !document.querySelector('${id('machine-add')}').textContent.includes('Connecting')`
     );
-    await a.call('settings.set', { warmProcessMinutes: 7 });
+    await b.call('settings.set', { warmProcessMinutes: 2, agentCpuCapPercent: 35 });
+    await a.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 7, agentCpuCapPercent: 85 });
     await page.click(id('machine-sync'));
-    await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.warmProcessMinutes === 7`);
-    expect((await b.call('settings.get', {})).warmProcessMinutes).toBe(7);
+    await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.asyncQuestions === false`);
+    expect(await b.call('settings.get', {})).toMatchObject({ asyncQuestions: false, warmProcessMinutes: 2, agentCpuCapPercent: 35 });
+    expect(await page.evaluate(`!!document.querySelector('${id('machines-page')}') && !document.querySelector('${id('machine-settings')}')`)).toBe(true);
+    await page.click(`[data-machine-id="${second.url}"] ${id('machine-settings-open')}`);
+    await page.waitFor(`document.querySelector('${id('machine-settings')}')?.dataset.machineId === ${JSON.stringify(second.url)}`);
+    await page.type(`${id('machine-settings')} input[type=number]`, '45');
+    await page.evaluate(`document.querySelector('${id('machine-settings')} input[type=number]').closest('form').requestSubmit()`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === ${JSON.stringify(second.url)})?.store.settings?.agentCpuCapPercent === 45`);
+    expect((await b.call('settings.get', {})).agentCpuCapPercent).toBe(45);
+    expect((await a.call('settings.get', {})).agentCpuCapPercent).toBe(85);
+    expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(ta.id)}`)).toBe(true);
+    await page.click(id('machine-settings-back'));
     await page.click(id('settings-back'));
     await page.waitFor(`document.querySelector('[data-thread-id="${tb.id}"]')`);
     await page.click(`[data-thread-id="${tb.id}"]`);
@@ -163,9 +176,9 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.send('Emulation.clearDeviceMetricsOverride', {});
     await page.click(id('terminal-close'));
     await page.waitFor(`!document.querySelector('${id('terminal-drawer')}')`);
-    await a.call('settings.set', { warmProcessMinutes: 13 });
-    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.warmProcessMinutes === 13`);
-    expect((await b.call('settings.get', {})).warmProcessMinutes).toBe(13);
+    await a.call('settings.set', { asyncQuestions: true });
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.asyncQuestions === true`);
+    expect((await b.call('settings.get', {})).asyncQuestions).toBe(true);
     await page.type(id('composer-input'), 'Only on the remote host');
     await page.click(id('composer-send'));
     await page.waitFor(
@@ -177,14 +190,15 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await second.stop({ keepDataDir: true });
     await page.click(`[data-thread-id="${ta.id}"]`);
     await page.waitFor(`document.querySelector('${id('thread-title')}')?.textContent === 'Primary project'`);
-    await a.call('settings.set', { warmProcessMinutes: 15 });
+    await a.call('settings.set', { asyncQuestions: false });
     const restarted = await startCore({ dataDir: second.dataDir, port: second.port });
     cores[1] = restarted;
     await page.evaluate(`location.reload()`);
     await page.waitFor(`document.querySelectorAll('${id('thread-row')}').length === 2`);
     await page.click(`[data-thread-id="${tb.id}"]`);
     await page.waitFor(`document.querySelector('${id('chat')}')?.textContent.includes('Only on the remote host')`);
-    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.warmProcessMinutes === 15`);
+    await page.waitFor(`globalThis.__boiteTest.workspace.active.settings?.asyncQuestions === false`);
+    expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.settings.agentCpuCapPercent === 45 && globalThis.__boiteTest.workspace.active.settings.warmProcessMinutes === 2`)).toBe(true);
     await page.click(id('nav-settings'));
     await page.click(id('settings-tab-machines'));
     const admin = await connect(restarted.url, restarted.token);

@@ -17,25 +17,22 @@ import { connected } from './provider-setup';
  * The client does it with the calls each core already answers, so a core needs
  * nothing new and an older one simply lacks what it cannot take.
  *
- * What moves is how the user works: the limits, the process guards, the agent
- * updates, the keybindings file and the brain's switches. What stays is what
- * belongs to the machine: its network face (LAN, public URL, browser origins),
- * its brain folder, and above all its providers. A login is a token, and a
- * token never crosses machines here: the report names every provider signed in
+ * Deleted-history retention, process guards, question mode, keybindings and
+ * brain switches follow the user.
+ * Resource limits, process retention, agent updates, storage, network access,
+ * the brain folder and providers stay on their owning machine. Login tokens
+ * never cross machines here: the report names every provider signed in
  * on the source and not on the target, so the user signs in there once.
  */
 
 /** The settings that describe the user, not the machine they sit on. */
 export const PORTABLE_SETTINGS = [
-  'warmProcessMinutes',
-  'agentCpuCapPercent',
-  'agentMemoryBudgetPercent',
-  'threadMemoryCapMb',
+  'threadDeletionRetentionDays',
   'focusGuard',
   'muteAgents',
   'reapOrphans',
-  'autoUpdateHarnesses',
-  'asyncQuestions'
+  'asyncQuestions',
+  'autoCompact'
 ] as const satisfies readonly (keyof Settings)[];
 
 /** One machine as the sync sees it: its connection and what its store last listed. */
@@ -147,7 +144,8 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: Ab
       target.client.call('settings.get', {})
     ]);
     const patch = portable(fromSettings);
-    const changed = Object.entries(patch).filter(([key, value]) => toSettings[key as keyof Settings] !== value).length;
+    // `autoCompact` is an object: two equal ones are never the same reference.
+    const changed = Object.entries(patch).filter(([key, value]) => JSON.stringify(toSettings[key as keyof Settings]) !== JSON.stringify(value)).length;
     signal?.throwIfAborted();
     return { settings: changed ? await target.client.call('settings.set', patch) : toSettings, changed };
   });

@@ -108,7 +108,8 @@ export class Scheduler {
   /** Shutdown: drop the queue, stop what runs, and wait for it before the journal closes. */
   async drain(timeoutMs: number = DRAIN_TIMEOUT_MS): Promise<void> {
     if (!this.core.journal.isClosed()) {
-      for (const entry of this.queue) this.core.threads.markQueuedStopped(entry.turnId);
+      // A restart handoff carries its queued turns to the next core as they are.
+      for (const entry of this.queue) if (!this.core.threads.handoff.keepsQueued(entry.turnId)) this.core.threads.markQueuedStopped(entry.turnId);
     }
     this.queue.length = 0;
     const entries = [...this.running.values()];

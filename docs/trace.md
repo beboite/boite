@@ -5,6 +5,25 @@ only true because one launcher owns every spawn and, on Windows, puts the child
 in a kernel object before its first instruction. This page is what the claim
 covers, and where it stops.
 
+While a turn runs, its chat footer shows the latest observed activity: starting,
+thinking, compacting, retrying, running a tool, working or waiting for the provider.
+Provider progress events can update this without a chat message. The timestamp advances only when
+an event arrives, not on a timer. After a minute of silence, the footer says how
+long no new activity has arrived and offers a Trace button. This describes the
+available evidence; it does not establish that the provider is stuck. Reopening
+the thread receives the current activity snapshot, and ending the turn clears
+it. Cores without these metadata keep the existing elapsed-time footer.
+
+Codex reasoning item boundaries count as activity even when their summaries
+are empty. They add no thinking text or assistant comment, and their encrypted
+content is never inspected. After a tool completes, its card remains in the
+chat while the footer reports waiting for the provider. Status notifications
+have a separate provider-signal timestamp: repeated signals show that the
+provider still talks to the core without resetting the last execution activity.
+Codex's completed public messages render immediately even while their turn keeps
+running. Completion updates the existing text part by native item id, so loading
+the stored snapshot after reconnect does not add another message.
+
 ## Platform boundary
 
 The shared process registry calls `ProcessPlatform` in
@@ -230,10 +249,26 @@ the mixer and silence in the speakers.
 
 ## Turning them off
 
-All three live under Settings, Protection, and all three are on by default.
+Process protections live under Settings, Protection, and are on by default.
+Under Limits, "Protect available memory" controls automatic memory stops and
+the Windows allocation caps. Turning it off applies immediately to running
+conversations and keeps the configured budget, quota and reserve for later.
+The operating system can still refuse an allocation or stop a process.
+Zero in the quota or reserve fields means automatic sizing, not disabled.
+Memory readings remain visible with protection off.
+
+Memory notices appear beside the interrupted tool in a response. New notices
+persist their message and part boundary so later output and reopening cannot
+move them to the end. Older notices use tool timestamps when available.
+Consecutive stops at the same boundary with the same reason and threshold
+share a compact row, with the process list folded underneath. The row links
+to this machine's memory settings for owners.
+Owner connections also have the Protection page in the mobile settings menu.
+Paired devices retain their existing permissions and cannot change core settings.
 
 | Setting | Effect when off |
 |---|---|
+| `memoryProtection` | automatic memory stops and Windows global and conversation allocation caps are removed |
 | `focusGuard` | an agent's window keeps the foreground it took |
 | `muteAgents` | an agent's audio reaches the speakers, and anything muted is unmuted |
 | `reapOrphans` | what a thread leaves running after its turn runs until the thread's tree is killed or the core exits |

@@ -21,6 +21,7 @@ import { coordinationMethods, registerCore, unregisterCore } from './fake-client
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
+import { pathKey } from './fake-client/checks';
 import { projectIconMethods } from './fake-client/project-icons';
 import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
@@ -32,12 +33,13 @@ import { settingsMethods } from './fake-client/settings';
 import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
-import { threadMethods } from './fake-client/threads';
+import { purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { worktreeMethods } from './fake-client/worktrees';
+import { serverUpdateMethods } from './fake-client/server-update';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -108,6 +110,15 @@ export class FakeClient implements ObservableClient {
     this.#ctx.bus.principal = principal;
   }
 
+  /**
+   * Takes a folder off the fake's disk, as a repository deleted outside the
+   * app: the project there reads `missing` on its next answer, and a thread
+   * in it or under it is refused a turn.
+   */
+  loseFolder(path: string): void {
+    this.#ctx.goneFolders.add(pathKey(path));
+  }
+
   onState(handler: (state: ClientState) => void): () => void {
     return this.#ctx.bus.onState(handler);
   }
@@ -117,6 +128,7 @@ export class FakeClient implements ObservableClient {
   }
 
   async connect(): Promise<CoreInfo> {
+    purgeDeletedThreads(this.#ctx);
     this.#ctx.agents.open();
     this.#ctx.bus.setState('connecting');
     await this.#ctx.tick();
@@ -125,7 +137,6 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
-    this.#ctx.deletedThreads.clear();
     const ctx = this.#ctx;
     ctx.agents.close();
     unregisterCore(ctx);
@@ -213,10 +224,15 @@ export class FakeClient implements ObservableClient {
     ctx.memoryState = event.state;
     ctx.emit('resources.memory', structuredClone(event));
     if (event.threadId === null) return;
-    const thread = ctx.threads.get(event.threadId);
+    const threadId = event.threadId;
+    const thread = ctx.threads.get(threadId);
     if (!thread) return;
+    const message = thread.messages.at(-1);
+    if (!event.anchor && message?.role === 'assistant' && message.state === 'streaming') {
+      event = { ...event, anchor: { messageId: message.id, partIndex: message.parts.length } };
+    }
     thread.memoryEvents = [...(thread.memoryEvents ?? []), event].slice(-100);
-    ctx.emitToThread(event.threadId, 'thread.memory', { ...event, threadId: event.threadId });
+    ctx.emitToThread(threadId, 'thread.memory', { ...event, threadId });
   }
 
   /**
@@ -278,6 +294,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...serverUpdateMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projectMethods(ctx),

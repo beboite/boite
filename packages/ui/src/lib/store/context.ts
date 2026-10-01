@@ -16,6 +16,7 @@ import { Terminals } from './terminals.svelte';
 import { Threads } from './threads.svelte';
 import { Workbench } from './workbench.svelte';
 import { Workflows } from './workflows.svelte';
+import { ServerUpdater } from './server-update.svelte';
 
 /**
  * What the parts of one Store share and the Store keeps off its public
@@ -43,6 +44,7 @@ export class StoreContext {
   readonly delegation: Delegation;
   readonly workbench: Workbench;
   readonly workflows: Workflows;
+  readonly serverUpdater: ServerUpdater;
 
   constructor(readonly store: Store) {
     this.connection = new Connection(this);
@@ -61,6 +63,7 @@ export class StoreContext {
     this.delegation = new Delegation(this);
     this.workbench = new Workbench(this);
     this.workflows = new Workflows(this);
+    this.serverUpdater = new ServerUpdater(this);
   }
 
   /**

@@ -294,6 +294,14 @@ export function withUtf8Locale(env: Record<string, string | undefined>, platform
 
 export function main(argv: string[]): void {
   withUtf8Locale(process.env, process.platform);
+  if (argv[0] === 'update-apply') {
+    void (async () => {
+      if (!processPlatform.serverUpdates || !argv[1]) throw new Error('update-apply expects a private server update plan on Linux');
+      const { applyServerUpdate } = await import('./server-update/apply.ts');
+      await applyServerUpdate(argv[1], processPlatform.serverUpdates);
+    })().catch(error => { process.stderr.write(`boite-core update: ${messageOf(error)}\n`); process.exitCode = 1; });
+    return;
+  }
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
     // The exit code is set and the process left to end on its own: `process.exit`
@@ -360,6 +368,7 @@ export function main(argv: string[]): void {
   const host = resolveHost(flags, settings);
   const server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
   core.updates.start();
+  core.serverUpdates.start();
   if (core.cliDir === null) {
     console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
   }
@@ -420,7 +429,17 @@ export function main(argv: string[]): void {
       });
   };
   process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  // What a service manager sends for a restart, an update or a reboot. The
+  // first one hands the running turns to the next core: each ends its tool
+  // call, 30 seconds at most, and resumes after the restart. A second one
+  // stops them now, and they still resume. A third exits.
+  let terms = 0;
+  process.on('SIGTERM', () => {
+    terms += 1;
+    if (stopping || terms > 2) shutdown();
+    else if (terms === 1) core.requestHandoffShutdown();
+    else core.requestShutdown();
+  });
   // The last line of defence: Bun exits on either anyway. This leaves a log
   // line, stops the turns and releases the lock on the way out; the process
   // never carries on after an error nobody expected.

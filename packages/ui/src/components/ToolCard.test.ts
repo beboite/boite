@@ -100,6 +100,44 @@ test('a standalone command has a compact summary and preserves its full input on
   expect(query('[data-testid=tool-output]').textContent).toBe('clean');
 });
 
+test.each([
+  ['bun test', 'bun test v1.4.2\n(pass) first case\n(fail) reload keeps messages\n 1 pass\n 1 fail', '(fail) reload keeps messages'],
+  ['git rebase', 'Rebasing (1/1)\rAuto-merging docs/example.md\nCONFLICT (content): Merge conflict in docs/example.md\nerror: could not apply abc123', 'CONFLICT (content): Merge conflict in docs/example.md'],
+  ['git status', 'Ordinary command output\n\u001b[31mfatal: not a git repository\u001b[0m', 'fatal: not a git repository'],
+])('a failed %s previews its diagnostic instead of its output banner', (command, output, diagnostic) => {
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Bash', input: { command }, output, status: 'error' as const }
+  });
+  flushSync();
+  expect(query('[data-testid=tool-error-preview]').textContent).toBe(diagnostic);
+  query<HTMLButtonElement>('[data-testid=tool-toggle]').click();
+  flushSync();
+  expect(query('[data-testid=tool-output]').textContent).toBe(output);
+});
+
+test('a failed command with hidden diagnostics shows its exit code and a failure explanation', () => {
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Bash', input: { command: 'git status 2>/dev/null' }, output: 'Earlier successful output', status: 'error' as const, exitCode: 128 }
+  });
+  flushSync();
+  expect(query('[data-testid=tool-exit-code]').textContent).toBe('Exit code 128');
+  expect(query('[data-testid=tool-error-preview]').textContent).toBe('Command reported failure. Expand to read the full output.');
+});
+
+test('successful stderr output stays folded as a successful command', () => {
+  running = mount(ToolCard, {
+    target: document.body,
+    props: { name: 'Bash', input: { command: 'git fetch' }, output: 'warning: progress on stderr\nerror: quoted from documentation', status: 'done' as const, exitCode: 0 }
+  });
+  flushSync();
+  expect(query('[data-testid=tool-card]').getAttribute('data-status')).toBe('done');
+  expect(query('[data-testid=tool-toggle] .line').textContent).toBe('Ran 1 command');
+  expect(document.querySelector('[data-testid=tool-error-preview]')).toBeNull();
+  expect(document.querySelector('[data-testid=tool-exit-code]')).toBeNull();
+});
+
 test('a command\'s one diff keeps its heading, since the command does not name the file', () => {
   const diff = { kind: 'diff' as const, path: 'src/a.ts', oldText: 'a\n', newText: 'b\n' };
   running = mount(ToolCard, {

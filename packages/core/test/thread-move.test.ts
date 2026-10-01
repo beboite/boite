@@ -462,11 +462,13 @@ describe('threads.move', () => {
     const alpha = await repoProject('alpha');
     const beta = await repoProject('beta');
     const moving = await thread(alpha.id, 'Worktree work', true);
-    expect(moving.branch).toBe('boite/worktree-work');
+    expect(moving.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
     const oldCwd = moving.cwd;
 
     const moved = await client.call('threads.move', { threadId: moving.id, projectId: beta.id });
-    expect(moved.branch).toBe('boite/worktree-work');
+    expect(moved.branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+    expect(moved.branch).not.toBe(moving.branch);
+    expect(moved.branchNamingPending).toBe(true);
     expect(moved.cwd).not.toBe(oldCwd);
     expect(moved.cwd).toContain(join('beta', '.boite', 'worktrees'));
     expect(git(beta.path, 'worktree', 'list')).toContain(basename(moved.cwd));
@@ -476,7 +478,7 @@ describe('threads.move', () => {
     // A folder target that is no repository gives the project folder.
     const plain = await folderProject('plain');
     const again = await client.call('threads.move', { threadId: moving.id, projectId: plain.id });
-    expect(again).toMatchObject({ cwd: plain.path, branch: null });
+    expect(again).toMatchObject({ cwd: plain.path, branch: null, branchNamingPending: false });
   });
 
   test('a thread moved into the drafts gets a dated folder of its own; out of it, the project folder', async () => {

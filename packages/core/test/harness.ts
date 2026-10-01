@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Settings } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import type { CoreClient } from '../src/client.ts';
-import { Core } from '../src/core.ts';
+import { Core, type CoreOptions } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { startServer } from '../src/server.ts';
 import type { RunningServer } from '../src/server.ts';
@@ -20,6 +20,7 @@ export interface TestCore {
 }
 
 export interface TestCoreOptions {
+  serverUpdates?: CoreOptions['serverUpdates'];
   bundleHash?: string;
   helloTimeoutMs?: number;
   settings?: Partial<Settings>;
@@ -61,7 +62,7 @@ export async function startTestCore(options: TestCoreOptions = {}): Promise<Test
   process.env.BOITE_TERMINAL_SHELL = process.platform === 'win32' ? (process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe') : '/bin/sh';
 
   const token = newToken();
-  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash });
+  const core = new Core({ dataDir, token, onShutdown: options.onShutdown, bundleHash: options.bundleHash, serverUpdates: options.serverUpdates });
   // The scripted agents echo their prompt, and the line that teaches `boite ask`
   // would ride along in every reply: a test that wants it turns it back on.
   core.settings.set({ asyncQuestions: false, ...options.settings });

@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { TECH_ICON_IDS, type Project, type ProjectIcon, type ProjectId, type TechIconId } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { newId } from './ids.ts';
-import { notFound, refused } from './errors.ts';
+import { folderGone, messageOf, notFound, refused } from './errors.ts';
 import { FileIndex } from './files.ts';
 import { documentsDir } from './platform/folders.ts';
 import { threadTerminalId } from './terminals.ts';
@@ -24,6 +24,17 @@ export const GIT_PROBE_TIMEOUT_MS = 2_000;
 export function probeGit(folder: string): Promise<boolean | null> {
   return stat(join(folder, '.git')).then(
     () => true,
+    (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' || error.code === 'ENOTDIR' ? false : null),
+  );
+}
+
+/**
+ * Whether `folder` is still a directory, off the event loop: true, false, or
+ * null when the disk gave no clear answer. A file in its place is not a folder.
+ */
+export function probeFolder(folder: string): Promise<boolean | null> {
+  return stat(folder).then(
+    (found) => found.isDirectory(),
     (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' || error.code === 'ENOTDIR' ? false : null),
   );
 }
@@ -62,6 +73,8 @@ function pathKey(path: string): string {
 
 interface GitFlag {
   value: boolean | undefined;
+  /** The folder itself is gone. Undefined before a check gave a clear answer. */
+  missing?: boolean | undefined;
   inflight: boolean;
 }
 
@@ -73,6 +86,8 @@ export class ProjectStore {
   private readonly git = new Map<string, GitFlag>();
   /** Replaced by a test to hold a check pending. */
   gitProbe: (folder: string) => Promise<boolean | null> = probeGit;
+  /** Replaced by a test to hold or fail the folder check. */
+  folderProbe: (folder: string) => Promise<boolean | null> = probeFolder;
   /** How long `projects.list` waits for the checks it starts; lowered by a test. */
   gitWaitMs = GIT_PROBE_TIMEOUT_MS;
   /** Replaced by a test to count or hold detections. */
@@ -278,6 +293,38 @@ export class ProjectStore {
     return this.described(project);
   }
 
+  /**
+   * The project, once its folder answered as a directory. Refused by the
+   * folder when it is gone, and every client hears the project is `missing`;
+   * a disk that gave no clear answer passes, as it does for the `.git` check.
+   * The drafts folder is made on demand and never refused here.
+   */
+  async requireFolder(projectId: ProjectId): Promise<Project> {
+    const project = this.require(projectId);
+    if (this.isDrafts(project)) return project;
+    const present = await this.folderProbe(project.path).catch(() => null);
+    if (present === null) return project;
+    this.noteFolder(project.path, !present);
+    if (!present) {
+      throw folderGone(project.path, { field: 'projectId', projectId, project: project.name });
+    }
+    return project;
+  }
+
+  /** Records what a check said of a folder and tells the clients when a project appeared or vanished. */
+  private noteFolder(path: string, missing: boolean): void {
+    const flag = this.git.get(path) ?? { value: undefined, inflight: false };
+    const before = flag.missing;
+    flag.missing = missing;
+    if (missing) flag.value = false;
+    this.git.set(path, flag);
+    // The first answer of a folder that is there changes nothing a client drew.
+    if (before === missing || (before === undefined && !missing) || this.core.stopping) return;
+    for (const project of this.core.journal.listProjects()) {
+      if (project.path === path && !this.removing.has(project.id)) this.announce(project.id);
+    }
+  }
+
   add(path: string, name?: string): Project {
     const full = resolve(path);
     let isDirectory = false;
@@ -294,7 +341,7 @@ export class ProjectStore {
     const key = pathKey(full);
     const existing = this.core.journal.listProjects().find((project) => pathKey(project.path) === key);
     // The folder just answered, so this check does too; the answer is exact from the start.
-    this.git.set(existing?.path ?? full, { value: existsSync(join(full, '.git')), inflight: false });
+    this.git.set(existing?.path ?? full, { value: existsSync(join(full, '.git')), missing: false, inflight: false });
     // No second check of a folder that was just checked.
     if (existing !== undefined) return this.described(existing, false);
 
@@ -335,6 +382,7 @@ export class ProjectStore {
   async setWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<Project> {
     const project = this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setWorktreeDefault.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
+    if (enabled && !this.isDrafts(project)) await this.requireFolder(projectId);
     if (enabled && (this.isDrafts(project) || await hasGitMarker(project.path) !== true)) {
       throw refused('projects.setWorktreeDefault.projectId must name a Git repository', { field: 'projectId', projectId, expected: 'a Git repository other than the drafts project' });
     }
@@ -380,7 +428,9 @@ export class ProjectStore {
           return removed;
         },
       );
-      await this.core.threads.codeCheckpoints.discard(threadIds);
+      await this.core.threads.codeCheckpoints.discard(threadIds).catch(error => {
+        this.core.log('warn', `file checkpoints of removed project ${projectId} were not deleted: ${messageOf(error)}`);
+      });
       for (const threadId of threadIds) this.core.bus.emit('thread.removed', { threadId });
       this.core.bus.emit('project.removed', { projectId });
       this.core.bus.emit('thread.deletionsUpdated', {});
@@ -418,6 +468,7 @@ export class ProjectStore {
       ...(archivedThreads > 0 ? { archivedThreads } : {}),
       ...(icon === undefined ? {} : { icon }),
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
+      ...(flag?.missing === true ? { missing: true } : {}),
       ...(this.isDrafts(project) ? { kind: 'drafts' as const } : {}),
     };
   }
@@ -431,10 +482,13 @@ export class ProjectStore {
     // One check per folder at a time, held until the disk answers: a dead share
     // costs one pending check, never a pile of them.
     return this.gitProbe(path).then(
-      (found) => {
-        flag.inflight = false;
+      async (found) => {
         // No clear answer keeps the last one: a sleeping share is not a lost repository.
         if (found !== null) flag.value = found;
+        // A `.git` that answered sits in a folder that is there; without one the folder itself is asked.
+        const present = found === true ? true : found === false ? await this.folderProbe(path).catch(() => null) : null;
+        flag.inflight = false;
+        if (present !== null && this.git.get(path) === flag) this.noteFolder(path, !present);
       },
       () => {
         flag.inflight = false;

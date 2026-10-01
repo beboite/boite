@@ -328,6 +328,11 @@ export class HarnessUpdates {
     return this.describe(providerId)!;
   }
 
+  /** The version last read from this provider's program, null before the first check. */
+  current(providerId: ProviderId): string | null {
+    return this.entries.get(providerId)?.current ?? null;
+  }
+
   /** True while this provider's program is being replaced: a turn started now would run on half of it. */
   updating(providerId: ProviderId): boolean {
     return this.entries.get(providerId)?.state === 'updating';

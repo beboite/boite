@@ -256,7 +256,8 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
     // English whatever the machine speaks, as `lib/cdp.ts` launches its browser.
-    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11 --lang=en-US --accept-lang=en-US`;
+    // Keep the hidden WebView responsive, as BrowserPage.launch does for Chrome.
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11 --lang=en-US --accept-lang=en-US --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding`;
   }
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
 }
@@ -718,7 +719,7 @@ shellTest('voice capture loads its packaged worklet under the native content sec
   }
 }, 30_000);
 
-shellTest('the Whip button moves the native window and restores its position', async () => {
+shellTest('a Whip crack moves the native window and restores its position', async () => {
   if (!page) throw new Error('the shell page is missing');
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.click(testid('nav-settings'));
@@ -729,17 +730,24 @@ shellTest('the Whip button moves the native window and restores its position', a
   const result = await page.evaluate<{ origin: { x: number; y: number }; final: { x: number; y: number }; moved: boolean }>(`(async () => {
     const position = () => window.__TAURI_INTERNALS__.invoke('plugin:window|outer_position', { label: 'main' });
     const origin = await position();
-    const button = document.querySelector('[data-testid=whip-button]');
-    button.click();
-    await Promise.resolve();
+    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    document.querySelector('[data-testid=whip-button]').click();
+    // The throw alone leaves the window in place; the crack of a flick moves it.
+    for (let i = 0; i < 30; i++) await frame();
+    const still = await position();
+    if (still.x !== origin.x || still.y !== origin.y) throw new Error('the throw moved the window before any crack');
     let moved = false;
-    const deadline = Date.now() + 5000;
-    do {
+    const deadline = Date.now() + 10000;
+    for (let i = 0; !moved && Date.now() < deadline; i++) {
+      window.dispatchEvent(new PointerEvent('pointermove', {
+        clientX: window.innerWidth / 2 + Math.sin(i / 1.5) * 200, clientY: window.innerHeight / 2
+      }));
+      await frame();
       const sample = await position();
-      moved ||= sample.x !== origin.x || sample.y !== origin.y;
-      await new Promise(resolve => setTimeout(resolve, 15));
-    } while (button.getAttribute('aria-busy') === 'true' && Date.now() < deadline);
-    if (button.getAttribute('aria-busy') === 'true') throw new Error('Whip did not finish within five seconds');
+      moved = sample.x !== origin.x || sample.y !== origin.y;
+    }
+    // Seven 50 ms steps, then the restore.
+    await new Promise(resolve => setTimeout(resolve, 600));
     return { origin, final: await position(), moved };
   })()`);
   expect(result.moved).toBe(true);

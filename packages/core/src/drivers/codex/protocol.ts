@@ -119,6 +119,8 @@ export interface CodexModelListResponse {
 export interface CodexItem {
   type: string;
   id: string;
+  /** Completed agent messages carry their final public text. */
+  text?: string;
   status?: string;
   command?: string;
   cwd?: string | null;
@@ -180,6 +182,7 @@ export const MODE_POLICY: Record<PermissionMode, { approvalPolicy: AskForApprova
   acceptEdits: { approvalPolicy: 'on-request', sandbox: 'workspace-write' },
   plan: { approvalPolicy: 'never', sandbox: 'read-only' },
   bypassPermissions: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
+  yolo: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
   dontAsk: { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 };
 
@@ -194,6 +197,7 @@ export type Timer = ReturnType<typeof setTimeout>;
 
 /** What one Codex `ThreadItem` is drawn as, or null when the contract has no part for it. */
 export interface ToolView {
+  exitCode?: number | null;
   nativeAgents?: NativeAgentUpdate[];
   name: string;
   input: unknown;

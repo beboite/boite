@@ -74,6 +74,7 @@ afterAll(async () => { await server?.close(); }, 15_000);
 test('footer icons open a compact update popup with release details and an external changelog', async () => {
   await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.waitFor(`document.querySelector('${id('nav-app-update')}')`);
   expect(await page.evaluate(`document.querySelector('.foot ${id('nav-app-update')}') !== null`)).toBe(true);
   expect((await page.text(id('add-project'))).trim()).toBe('');
   expect((await page.text(id('panel-toggle'))).trim()).toBe('');
@@ -94,7 +95,7 @@ test('footer icons open a compact update popup with release details and an exter
   await page.evaluate(`document.querySelectorAll('${id('machine-status-menu')} [data-value]')[2].click()`);
   await page.waitFor(`document.querySelector('${id('machine-status-menu')}') === null`);
   expect(await page.evaluate(`(() => {
-    const controls = ['machine-status', 'add-project', 'nav-app-update', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
+    const controls = ['machine-status', 'add-project', 'nav-limits', 'nav-app-update', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
     const foot = document.querySelector('.foot').getBoundingClientRect();
     return controls.every((box, index) => box.width >= 26 && box.right <= foot.right && (!index || box.left >= controls[index - 1].right));
   })()`)).toBe(true);
@@ -129,7 +130,7 @@ test('the update popup closes outside and by keyboard, and confirms installation
   await page.waitFor(`document.querySelector('${id('confirm-ok')}') === null`);
   await openUpdate();
   await page.waitFor(`document.querySelector('${id('app-update-install')}') === null`);
-  expect(await page.text(id('app-update-status'))).toContain("Démarrage");
+  expect(await page.text(id('app-update-status'))).toContain("l'installation démarre");
 }, 30_000);
 
 test('hiding the reminder persists without losing the update button or installation', async () => {
@@ -146,7 +147,7 @@ test('hiding the reminder persists without losing the update button or installat
   await page.click(id('nav-settings'));
   await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
   await page.click(id('settings-tab-general'));
-  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('app-update-card')}') !== null`)).toBe(true);
   await openUpdate();
   expect(await page.evaluate(`document.querySelector('${id('app-update-install')}') !== null`)).toBe(true);
   await updates('ready', true);
@@ -157,7 +158,12 @@ test('channel options preserve the installed channel and nightly window name', a
   await updates('ready', true);
   await page.waitFor(`document.title.endsWith('boite (de nuit)')`);
   expect(await page.text(id('titlebar'))).not.toContain('boite (de nuit)');
-  await page.click(`${id('app-update-popover')} summary`);
+  await escapeUpdate();
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
+  await page.click(id('settings-tab-general'));
+  await page.waitFor(`document.querySelector('${id('app-update-card')}')`);
+  await page.click(`${id('app-update-card')} summary`);
   await page.click(id('app-update-stable'));
   await page.waitFor(`document.querySelector('${id('app-update-stable')}').getAttribute('aria-pressed') === 'true'`);
   expect(await page.text(id('app-update-content'))).toContain('Installed version: Boite Nightly');
@@ -173,18 +179,21 @@ test('download progress and retry fit a narrow desktop', async () => {
   expect(await page.evaluate('document.documentElement.scrollWidth <= 880')).toBe(true);
   await capture('error-narrow');
   await page.click(id('app-update-retry'));
-  await page.waitFor(`document.querySelector('${id('app-update-check')}')`);
+  await page.waitFor(`document.querySelector('${id('nav-app-update')}') === null`);
 }, 30_000);
 
-test('checking stays disabled and the popup fits a narrow desktop', async () => {
-  await updates('checking', true);
+test('a running check has no footer button and remains available in settings', async () => {
+  await page.navigate(`${base}/?fake=1&appUpdate=checking&appUpdateCurrentChannel=nightly`);
+  await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  expect(await page.evaluate(`document.querySelector('${id('nav-app-update')}') === null`)).toBe(true);
+  await page.click(id('nav-settings'));
+  await page.waitFor(`document.querySelector('${id('settings-tab-general')}')`);
+  await page.click(id('settings-tab-general'));
   await page.waitFor(`document.querySelector('${id('app-update-check')}')?.disabled === true`);
   expect(await page.evaluate(`document.querySelector('${id('app-update-check')}').getAttribute('aria-busy')`)).toBe('true');
   await capture('checking-desktop');
-  await escapeUpdate();
   await width(880);
-  await openUpdate();
-  expect(await page.evaluate(`(() => { const r = document.querySelector('${id('app-update-popover')}').getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`)).toBe(true);
+  expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await capture('checking-narrow');
 }, 30_000);
 

@@ -36,6 +36,11 @@ export class TurnRunner {
   private readonly stopRequested = new Set<ThreadId>();
   private readonly preparing = new Set<ThreadId>();
   readonly steering = new Set<ThreadId>();
+  /**
+   * Running turns the user wrote into, with when that message was journalled.
+   * The turn's emitter reads it to start a new assistant message after it.
+   */
+  readonly userInputAt = new Map<TurnId, number>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
@@ -57,6 +62,7 @@ export class TurnRunner {
     let result: TurnResult;
     try {
       // Commit the running state before a driver can spawn or stream output.
+      this.threads.progress.begin(threadId, turnId);
       this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
         this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
           this.core.journal.putTurn(running);
@@ -110,6 +116,7 @@ export class TurnRunner {
       this.stopDeadlines.delete(threadId);
       this.stopRequested.delete(threadId);
       this.preparing.delete(threadId);
+      this.userInputAt.delete(turnId);
     }
 
     const checkpoint = this.threads.codeCheckpoints.end(turnId);
@@ -131,6 +138,7 @@ export class TurnRunner {
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
     const completion = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.threads.progress.end(threadId, turnId);
       this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
         this.core.journal.putTurn(finished);
       });
@@ -165,6 +173,7 @@ export class TurnRunner {
     await this.threads.spawns.finished(finished);
     if (result.status !== 'done') this.core.coordination.pause(threadId);
     if (result.status === 'done' && sameSession && !queued.execution?.operation) this.threads.titles.autoRefine(threadId);
+    if (sameSession) this.threads.autoCompact.turnFinished(next, finished);
     const woke = this.threads.deferred.pendingWakes.get(threadId);
     if (woke !== undefined) {
       this.threads.deferred.pendingWakes.delete(threadId);

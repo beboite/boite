@@ -124,7 +124,7 @@ test('plans are refused by field before anything starts', async () => {
   const { owner, threadId } = await setup();
   const bad = (plan: unknown) => owner.call('workflows.check', { threadId, plan: plan as WorkflowPlan });
   await expect(bad({ name: 'x', steps: [] })).rejects.toThrow('steps: expected at least one step');
-  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'nope', task: 't' }] })).rejects.toThrow('steps[0].profile: "nope" is not an approved profile; expected one of fast, reviewer');
+  await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'nope', task: 't' }] })).rejects.toThrow('steps[0].profile: "nope" is not a profile of this thread; expected one of fast, reviewer, or leave profile out');
   await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 'use {{b.x}}' }, { id: 'b', profile: 'fast', task: 'use {{a}}' }] })).rejects.toThrow('cycle a -> b -> a');
   await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: '{{item}}' }] })).rejects.toThrow('{{item}} exists only in a step with forEach');
   await expect(bad({ name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't', output: { n: 'integer' } }] })).rejects.toThrow('steps[0].output.n');
@@ -184,14 +184,57 @@ test('concurrency holds to the run limit, and stop ends running steps without wa
   expect(prompts.some(p => p.threadId === threadId && p.prompt.includes('Boite workflow'))).toBe(false);
 });
 
-test('workflows need the owner-enabled team, and a paused team pauses the run until an owner resumes it', async () => {
+test('a workflow needs no team: a step without a profile runs on the conversation model and the parent gets the result', async () => {
+  const { prompts } = scripted(ctx => ctx.thread.parentThreadId ? 'Step done.' : 'parent acknowledged');
+  const h = await startTestCore(); cores.push(h);
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner, 'Parent');
+  const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
+  try {
+    expect(h.core.delegation.config(threadId)).toEqual(DEFAULT_DELEGATION_CONFIG);
+    const plan: WorkflowPlan = { name: 'Plain', steps: [{ id: 'a', task: 'a' }, { id: 'b', task: 'b {{a}}' }] };
+    const run = await agent.call('workflows.start', { threadId, plan, requestId: 'plain' });
+    expect(run.nodes.map(n => n.profileId)).toEqual([null, null]);
+    const done = await settled(h, threadId, run.id);
+    expect([done.status, done.error]).toEqual(['done', null]);
+    const parent = h.core.threads.require(threadId);
+    const child = h.core.threads.require(done.nodes[1]!.instances[0]!.threadId!);
+    expect([child.providerId, child.accountId, child.model]).toEqual([parent.providerId, parent.accountId, parent.model]);
+    expect(done.nodes[1]!.instances[0]!.model).toBe(parent.model!);
+    await waitFor(() => prompts.some(p => p.threadId === threadId && p.prompt.includes('Boite workflow done')));
+    await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);
+    // Nothing was configured along the way, and a name that is no profile still says how to go without one.
+    expect(h.core.journal.getSetting(`delegation:${threadId}`)).toBeUndefined();
+    await expect(agent.call('workflows.check', { threadId, plan: { name: 'x', steps: [{ id: 'a', profile: 'fast', task: 't' }] } })).rejects.toThrow('none is configured: leave profile out');
+  } finally { agent.close(); }
+});
+
+test('a failed turn of a conversation without a team pauses its run until the owner resumes it', async () => {
+  let fail = true;
+  const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : fail ? { status: 'error' } : 'parent acknowledged');
+  const h = await startTestCore(); cores.push(h);
+  const owner = await h.connect();
+  const { threadId } = await echoThread(h, owner, 'Parent');
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', task: 'a' }, { id: 'b', task: 'b {{a}}' }] }, requestId: 'two' });
+  await waitFor(() => held.size === 1);
+  await owner.call('turns.start', { threadId, prompt: 'Carry on' });
+  const paused = await settled(h, threadId, run.id, ['paused']);
+  expect(paused.error).toContain('failed');
+  fail = false;
+  [...held.values()][0]!('A done');
+  await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.status === 'done');
+  expect(h.core.workflows.get(threadId, run.id).nodes[1]!.instances).toHaveLength(0);
+  await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
+  await waitFor(() => held.size === 1);
+  [...held.values()][0]!('B done');
+  expect((await settled(h, threadId, run.id)).status).toBe('done');
+});
+
+test('a paused team pauses the run until an owner resumes it', async () => {
   const { held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId, config } = await setup();
   const agent = await connect(h.url, h.core.agents.tokenFor(threadId));
   try {
-    await owner.call('delegation.configure', { threadId, config: { ...config, enabled: false } });
-    await expect(agent.call('workflows.start', { threadId, plan: REVIEW, requestId: 'off' })).rejects.toThrow('enables delegation');
-    await owner.call('delegation.configure', { threadId, config });
     const run = await agent.call('workflows.start', { threadId, plan: { name: 'Two', steps: [{ id: 'a', profile: 'fast', task: 'a' }, { id: 'b', profile: 'fast', task: 'b {{a}}' }] }, requestId: 'on' });
     expect(run.launchedBy).toBe('agent');
     await waitFor(() => held.size === 1);
@@ -384,7 +427,7 @@ test('completed steps keep their summary while the team is paused and deliver on
   const held = h.core.workflows.get(threadId, run.id);
   expect([held.status, held.delivered]).toEqual(['paused', false]);
   expect(held.deliveryError ?? null).toBeNull();
-  expect(held.error).toContain('Delegation is paused');
+  expect(held.error).toContain('Subagents are paused');
   await owner.call('delegation.configure', { threadId, config });
   await settled(h, threadId, run.id);
   await waitFor(() => h.core.workflows.get(threadId, run.id).delivered);

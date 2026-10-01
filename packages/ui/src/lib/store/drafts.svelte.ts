@@ -14,6 +14,15 @@ const empty = (): Input => ({ text: '', attachments: [], queued: [], sending: fa
 const hasText = (input: Input | undefined) => !!(input?.text || input?.queued.length);
 const hasContent = (input: Input | undefined) => hasText(input) || !!(input?.attachments.length || input?.previewReferences?.length);
 const projectKey = (id: string | null) => JSON.stringify(id);
+/**
+ * How long the durable journal waits after the last keystroke. The synchronous
+ * backup already holds the text by then; the durable copy is what carries the
+ * attachments' bytes, and writing it on every key cloned each picture into
+ * IndexedDB and waited on the disk while the user typed.
+ */
+const DURABLE_DELAY_MS = 800;
+/** Typing that never pauses still reaches the durable journal this often. */
+const DURABLE_MAX_WAIT_MS = 5000;
 
 /** Device-local unsent text. Each host and data directory owns a separate journal. */
 export class Drafts {
@@ -29,6 +38,12 @@ export class Drafts {
   #writeFailed = false;
   #hydrated = false;
   #durableReady = false;
+  /** A file the durable journal has never held: its bytes live nowhere else yet. */
+  #newAsset = false;
+  /** The synchronous backup refused the last write, so the durable journal is the only copy. */
+  #backupFailed = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #waitingSince = 0;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -68,11 +83,23 @@ export class Drafts {
       }
     } catch { /* An unavailable or malformed journal leaves the current session usable. */ }
     this.#hydrated = true;
-    this.#stop = $effect.root(() => { $effect(() => this.persist()); });
+    const root = $effect.root(() => { $effect(() => this.persist()); });
+    // Leaving the page or the app going to the background writes the durable
+    // journal at once: a phone may never bring a hidden page back.
+    const leave = () => { this.persist(); this.#writeNow(); };
+    const hidden = () => { if (document.visibilityState === 'hidden') leave(); };
+    window.addEventListener('pagehide', leave);
+    document.addEventListener('visibilitychange', hidden);
+    this.#stop = () => {
+      root();
+      window.removeEventListener('pagehide', leave);
+      document.removeEventListener('visibilitychange', hidden);
+    };
   }
 
   stop(): void {
     this.persist();
+    this.#writeNow();
     this.#stop?.();
     this.#generation++;
     this.#stop = null;
@@ -104,7 +131,7 @@ export class Drafts {
 
   forget(projectId: string | null): void { delete this.saved[projectKey(projectId)]; }
   has(projectId: string | null): boolean { return hasContent(this.saved[projectKey(projectId)]?.input); }
-  async flush(): Promise<boolean> { this.persist(); while (this.#writing) await this.#writing; return !this.#writeFailed; }
+  async flush(): Promise<boolean> { this.persist(); this.#writeNow(); while (this.#writing) await this.#writing; return !this.#writeFailed; }
 
   get entries(): { projectId: string | null; text: string; active: boolean }[] {
     const s = this.ctx.store;
@@ -119,7 +146,11 @@ export class Drafts {
     return entries;
   }
 
-  /** Called synchronously on typing, and reactively for queue, send and navigation changes. */
+  /**
+   * Called synchronously on typing, and reactively for queue, send and
+   * navigation changes. The small backup is written here, every time; the
+   * durable journal follows once typing pauses, or at once for a new file.
+   */
   persist(): void {
     if (!this.#key || !this.#hydrated) return;
     const inputs = Object.fromEntries(Object.entries(this.ctx.composer.composerStates)
@@ -139,31 +170,52 @@ export class Drafts {
     untrack(() => {
       if (journal === this.#lastJournal) return;
       const updatedAt = this.#revision = Math.max(Date.now(), this.#revision + 1);
-      try { localStorage.setItem(this.#key!, JSON.stringify({ ...JSON.parse(journal), updatedAt, ...(!this.#durableReady ? { incomplete: true } : {}) })); }
-      catch { if (typeof indexedDB === 'undefined') this.ctx.store.error = strings.errors.draftStorage; }
+      // The journal is an object: the stamp goes in before its closing brace,
+      // rather than parsing the whole text back to add one field.
+      const stamp = `,"updatedAt":${updatedAt}${this.#durableReady ? '' : ',"incomplete":true'}}`;
+      try { localStorage.setItem(this.#key!, journal.slice(0, -1) + stamp); this.#backupFailed = false; }
+      catch { this.#backupFailed = true; if (typeof indexedDB === 'undefined') this.ctx.store.error = strings.errors.draftStorage; }
       this.#lastJournal = journal;
       // Never replace a durable journal we could not read. Text still has its backup.
       if (!this.#durableReady) return;
       this.#pending = { key: this.#key!, value: { ...full, updatedAt } };
-      this.#schedule();
+      if (this.#newAsset || this.#backupFailed) this.#writeNow();
+      else this.#writeLater();
     });
+  }
+
+  /** The durable journal after a pause in typing, never later than the longest wait. */
+  #writeLater(): void {
+    const now = Date.now();
+    if (this.#timer === undefined) this.#waitingSince = now;
+    else clearTimeout(this.#timer);
+    const wait = Math.min(DURABLE_DELAY_MS, Math.max(0, this.#waitingSince + DURABLE_MAX_WAIT_MS - now));
+    this.#timer = setTimeout(() => this.#writeNow(), wait);
+  }
+
+  #writeNow(): void {
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#timer = undefined;
+    this.#newAsset = false;
+    if (this.#pending) this.#schedule();
   }
 
   #assetId = (bytes: string): string => {
     let id = this.#assetIds.get(bytes);
-    if (!id) { id = crypto.randomUUID(); this.#assetIds.set(bytes, id); }
+    if (!id) { id = crypto.randomUUID(); this.#assetIds.set(bytes, id); this.#newAsset = true; }
     return id;
   };
 
+  /** A write already under way does not pick up text that is still waiting for its pause. */
   #schedule(): void {
     this.#writing ??= this.#drain().finally(() => {
       this.#writing = null;
-      if (this.#pending) this.#schedule();
+      if (this.#pending && this.#timer === undefined) this.#schedule();
     });
   }
 
   async #drain(): Promise<void> {
-    while (this.#pending) {
+    while (this.#pending && this.#timer === undefined) {
       const next = this.#pending;
       this.#pending = null;
       try { await writeDraftJournal(next.key, next.value); this.#writeFailed = false; }

@@ -23,6 +23,10 @@ test('memory RPC reads applied limits and threads.get recovers bounded memory no
     expect(thread.memoryEvents?.[0]?.at).toBe(3);
     expect(thread.memoryEvents?.at(-1)?.at).toBe(102);
     expect(thread.messages).toHaveLength(0);
+    await client.call('settings.set', { memoryProtection: false });
+    expect((await client.call('resources.memoryStatus', {})).limits).toEqual({ budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 });
+    await client.call('settings.set', { memoryProtection: true });
+    expect((await client.call('resources.memoryStatus', {})).limits).toEqual(status.limits);
   } finally { await harness.stop(); }
 });
 

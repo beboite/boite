@@ -227,13 +227,18 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 
   await waitFor(() => store.openThread !== null && store.draft === null);
-  expect(store.openThread?.branch).toBe('boite/fix-the-login');
-  expect(store.openThread?.cwd).toBe('C:\\src\\notes\\.boite\\worktrees\\fix-the-login');
+  const branch = store.openThread!.branch!;
+  expect(branch).toMatch(/^boite\/wt-[a-z0-9]{8}$/);
+  expect(store.openThread?.cwd).toBe(`C:\\src\\notes\\.boite\\worktrees\\${branch.slice(6)}`);
   await waitFor(() => document.querySelector('[data-testid=thread-branch]') !== null);
-  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe('boite/fix-the-login');
-  expect(query('[data-testid=thread-branch]').title).toContain('fix-the-login');
+  expect(query('[data-testid=thread-branch]').textContent?.trim()).toBe(branch);
+  expect(query('[data-testid=thread-branch]').title).toContain(branch.slice(6));
   // The chip went with the draft.
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
+  const cwd = store.openThread!.cwd;
+  await waitFor(() => store.openThread?.turns.some(turn => turn.status === 'done') === true);
+  await waitFor(() => query('[data-testid=thread-branch]').textContent?.trim() === 'boite/fix-the-login');
+  expect(store.openThread?.cwd).toBe(cwd);
 });
 
 test('a draft on a folder that is not a repository offers no worktree switch', async () => {
@@ -578,7 +583,8 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 60 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
   const labels = Array.from(document.querySelectorAll('[data-testid=context-menu] [data-row]')).map((el) => el.textContent?.trim());
-  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path C:\\src\\boite', 'Move to project', 'Archive', 'Delete']);
+  expect(labels).toEqual(['Open', 'Rename', 'Regenerate title', 'Pin', 'Refresh pull request', 'Copy path', 'Move to project', 'Archive', 'Delete']);
+  expect(query('[data-testid=context-menu] [data-value=copy]').getAttribute('title')).toBe('C:\\src\\boite');
   // t-bench waits on a permission: its turn still runs, and a move would wait for it to end.
   expect(query<HTMLButtonElement>('[data-testid=context-menu] [data-value=move]').disabled).toBe(false);
 
@@ -965,10 +971,9 @@ test("a header button's right click hides it, and the Appearance page brings it 
   await waitFor(() => document.querySelector('[data-testid=terminal-toggle]') === null);
   expect(work.current.hidden).toEqual(['header.terminal']);
 
-  // The same button's menu, on another one, leads to the page that lists them all.
-  // Team shows once that team has loaded.
-  await waitFor(() => document.querySelector('[data-testid=agents-toggle]') !== null);
-  query('[data-testid=agents-toggle]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
+  // The same menu, on another button, leads to the page that lists them all.
+  await waitFor(() => document.querySelector('.context-control') !== null);
+  query('.context-control').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=customize]') !== null);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=customize]').click();
   await waitFor(() => document.querySelector('[data-testid=settings-buttons]') !== null);
@@ -2306,18 +2311,22 @@ test('automatic settings sync follows the chosen source outside settings and sto
   const remote = workspace.machines.find(machine => machine.store !== store)!;
   await store.client!.call('brain.configure', { path: '/home/user/source-brain', enabled: false });
   await remote.store.client!.call('brain.configure', { path: '/home/user/target-brain', enabled: false });
-  await store.client!.call('settings.set', { warmProcessMinutes: 9 });
+  await remote.store.client!.call('settings.set', { warmProcessMinutes: 3, agentCpuCapPercent: 35 });
+  await store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentCpuCapPercent: 85 });
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
   const checkbox = query<HTMLInputElement>('[data-testid=machine-sync]');
   expect(checkbox.type).toBe('checkbox');
   checkbox.click();
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 9);
+  await waitFor(() => remote.store.settings?.asyncQuestions === false);
   expect(document.querySelector('[data-testid=confirm-ok]')).toBeNull();
+  expect(document.querySelector('[data-testid=machines-page]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=machine-settings]')).toBeNull();
+  expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   store.showChat();
-  await store.client!.call('settings.set', { warmProcessMinutes: 12 });
+  await store.client!.call('settings.set', { asyncQuestions: true });
   await store.client!.call('keybindings.set', { command: 'terminal', chord: 'Ctrl+Shift+J' });
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 12 && remote.store.keybindings?.bindings.terminal === 'ctrl+shift+j');
+  await waitFor(() => remote.store.settings?.asyncQuestions === true && remote.store.keybindings?.bindings.terminal === 'ctrl+shift+j');
   const brain = await store.client!.call('brain.status', {});
   await store.client!.call('brain.configure', { ...brain.config, boiteGuide: false });
   await waitFor(() => workspace.settingsSync.reports[remote.id]?.report.brain === 'copied');
@@ -2325,21 +2334,22 @@ test('automatic settings sync follows the chosen source outside settings and sto
   // Missed changes catch up when the destination reconnects.
   remote.store.connection = 'closed';
   flushSync();
-  await store.client!.call('settings.set', { warmProcessMinutes: 14 });
+  await store.client!.call('settings.set', { asyncQuestions: false });
   remote.store.connection = 'ready';
   flushSync();
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 14);
+  await waitFor(() => remote.store.settings?.asyncQuestions === false);
+  expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   // Switching the visible host does not reverse the saved source.
   await workspace.select(remote.store);
-  await store.client!.call('settings.set', { warmProcessMinutes: 15 });
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 15);
+  await store.client!.call('settings.set', { asyncQuestions: true });
+  await waitFor(() => remote.store.settings?.asyncQuestions === true);
   await workspace.select(store);
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
   query<HTMLInputElement>('[data-testid=machine-sync]').click();
-  await store.client!.call('settings.set', { warmProcessMinutes: 18 });
+  await store.client!.call('settings.set', { asyncQuestions: false });
   await new Promise(resolve => setTimeout(resolve, 300));
-  expect(remote.store.settings?.warmProcessMinutes).toBe(15);
+  expect(remote.store.settings?.asyncQuestions).toBe(true);
 });
 
 test('a remote terminal keeps output arriving while its opening response is in flight', async () => {

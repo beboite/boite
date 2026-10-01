@@ -254,7 +254,8 @@ the setting returns links to the core's local address. No wildcard origin or
 forwarded header is trusted.
 
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
-On Android, use Install Boite in Phone app or the browser's installation menu.
+On Android, use Install Boite in Phone app or the browser's installation menu,
+or install the nightly APK ([android.md](android.md)).
 Open the installed icon and pair there if the browser did not carry the session
 across. Installing a PWA and using Web Push require no Apple Developer account.
 
@@ -355,7 +356,9 @@ and write a generic diagnostic without the provider's credential-bearing body.
 - Pairing is a link somebody carries over, by hand or by the QR code beside it,
   and it has to be opened within ten minutes. There is no discovery on the
   network.
-- There is no Android or iOS package. The phone runs the installed web app.
+- There is no iOS package. On Android, the nightly APK opens one core's page
+  full screen ([android.md](android.md)); otherwise the phone runs the installed
+  web app.
 - Push is a notification channel, not background execution. The core must stay
   running to run agents and send notifications; delivery is not guaranteed.
 - The core must be reachable. A different network, a VPN, or a firewall that

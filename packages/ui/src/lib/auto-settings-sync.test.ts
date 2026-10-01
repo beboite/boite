@@ -30,7 +30,7 @@ async function fixture() {
 
 test('unchecking during module loading or a slow read prevents the pending copy from writing', async () => {
   const { sync, source, target } = await fixture();
-  await source.store.client!.call('settings.set', { warmProcessMinutes: 9 });
+  await source.store.client!.call('settings.set', { asyncQuestions: false });
   const client = target.store.client!, call = client.call.bind(client);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -65,13 +65,13 @@ test('unchecking during module loading or a slow read prevents the pending copy 
     release();
     await vi.waitFor(() => expect(sync.busy.target).toBe(false));
     expect(spy.mock.calls.some(([method]) => method === 'settings.set')).toBe(false);
-    expect((await call('settings.get', {})).warmProcessMinutes).not.toBe(9);
+    expect((await call('settings.get', {})).asyncQuestions).not.toBe(false);
   } finally { releaseModule(); release(); vi.doUnmock('./settings-sync'); spy.mockRestore(); }
 });
 
 test('a failed copy reports its stage and the next change retries, while reverse links are refused', async () => {
   const { sync, source, target } = await fixture();
-  await source.store.client!.call('settings.set', { warmProcessMinutes: 9 });
+  await source.store.client!.call('settings.set', { asyncQuestions: false });
   const client = target.store.client!, call = client.call.bind(client);
   const spy = vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'settings.set'
     ? Promise.reject(new Error('target unavailable')) : call<RpcMethodName>(method, params));
@@ -81,7 +81,7 @@ test('a failed copy reports its stage and the next change retries, while reverse
   spy.mockRestore();
   sync.set(source, target);
   expect(sync.enabled(source)).toBe(false);
-  await source.store.client!.call('settings.set', { warmProcessMinutes: 12 });
-  await vi.waitFor(() => expect(target.store.settings?.warmProcessMinutes).toBe(12));
+  await source.store.client!.call('settings.set', { muteAgents: false });
+  await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
   expect(target.store.error).toBeNull();
 });

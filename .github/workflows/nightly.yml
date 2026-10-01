@@ -60,6 +60,7 @@ jobs:
       APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
     with:
       skip-server: true
+      skip-android: true
       sign-updates: true
       channel: nightly
       version: ${{ needs.revision.outputs.version }}
@@ -70,7 +71,7 @@ jobs:
   # The tag is taken once the checks pass: the release tags ruleset keeps a tag
   # from being deleted, so one taken before them outlived every failed build.
   reserve:
-    needs: [revision, verify, image]
+    needs: [revision, verify, image, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -82,6 +83,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.revision.outputs.tag }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+
+  # Signed, or the previous release's APK taken back when apps/android, the
+  # host and the key are unchanged since it was built (docs/android.md).
+  android:
+    needs: revision
+    if: needs.revision.outputs.changed == 'true'
+    uses: ./.github/workflows/android.yml
+    secrets:
+      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+    with:
+      release: true
+      version: ${{ needs.revision.outputs.version }}
 
   image:
     needs: revision
@@ -109,7 +123,7 @@ jobs:
         sha-${{ github.sha }}
 
   release:
-    needs: [revision, verify, publish-image]
+    needs: [revision, verify, publish-image, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -130,6 +144,11 @@ jobs:
           pattern: desktop-bundle-*
           merge-multiple: true
           path: artifacts
+      # Beside the desktop files, which updater-manifest.ts checks one by one.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: android-apk
+          path: android
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,8 +162,11 @@ jobs:
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
           # updater-manifest.ts refused any file outside this set.
-          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz)
+          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz ./boite-server_*.zip)
           sha256sum "${installers[@]}" > SHA256SUMS.txt
+          apks=(../android/boite-*.apk)
+          test "${#apks[@]}" -eq 1 && test -f "${apks[0]}"
+          (cd ../android && sha256sum ./boite-*.apk) >> SHA256SUMS.txt
           if [[ -n "$existing" ]]; then
             echo "$existing" | jq -e '.draft == true' >/dev/null
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
@@ -152,8 +174,8 @@ jobs:
             else
               test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
             fi
-            gh release upload "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
             gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
           else
-            gh release create "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" "${installers[@]}" "${apks[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --title "boite (de nuit) $RELEASE_TAG" --prerelease --latest=false --notes-file release-notes.md
           fi

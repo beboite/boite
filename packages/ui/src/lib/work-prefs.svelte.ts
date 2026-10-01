@@ -24,7 +24,6 @@ export const CONTROL_IDS = [
   'header.project',
   'header.branch',
   'header.context',
-  'header.agents',
   'header.terminal',
   'sidebar.limits',
   'sidebar.add-project',

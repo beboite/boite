@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -44,7 +44,8 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
-  if (!agentId) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
+  // Nothing unfinished, nothing to stop: the team stays usable. Finished children are history.
+  if (!agentId && rows.some(row => ['queued', 'running', 'waiting'].includes(ctx.thread(row.threadId).status))) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
   let stopped = 0;
   for (const row of selected) {
     const thread = ctx.thread(row.threadId);
@@ -101,7 +102,10 @@ export function seedDelegationDemo(ctx: FakeContext): void {
 }
 
 /** A workflow step's thread, the way `delegation.spawn` makes one: the task sent, the turn running. */
-export function workflowChild(ctx: FakeContext, root: Thread, profile: DelegationProfile, title: string, task: string): ThreadId {
+/** A profile, or the conversation's own route, whose model may be the provider's default. */
+export type ChildRoute = Omit<DelegationProfile, 'model'> & { model: string | null };
+
+export function workflowChild(ctx: FakeContext, root: Thread, profile: ChildRoute, title: string, task: string): ThreadId {
   const id = `t-${++ctx.seq}`;
   const at = ctx.now();
   const turn: Turn = { id: `turn-${id}`, threadId: id, status: 'running', queuedAt: at, startedAt: at, finishedAt: null, usage: null, error: null };
@@ -194,7 +198,6 @@ export function delegationMethods(ctx: FakeContext) {
         return { ...profile, name: profile.name.trim() };
       });
       if (new Set(profiles.map(profile => profile.id)).size !== profiles.length) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'profile ids must be unique' });
-      if (value.enabled && profiles.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'choose at least one profile before enabling delegation' });
       const config: DelegationConfig = {
         enabled: value.enabled,
         paused: value.paused,
@@ -222,7 +225,8 @@ export function delegationMethods(ctx: FakeContext) {
       const config = delegationConfig(ctx, parent.id);
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
-      const profile = config.profiles.find(entry => entry.id === params.profileId);
+      const profile: ChildRoute | undefined = config.profiles.find(entry => entry.id === params.profileId)
+        ?? (params.profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null } : undefined);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();
@@ -274,8 +278,8 @@ export function delegationMethods(ctx: FakeContext) {
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'user',
-        from: { coreId: 'local', threadId: sender.id, title: sender.title, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
-        to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title,
+        from: { coreId: 'local', threadId: sender.id, title: sender.title, project: ctx.projects.find(project => project.id === sender.projectId)?.name, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
+        to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: ctx.projects.find(project => project.id === recipient.projectId)?.name, toMachine: 'Boite',
         text: body, replyTo: null, createdAt: ctx.now(), expiresAt: ctx.now() + 15 * 60_000,
         status: 'received', error: null
       };

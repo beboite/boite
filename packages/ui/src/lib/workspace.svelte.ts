@@ -1,4 +1,5 @@
 import { Store, store } from './store.svelte';
+import type { AgentAddress } from '@boite/contracts';
 import {
   parsePairingLink,
   readEnvironments,
@@ -318,6 +319,28 @@ export class Workspace {
     }
     const target = machineId ? this.machines.find((m) => m.store.machineId === machineId || m.id === machineId)?.store : store;
     if (target) await this.select(target, threadId);
+  }
+
+  /** Resolve the authenticated core identity before using a machine-scoped thread id. */
+  async openAgentThread(owner: Store, self: AgentAddress, address: AgentAddress): Promise<void> {
+    const generation = this.#generation;
+    const lifecycle = this.#lifecycle;
+    let target: Store | undefined;
+    if (address.coreId === self.coreId) target = owner;
+    else {
+      const candidates = this.machines.filter(machine => machine.store !== owner && machine.store.connection === 'ready');
+      const identities = await Promise.all(candidates.map(async machine => {
+        try {
+          const view = await machine.store.client!.call('collaboration.get', { threadId: address.threadId });
+          return { store: machine.store, coreId: view.self.coreId };
+        }
+        catch { return null; }
+      }));
+      if (generation !== this.#generation || lifecycle !== this.#lifecycle) return;
+      target = identities.find(identity => identity?.coreId === address.coreId)?.store;
+    }
+    if (!target) { owner.error = strings.coordination.machineNotConnected; return; }
+    await this.select(target, address.threadId);
   }
 
   close(): void {

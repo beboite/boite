@@ -24,8 +24,21 @@ export class ThreadRecovery {
    */
   recoverStuckTurns(): number {
     const stuck = this.core.journal.unfinishedTurns();
+    const handoff = this.core.threads.handoff;
+    const inherited = handoff.inheritedTurns();
+    /** Threads whose queued turn goes back in line once the server listens. */
+    const waiting = new Set<ThreadId>();
     for (const turn of stuck) {
       const previous = turn.status;
+      if (handoff.requeues(turn)) {
+        waiting.add(turn.threadId);
+        continue;
+      }
+      if (previous === 'running' && inherited.get(turn.id) === 'running') {
+        // Killed during a restart handoff: the next turn of the thread resumes it, so this is no failure.
+        this.core.journal.db.transaction(() => this.closeHandedOver(turn))();
+        continue;
+      }
       this.core.journal.db.transaction(() => {
         this.failStuckTurn(turn, previous === 'running' ? CRASH_WHILE_RUNNING : CRASH_WHILE_QUEUED);
         if (previous === 'queued' && turn.execution?.operation === 'coordination') this.core.coordination.queuedCancelled(turn.threadId);
@@ -36,11 +49,33 @@ export class ThreadRecovery {
       );
     }
     for (const thread of this.core.journal.listThreads()) {
-      if (['queued', 'running', 'waiting'].includes(thread.status)) {
+      if (['queued', 'running', 'waiting'].includes(thread.status) && !waiting.has(thread.id)) {
         saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
       }
     }
     return stuck.length;
+  }
+
+  /** A turn the previous core was handing over when it was killed: stopped, with no error part. */
+  private closeHandedOver(turn: Turn): void {
+    const threadId = turn.threadId;
+    for (const message of this.core.journal.walkTurnMessages(threadId, turn.id)) {
+      if (message.state !== 'streaming') continue;
+      this.core.journal.append(
+        { type: 'message.completed', threadId, version: 1, payload: { messageId: message.id, state: 'complete' } },
+        () => {
+          this.core.journal.setMessageState(message.id, 'complete');
+        },
+      );
+      this.core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
+    }
+    const stopped: Turn = { ...turn, status: 'stopped', finishedAt: Date.now() };
+    this.core.journal.append({ type: 'turn.stopped', threadId, version: 1, payload: stopped }, () => {
+      this.core.journal.putTurn(stopped);
+    });
+    this.core.bus.emit('turn.finished', stopped);
+    const thread = this.core.journal.getThread(threadId);
+    if (thread !== null) saveThread(this.core, { ...thread, status: 'idle' }, 'thread.finished');
   }
 
   private failStuckTurn(turn: Turn, reason: string): void {

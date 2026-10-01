@@ -119,7 +119,7 @@
         },
         { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
         { id: 'pr', label: strings.machines.refreshPr, disabled: prLoading || !thread.branch || thread.branch === 'HEAD' },
-        { id: 'copy', label: strings.sidebar.copyPath, hint: thread.cwd },
+        { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
         // A sub-thread moves with its parent, which is the row the sidebar lists.
         ...(thread.parentThreadId ? [] : moveItems(owner, thread)),
         separator(),
@@ -161,6 +161,7 @@
     class:unread={thread.unread}
     class:pinned={thread.pinned}
     class:meta
+    class:offline={owner.connection !== 'ready'}
     class:dragging={threadDrag.current?.threadId === thread.id && threadDrag.current.machineId === machine.id}
     draggable={!thread.parentThreadId && !moveBlocked(owner, thread.id)}
     ondragstart={dragStart}
@@ -202,12 +203,12 @@
     {#if meta}
     <div class="metadata">
       {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
-      <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
-      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
       {/if}
+      <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
+      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
     </div>
     {/if}
     <button
@@ -235,6 +236,11 @@
   }
   .thread.dragging {
     opacity: 0.5;
+  }
+  /* Its machine dropped: the row still opens, to read what is held and queue a prompt. */
+  .thread.offline .row,
+  .thread.offline .metadata {
+    opacity: 0.55;
   }
   .row {
     display: flex;
@@ -342,14 +348,12 @@
     flex: 1;
   }
   /* Beside a branch, the project keeps its length up to half the line and the branch takes the rest. */
-  .project-name:has(+ .branch) {
+  .project-name:has(~ .branch) {
     flex: 0 0 auto;
     max-width: 50%;
   }
   .metadata .branch {
     flex: 0 1 auto;
-  }
-  .pr-link {
     margin-left: auto;
   }
   .provider {

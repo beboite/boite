@@ -69,6 +69,7 @@ describe('settings', () => {
     const client = await harness.connect();
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
+      threadDeletionRetentionDays: 30,
       worktreeStorage: { mode: 'project', directory: null },
       warmProcessMinutes: 0,
       listenOnLan: false,
@@ -76,6 +77,7 @@ describe('settings', () => {
       agentMemoryBudgetPercent: 60,
       threadMemoryCapMb: 0,
       memoryReserveMb: 0,
+      memoryProtection: true,
       focusGuard: true,
       muteAgents: true,
       reapOrphans: true,

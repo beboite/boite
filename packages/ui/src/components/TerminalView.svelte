@@ -116,6 +116,9 @@
         return;
       }
       draw(state);
+      // A thread shell can already be starting while this view's chunk loads.
+      // Give it the measured viewport even when it began with the default size.
+      store.resizeTerminal(id, term.cols, term.rows);
       const input = term.onData((data) => store.writeTerminal(id, data));
       const resize = term.onResize(({ cols, rows }) => store.resizeTerminal(id, cols, rows));
       cleanups.push(() => { input.dispose(); resize.dispose(); });

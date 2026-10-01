@@ -1,10 +1,11 @@
-import { checkSettingsPatch, type Settings } from '@boite/contracts';
+import { checkSettingsPatch, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type Settings } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { writesTitles } from './drivers/index.ts';
 import { invalidParams } from './errors.ts';
 import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_SETTINGS: Settings = {
+  threadDeletionRetentionDays: DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   worktreeStorage: { mode: 'project', directory: null },
   warmProcessMinutes: 0,
   listenOnLan: false,
@@ -12,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentMemoryBudgetPercent: 60,
   threadMemoryCapMb: 0,
   memoryReserveMb: 0,
+  memoryProtection: true,
   focusGuard: true,
   muteAgents: true,
   reapOrphans: true,

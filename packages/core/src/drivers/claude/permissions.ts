@@ -66,6 +66,8 @@ export function toolGate(host: GateHost): ToolGate {
       return { behavior: 'deny', message: DENIED };
     }
     if (toolName === ASK_TOOL) return askUser(turn, input);
+    if (turn.isStopped || options.signal.aborted) return { behavior: 'deny', message: DENIED };
+    if (turn.ctx.thread.permissionMode === 'yolo') return { behavior: 'allow', updatedInput: input };
     const ticket = turn.ctx.requestPermission(toolName, input, options.title ?? options.description ?? null);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });

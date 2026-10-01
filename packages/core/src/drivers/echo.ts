@@ -55,7 +55,8 @@ const ECHO_COMMANDS: AgentCommand[] = [
 type Segment =
   | { kind: 'text'; text: string }
   | { kind: 'sleep'; ms: number }
-  | { kind: 'tool' }
+  /** `[tool:400]` keeps the call running for 400 ms, the way a long command does. */
+  | { kind: 'tool'; ms: number }
   | { kind: 'tool-stream' }
   | { kind: 'diff' }
   | { kind: 'doc' }
@@ -83,7 +84,7 @@ const COMPACT_POST_TOKENS = 300;
  * one whenever a prompt mentions it, which is what the end to end run types.
  */
 const DIRECTIVE =
-  /\[(?:sleep:\d+|tool-stream|tool|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
+  /\[(?:sleep:\d+|tool-stream|tool(?::\d+)?|diff|doc|image|permission(?::\d+)?|question|think|compact|spawn:[^\]]*|error)\]|\bquestion\b/g;
 
 export function parsePrompt(prompt: string): Segment[] {
   const segments: Segment[] = [];
@@ -95,7 +96,7 @@ export function parsePrompt(prompt: string): Segment[] {
     if (body.startsWith('sleep:')) segments.push({ kind: 'sleep', ms: Number(body.slice('sleep:'.length)) });
     else if (body.startsWith('spawn:')) segments.push({ kind: 'spawn', command: body.slice('spawn:'.length) });
     else if (body === 'tool-stream') segments.push({ kind: 'tool-stream' });
-    else if (body === 'tool') segments.push({ kind: 'tool' });
+    else if (body === 'tool' || body.startsWith('tool:')) segments.push({ kind: 'tool', ms: body === 'tool' ? TOOL_DELAY_MS : Number(body.slice('tool:'.length)) });
     else if (body === 'diff') segments.push({ kind: 'diff' });
     else if (body === 'doc') segments.push({ kind: 'doc' });
     else if (body === 'image') segments.push({ kind: 'image' });
@@ -198,7 +199,10 @@ export const echoDriver: Driver = {
     };
   },
   title(ctx: TitleContext): Promise<string | null> {
-    return Promise.resolve(echoTitle(ctx.prompt));
+    const title = echoTitle(ctx.prompt);
+    if (title === null || !ctx.nameBranch) return Promise.resolve(title);
+    const slug = title.slice(TITLE_PREFIX.length).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '') || 'update';
+    return Promise.resolve(JSON.stringify({ title, needsRefinement: false, branch: slug }));
   },
 };
 
@@ -328,7 +332,7 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
           output: null,
           status: 'running',
         });
-        await sleep(TOOL_DELAY_MS, state);
+        await sleep(segment.ms, state);
         ctx.emit.part(messageId, index, {
           type: 'tool',
           toolId,
@@ -402,6 +406,10 @@ async function run(ctx: TurnContext, state: RunState): Promise<TurnResult> {
         ]);
         break;
       case 'permission': {
+        if (ctx.thread.permissionMode === 'yolo') {
+          await writeText('allowed');
+          break;
+        }
         // Every card is raised before any is awaited, so `[permission:2]` is
         // two open at once: what an agent asking for two parallel tool calls
         // does, and what the thread status has to survive.

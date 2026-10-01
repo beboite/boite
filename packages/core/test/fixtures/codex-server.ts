@@ -24,11 +24,11 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
-  | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
   | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
 
 let threadCounter = 0;
@@ -217,15 +217,41 @@ function commandItem(itemId: string, status: string, output: string | null): unk
     status,
     commandActions: [],
     aggregatedOutput: output,
-    exitCode: status === 'completed' ? 0 : null,
+    exitCode: status === 'completed' ? 0 : status === 'failed' ? 128 : null,
     durationMs: 1,
   };
 }
 
 async function runTurn(turnId: string, text: string): Promise<void> {
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
+  if (text.includes('[retry-progress]')) {
+    notify('error', { threadId, turnId: 'previous-native-turn', error: { message: 'stale retry' }, willRetry: true });
+    notify('error', { threadId, turnId, error: { message: 'provider overloaded' }, willRetry: true });
+  }
   if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
+  if (text.includes('[silent-reasoning]')) {
+    notify('item/agentMessage/delta', { threadId, turnId, itemId: 'stored-answer', delta: 'Message already stored.' });
+    notify('item/completed', { threadId, turnId, item: { type: 'agentMessage', id: 'stored-answer', text: 'Message already stored.' } });
+    for (let index = 0; index < 35; index++) {
+      const item = { type: 'reasoning', id: `private-reasoning-${index}`, summary: [], encryptedContent: 'opaque-do-not-render' };
+      notify('item/started', { threadId, turnId, item });
+      await Bun.sleep(Number(process.env['CODEX_FAKE_SILENT_DELAY'] ?? 8));
+      notify('item/completed', { threadId, turnId, item });
+    }
+    notify('item/started', { threadId, turnId, item: commandItem('silent-tool', 'inProgress', null) });
+    await Bun.sleep(100);
+    notify('item/completed', { threadId, turnId, item: commandItem('silent-tool', 'completed', 'Filesystem copied') });
+    log('silent tool complete');
+    for (let index = 0; index < 15; index++) {
+      await Bun.sleep(100);
+      notify('thread/status/changed', { threadId, status: { type: 'active', activeFlags: [] } });
+    }
+    await awaitInterrupt(turnId);
+    waiting.delete(turnId); interrupted.delete(turnId);
+    notify('turn/completed', { threadId, turn: turnRecord(turnId, 'interrupted') });
+    return;
+  }
   const say = (chunk: string): void => {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg-1', delta: chunk });
   };
@@ -269,7 +295,8 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other-done', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'completed' } });
         break;
       }
-      case 'command': {
+      case 'command':
+      case 'command-failed': {
         itemCounter += 1;
         const itemId = `item-${itemCounter}`;
         notify('item/started', {
@@ -279,7 +306,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           startedAtMs: Date.now(),
         });
         notify('item/completed', {
-          item: commandItem(itemId, 'completed', 'ok'),
+          item: commandItem(itemId, directive === 'command-failed' ? 'failed' : 'completed', 'ok'),
           threadId,
           turnId,
           completedAtMs: Date.now(),
@@ -493,6 +520,11 @@ function handle(method: string, raw: unknown): unknown {
         platformFamily: process.platform === 'win32' ? 'windows' : 'unix',
         platformOs: process.platform === 'win32' ? 'windows' : 'linux',
       };
+    case 'account/rateLimits/read':
+      log(`account/rateLimits/read ${JSON.stringify(params)}`);
+      return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
+        credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
+        rateLimitResetCredits: { availableCount: 2, credits: null } };
     case 'hooks/list':
       log('hooks/list');
       // `CODEX_FAKE_HOOKS=1`: one hook the user never reviewed, one they did.

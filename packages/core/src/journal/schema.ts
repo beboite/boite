@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -361,12 +361,17 @@ export function migrate(db: Database, file: string): void {
     db.exec('ALTER TABLE projects ADD COLUMN worktree_default INTEGER NOT NULL DEFAULT 0');
     version = 25;
   }
+  if (!db.query("SELECT 1 FROM pragma_table_info('threads') WHERE name = 'branch_naming_pending'").get()) {
+    db.exec('ALTER TABLE threads ADD COLUMN branch_naming_pending INTEGER NOT NULL DEFAULT 0');
+    version = 26;
+  }
   version = Math.max(version, SCHEMA_VERSION);
   db.exec(`PRAGMA user_version = ${version}`);
 }
 
 /** Indexes made on every open, after the migration and outside its transaction. */
 export function ensureIndexes(db: Database): void {
+  db.exec('CREATE INDEX IF NOT EXISTS thread_deletions_by_date ON thread_deletions (deleted_at)');
   db.exec('CREATE INDEX IF NOT EXISTS processes_by_started ON processes (thread_id, started_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
   db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');

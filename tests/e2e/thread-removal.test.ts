@@ -37,7 +37,10 @@ for (const width of [1280, 390]) {
         await page.click('[data-testid=archived-drawer-toggle]');
         await page.waitFor(`document.querySelectorAll('[data-testid=archived-drawer] li').length === 7`);
       }
-      await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+      // A theme change can leave transitions pending inside closed disclosures.
+      // Only wait for the archive surface whose layout this capture verifies.
+      const archives = width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]';
+      await page.evaluate(`Promise.all([document.fonts.ready, ...document.querySelector('${archives}').getAnimations({subtree:true}).filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
       await page.screenshot(join(import.meta.dir, '.artifacts', `thread-archives-readable-${width}.png`));
       expect(await page.evaluate(`Array.from(document.querySelectorAll('${width < 720 ? '[data-testid=archived-list]' : '[data-testid=archived-drawer]'} li')).every(row => {
         const title = row.querySelector('.title');
@@ -58,7 +61,7 @@ for (const width of [1280, 390]) {
     } finally { await page.close(); }
   }, 60_000);
 
-  test(`deleting conversations at ${width}px supports immediate and later session undo`, async () => {
+  test(`deleting conversations at ${width}px supports restoration and configurable retention`, async () => {
     const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width, height: 900 } });
     try {
       await page.waitFor(`globalThis.__boiteTest?.workspace.active.openThread && document.querySelector('[data-testid=thread-header]')`);
@@ -110,9 +113,14 @@ for (const width of [1280, 390]) {
       await page.waitFor(`document.querySelector('[data-testid=deleted-show]') || document.querySelector('[data-testid=deleted-list]')`);
       if (await page.evaluate(`document.querySelector('[data-testid=deleted-show]') !== null`)) await page.click('[data-testid=deleted-show]');
       await page.waitFor(`document.querySelectorAll('[data-testid=deleted-list] li').length === 2`);
+      expect(await page.evaluate(`document.querySelector('[data-testid=deleted-retention-days]').value`)).toBe('30');
+      await page.choose('[data-testid=deleted-retention-days]', '7');
+      await page.click('[data-testid=deleted-retention-save]');
+      await page.waitFor(`globalThis.__boiteTest.workspace.active.settings.threadDeletionRetentionDays === 7`);
+      expect(await page.evaluate(`document.querySelectorAll('[data-testid=deleted-list] .expiry').length`)).toBe(2);
       await page.evaluate(`document.querySelector('[data-testid=deleted-threads]').scrollIntoView({block:'center'}); document.querySelector('[data-testid=undo-toast] button:last-child')?.click()`);
       await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
-      await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-session-${width}.png`));
+      await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-retention-${width}.png`));
       await page.click(`[data-testid=deleted-list] [data-thread-id="${archivedId}"] [data-testid=deleted-restore]`);
       await page.waitFor(`!document.querySelector('[data-testid=deleted-list] [data-thread-id="${archivedId}"]')`);
       expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.client.call('threads.get', {threadId: ${JSON.stringify(archivedId)}}).then(t => t.archived)`)).toBe(true);

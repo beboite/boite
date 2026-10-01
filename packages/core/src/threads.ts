@@ -1,6 +1,6 @@
 import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
-import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -36,10 +36,12 @@ import { AgentState } from './threads/agent-state.ts';
 import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
+import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
@@ -49,6 +51,7 @@ import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } 
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { ThreadFocus } from './threads/focus.ts';
+import { ProgressState } from './threads/progress.ts';
 
 type CreateParams = RpcParams<'threads.create'>;
 
@@ -78,6 +81,7 @@ export class ThreadStore {
   /** Builds what a driver gets for a turn. */
   readonly contexts: TurnContexts;
   readonly focus: ThreadFocus;
+  readonly progress: ProgressState;
   /** Permission and question cards. */
   readonly cards: ThreadCards;
   /** Held asynchronous answers and wakes. */
@@ -92,13 +96,18 @@ export class ThreadStore {
   readonly moves: ThreadMove;
   /** `agent.spawn`. */
   readonly spawns: ThreadSpawns;
+  /** The `autoCompact` setting: compactions the core opens between turns. */
+  readonly autoCompact: AutoCompaction;
   private readonly recovery: ThreadRecovery;
+  /** Turns a restart hands to the next core (`threads/handoff.ts`). */
+  readonly handoff: RestartHandoff;
   private readonly removing = new Set<ThreadId>();
 
   constructor(private readonly core: Core) {
     this.runner = new TurnRunner(core, this);
     this.contexts = new TurnContexts(core, this);
     this.focus = new ThreadFocus(core);
+    this.progress = new ProgressState(core);
     this.cards = new ThreadCards(core, this);
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
@@ -107,7 +116,9 @@ export class ThreadStore {
     this.codeCheckpoints = new CodeCheckpoints(core);
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
+    this.autoCompact = new AutoCompaction(core, this);
     this.recovery = new ThreadRecovery(core);
+    this.handoff = new RestartHandoff(core, this);
   }
 
   // -- reads ----------------------------------------------------------------
@@ -204,16 +215,16 @@ export class ThreadStore {
     checkEffort(provider, account.id, model, params.effort ?? null);
     checkSpeed(provider, account.id, model, params.speed ?? null);
     const id = newId('thr_');
-    const placed = await this.core.worktrees.add(id, project, titleOf(params.title), params.worktree?.branch);
+    const placed = await this.core.worktrees.add(id, project, params.worktree?.branch);
     try {
-      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch });
+      return this.create({ ...params, cwd: placed.path }, { id, branch: placed.branch, branchNamingPending: placed.namingPending });
     } catch (error) {
       await this.core.worktrees.remove(id, project, placed);
       throw error;
     }
   }
 
-  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; parentThreadId?: ThreadId }): ThreadSummary {
+  create(params: CreateParams, placed?: { id: ThreadId; branch: string | null; branchNamingPending?: boolean; parentThreadId?: ThreadId }): ThreadSummary {
     const { project, provider, account } = this.check(params);
 
     const now = Date.now();
@@ -244,6 +255,7 @@ export class ThreadStore {
       speed,
       cwd,
       branch: placed?.branch ?? null,
+      branchNamingPending: placed?.branchNamingPending ?? false,
       permissionMode: params.permissionMode ?? 'default',
       status: 'idle',
       unread: false,
@@ -503,8 +515,9 @@ export class ThreadStore {
   }
 
   restoreDeleted(threadId: ThreadId): ThreadSummary {
+    this.purgeDeleted();
     const root = this.core.journal.listDeletedThreads().find(t => t.id === threadId);
-    if (!root) throw notFound(`threadId: no deletion to undo in this Boite session for ${threadId}`, { threadId });
+    if (!root) throw notFound(`threadId: no recoverable deletion for ${threadId}`, { threadId });
     if (root.projectId !== null) this.core.projects.require(root.projectId);
     const ids = this.core.journal.append(
       { type: 'thread.restored', threadId, version: 1, payload: { threadId } },
@@ -514,6 +527,15 @@ export class ThreadStore {
     this.core.bus.emit('thread.deletionsUpdated', {});
     if (root.projectId !== null) this.core.projects.announce(root.projectId);
     return this.withLoad(this.require(threadId));
+  }
+
+  /** Expiry uses the deletion date, never the conversation's creation or last message. */
+  purgeDeleted(): void {
+    const days = this.core.settings.get().threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
+    if (days === 0) return;
+    if (this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000) > 0) {
+      this.core.bus.emit('thread.deletionsUpdated', {});
+    }
   }
 
   pin(threadId: ThreadId, pinned: boolean): ThreadSummary {
@@ -534,16 +556,25 @@ export class ThreadStore {
     return this.titles.retitle(threadId);
   }
 
-  compact(threadId: ThreadId, expectedSelectionVersion?: number): Turn {
+  /** `automatic`: the core opens it by the `autoCompact` setting (`threads/auto-compact.ts`). */
+  compact(threadId: ThreadId, expectedSelectionVersion?: number, automatic = false): Turn {
     const thread = this.require(threadId);
+    const refusal = this.compactRefusal(thread);
+    if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    if (!thread.sessionId) throw refused('this thread has no native session to compact', { threadId });
-    if (protocol === 'acp' && !this.agentState.commands.get(threadId)?.some((command) => command.name === 'compact')) {
-      throw refused('this agent has not advertised a compact command', { threadId });
+    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact', undefined, undefined, automatic ? AUTO_COMPACT_LABEL : undefined);
+  }
+
+  /** Why this thread's agent cannot compact, or null. */
+  compactRefusal(thread: ThreadSummary): string | null {
+    const protocol = this.core.providers.require(thread.providerId).protocol;
+    if (!thread.sessionId) return 'this thread has no native session to compact';
+    if (protocol === 'acp' && !this.agentState.commands.get(thread.id)?.some((command) => command.name === 'compact')) {
+      return 'this agent has not advertised a compact command';
     }
     // agy's print mode refuses every interactive-only slash command, `/compact` among them.
-    if (protocol === 'agy') throw refused('the Antigravity CLI takes no /compact in print mode', { threadId });
-    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
+    if (protocol === 'agy') return 'the Antigravity CLI takes no /compact in print mode';
+    return null;
   }
 
   /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
@@ -604,6 +635,8 @@ export class ThreadStore {
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
+    // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
+    const automatic = operation === 'compact' && displayText !== undefined;
     const now = Date.now();
     // The first message after a move carries the note to the agent. A compact
     // or a slash command goes to the agent as the command alone, so the note
@@ -624,15 +657,16 @@ export class ThreadStore {
         ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
+        ...(automatic ? { automatic: true as const } : {}),
       },
     };
     const message: Message = {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: systemOperation(operation) ? 'system' : 'user',
+      role: systemOperation(operation) || automatic ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(automatic ? { displayText } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -667,15 +701,20 @@ export class ThreadStore {
       // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
       if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
       accepted.dismissal?.();
+      // His own message puts the agent back to work, so a pause left by Stop or a restart ends with it.
+      if (!activity && !operation && !startedBy) this.core.coordination.resumeForUser(threadId);
     });
+    this.autoCompact.cancel(threadId);
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
   }
 
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
+    this.handoff.forget(threadId);
     this.core.coordination.pause(threadId);
-    const childrenStopped = this.core.delegation.stop(threadId) + this.core.workflows.stopRoot(threadId, 'Stopped with its thread');
+    // Runs first: once they are stopped, a team with no child has nothing left to pause.
+    const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);
     if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;
     // No turn left, but the agent still runs work in the background: Stop ends
     // the agent process, and that work with it.

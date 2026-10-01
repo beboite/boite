@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'node:crypto';
-import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
+import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
@@ -45,6 +45,10 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
     const letter = await agent.call('collaboration.send', { threadId: a, to: dest(h, b), text: 'Wait for my answer', requestId: 'one' });
     expect(letter.from.threadId).toBe(a);
     expect(letter.from.title).toBe('Maintenance');
+    const project = h.core.journal.getProject(h.core.threads.require(a).projectId!)!;
+    expect(directory.agents[0]?.project).toBe(project.name);
+    expect(letter.from.project).toBe(project.name);
+    expect(letter.toProject).toBe(project.name);
     expect(letter.status).toBe('received');
     mkdirSync(join(h.dataDir, 'elsewhere'));
     const other = await owner.call('projects.add', { path: join(h.dataDir, 'elsewhere'), name: 'Other' });
@@ -86,7 +90,7 @@ test('delivery wakes the recipient once, preserves system provenance and does no
 // The delivery wait allows 8 seconds; the test must also allow setup and teardown.
 }, 12000);
 
-test('idempotency, size limits, reply provenance and outgoing budgets are enforced in the core', async () => {
+test('idempotency, size limits and reply provenance are enforced in the core, with no hourly budget', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
   h.core.coordination.pause(b);
   const first = await send(h, a, dest(h, b), 'One', 'same');
@@ -94,9 +98,10 @@ test('idempotency, size limits, reply provenance and outgoing budgets are enforc
   await expect(send(h, a, dest(h, b), 'Changed', 'same')).rejects.toThrow('different content');
   await expect(send(h, a, dest(h, b), 'x'.repeat(4001))).rejects.toThrow('4000');
   await expect(h.core.coordination.send({ threadId: a, to: dest(h, b), text: 'Fake reply', replyTo: first.id, requestId: 'bad-reply' })).rejects.toThrow('incoming');
-  for (let i = 0; i < 5; i++) await send(h, a, dest(h, b), `Message ${i}`);
-  await expect(send(h, a, dest(h, b))).rejects.toThrow('budget');
-  expect(h.core.coordination.get(b).messages).toHaveLength(6);
+  // More than the old Brief budgets allowed (6 sent, 20 received an hour).
+  for (let i = 0; i < 24; i++) await send(h, a, dest(h, b), `Message ${i}`);
+  expect(h.core.coordination.get(b).messages).toHaveLength(25);
+  expect(h.core.coordination.get(a)).toMatchObject({ sent: 25, sendLimit: null, wakeLimit: null });
   expect(h.core.coordination.get(b).wakes).toBe(0);
 });
 
@@ -151,15 +156,35 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
   const directory = await one.h.core.coordination.directory(one.a);
   expect(directory.unavailable).toHaveLength(0);
-  expect(directory.agents.some(a => a.coreId === cardB.coreId && a.threadId === two.b)).toBe(true);
+  const remoteProject = two.h.core.journal.getProject(two.h.core.threads.require(two.b).projectId!)!.name;
+  expect(directory.agents.find(a => a.coreId === cardB.coreId && a.threadId === two.b)?.project).toBe(remoteProject);
   const letter = await send(one.h, one.a, dest(two.h, two.b));
   expect(letter.status).toBe('queued');
   await waitFor(() => one.h.core.coordination.get(one.a).messages[0]?.status === 'delivered', 12000);
+  expect(one.h.core.coordination.get(one.a).messages[0]?.toProject).toBe(remoteProject);
+  expect(one.h.core.coordination.get(one.a).messages[0]?.toMachine).toBe(cardB.name);
+  expect(two.h.core.coordination.get(two.b).messages[0]?.from.project).toBe(one.h.core.journal.getProject(one.h.core.threads.require(one.a).projectId!)!.name);
   const reply = await two.h.core.coordination.send({ threadId: two.b, to: dest(one.h, one.a), text: 'Ready now.', replyTo: letter.id, requestId: 'remote-reply' });
   await waitFor(() => one.h.core.coordination.get(one.a).messages.some(m => m.id === reply.id && m.status === 'delivered'), 10000);
   two.h.core.coordination.untrust(cardA.coreId);
   expect((await one.h.core.coordination.directory(one.a)).unavailable).toEqual([cardB.name]);
 }, 25000);
+
+test('an unreachable coordination check names the destination without broadcasting an internal error', async () => {
+  const one = await setup(); const two = await setup();
+  const peer = { ...two.h.core.coordination.identity(), name: 'Remote test machine', url: 'http://127.0.0.1:1' };
+  one.h.core.coordination.trust(peer);
+  const log = spyOn(one.h.core, 'log');
+  try {
+    await expect(one.owner.call('collaboration.check', { coreId: peer.coreId })).rejects.toMatchObject({
+      rpc: {
+        code: RpcErrorCode.Unavailable,
+        message: expect.stringContaining('Remote test machine at http://127.0.0.1:1'),
+      },
+    });
+    expect(log.mock.calls.some(([level]) => level === 'error')).toBe(false);
+  } finally { log.mockRestore(); }
+});
 
 test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
   const one = await setup(); const two = await setup();
@@ -172,7 +197,7 @@ test('signed peer errors expose validation messages but hide unexpected implemen
   };
   const invalid = await request('invalid');
   expect(invalid.status).toBe(400);
-  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver or receipt' });
+  expect(await invalid.json()).toMatchObject({ error: 'operation: expected directory, deliver, receipt, search or read' });
   const failure = spyOn(two.h.core.journal, 'listThreads').mockImplementation(() => { throw new Error('database failure at /private/workspace/journal.sqlite'); });
   try {
     const response = await request('directory');
@@ -229,9 +254,9 @@ test('restart pauses pending work while existing idle threads stay reachable and
   } finally { await reopened.close(); }
 });
 
-test('wake limits keep messages pending, and expired messages never wake a provider', async () => {
+test('a paused recipient keeps messages pending, and expired messages never wake a provider', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
-  for (let i = 0; i < 2; i++) h.core.journal.db.query('INSERT INTO coordination_wakes VALUES (?, ?)').run(b, Date.now());
+  h.core.coordination.pause(b);
   const letter = await send(h, a, dest(h, b));
   await new Promise(resolve => setTimeout(resolve, 2200));
   expect(h.core.journal.listTurns(b)).toHaveLength(0);
@@ -256,6 +281,23 @@ test('an offline peer recovers before expiry without duplicate delivery', async 
   expect(two.h.core.coordination.get(two.b).messages.map(m => m.id)).toEqual([letter.id]);
   expect(two.h.core.coordination.get(two.b).wakes).toBe(0);
 }, 14000);
+
+test('a pause left by Stop ends with the user\'s next message, the owner\'s pause does not', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.threads.stopTurn(b);
+  await send(h, a, dest(h, b));
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+  h.core.threads.startTurn(b, 'Carry on');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  // The waiting letter reaches the agent, inside his turn or in a wake right after it.
+  await waitFor(() => h.core.coordination.get(b).messages[0]?.status === 'delivered', 8000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle', 8000);
+
+  h.core.coordination.configure(b, { ...brief, paused: true });
+  h.core.threads.stopTurn(b);
+  h.core.threads.startTurn(b, 'Carry on again');
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+}, 20000);
 
 test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
   const { h, a, b } = await setup();
@@ -322,4 +364,83 @@ test('an uncertain letter does not keep the sweep awake, and leaves the journal 
   const ids = (db.query('SELECT id FROM coordination_letters').all() as { id: string }[]).map(row => row.id);
   expect(ids).toContain(stuck.id);
   expect(ids).not.toContain(old.id);
+});
+
+function say(h: TestCore, threadId: string, role: 'user' | 'assistant', text: string, at = Date.now()) {
+  h.core.journal.putMessage({ id: crypto.randomUUID(), threadId, turnId: 'history', role, state: 'complete', createdAt: at, parts: [{ type: 'text', text }, ...(role === 'assistant' ? [{ type: 'tool' as const, toolId: 't1', name: 'Bash', input: {}, status: 'done' as const, output: 'secret tool output' }] : [])] as never });
+}
+
+test('directory lists the most recently active first and describes each contact', async () => {
+  const { h, a, b } = await setup();
+  const c = (await echoThread(h, await h.connect(), 'Newest')).threadId;
+  h.core.journal.putThread({ ...h.core.threads.require(b), updatedAt: Date.now() + 60_000 });
+  const agents = (await h.core.coordination.directory(a)).agents;
+  expect(agents.map(t => t.threadId)).toEqual([b, c]);
+  expect(agents[0]).toMatchObject({ title: 'Deployment', agent: expect.stringContaining('echo'), branch: null });
+  expect(typeof agents[0]?.project).toBe('string');
+});
+
+test('search finds a contact by words of its chat, fields or both, and reading returns text and tool names only', async () => {
+  const { h, a, b } = await setup();
+  say(h, b, 'user', 'the login page shows a blank screen after the redirect', 1000);
+  say(h, b, 'assistant', 'I changed the OAuth callback in auth.ts', 2000);
+  const found = await h.core.coordination.search(a, 'blank deployment');
+  expect(found.matches.map(m => m.threadId)).toEqual([b]);
+  expect(found.matches[0]?.matched).toEqual(['title', 'chat']);
+  expect(found.matches[0]?.excerpts[0]).toContain('blank screen');
+  expect((await h.core.coordination.search(a, 'blank nowhere')).matches).toEqual([]);
+  // A tool's output is not chat.
+  expect((await h.core.coordination.search(a, 'secret')).matches).toEqual([]);
+  const read = await h.core.coordination.read(a, dest(h, b), 1);
+  expect(read.entries.map(e => [e.role, e.text, e.tools])).toEqual([['assistant', 'I changed the OAuth callback in auth.ts', ['Bash']]]);
+  expect(read.more).toBe(true);
+  const older = await h.core.coordination.read(a, dest(h, b), 5, read.entries[0]!.at);
+  expect(older.entries.map(e => e.text)).toEqual(['the login page shows a blank screen after the redirect']);
+  expect(older.more).toBe(false);
+  expect(JSON.stringify(read)).not.toContain('secret tool output');
+  h.core.coordination.configure(b, { ...brief, mode: 'off' });
+  await expect(h.core.coordination.read(a, dest(h, b))).rejects.toThrow('not a contact');
+});
+
+test('a waiting agent takes its answer directly, and the recipient is not woken for it', async () => {
+  const { h, a, b } = await setup();
+  const waiting = h.core.coordination.wait(a, dest(h, b), 5000);
+  const answer = await send(h, b, dest(h, a), 'Done, you can restart.');
+  const { letters } = await waiting;
+  expect(letters.map(l => [l.id, l.status])).toEqual([[answer.id, 'delivered']]);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  // The answer reached the agent through its tool output only: no wake turn, no injected copy.
+  expect(h.core.journal.listTurns(a)).toHaveLength(0);
+  const prompts = h.core.journal.listMessages(a).filter(m => m.role === 'system').map(m => JSON.stringify(m.parts));
+  expect(prompts.some(p => p.includes('Done, you can restart.'))).toBe(false);
+  expect((await h.core.coordination.wait(a, undefined, 0)).letters).toEqual([]);
+});
+
+test('two linked cores search and read each other\'s agents through signed requests', async () => {
+  const one = await setup(); const two = await setup();
+  const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
+  one.h.core.coordination.trust(cardB); two.h.core.coordination.trust({ ...cardA, readThreads: true });
+  say(two.h, two.b, 'user', 'the nightly backup to the NAS failed again');
+  const found = await one.h.core.coordination.search(one.a, 'nas backup');
+  expect(found.unavailable).toEqual([]);
+  const remote = found.matches.find(m => m.coreId === cardB.coreId);
+  expect(remote).toMatchObject({ threadId: two.b, machine: cardB.name, matched: ['chat'] });
+  const read = await one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b });
+  expect(read.contact.threadId).toBe(two.b);
+  expect(read.entries.map(e => e.text)).toEqual(['the nightly backup to the NAS failed again']);
+  two.h.core.coordination.configure(two.b, { ...brief, remote: false });
+  await expect(one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b })).rejects.toThrow('not a thread open to other machines');
+}, 25000);
+
+
+test('old local letters gain project names without requiring enabled contacts', async () => {
+  const { h, a, b } = await setup();
+  h.core.coordination.pause(b);
+  const letter = await send(h, a, dest(h, b));
+  h.core.journal.db.query("UPDATE coordination_letters SET data = json_remove(data, '$.from.project', '$.toProject') WHERE id = ?").run(letter.id);
+  h.core.coordination.configure(a, { ...brief, mode: 'off' });
+  const project = h.core.journal.getProject(h.core.threads.require(a).projectId!)!.name;
+  const old = h.core.coordination.get(b).messages[0]!;
+  expect(old.from.project).toBe(project);
+  expect(old.toProject).toBe(project);
 });

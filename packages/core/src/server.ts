@@ -280,6 +280,8 @@ function ticketedFile(core: Core, ticket: string, range: string | null): Respons
  */
 export const SHUTDOWN_PATH = '/shutdown';
 export const IDLE_SHUTDOWN_PATH = '/shutdown-if-idle';
+/** Stops without waiting for idle and hands the running turns to the next core. */
+export const HANDOFF_SHUTDOWN_PATH = '/shutdown-for-update';
 
 function sameToken(given: string, expected: string): boolean {
   const a = Buffer.from(given);
@@ -287,7 +289,7 @@ function sameToken(given: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function shutdownResponse(core: Core, request: Request, idleOnly = false): Response {
+export function shutdownResponse(core: Core, request: Request, mode: 'now' | 'idle' | 'handoff' = 'now'): Response {
   if (request.method !== 'POST') return new Response('POST only', { status: 405, headers: { allow: 'POST' } });
   if (!isLoopbackHost(request.headers.get('host'))) {
     return new Response('shutdown is only served on a loopback name', { status: 403 });
@@ -297,10 +299,12 @@ export function shutdownResponse(core: Core, request: Request, idleOnly = false)
   if (token === '' || !sameToken(token, core.token)) {
     return new Response('shutdown needs "Authorization: Bearer <core token>" from core.json', { status: 401 });
   }
-  if (idleOnly) {
-    if (new URL(request.url).searchParams.get('pid') !== String(process.pid)) {
-      return new Response('pid must name this core process', { status: 412 });
-    }
+  if (mode !== 'now' && new URL(request.url).searchParams.get('pid') !== String(process.pid)) {
+    return new Response('pid must name this core process', { status: 412 });
+  }
+  if (mode === 'handoff') {
+    if (core.requestHandoffShutdown() === 'unsupported') return new Response('this embedded core has no process to stop', { status: 501 });
+  } else if (mode === 'idle') {
     const admission = core.requestIdleShutdown();
     if (admission === 'busy') return new Response('active work prevents installation; retry after it finishes', { status: 409 });
     if (admission === 'unsupported') return new Response('this embedded core has no process to stop', { status: 501 });
@@ -367,7 +371,8 @@ export function startServer(options: ServerOptions): RunningServer {
       }
 
       if (url.pathname === SHUTDOWN_PATH) return shutdownResponse(core, request);
-      if (url.pathname === IDLE_SHUTDOWN_PATH) return shutdownResponse(core, request, true);
+      if (url.pathname === IDLE_SHUTDOWN_PATH) return shutdownResponse(core, request, 'idle');
+      if (url.pathname === HANDOFF_SHUTDOWN_PATH) return shutdownResponse(core, request, 'handoff');
 
       if (url.pathname.startsWith(`${FILE_ROUTE}/`)) {
         if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
@@ -442,6 +447,7 @@ export function startServer(options: ServerOptions): RunningServer {
       drain(socket) { socket.data.connection.drain(); },
 
       close(socket) {
+        core.coordination.bridge.disconnect(socket.data.connection.id);
         core.threads.focus.disconnect(socket.data.connection.id);
         incoming.drop(socket.data.connection);
         core.speech.cancel(socket.data.connection.id);
@@ -455,6 +461,11 @@ export function startServer(options: ServerOptions): RunningServer {
 
   const port = server.port ?? 0;
   core.setEndpoint(host, port);
+  // What a restart handed over starts once agents can reach this core. After
+  // the caller's own setup: `main` writes `core.json` right behind this call.
+  setTimeout(() => {
+    if (!stopping) core.threads.handoff.resume();
+  }, 0);
   core.subscribers = {
     hasSubscribers(threadId: ThreadId): boolean {
       for (const connection of connections) {

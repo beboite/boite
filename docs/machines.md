@@ -66,6 +66,23 @@ link is not cut off every time. While the browser reports itself offline, a
 remote host is not retried at all: the `online` event starts the next attempt.
 A loopback core is retried regardless, since it is on the same machine.
 
+## Agent links
+
+Two machines connected here with owner connections are linked for agent
+coordination as soon as both are ready: each core trusts the other's public
+key and address, then both check the link. Their agents can then find, read
+and message each other ([coordination](coordination.md)). Paired-device
+connections are never linked. Each core needs an HTTPS public address the
+other can reach. When a core advertises loopback, the client uses its connected
+HTTPS origin if available. Otherwise, it asks for a reachable public address
+before exchanging trust or probing the link. A pair that cannot link shows the
+reason in the Agent links
+section and is tried again when one of the machines reconnects. A link removed
+there is remembered on this device and stays removed until Link agents is
+used again. Link failures name the source, destination and address without
+broadcasting an internal-error notification. Owners can inspect and retry links
+on desktop and phone.
+
 ## Automatic settings synchronization
 
 Each card of another machine has a checkbox to keep its settings synchronized
@@ -84,14 +101,20 @@ this client is offline.
 
 The client copies:
 
-- limits, process guards, agent updates and question mode;
+- deleted-history retention, process guards and question mode;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Use with agents, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
-Network access, public URLs, browser origins and provider sign-ins stay on their
-own machine. The report names providers that still need signing in on the target
+Resource limits, memory protection, process retention, automatic agent updates,
+worktree storage, network access, public URLs, browser origins and provider
+sign-ins stay on their own machine. Each owner machine card has a Settings for
+this machine button beside its synchronization control. It opens resource and
+execution settings for that core without changing the active conversation.
+Checking synchronization leaves the machine list open. The button is available
+on desktop and phone; offline machines cannot be edited. The report names
+providers that still need signing in on the target
 and opens that machine's Providers page. Methods absent on an older core are
 skipped for that part. Automatic brain changes require the source core's
 `brain.configured` event. A failure names its stage; earlier changes stay copied,
@@ -169,6 +192,17 @@ page of 200 and a branch is missing from it does the core ask for that branch
 alone, even if two of those 200 came from one branch. At most two commands run at once. Each has a ten-second deadline and
 runs through the process registry under `pull-request:<threadId>`. Cards in a
 folded project wait for the unfold before they ask.
+
+When a machine drops, its cards stay listed, greyed, and still open. The client
+asks nothing of the core then: it shows the timeline it last read for that
+thread, or an empty one for a thread it never opened. Sending in such a thread
+puts the prompt in the thread's queue, which the device keeps with the unsent
+drafts, and the composer says the machine is offline. When the machine is back,
+the reconnect reopens the thread, reads its team, workflows and coordination,
+and the queue goes out as one turn, or waits behind a turn the core was still
+running. A new thread needs the core, so a
+draft keeps its text until the machine returns. A machine offline since the app
+started has no cards to open: the client keeps no copy of the thread list.
 
 A lookup the user did not ask for fails quietly, and once `gh` is missing or
 signed out the core stops starting it. The thread menu's refresh reads the

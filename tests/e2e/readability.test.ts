@@ -163,10 +163,13 @@ test('tool activity keeps failures visible and answered questions compact at des
     m.parts = [
       { type:'thinking', text:'**Inspecting project files**\\nCheck the repository before publishing.' },
       { type:'text', text:'I will keep the archived version on its branch, then publish both branches.\\n\\n' },
-      { type:'tool', toolId:'readability-check', name:'exec_command', input:{cmd:'git status --short\\ngit branch -vv\\ngit remote -v'}, output:'No remote configured.', status:'done' },
+      { type:'tool', toolId:'readability-check', name:'exec_command', input:{cmd:'git status --short\\ngit branch -vv\\ngit remote -v'}, output:'warning: progress on stderr\\nerror: quoted documentation', status:'done', exitCode:0 },
       { type:'question', questionId:'readability-question', text:'Which remote should receive the branches?', options:[{id:'private',label:'Private repository'}], allowText:true, multiple:false, async:true, answer:{optionIds:['private'],text:'Create it on GitHub.'} },
       { type:'tool', toolId:'readability-read', name:'Read', input:{file_path:'README.md'}, output:'Project documentation', status:'done' },
-      { type:'tool', toolId:'readability-failed', name:'Bash', input:{command:'git remote get-url origin'}, output:'error: No such remote origin', status:'error' },
+      { type:'tool', toolId:'readability-failed', name:'Bash', input:{command:'git remote get-url origin'}, output:'Earlier successful output\\nerror: No such remote origin', status:'error', exitCode:128 },
+      { type:'tool', toolId:'readability-failed-test', name:'Bash', input:{command:'bun test tests/e2e/example.test.ts'}, output:'bun test v1.4.2\\n(pass) first case\\n(fail) reload keeps messages\\n 1 pass\\n 1 fail', status:'error', exitCode:1 },
+      { type:'tool', toolId:'readability-failed-rebase', name:'Bash', input:{command:'git rebase origin/main'}, output:'Rebasing (1/1)\\rAuto-merging docs/example.md\\nCONFLICT (content): Merge conflict in docs/example.md', status:'error', exitCode:1 },
+      { type:'tool', toolId:'readability-hidden-error', name:'Bash', input:{command:'git status 2>/dev/null'}, output:'Earlier successful output', status:'error', exitCode:128 },
       { type:'tool', toolId:'readability-search', name:'Grep', input:{pattern:'repository'}, output:'README.md:3', status:'done' },
       { type:'text', text:'I will create the private repository and publish the branches.\\n\\n' },
       { type:'tool', toolId:'readability-live', name:'Bash', input:{command:'gh repo create sample-project --private --source=. --remote=origin'}, output:null, status:'running', startedAt:Date.now()-2000 }
@@ -178,6 +181,12 @@ test('tool activity keeps failures visible and answered questions compact at des
   expect(await page.evaluate(`document.querySelector('${id('tool-card')} .line').textContent`)).toBe('Ran 1 command');
   expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=error]').getBoundingClientRect().height > 0`)).toBe(true);
   expect(await page.text(id('tool-error-preview'))).toBe('error: No such remote origin');
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-error-preview')}')).map(e => e.textContent)`)).toEqual([
+    'error: No such remote origin', '(fail) reload keeps messages',
+    'CONFLICT (content): Merge conflict in docs/example.md',
+    'Command reported failure. Expand to read the full output.'
+  ]);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('tool-exit-code')}')).map(e => e.textContent)`)).toEqual(['Exit code 128', 'Exit code 1', 'Exit code 1', 'Exit code 128']);
   expect(await page.evaluate(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded')`)).toBe('false');
   expect(await page.evaluate(`document.querySelector('${id('tool-card')}[data-status=running] .line').textContent`)).toBe('Running gh');
   expect(await page.evaluate(`document.querySelector('${id('turn-summary')}') === null`)).toBe(true);
@@ -192,6 +201,10 @@ test('tool activity keeps failures visible and answered questions compact at des
     await page.waitFor(`document.querySelector('${id('question-toggle')}').getAttribute('aria-expanded') === 'false'`);
     await page.evaluate(`document.querySelector('${id('timeline')}').scrollTop = 0`);
     await capture(width<720 ? 'activity-phone' : 'activity-desktop');
+    if (width < 720) {
+      await page.evaluate(`document.querySelectorAll('${id('tool-card')}[data-status=error]')[2].scrollIntoView({block:'center'})`);
+      await capture('activity-phone-errors');
+    }
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
     const rows = await page.evaluate<number[]>(`Array.from(document.querySelectorAll('${id('question-toggle')}, ${id('tool-toggle')}, ${id('thinking-toggle')}')).filter(e=>!e.closest('[inert]')).map(e=>e.getBoundingClientRect().height)`);
     expect(rows.every(height => height >= (width<720 ? 44 : 30))).toBe(true);
@@ -244,12 +257,26 @@ test('PR links belong to a thread branch and disappear after a move to a plain f
   `);
   await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
   const sharedRowsHaveNoPr = `Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).every(row => !row.closest('.thread').querySelector('${id('thread-pr')}'))`;
+  const prBeforeBranch = (scope: string) => page.evaluate(`(() => {
+    const links = Array.from(document.querySelectorAll('${scope} ${id('thread-pr')}'));
+    return links.length > 0 && links.every(pr => {
+      const branch = pr.nextElementSibling;
+      return branch?.matches('${id('thread-branch')}') && pr.getBoundingClientRect().right < branch.getBoundingClientRect().left;
+    });
+  })()`);
   expect(await page.evaluate(sharedRowsHaveNoPr)).toBe(true);
+  expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-links-desktop');
+  await page.click(id('view-recent'));
+  await page.waitFor(`document.querySelector('${id('sidebar')} ${id('thread-project')}')`);
+  expect(await prBeforeBranch(id('sidebar'))).toBe(true);
+  await capture('pr-links-recent');
+  await page.click(id('view-projects'));
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
   await page.click(id('mobile-conversations'));
   await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('mobile-list')}').textContent.includes('#180')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-list')} ${id('thread-pr')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await capture('pr-links-phone');
   await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });

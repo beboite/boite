@@ -3,6 +3,7 @@
 ## Using boite
 
 - [Desktop updates](updates.md): Boite, Boite Nightly, downloads and restarting.
+- [Restart handoff](restart-handoff.md): how an update stops running agents and resumes them.
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Drafts](drafts.md): conversations with no project, a folder each in Documents/Boite.
@@ -16,7 +17,7 @@
 - [Prompt cache timer](prompt-cache.md): how long a thread's cache stays warm, per provider, and the sources.
 - [Agent coordination](coordination.md): messages between agents, machine links and limits.
 - [Persistent agents](agents.md): identities, groups, teams, missions, memory and background execution.
-- [Agent delegation](delegation.md): model profiles, child conversations, live steering and usage.
+- [Subagents](delegation.md): child conversations on by default, model profiles, live steering and usage.
 - [Workflows](workflows.md): JSON plans of delegated steps, fan-out, conditions, templates and the graph.
 - [Usage](usage.md): tokens, API cost and limits per day, provider and model.
 - [Analytics](analytics.md): optional telemetry, consent, collected fields and data controls.
@@ -28,6 +29,7 @@
 - [Titles](titles.md): automatic and manual conversation titles.
 - [Session import](imports.md): bringing in a Claude Code conversation.
 - [Phone access](phone.md): pairing, permissions and offline behavior.
+- [Android app](android.md): the APK each nightly publishes, its host and its signing key.
 - [Voice dictation](voice.md): local Whisper, API transcription and microphone access.
 - [Headless server](server.md): Docker, persistent storage and remote access.
 - [Plugins](plugins.md): recommended plugins, adding one from a git URL, and writing your own.

@@ -366,8 +366,31 @@ export interface QuotaWindow {
   resetsAt: Timestamp | null;
 }
 
+/** A read-only count. No redeemable identifiers reach the client. */
+export interface QuotaResetCredits {
+  availableCount: number;
+  nextExpiresAt: Timestamp | null;
+}
+
+export interface QuotaCredits {
+  /** A prepaid balance or a monthly spending budget, never interchangeable. */
+  kind: 'balance' | 'budget';
+  /** Null means the provider did not confirm automatic paid usage. */
+  enabled: boolean | null;
+  /** Provider units. Budgets are displayed as a percentage, not a wallet. */
+  remaining: number | null;
+  limit: number | null;
+  unlimited: boolean;
+}
+
+export interface QuotaReading {
+  windows: QuotaWindow[];
+  resetCredits?: QuotaResetCredits;
+  credits?: QuotaCredits;
+}
+
 /** Provider-reported limits, never inferred from Boite's token ledger. */
-export interface AccountQuota {
+export interface AccountQuota extends QuotaReading {
   /** Account id, or `quota:antigravity-cli` for the opt-in local CLI quota source. */
   accountId: AccountId;
   providerId: ProviderId;
@@ -375,7 +398,8 @@ export interface AccountQuota {
   label: string;
   enabled: boolean;
   status: 'ready' | 'unavailable' | 'unsupported' | 'disabled';
-  windows: QuotaWindow[];
+  /** A host's last observation, rather than a fresh account snapshot. */
+  source?: 'observation';
   checkedAt: Timestamp | null;
   error: string | null;
 }
@@ -534,6 +558,15 @@ export interface Project {
    */
   archivedThreads?: number;
   /**
+   * The project's folder is gone from the disk: deleted, moved or renamed
+   * since it was added. Read on every answer like `repository`, and
+   * `project.updated` follows when it changes. A thread cannot start there
+   * until the folder is back; removing the project still works. Absent while
+   * the folder is there, while the disk gave no clear answer (a share whose
+   * host sleeps) and from a core older than this field.
+   */
+  missing?: boolean;
+  /**
    * What the sidebar draws in place of the project's initial, detected from
    * its folder after it was added and on `projects.refreshIcon`, never while a
    * list is answered. An `image` carries only its version: the bytes come
@@ -560,7 +593,7 @@ export type ProjectIcon =
   /** No image, but the folder reads as this stack. */
   | { kind: 'tech'; id: TechIconId };
 
-export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'yolo' | 'plan' | 'dontAsk';
 
 export type ThreadStatus =
   | 'idle'
@@ -630,6 +663,16 @@ export interface PromptCache {
   accountId: AccountId;
 }
 
+/** Latest observed execution event of the current turn, never a synthetic heartbeat. */
+export interface ThreadProgress {
+  turnId: TurnId;
+  phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working' | 'waiting';
+  detail: string | null;
+  at: Timestamp;
+  /** Latest provider signal, including status notifications that do not advance activity. */
+  providerAt?: Timestamp | null;
+}
+
 export interface ThreadSummary {
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
@@ -657,6 +700,8 @@ export interface ThreadSummary {
    * in the project directory itself.
    */
   branch: string | null;
+  /** Only automatically created temporary branches may be named by the title model. */
+  branchNamingPending?: boolean;
   permissionMode: PermissionMode;
   status: ThreadStatus;
   /**
@@ -665,6 +710,8 @@ export interface ThreadSummary {
    * missing on older cores.
    */
   runningSince?: Timestamp | null;
+  /** In memory only, cleared at turn end/restart. Missing on older cores. */
+  progress?: ThreadProgress | null;
   /**
    * What the agent still runs in the background, a monitor or a shell it left
    * going past its turn: the kind of each task and when the oldest started,
@@ -773,8 +820,12 @@ export type TurnExecution = Pick<ThreadSummary,
   /**
    * `background`: the agent resumed on its own after background work it
    * started finished; the turn carries no prompt of the user's.
+   * `resume`: the core restarted over a running turn and opened this one so
+   * the agent carries on (`docs/restart-handoff.md`).
    */
-  operation?: 'compact' | 'coordination' | 'delegation' | 'background';
+  operation?: 'compact' | 'coordination' | 'delegation' | 'background' | 'resume';
+  /** A `compact` the core opened by the `autoCompact` setting, not one the user asked for. */
+  automatic?: true;
 };
 
 export interface Turn {
@@ -918,7 +969,7 @@ export interface PendingMove {
 }
 
 export type MessagePart =
-  | { type: 'text'; text: string; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
+  | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
@@ -933,6 +984,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
+      exitCode?: number | null;
       /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
       nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
@@ -1195,6 +1248,7 @@ export interface MemoryStatus {
   state: MemoryState;
   agentBytes: number;
   availableBytes: number | null;
+  /** All zero when protection is off; usage readings remain available. */
   limits: { budgetMb: number; threadMemoryCapMb: number; memoryReserveMb: number };
 }
 
@@ -1205,6 +1259,8 @@ interface MemoryEventBase {
   bytes?: number;
   state: MemoryState;
   at: number;
+  /** Insert after the parts present when this notice arrived, including after reload. */
+  anchor?: { messageId: MessageId; partIndex: number };
 }
 
 export type MemoryKillReason = 'thread-quota' | 'budget' | 'machine';
@@ -1221,7 +1277,16 @@ export interface TelemetryState {
   pendingDeletion: boolean;
 }
 
+export const DEFAULT_THREAD_DELETION_RETENTION_DAYS = 30;
+
+/** A recoverable conversation, with the time its whole family was deleted. */
+export interface DeletedThreadSummary extends ThreadSummary {
+  deletedAt: number;
+}
+
 export interface Settings {
+  /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
+  threadDeletionRetentionDays?: number;
   /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
   worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
@@ -1248,6 +1313,8 @@ export interface Settings {
   threadMemoryCapMb: number;
   /** Memory kept available in MB. 0 uses the larger of 10% of physical RAM and 3 GB. */
   memoryReserveMb: number;
+  /** Automatic memory stops and Windows allocation caps. Missing means enabled. */
+  memoryProtection?: boolean;
   /**
    * Windows of agent processes never keep the foreground: one that takes it is
    * sent to the bottom without activation and the window the user was on gets
@@ -1287,6 +1354,11 @@ export interface Settings {
    * longer write one falls back to that too.
    */
   titleModel?: TitleModel | null;
+  /**
+   * When the core compacts a conversation by itself, between two turns. Null
+   * or missing: never, each agent keeps its own behaviour. Missing on older cores.
+   */
+  autoCompact?: AutoCompact | null;
 }
 
 export type WorktreeStorage =
@@ -1841,6 +1913,37 @@ export interface AgentContact extends AgentAddress {
   resources: string;
   status: ThreadStatus;
   mode: CoordinationMode;
+  /** The project's name. Missing on older cores. */
+  project?: string;
+  /** Provider and model, as `claude claude-opus-5-5`. Missing on older cores. */
+  agent?: string;
+  /** The worktree branch the thread works on, when it has one. Missing on older cores. */
+  branch?: string | null;
+  /** Last activity: a message, a turn or a change of state. Missing on older cores. */
+  activeAt?: Timestamp;
+}
+/** A contact whose title, project, branch, model, resources or chat matched a search. */
+export interface AgentMatch extends AgentContact {
+  /** Which fields matched, best first. */
+  matched: ('title' | 'project' | 'branch' | 'agent' | 'resources' | 'chat')[];
+  /** Up to three short excerpts of the chat around a match. */
+  excerpts: string[];
+}
+/** One entry of another agent's conversation as `collaboration.read` returns it. */
+export interface AgentTranscriptEntry {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  at: Timestamp;
+  /** Text only, cut at 4,000 characters. */
+  text: string;
+  /** The tools the agent called in this message, by name, in order. */
+  tools: string[];
+}
+export interface AgentTranscript {
+  contact: AgentContact;
+  entries: AgentTranscriptEntry[];
+  /** Older entries exist before the first one returned; pass its `at` as `before`. */
+  more: boolean;
 }
 export interface AgentLetter {
   /** Authenticated source of delegation mail. Older coordination mail is agent-authored. */
@@ -1849,6 +1952,8 @@ export interface AgentLetter {
   from: AgentContact;
   to: AgentAddress;
   toTitle: string;
+  toProject?: string;
+  toMachine?: string;
   text: string;
   replyTo: string | null;
   createdAt: Timestamp;
@@ -1857,15 +1962,28 @@ export interface AgentLetter {
   error: string | null;
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
-export interface CoordinationPeer { coreId: string; name: string; url: string; publicKey: string }
+export interface CoordinationPeer {
+  coreId: string;
+  name: string;
+  url: string;
+  publicKey: string;
+  /** Local owner permission for agents on this peer to read this core's threads. Missing means denied. */
+  readThreads?: boolean;
+  /** Route through an owner app connected to both cores; never dial its loopback address on another host. */
+  viaClient?: boolean;
+}
+/** Signed coordination response carried unchanged through the owner's app. */
+export interface CoordinationBridgeResponse { status: number; body: string; signature: string }
 export interface CoordinationView {
   self: AgentAddress;
   config: CoordinationConfig;
   messages: AgentLetter[];
   sent: number;
-  sendLimit: number;
+  /** Null: no limit. Older cores send a number. */
+  sendLimit: number | null;
   wakes: number;
-  wakeLimit: number;
+  /** Null: no limit. Older cores send a number. */
+  wakeLimit: number | null;
 }
 
 /** Owner-selected routes. Agents name a profile, never arbitrary credentials or permissions. */
@@ -1882,9 +2000,15 @@ export interface DelegationConfig {
   paused: boolean;
   profiles: DelegationProfile[];
 }
+/**
+ * On from the first turn: a conversation delegates to its own model with
+ * nothing to set up. Owner profiles only add other models.
+ */
 export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
-  enabled: false, paused: false, profiles: [],
+  enabled: true, paused: false, profiles: [],
 };
+/** The profile every conversation has without configuring one: its own harness, account, model and effort. */
+export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegatedAgent {
   thread: ThreadSummary;
   profileId: string;
@@ -2032,8 +2156,26 @@ export interface TerminalState {
   sequence?: number;
 }
 
+/** The server on one machine, independently of the desktop application's updater. */
+export interface ServerUpdateStatus {
+  mode: 'systemd' | 'docker' | 'manual';
+  phase: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'waiting' | 'installing' | 'error';
+  currentVersion: string;
+  version: string | null;
+  channel: 'stable' | 'nightly';
+  publishedAt: string | null;
+  checkedAt: Timestamp | null;
+  received: number;
+  total: number | null;
+  error: string | null;
+}
+
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
+  'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
+  /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
+  'core.updateInstall': { params: { version: string }; result: ServerUpdateStatus };
+  'core.updateCancel': { params: Record<string, never>; result: ServerUpdateStatus };
   'delegation.get': { params: { threadId: ThreadId }; result: DelegationView };
   'delegation.configure': { params: { threadId: ThreadId; config: DelegationConfig }; result: DelegationView };
   'delegation.spawn': { params: { threadId: ThreadId; profileId: string; task: string; title?: string; requestId: string }; result: DelegatedAgent };
@@ -2049,11 +2191,26 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'collaboration.configure': { params: { threadId: ThreadId; config: CoordinationConfig }; result: CoordinationView };
   'collaboration.directory': { params: { threadId: ThreadId }; result: { agents: AgentContact[]; unavailable: string[] } };
   'collaboration.send': { params: { threadId: ThreadId; to: AgentAddress; text: string; replyTo?: string; requestId: string }; result: AgentLetter };
+  /** Contacts on this core and linked cores whose title, project, branch, model, resources or chat contain every word of `query`. */
+  'collaboration.search': { params: { threadId: ThreadId; query: string }; result: { matches: AgentMatch[]; unavailable: string[] } };
+  /** Another contact's conversation, newest `limit` entries (default 30, at most 100) before `before`. */
+  'collaboration.read': { params: { threadId: ThreadId; target: AgentAddress; limit?: number; before?: Timestamp }; result: AgentTranscript };
+  /**
+   * Waits up to `timeoutMs` (at most 300,000) for incoming messages, from `from` only when given,
+   * and hands them over as delivered: they are not injected into the turn a second time.
+   */
+  'collaboration.wait': { params: { threadId: ThreadId; from?: AgentAddress; timeoutMs: number }; result: { letters: AgentLetter[] } };
   'collaboration.identity': { params: Record<string, never>; result: CoordinationPeer };
   'collaboration.peers': { params: Record<string, never>; result: CoordinationPeer[] };
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
   'collaboration.trust': { params: { peer: CoordinationPeer }; result: CoordinationPeer };
   'collaboration.untrust': { params: { coreId: string }; result: { ok: true } };
+  /** Owner-only route over the app's existing authenticated connections. Agents cannot register routes. */
+  'collaboration.bridge.register': { params: { coreId: string; enabled: boolean }; result: { ok: true } };
+  /** The destination verifies the original core's signature and its local permissions. */
+  'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
+  /** Only the owner connection that received this request can complete it. */
+  'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -2402,7 +2559,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
       permissionMode?: PermissionMode;
       /**
        * Start the thread in a git worktree of the project on a branch of its
-       * own: `boite/<slug of the title>` unless `branch` names one. The core
+       * own: a short temporary `boite/wt-<id>` unless `branch` names one.
+       * The title model can name that temporary branch after the first turn;
+       * the working directory stays fixed when the branch is renamed. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.
@@ -2513,12 +2672,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The
-   * owner can restore their history until this core stops; shutdown or the
-   * next startup purges unrestored deletions. Files and Git branches remain.
+   * owner can restore their history across restarts until the configured
+   * retention expires, measured from deletion. Files and Git branches remain.
    */
   'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** Owner-only conversations deleted during this core session, newest first. */
-  'threads.deleted': { params: Record<string, never>; result: ThreadSummary[] };
+  /** Owner-only recoverable deleted conversations, newest first. */
+  'threads.deleted': { params: Record<string, never>; result: DeletedThreadSummary[] };
   /** Undo deletion without restarting agents; restore each thread's previous archive state. Owner only. */
   'threads.restore': { params: { threadId: ThreadId }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
@@ -2640,6 +2799,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
+  /** Sent directly to the owner connection registered for the target core. */
+  'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
   'panel.requested': { threadId: ThreadId; surface: PanelSurface; at: Timestamp };
@@ -2660,7 +2821,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
   'thread.removed': { threadId: ThreadId; undoable?: boolean };
-  /** The owner-only session deletion list changed, including removal with a project. */
+  /** The owner-only deletion list changed, including purge and removal with a project. */
   'thread.deletionsUpdated': Record<string, never>;
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
@@ -2757,6 +2918,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
     exitCode: number | null;
   };
   'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  'core.updateChanged': ServerUpdateStatus;
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };
   /** Portable brain switches changed. The folder stays on its host. */
@@ -2850,7 +3012,8 @@ export const CLIENT_NAMES = ['shell', 'pwa', 'cli', 'test', 'bench'] as const;
 export type ClientName = (typeof CLIENT_NAMES)[number];
 
 export { attachmentError } from './attachment-validation.ts';
-export { BROWSER_ORIGINS_MAX, checkSettingsPatch, type SettingsPatchCheck } from './settings-validation.ts';
+export { AUTO_COMPACT_MOMENTS, AUTO_COMPACT_TOKENS, BROWSER_ORIGINS_MAX, checkSettingsPatch, type AutoCompact, type AutoCompactMoment, type SettingsPatchCheck } from './settings-validation.ts';
+import type { AutoCompact } from './settings-validation.ts';
 export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';

@@ -107,6 +107,35 @@ function renderTable(head: string, delimiter: string, body: string[], rich = fal
   return `<table><thead>${row(head, 'th')}</thead><tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * Finished blocks by source. A message the window mounts again as a scroll
+ * brings it back, or a paragraph above the one an answer is still writing, is
+ * not parsed a second time. Bounded by the characters it holds, oldest first.
+ */
+const rendered = new Map<string, string>();
+const RENDERED_CHARS = 4_000_000;
+let renderedChars = 0;
+
+/** `renderMarkdown` for a block that will not change again. */
+export function renderBlock(source: string, rich = false): string {
+  const key = (rich ? 'r' : 'p') + source;
+  const known = rendered.get(key);
+  if (known !== undefined) {
+    rendered.delete(key);
+    rendered.set(key, known);
+    return known;
+  }
+  const html = renderMarkdown(source, rich);
+  rendered.set(key, html);
+  renderedChars += key.length + html.length;
+  for (const [oldest, value] of rendered) {
+    if (renderedChars <= RENDERED_CHARS || rendered.size === 1) break;
+    rendered.delete(oldest);
+    renderedChars -= oldest.length + value.length;
+  }
+  return html;
+}
+
 export function renderMarkdown(source: string, rich = false): string {
   const lines = source.replaceAll('\r\n', '\n').split('\n');
   const html: string[] = [];

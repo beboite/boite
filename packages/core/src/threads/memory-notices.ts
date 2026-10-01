@@ -32,6 +32,10 @@ export class MemoryNotices {
   private record(event: MemoryEvent): void {
     const threadId = event.threadId;
     if (threadId === null || this.core.journal.isClosed() || this.core.journal.getThread(threadId) === null) return;
+    const message = this.core.journal.listMessagePage(threadId, { limit: 1 }).messages.at(-1);
+    if (message?.role === 'assistant' && message.state === 'streaming') {
+      event = { ...event, anchor: { messageId: message.id, partIndex: message.parts.length } };
+    }
     const notice = { id: newId('mem_'), text: memoryNotice(event) };
     this.core.journal.append({ type: 'thread.memory', threadId, version: 1, payload: event, ts: event.at }, () => {
       this.core.journal.setSetting(this.key(threadId), [...this.pending(threadId), notice]);

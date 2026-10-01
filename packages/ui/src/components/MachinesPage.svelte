@@ -1,6 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { Plus, ArrowUpRight, RefreshCw, ScanLine, Trash2, X } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, ScanLine, Settings2, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -9,6 +9,8 @@
   import RemoteCoordination from './RemoteCoordination.svelte';
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import MachineSettings from './MachineSettings.svelte';
+  import ServerUpdateCard from './ServerUpdateCard.svelte';
   import { parsePairingLink } from '../lib/endpoint';
   let { mobile = false }: { mobile?: boolean } = $props();
   let link = $state(''),
@@ -20,6 +22,8 @@
   let open = $derived(adding || workspace.machines.length === 0);
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
+  let settingsId = $state<string | null>(null);
+  const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   let linkInput = $state<HTMLInputElement | null>(null);
   /** The camera view, loaded on the first scan: a phone that never scans never downloads it. */
   let QrScanner = $state<typeof import('./QrScanner.svelte').default>();
@@ -83,6 +87,11 @@
   }
 </script>
 
+{#if settingsMachine}
+  {#key settingsMachine.id}
+    <MachineSettings machine={settingsMachine} source={sync.source(settingsMachine)?.label} onback={() => settingsId = null} />
+  {/key}
+{:else}
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
@@ -197,26 +206,32 @@
           </label>
           {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}
         {/if}
-        {#if sync.reports[machine.id]}
-
-          {@const done = sync.reports[machine.id]!}
-          <div class="sync-report" role="status" data-testid="machine-sync-report">
-            <p>{fill(strings.machines.synced, { source: done.source })}</p>
-            {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
-            {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
-            {#if done.report.providers.length > 0}
-              <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-              <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
-            {/if}
-          </div>
+        {#if machine.store.owner}
+          <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
+            <Settings2 size={14} />{strings.machines.settings}
+          </button>
         {/if}
+        {#if sync.reports[machine.id]}
+          {@const done = sync.reports[machine.id]!}
+          {#if done.report.keybindings === null || done.report.brain === 'absent' || done.report.providers.length > 0}
+            <div class="sync-report" role="status" data-testid="machine-sync-report">
+              {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
+              {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
+              {#if done.report.providers.length > 0}
+                <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
+                <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+              {/if}
+            </div>
+          {/if}
+        {/if}
+        {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
         {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
       </section>
     {/each}
   </div>
 
   <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
-  {#if !mobile && workspace.machines.filter(machine => machine.store.owner).length > 1}
+  {#if workspace.machines.filter(machine => machine.store.owner).length > 1}
     <RemoteCoordination />
   {/if}
 
@@ -230,6 +245,7 @@
     <PhoneSettings store={workspace.active} />
   {/if}
 </div>
+{/if}
 
 <style>
   .machines-page {
@@ -434,6 +450,7 @@
   }
   .sync-option input { width: auto; flex: none; }
   .sync-progress { margin: 6px 0 2px 52px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .machine-settings-button { align-self: flex-start; margin: 8px 0 2px 52px; }
   .sync-report {
     display: grid;
     justify-items: start;
@@ -485,5 +502,6 @@
       padding-left: 0;
       margin-left: 0;
     }
+    .machine-settings-button { margin-left: 0; min-height: var(--touch-target); }
   }
 </style>

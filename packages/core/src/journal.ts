@@ -1,11 +1,13 @@
 import { Database } from 'bun:sqlite';
 import type {
   Account,
+  DeletedThreadSummary,
   Message,
   MessagePart,
   PairingRole,
   Project,
   ProcessRecord,
+  QuestionRequest,
   ThreadSummary,
   Timestamp,
   Turn,
@@ -72,8 +74,6 @@ export class Journal {
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
       ensureIndexes(this.db);
-      // A hard stop leaves markers on disk; an old session never offers undo.
-      this.purgeDeletedThreads();
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -122,8 +122,8 @@ export class Journal {
   /**
    * Looks at the `limit` oldest events and deletes those written before
    * `before`; 0 means nothing old is left at the front. Only the front is read,
-   * never the whole table: ids grow with time. Nothing replays events, since
-   * the projections are written in the same transaction. The newest agents
+   * never the whole table: ids grow with time. Nothing replays events but
+   * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
    * event stays, because its id is the agents revision and must never go back.
    */
   pruneEvents(before: number, limit: number): number {
@@ -149,7 +149,6 @@ export class Journal {
     try {
       this.flushDeltas();
       this.persistMessages();
-      this.purgeDeletedThreads();
     } finally {
       this.stream.clear();
       this.closed = true;
@@ -224,8 +223,8 @@ export class Journal {
     this.db
       .query(
         `INSERT OR REPLACE INTO threads
-         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, project_id, title, title_source, provider_id, account_id, model, effort, cwd, branch, permission_mode, status, unread, archived, pinned, session_id, context, created_at, updated_at, session_generation, selection_version, speed, parent_thread_id, prompt_cache, agent_session_id, session_resume_at, title_state, branch_naming_pending)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         thread.id,
@@ -255,6 +254,7 @@ export class Journal {
         thread.agentSessionId ?? null,
         thread.sessionResumeAt ?? null,
         thread.titleState ? JSON.stringify(thread.titleState) : null,
+        thread.branchNamingPending === true ? 1 : 0,
       );
   }
 
@@ -278,7 +278,7 @@ export class Journal {
     return ids;
   }
 
-  /** Hide the stopped family while keeping its rows on disk until this core stops. */
+  /** Hide the stopped family while keeping its rows and deletion time across restarts. */
   stageThreadDeletion(rootId: string, threads: ThreadSummary[]): void {
     this.flushDeltas();
     this.persistMessages();
@@ -289,11 +289,11 @@ export class Journal {
     this.stream.forgetThreads(new Set(threads.map(t => t.id)));
   }
 
-  listDeletedThreads(): ThreadSummary[] {
-    const rows = this.db.query(`SELECT t.*, (SELECT MAX(created_at) FROM messages WHERE thread_id = t.id AND role = 'user') AS last_user_message_at
+  listDeletedThreads(): DeletedThreadSummary[] {
+    const rows = this.db.query(`SELECT t.*, d.deleted_at, (SELECT MAX(created_at) FROM messages WHERE thread_id = t.id AND role = 'user') AS last_user_message_at
       FROM threads t JOIN thread_deletions d ON t.id = d.thread_id
-      WHERE d.root_id = t.id ORDER BY d.deleted_at DESC, d.rowid DESC`).all() as ThreadRow[];
-    return rows.map(toThread);
+      WHERE d.root_id = t.id ORDER BY d.deleted_at DESC, d.rowid DESC`).all() as (ThreadRow & { deleted_at: number })[];
+    return rows.map(row => ({ ...toThread(row), deletedAt: row.deleted_at }));
   }
 
   /** Restore the family atomically, retaining IDs, message cursors and prior archive flags. */
@@ -306,9 +306,14 @@ export class Journal {
     })();
   }
 
-  private purgeDeletedThreads(): void {
-    const rows = this.db.query('SELECT thread_id FROM thread_deletions').all() as { thread_id: string }[];
+  /** Purge expired families atomically, using their root's deletion time. */
+  purgeDeletedThreads(before: number): number {
+    if (this.closed) return 0;
+    const rows = this.db.query(`SELECT thread_id FROM thread_deletions WHERE root_id IN
+      (SELECT root_id FROM thread_deletions WHERE thread_id = root_id AND deleted_at <= ?)`)
+      .all(before) as { thread_id: string }[];
     this.deleteThreads(rows.map(row => row.thread_id));
+    return rows.length;
   }
 
   /** Erase conversation history and its dependent records in one transaction, before client notifications. */
@@ -330,7 +335,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'coordination:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['activity:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }
@@ -433,6 +438,26 @@ export class Journal {
       .query("SELECT MIN(started_at) AS since FROM turns WHERE thread_id = ? AND status = 'running'")
       .get(threadId) as { since: number | null } | null;
     return row?.since ?? null;
+  }
+
+  /**
+   * The asynchronous questions asked and never answered or skipped, oldest
+   * first. The one place events are read back: a pending card has no
+   * projection, and the trail keeps it for as long as events are kept.
+   */
+  openAsyncQuestions(): QuestionRequest[] {
+    const rows = this.db
+      .query(
+        `SELECT asked.payload FROM events asked
+          WHERE asked.type = 'question.asked' AND json_extract(asked.payload, '$.async') = 1
+            AND NOT EXISTS (
+              SELECT 1 FROM events done
+               WHERE done.thread_id = asked.thread_id AND done.id > asked.id AND done.type = 'question.answered'
+                 AND json_extract(done.payload, '$.questionId') = json_extract(asked.payload, '$.id'))
+          ORDER BY asked.id`,
+      )
+      .all() as { payload: string }[];
+    return rows.map((row) => JSON.parse(row.payload) as QuestionRequest);
   }
 
   unfinishedTurns(): Turn[] {

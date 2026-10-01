@@ -24,6 +24,13 @@ it does not compile again. The end-to-end suite refuses missing or stale artifac
 
 ## What each step produces
 
+Linux CI also writes a signed `boite-server_<version>_<arch>.zip` for x64 and
+ARM64, containing the compiled core, CLI shim, UI and embedded release version.
+`scripts/ci/server-bundle.ts` creates it and Tauri's signer signs the payload
+with the desktop updater key and release version. Both stable and nightly
+publication require those signatures, include the archives in the checksums,
+and add separate server targets to `latest.json`. Docker images remain separate.
+
 - `build:ui` writes `packages/ui/dist`. That directory is what the core serves at
   `/` and what the shell bundles as its frontend. The Tauri config also runs it
   as its own before-build command, so a shell build never ships a UI older than

@@ -26,6 +26,7 @@ import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
+import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -40,6 +41,7 @@ import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
+import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -53,6 +55,7 @@ export interface SubscriptionSink {
 }
 
 export interface CoreOptions {
+  serverUpdates?: ServerUpdateOptions;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -131,6 +134,7 @@ export class Core {
   readonly speech: SpeechStore;
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
+  readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
@@ -156,7 +160,7 @@ export class Core {
   #idleShutdownAdmitted = false;
 
   /** An update may stop only between executions. Admission and the gates share one event-loop turn. */
-  requestIdleShutdown(): 'accepted' | 'busy' | 'unsupported' {
+  requestIdleShutdown(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
@@ -167,12 +171,28 @@ export class Core {
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    // Persist an updater's acknowledgement before closing admission or scheduling exit.
+    beforeShutdown?.();
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
     this.threads.focus.close();
     this.router.stopAccepting();
     this.procs.stopAccepting();
     this.requestShutdown();
+    return 'accepted';
+  }
+
+  /**
+   * A restart that does not wait for idle: each running turn ends the tool
+   * call it is in, 30 seconds at most, then stops, and the next core resumes
+   * those threads (`threads/handoff.ts`). No new turn starts meanwhile; the
+   * RPC surface stays open so a tool that calls `boite` can still finish.
+   */
+  requestHandoffShutdown(graceMs?: number): 'accepted' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#shutdownRequested || this.threads.handoff.active) return 'accepted';
+    this.#stopping = true;
+    void this.threads.handoff.begin(graceMs).then(() => this.requestShutdown());
     return 'accepted';
   }
 
@@ -223,6 +243,7 @@ export class Core {
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
+    this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
@@ -239,9 +260,11 @@ export class Core {
     });
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
+    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    this.threads.cards.restoreAsyncQuestions();
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
@@ -303,11 +326,13 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     this.activity.close();
+    this.threads.autoCompact.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
 
   #stopRetention: () => void;
+  #stopDeletionRetention: () => void;
 
   /** Share both an active wait and its completion across shutdown phases. */
   #drainPromise: Promise<void> | null = null;
@@ -317,10 +342,12 @@ export class Core {
 
   async close(): Promise<void> {
     this.threads.titles.close();
+    this.threads.autoCompact.close();
     await this.agentRuntime.close();
     this.#stopping = true;
     await this.brain.close();
     this.updates.close();
+    this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();
@@ -341,6 +368,7 @@ export class Core {
     await this.telemetry.close();
     this.bus.dispose();
     this.#stopRetention();
+    this.#stopDeletionRetention();
     this.journal.close();
   }
 }

@@ -17,7 +17,7 @@
 import { appendFileSync } from 'node:fs';
 
 const DIRECTIVE =
-  /\[(agents|command|approve|edit|edit-out|edit-link|thought|usage|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
+  /\[(agents|command|approve|edit|edit-out|edit-link|thought|usage|quota|tasks|slow|steer|crash|input|auth|server-request|close-idle)\]/g;
 const CHUNKS = 3;
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -30,6 +30,7 @@ type Directive =
   | 'edit-link'
   | 'thought'
   | 'usage'
+  | 'quota'
   | 'tasks'
   | 'slow'
   | 'steer'
@@ -273,6 +274,14 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           ],
         });
         break;
+      case 'quota': {
+        const observedAtMs = Date.now();
+        const usage = { observedAtMs, tier: 'pro', window: { usedPercent: 100, resetsAtMs: 1900000000000, windowDurationMins: 300 }, weekly: { usedPercent: 18, resetsAtMs: 1900100000000 } };
+        notify('usage/changed', { ...usage, window: { ...usage.window, usedPercent: 80 } });
+        notify('usage/changed', usage);
+        notify('usage/changed', { ...usage, observedAtMs: observedAtMs - 1, window: { ...usage.window, usedPercent: 0 } });
+        break;
+      }
       case 'usage':
         usage = { inputTokens: 8, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 };
         notify('session/contextUsage', { usedTokens: 90, windowTokens: 200000 });

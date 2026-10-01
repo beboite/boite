@@ -12,8 +12,8 @@
   let { view, agent }: { view: AgentsView; agent: AgentProfile } = $props();
   let config = $state<AgentRuntimeConfig | null>(null);
   const labels = $derived(strings.agents);
-  const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'] as const;
-  const permissionLabels = $derived<Record<AgentSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, dontAsk: labels.deny });
+  const PERMISSIONS = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'] as const;
+  const permissionLabels = $derived<Record<AgentSelection['permissionMode'], string>>({ default: labels.ask, acceptEdits: labels.edits, plan: labels.plan, bypassPermissions: labels.full, yolo: strings.permissionMode.yolo, dontAsk: labels.deny });
   const effort = $derived(config ? view.store.modelOf(config.defaultRoute)?.effort : undefined);
   const locked = $derived(!view.store.owner || view.pending);
   onMount(() => { void view.call('agents.runtime.get', { agentId: agent.id }).then(value => { config = value; }); });

@@ -68,3 +68,46 @@ test('saves a percentage and can return the quota and reserve to auto', async ()
   expect(store.memory!.limits).toEqual({ budgetMb: 19456, threadMemoryCapMb: 9728, memoryReserveMb: 3276.8 });
   expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
 });
+
+test('memory protection toggles immediately, keeps configured values and explains auto sizing', async () => {
+  await setup();
+  const toggle = document.querySelector<HTMLInputElement>('[data-testid=setting-memory-protection]')!;
+  expect(toggle.checked).toBe(true);
+  // The explanation sits behind the switch's "i", and a field left at 0 shows what it resolved to.
+  expect(toggle.closest('label')!.querySelector('[data-testid=info-tip]')!.getAttribute('aria-label')).toContain(strings.settings.memoryProtection);
+  expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
+  await store.saveSettings({ threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  const budget = document.querySelector<HTMLInputElement>('[data-testid=memory-budget]')!;
+  budget.value = '5'; budget.dispatchEvent(new Event('input', { bubbles: true }));
+  toggle.click(); await settle();
+  const cpu = document.querySelector<HTMLInputElement>('input[type=number]')!;
+  cpu.value = '50'; cpu.dispatchEvent(new Event('input', { bubbles: true }));
+  const save = vi.spyOn(store, 'saveSettings');
+  document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(save).toHaveBeenLastCalledWith({ agentCpuCapPercent: 50 });
+  expect(await client.call('settings.get', {})).toMatchObject({ memoryProtection: false, agentCpuCapPercent: 50, agentMemoryBudgetPercent: 60, threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  expect(store.memory!.limits).toEqual({ budgetMb: 0, threadMemoryCapMb: 0, memoryReserveMb: 0 });
+  expect(document.querySelector<HTMLInputElement>('[data-testid=memory-cap]')!.disabled).toBe(true);
+  expect(document.querySelector('[data-testid=memory-status]')!.textContent).toContain(strings.resources.protectionOff);
+  toggle.click(); await settle();
+  expect(await client.call('settings.get', {})).toMatchObject({ memoryProtection: true, threadMemoryCapMb: 4096, memoryReserveMb: 512 });
+  expect(store.memory!.limits.threadMemoryCapMb).toBe(4096);
+  expect(document.querySelector<HTMLInputElement>('[data-testid=memory-cap]')!.disabled).toBe(false);
+});
+
+test('a refused memory-protection save restores the switch in either direction', async () => {
+  await setup();
+  const toggle = document.querySelector<HTMLInputElement>('[data-testid=setting-memory-protection]')!;
+  const save = vi.spyOn(store, 'saveSettings');
+  save.mockResolvedValueOnce(false);
+  toggle.click(); await settle();
+  expect(store.settings!.memoryProtection).toBe(true);
+  expect(toggle.checked).toBe(true);
+  toggle.click(); await settle();
+  expect(toggle.checked).toBe(false);
+  save.mockResolvedValueOnce(false);
+  toggle.click(); await settle();
+  expect(store.settings!.memoryProtection).toBe(false);
+  expect(toggle.checked).toBe(false);
+});

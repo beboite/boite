@@ -45,6 +45,30 @@ describe('claude driver', () => {
     expect(thread.status).toBe('idle');
   });
 
+  test('the CLI exiting on its interrupt result after a stop is not reported as an error', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const errors: string[] = [];
+    const off = harness.core.bus.onAny((name, payload) => {
+      const log = payload as { level?: string; message?: string };
+      if (name === 'core.log' && log.level === 'error') errors.push(log.message ?? '');
+    });
+    try {
+      scripted((fake) => {
+        fake.exitError = '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use';
+        fake.emit(init('sess-stop-exit'));
+      });
+      const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 10000);
+      await client.call('turns.start', { threadId, prompt: 'take your time' });
+      await waitFor(() => queries.length === 1);
+      await client.call('turns.stop', { threadId });
+      expect((await finished).status).toBe('stopped');
+      await waitFor(() => (queries[0]?.closes ?? 0) > 0 || errors.length > 0, 5000).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(errors).toEqual([]);
+    } finally { off(); }
+  });
+
   test('an aborted result nobody asked for is still an error', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

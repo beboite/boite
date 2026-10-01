@@ -106,10 +106,13 @@ and assertions when making the suite faster.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
 - [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.
+- [Restart handoff](docs/restart-handoff.md): the 30 second wait before an update
+  stops a turn, and how the next core resumes it.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.
-- [Phone](docs/phone.md) and [server](docs/server.md): pairing and deployment.
+- [Phone](docs/phone.md), [Android app](docs/android.md) and [server](docs/server.md):
+  pairing, the APK and deployment.
 - [Machines](docs/machines.md): connections, browser origins and thread views.
 - [Trace](docs/trace.md): process events, resource caps and Windows guards.
 - [Performance](docs/performance.md): what a remote client is sent, startup

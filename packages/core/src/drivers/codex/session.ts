@@ -372,6 +372,7 @@ export class CodexSession {
   }
 
   private spawn(ctx: SessionContext, executable: string, args: string[]): CodexRpc {
+    if (ctx.thread.permissionMode === 'yolo') args = [...args, '--config', 'features.hooks=false'];
     const child = ctx.spawnChild(executable, args, {
       startup: true,
       cwd: ctx.thread.cwd,
@@ -531,6 +532,8 @@ export class CodexSession {
     }
     const turn = this.current;
     if (turn === null) return;
+    if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;
+    turn.ctx.reportProviderEvent?.();
     switch (method) {
       case 'turn/started': {
         const record = params['turn'] as CodexTurnRecord | undefined;
@@ -539,7 +542,7 @@ export class CodexSession {
       }
       case 'item/agentMessage/delta':
         if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
-        turn.writeText(textOf(params['delta']));
+        turn.writeText(textOf(params['delta']), typeof params['itemId'] === 'string' ? params['itemId'] : undefined);
         break;
       case 'item/commandExecution/outputDelta':
         if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
@@ -553,15 +556,23 @@ export class CodexSession {
         break;
       }
       case 'item/reasoning/textDelta':
+        turn.ctx.reportProgress?.('thinking');
         turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:content:${String(params['contentIndex'] ?? 0)}`);
         break;
       case 'item/reasoning/summaryTextDelta':
+        turn.ctx.reportProgress?.('thinking');
         turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:summary:${String(params['summaryIndex'] ?? 0)}`);
         break;
       case 'item/started':
       case 'item/completed': {
         const item = params['item'] as CodexItem | undefined;
         if (item === undefined || typeof item.id !== 'string') break;
+        if (item.type === 'reasoning') {
+          // Presence is activity even with summary=[]; encrypted content is never read.
+          turn.ctx.reportProgress?.('thinking');
+          break;
+        }
+        if (item.type === 'contextCompaction' && method === 'item/started') turn.ctx.reportProgress?.('compacting');
         if (item.type === 'contextCompaction' && method === 'item/completed') {
           turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
           break;
@@ -573,8 +584,15 @@ export class CodexSession {
           }
           break;
         }
+        if (item.type === 'agentMessage' && method === 'item/completed' && typeof item.text === 'string') {
+          turn.completeText(item.id, item.text);
+          break;
+        }
         const view = toolViewOf(item, method === 'item/completed');
-        if (view !== null) turn.upsertTool(item.id, view);
+        if (view !== null) {
+          turn.upsertTool(item.id, view);
+          if (method === 'item/completed' && view.status !== 'running') turn.ctx.reportProgress?.('waiting');
+        }
         break;
       }
       case 'turn/completed': {
@@ -589,6 +607,7 @@ export class CodexSession {
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.
         turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);
+        if (willRetry) turn.ctx.reportProgress?.('retrying', text);
         break;
       }
       default:
@@ -629,6 +648,7 @@ export class CodexSession {
    * is one line in the log.
    */
   private async reportSkippedHooks(rpc: CodexRpc, ctx: SessionContext): Promise<void> {
+    if (ctx.thread.permissionMode === 'yolo') return;
     try {
       const listed = await rpc.request<CodexHooksListed>('hooks/list', { cwds: [ctx.thread.cwd] });
       for (const entry of listed.data ?? []) {
@@ -797,7 +817,8 @@ export class CodexSession {
     reason: string,
   ): Promise<'accept' | 'decline' | 'cancel'> {
     const turn = this.current;
-    if (turn === null) return 'cancel';
+    if (turn === null || turn.isStopped) return 'cancel';
+    if (turn.ctx.thread.permissionMode === 'yolo') return 'accept';
     const ticket = turn.ctx.requestPermission(toolName, input, reason.length === 0 ? null : reason);
     const index = turn.takeIndex();
     turn.part(index, { type: 'permission', requestId: ticket.requestId, toolName, decision: null });

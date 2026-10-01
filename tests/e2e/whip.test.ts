@@ -15,23 +15,41 @@ async function settled() {
     .map(animation => animation.finished.catch(() => {}))])`);
 }
 
+/** In-page: throws the rope, checks the throw moved nothing, then flicks until a crack starts the shake. */
+const crack = () => `(async () => {
+    const root = document.getElementById('app');
+    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    document.querySelector('${button}').click();
+    for (let i = 0; i < 30; i++) await frame();
+    if (root.getAnimations().length) return undefined;
+    // A phone is too narrow for a sideways flick to reach crack speed.
+    const tall = window.innerHeight > window.innerWidth;
+    for (let i = 0; i < 600 && !root.getAnimations().length; i++) {
+      const swing = Math.sin(i / 1.5) * 200;
+      window.dispatchEvent(new PointerEvent('pointermove', {
+        clientX: window.innerWidth / 2 + (tall ? 0 : swing), clientY: window.innerHeight / 2 + (tall ? swing : 0)
+      }));
+      await frame();
+    }
+    return root.getAnimations()[0];
+  })()`;
+
 async function shake() {
   // Sample inside the page: another CDP round trip can miss the entire hit on a busy runner.
   return page.evaluate<boolean>(`(async () => {
     const root = document.getElementById('app');
-    document.querySelector('${button}').click();
-    const [animation] = root.getAnimations();
+    const animation = await ${crack()};
     if (!animation) return false;
     let moved = false;
-    let frame;
+    let request;
     const sample = () => {
       const matrix = new DOMMatrixReadOnly(getComputedStyle(root).transform);
       moved ||= matrix.m41 !== 0 || matrix.m42 !== 0;
-      frame = requestAnimationFrame(sample);
+      request = requestAnimationFrame(sample);
     };
     sample();
     await animation.finished;
-    cancelAnimationFrame(frame);
+    cancelAnimationFrame(request);
     return moved;
   })()`);
 }
@@ -169,13 +187,13 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
   await page.click('[data-testid=mobile-settings]');
   await page.click('[data-testid=settings-tab-experiments]');
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  expect(await page.evaluate(`(() => {
-    document.querySelector('${button}').click();
-    const running = document.getElementById('app').getAnimations().length;
-    return running;
-  })()`)).toBe(1);
-  await page.waitFor(`document.querySelector('[data-testid=whip-canvas]')`);
-  await page.evaluate(`document.querySelector('${toggle}').click()`);
+  // Switching the experiment off mid-hit stops the shake with the rope.
+  expect(await page.evaluate(`(async () => {
+    const running = await ${crack()};
+    if (!running) return 'no shake';
+    document.querySelector('${toggle}').click();
+    return 'cracked';
+  })()`)).toBe('cracked');
   await page.waitFor(`document.querySelector('${button}') === null`);
   expect(await page.evaluate(`document.querySelector('[data-testid=whip-canvas]') === null`)).toBe(true);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);

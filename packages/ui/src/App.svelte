@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import TerminalDrawer from './components/TerminalDrawer.svelte';
   import UndoToast from './components/UndoToast.svelte';
   import NotificationCard from './components/NotificationCard.svelte';
   import HarnessUpdateNotices from './components/HarnessUpdateNotices.svelte';
@@ -33,6 +34,7 @@
   import { WsClient } from './lib/client';
   import { listenForInstall } from './lib/pwa';
   import { mobileOverlay } from './lib/mobile-history';
+  import { agentAutoLink } from './lib/agent-links.svelte';
   import ThreadPreparation from './components/ThreadPreparation.svelte';
 
   let store = $derived(workspace.active);
@@ -54,7 +56,7 @@
     ConnectFlow: () => import('./components/ConnectFlow.svelte'),
     Onboarding: () => import('./components/Onboarding.svelte'),
     // xterm.js and its stylesheet: only once a terminal is asked for.
-    TerminalDrawer: () => import('./components/TerminalDrawer.svelte')
+    TerminalView: () => import('./components/TerminalView.svelte')
   };
   type Deferred = { [K in keyof typeof deferredLoaders]?: Awaited<ReturnType<(typeof deferredLoaders)[K]>>['default'] };
   let deferred = $state.raw<Deferred>({});
@@ -121,7 +123,7 @@
   });
 
   $effect(() => {
-    if (terminalShown) need('TerminalDrawer');
+    if (terminalShown) need('TerminalView');
   });
 
   // Asked for before the idle prefetch got to it: fetch it now.
@@ -136,6 +138,7 @@
   onMount(() => {
     const stopViewport = startViewport();
     const stopInstall = listenForInstall();
+    const stopAutoLink = agentAutoLink.start();
     let stopAppUpdater: () => void = () => undefined;
     let updateDelay: number | undefined;
     const updateFrame = typeof requestAnimationFrame === 'function'
@@ -170,6 +173,7 @@
     navigator.serviceWorker?.addEventListener('message', notification);
     return () => {
       stopViewport();
+      stopAutoLink();
       stopInstall();
       if (updateFrame !== undefined) cancelAnimationFrame(updateFrame);
       if (updateDelay !== undefined) clearTimeout(updateDelay);
@@ -503,14 +507,16 @@
           onclick={() => (store.sidebarOpen = false)}
         ></button>
       {/if}
-      <main class="framed">
-        {#key store}
-          <ChatView {store} />
-        {/key}
-        {#if terminalSlot.shown && store.openThread && deferred.TerminalDrawer}
-          {@const TerminalDrawer = deferred.TerminalDrawer}
+      <main>
+        <div class="thread-chat framed">
+          {#key store}
+            <ChatView {store} />
+          {/key}
+        </div>
+        {#if terminalSlot.shown && store.openThread}
           {#key `${store.endpointUrl}:${store.openThread.id}`}
             <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
+              view={deferred.TerminalView}
               closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
           {/key}
         {/if}
@@ -601,6 +607,13 @@
   main {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .thread-chat {
+    flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;

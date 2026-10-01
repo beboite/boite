@@ -6,6 +6,8 @@
   import { AGENT_PREFIX, isAgentCommand, runCommand } from '../lib/commands.svelte';
   import { agentSlashItems, boiteSlashItems, listKey, mentionQueryOf, mentionRows, slashQueryOf, type ChipCommand } from '../lib/composer-menus';
   import { attachFiles } from '../lib/composer-attachments';
+  import { rewindComposerEdit } from '../lib/composer-edit';
+  import { fitHeight, selfSizing } from '../lib/composer-size';
   import { insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
@@ -14,6 +16,7 @@
   import { claudeKeywords, promptSegments } from '../lib/message-display';
   import { fill, strings } from '../lib/strings';
   import type { Choice, Store } from '../lib/store.svelte';
+  import { workspace } from '../lib/workspace.svelte';
   import ComposerAttachments from './ComposerAttachments.svelte';
   import ComposerImageReferences from './ComposerImageReferences.svelte';
   import ComposerBar from './ComposerBar.svelte';
@@ -31,6 +34,7 @@
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
   const MAX_LINES = 8;
+  const sizesItself = selfSizing();
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
@@ -130,12 +134,19 @@
       untrack(() => void store.probeModelEffort(id, accountId, model));
     }
   });
+  /**
+   * A thread whose machine dropped still takes prompts: they wait in its queue,
+   * which the store keeps on the device and sends once the machine is back.
+   * A new thread needs the core to exist, so a draft waits for the machine.
+   */
+  let offline = $derived(store.connection !== 'ready' && store.openThread !== null && !store.draft);
+  let machineLabel = $derived(workspace.machines.find((machine) => machine.store === store)?.label ?? strings.machines.local);
   let canSend = $derived(
     (text.trim().length > 0 || attachments.length > 0 || previewReferences.length > 0) &&
       readingFiles === 0 &&
       !attachments.some(unresolvedAssetId) &&
       choice !== null &&
-      store.connection === 'ready' &&
+      (store.connection === 'ready' || offline) &&
       !picking &&
       !dictating &&
       !composer?.sending
@@ -143,7 +154,9 @@
 
   // A new conversation asks what the user wants done; one under way names who reads the message.
   let placeholder = $derived(
-    !store.openThread && store.draft
+    offline
+      ? fill(strings.composer.placeholderOffline, { machine: machineLabel })
+      : !store.openThread && store.draft
       ? strings.composer.placeholderNew
       : store.openProject && provider
         ? fill(strings.composer.placeholder, { provider: provider.name, project: store.openProject.name })
@@ -231,6 +244,7 @@
   let keywords = $derived(claudeKeywords(provider?.protocol, choice?.model));
   let segments = $derived(promptSegments(text, commandToken || undefined, keywords));
   let painted = $derived(segments.some(segment => segment.kind !== 'plain'));
+  let highlighted = $derived(painted || previewReferences.length > 0 || attachments.some(item => item.kind === 'image'));
 
   function syncInput() {
     if (!box) return;
@@ -243,8 +257,8 @@
     if (!element) return;
     let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
-      if (element.clientWidth !== inputWidth) { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
-      else syncInput();
+      if (sizesItself || element.clientWidth === inputWidth) syncInput(); // No height to write: the paint layer's width, this frame.
+      else { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(grow); }
     });
     observer.observe(element);
     return () => { observer.disconnect(); cancelAnimationFrame(resizeFrame); };
@@ -255,20 +269,17 @@
     slashAt = 0;
   });
 
-  let grown = ''; // Last value measured. Reading the style before the auto write forces one layout, not two.
+  let grown = ''; // Last value measured.
   function grow() {
-    const el = box;
-    if (!el) return;
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 20;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, line * MAX_LINES + 16)}px`;
-    grown = el.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
+    if (!box) return;
+    if (!sizesItself) fitHeight(box, MAX_LINES);
+    grown = box.value; syncInput(); // The height can toggle the scrollbar, and the paint layer's width follows it.
   }
 
   // A preview insertion writes the draft with no input event: measure once Svelte wrote it, unless oninput did.
   $effect(() => {
     void text;
-    if (!box) return;
+    if (!box || sizesItself) return;
     let current = true;
     void tick().then(() => { if (current && box?.value !== grown) grow(); });
     return () => { current = false; };
@@ -299,7 +310,7 @@
     });
   });
 
-  /** Typing is the user's own, so it takes the composer out of recall. */
+  /** Typing is the user's own, so it takes the composer out of recall. A box that sizes itself is measured by the observer, but a scrollbar the key brought under the paint layer is read now. */
   function oninput(event: Event) {
     const input = event as InputEvent;
     const element = event.currentTarget as HTMLTextAreaElement;
@@ -313,13 +324,14 @@
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
     track();
-    grow();
+    if (!sizesItself) grow(); else if (highlighted) syncInput();
   }
 
-  /** Where the caret is now: read after every key, click and input. */
+  /** Where the caret is now: read after every key (twice: input and keyup), click and input. An unmoved caret writes nothing. */
   function track() {
     caret = box?.selectionEnd ?? text.length;
-    if (box) stateForInput().selection = { start: box.selectionStart, end: box.selectionEnd };
+    const state = box && stateForInput(), start = box?.selectionStart ?? 0, end = box?.selectionEnd ?? 0;
+    if (state && (state.selection?.start !== start || state.selection?.end !== end)) state.selection = { start, end };
   }
 
   /** Writes a recalled or restored prompt in, caret at its end. */
@@ -364,20 +376,11 @@
     const inputStore = store, inputKey = key, sendChoice = choice;
     const state = stateForInput();
     const editedThread = state.editing ? inputStore.openThread : null;
-    // An edited message: the thread goes back to before it, then this goes out
-    // in its place. A refusal is shown and the text stays in the box.
-    if (state.editing) {
-      if (state.queued.length) { inputStore.error = strings.composer.editingQueued; return; }
-      state.sending = true;
-      const rewound = await inputStore.rewind(state.editing, inputKey);
-      state.sending = false;
-      if (!rewound) return;
-      state.editing = null;
-    }
+    if (state.editing && !await rewindComposerEdit(inputStore, inputKey, state)) return;
     // A queue that still holds something takes this prompt too, whatever the
     // thread's status: sending it on its own would put it ahead of prompts the
     // user typed first. Sending is also how he resumes a queue a refusal paused.
-    if (!editedThread && (inputStore.busy || state.queued.length > 0)) {
+    if (!editedThread && (inputStore.busy || state.queued.length > 0 || offline)) {
       state.queued.push({ text: prompt, attachments: images, afterBoundary: store.inputBoundaries[key]?.boundary, ...(references.length ? { previewReferences: references } : {}) });
       state.editing = null;
       state.text = '';
@@ -724,7 +727,7 @@
     {/if}
 
     <div class="input-wrap">
-    {#if painted || previewReferences.length || attachments.some(item => item.kind === 'image')}
+    {#if highlighted}
       <div class="input-highlight" aria-hidden={previewReferences.length || attachments.length ? undefined : true} data-testid="composer-highlight" style:width={`${inputWidth}px`}>
         <div class="input-paint input-mirror" style:transform={`translateY(${-inputScroll}px)`}><PreviewReferences {text} references={previewReferences} {store} threadId={key} editing {keywords} command={commandToken || undefined} onreference={(reference) => {
           if (box && reference.mention) { box.focus(); box.setSelectionRange(reference.mention.end, reference.mention.end); track(); }
@@ -732,7 +735,7 @@
       </div>
     {/if}
     <textarea
-      class:highlighted={painted || previewReferences.length > 0 || attachments.some(item => item.kind === 'image')}
+      class:highlighted
       bind:this={box}
       value={text}
       onbeforeinput={() => { pendingEdit = box ? { start: box.selectionStart, end: box.selectionEnd } : undefined; }}
@@ -873,6 +876,7 @@
 
   textarea { display: block; }
   .input-paint { max-height: none; }
+  @supports (field-sizing: content) { textarea { field-sizing: content; max-height: min(200px, calc(8lh + 16px)); } }
 
   textarea:focus {
     outline: none;

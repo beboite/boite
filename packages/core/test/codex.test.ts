@@ -5,6 +5,8 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, RpcEvents, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
+import { readCodexQuota } from '../src/drivers/codex.ts';
+import { codexQuotaDetails } from '../src/quota-details.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -14,7 +16,7 @@ const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.m
 /** The fixture's environment switches a test may set; every one is cleared after it. */
 const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT'];
 
-test('native collaboration is journalled and appears in Team with delegation disabled', async () => {
+test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
   const threadId = await codexThread(client);
   const finished = client.next('turn.finished', turn => turn.threadId === threadId);
@@ -25,7 +27,6 @@ test('native collaboration is journalled and appears in Team with delegation dis
   expect(JSON.stringify(thread.messages)).not.toContain('Private command output');
   expect(thread.messages.flatMap(m => m.parts).filter(p => p.type === 'tool' && p.name === 'Agent')).toHaveLength(4);
   const team = await client.call('delegation.get', { threadId });
-  expect(team.config.enabled).toBe(false);
   expect(team.agents).toHaveLength(0);
   expect(team.nativeAgents).toEqual([
     expect.objectContaining({ id: 'native-reviewer', task: 'Review parser boundaries', model: 'fake-smart', status: 'done', result: 'Parser checked' }),
@@ -53,6 +54,31 @@ test('coordination steers the current Codex turn without creating a user turn', 
 });
 
 let harness: TestCore | null = null;
+
+test('Codex reasoning without summaries remains visible through tool completion and reconnect without creating text', async () => {
+  const client = await startCore(), threadId = await codexThread(client);
+  const thinking = client.next('thread.updated', thread => thread.id === threadId && thread.progress?.phase === 'thinking');
+  await client.call('turns.start', { threadId, prompt: '[silent-reasoning]' });
+  expect((await thinking).progress?.at).toEqual(expect.any(Number));
+  await waitFor(() => fakeLog().includes('silent tool complete'));
+  const reopened = await harness!.connect();
+  await reopened.call('threads.subscribe', { threadId });
+  const snapshot = await reopened.call('threads.get', { threadId });
+  expect(snapshot.progress?.phase).toBe('waiting');
+  const parts = snapshot.messages.filter(message => message.role === 'assistant').flatMap(message => message.parts);
+  expect(parts.filter(part => part.type === 'text')).toEqual([{ type: 'text', text: 'Message already stored.', complete: true }]);
+  expect(parts.filter(part => part.type === 'thinking')).toEqual([]);
+  expect(parts.filter(part => part.type === 'tool')).toHaveLength(1);
+  expect(parts.find(part => part.type === 'tool')).toMatchObject({ status: 'done', output: 'Filesystem copied' });
+  expect(JSON.stringify(snapshot)).not.toContain('opaque-do-not-render');
+  const at = snapshot.progress!.at;
+  await Bun.sleep(1100);
+  const afterSignal = await reopened.call('threads.get', { threadId });
+  expect(afterSignal.progress?.at).toBe(at);
+  expect(afterSignal.progress?.providerAt).toBeGreaterThan(snapshot.progress!.providerAt!);
+  expect(afterSignal.messages).toEqual(snapshot.messages);
+  await client.call('turns.stop', { threadId });
+});
 let logFile = '';
 
 afterEach(async () => {
@@ -177,6 +203,22 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('quota reads preserve reset counts and balances without starting a turn or redeeming credits', async () => {
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota:${accountId}`;
+    const raw = await readCodexQuota({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined });
+    await core.procs.stopAndWait(threadId);
+    expect(codexQuotaDetails(raw)).toEqual({ resetCredits: { availableCount: 2, nextExpiresAt: null },
+      credits: { kind: 'balance', enabled: null, remaining: 42.5, limit: null, unlimited: false } });
+    const lines = fakeLog().trim().split('\n');
+    expect(lines).toEqual(['initialize', 'initialized', 'account/rateLimits/read {}']);
+  });
   test('viewing prepares one session without a turn and reuses it with retention disabled', async () => {
     const client = await startCore({ warmProcessMinutes: 0 });
     const threadId = await codexThread(client);
@@ -528,6 +570,20 @@ describe('codex driver', () => {
     }
   });
 
+  test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const details: (string | null)[] = [];
+    client.on('thread.updated', thread => {
+      if (thread.id === threadId && thread.progress?.phase === 'retrying') details.push(thread.progress.detail);
+    });
+    await runTurn(client, threadId, 'Continue [retry-progress]');
+    expect(details).toEqual(['provider overloaded']);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.progress).toBeNull();
+    expect(thread.messages.flatMap(message => message.parts).some(part => part.type === 'error')).toBe(false);
+  });
+
   test('service tiers are model-specific, persisted and sent on the frozen turn', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);
@@ -650,7 +706,7 @@ describe('codex driver', () => {
     ]);
   });
 
-  test('a command execution item arrives running, then done with its output', async () => {
+  test.each([['command', 'done', 0], ['command-failed', 'error', 128]] as const)('a %s item preserves its status and exit code in live and saved parts', async (directive, status, exitCode) => {
     const client = await startCore();
     const threadId = await codexThread(client);
 
@@ -660,14 +716,55 @@ describe('codex driver', () => {
     });
 
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
-    await client.call('turns.start', { threadId, prompt: '[command]' });
+    await client.call('turns.start', { threadId, prompt: `[${directive}]` });
     expect((await finished).status).toBe('done');
 
     const tools = parts.filter((part) => part.type === 'tool');
     expect(tools).toHaveLength(2);
     expect(tools[0]).toMatchObject({ name: 'Bash', status: 'running', output: null });
     expect(tools[0]).toMatchObject({ input: { command: 'echo hello' } });
-    expect(tools[1]).toMatchObject({ name: 'Bash', status: 'done', output: 'ok' });
+    expect(tools[1]).toMatchObject({ name: 'Bash', status, output: 'ok', exitCode });
+    const saved = (await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts);
+    expect(saved.find(part => part.type === 'tool')).toMatchObject({ status, exitCode });
+  });
+
+  test.each([
+    ['[approve]', 'allowed'], ['[elicit]', 'elicit accept'], ['[permissions]', 'permissions granted'],
+  ])('YOLO accepts %s without a permission card and disables native hooks', async (prompt, expected) => {
+    const client = await startCore();
+    const threadId = await codexThread(client, 'yolo');
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt });
+    expect((await finished).status).toBe('done');
+    const parts = (await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts);
+    expect(parts.filter(part => part.type === 'text').map(part => part.text).join('')).toContain(expected);
+    expect(parts.filter(part => part.type === 'permission')).toEqual([]);
+    expect(requested).toEqual([]);
+    expect(fakeLog()).toContain('approvalPolicy=never sandbox=danger-full-access');
+    const trace = await client.call('trace.get', { threadId });
+    expect(trace.some(process => process.commandLine?.includes('features.hooks=false'))).toBe(true);
+  });
+
+  test('leaving YOLO restarts Codex with hooks enabled and restores approval cards', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client, 'yolo');
+    await client.call('settings.set', { warmProcessMinutes: 5 });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[approve]' });
+    expect((await finished).status).toBe('done');
+    await client.call('threads.update', { threadId, permissionMode: 'bypassPermissions' });
+    expect((await answerApproval(client, threadId, 'deny')).text).toBe('denied');
+    expect(countLines('initialize')).toBe(2);
+    const processes = (await client.call('trace.get', { threadId }))
+      .filter(process => process.commandLine?.includes(FAKE_SERVER)).sort((a, b) => a.startedAt - b.startedAt);
+    expect(processes).toHaveLength(2);
+    expect(processes[0]?.commandLine).toContain('features.hooks=false');
+    expect(processes[1]?.commandLine).not.toContain('features.hooks=false');
   });
 
   test('an approval is asked, answered, and the decision reaches the agent', async () => {

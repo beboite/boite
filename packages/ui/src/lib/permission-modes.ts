@@ -4,12 +4,13 @@ import type { PermissionMode, ProviderSummary } from '@boite/contracts';
 import { strings } from './strings';
 
 /** What the composer offers, the most open first. */
-const OFFERED: PermissionMode[] = ['bypassPermissions', 'acceptEdits', 'default'];
+const OFFERED: PermissionMode[] = ['yolo', 'bypassPermissions', 'acceptEdits', 'default'];
 
 /**
  * The modes worth offering for this agent. Codex gives `acceptEdits` the same
  * sandbox and approval pair as `default` (`drivers/codex.ts`, `MODE_POLICY`),
- * so a second entry would promise a difference that does not exist. An agent
+ * so a second entry would promise a difference that does not exist. YOLO also
+ * disables configured hooks, which Auto retains. An agent
  * that never asks (`capabilities.approvals` false, pi today) gets no choice at
  * all: every entry would describe something it does not do.
  */
@@ -44,7 +45,7 @@ export function modeHint(mode: PermissionMode, provider: ProviderSummary | null 
 
 /** One icon per mode, shared by the chip and the menu row. */
 export function modeIcon(mode: PermissionMode): Component<{ size?: number; strokeWidth?: number }> {
-  if (mode === 'bypassPermissions') return Bot as Component<{ size?: number; strokeWidth?: number }>;
+  if (mode === 'bypassPermissions' || mode === 'yolo') return Bot as Component<{ size?: number; strokeWidth?: number }>;
   if (mode === 'acceptEdits') return FilePen as Component<{ size?: number; strokeWidth?: number }>;
   return ShieldCheck as Component<{ size?: number; strokeWidth?: number }>;
 }

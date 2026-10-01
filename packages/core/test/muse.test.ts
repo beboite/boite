@@ -24,6 +24,33 @@ test('Muse subagent snapshots reach the native team', async () => {
   ]);
 });
 
+test('Muse quotas come only from observed host notifications, never a probe or an extra turn', async () => {
+  const client = await startCore();
+  const threadId = await museThread(client);
+  const thread = await client.call('threads.get', { threadId });
+  const quota = async () => (await client.call('quotas.list', { refresh: true })).find((row) => row.accountId === thread.accountId)!;
+  const before = fakeLog();
+  expect(await quota()).toMatchObject({ status: 'unavailable', windows: [], checkedAt: null });
+  expect(fakeLog()).toBe(before);
+  expect((await runTurn(client, threadId, '[quota]')).status).toBe('done');
+  const observed = await quota();
+  expect(observed).toMatchObject({ status: 'ready', windows: [
+    { id: 'window', usedPercent: 100, resetsAt: 1900000000000 },
+    { id: 'weekly', usedPercent: 18, resetsAt: 1900100000000 },
+  ] });
+  expect(observed.checkedAt).toBeGreaterThan(0);
+  const after = fakeLog();
+  await quota();
+  expect(fakeLog()).toBe(after);
+  expect(after).not.toContain('usage/read');
+  expect(after).not.toContain('resetCredit');
+  await client.call('quotas.configure', { accountId: thread.accountId!, enabled: false });
+  await runTurn(client, threadId, '[quota]');
+  expect(await quota()).toMatchObject({ status: 'disabled', windows: [] });
+  await client.call('quotas.configure', { accountId: thread.accountId!, enabled: true });
+  expect(await quota()).toMatchObject({ status: 'unavailable', windows: [], checkedAt: null });
+});
+
 let harness: TestCore | null = null;
 let logFile = '';
 
@@ -234,6 +261,23 @@ describe('muse driver', () => {
     expect(tools[1]).toMatchObject({ name: 'Bash', status: 'done', output: 'ok' });
   });
 
+  test('YOLO accepts a remaining approval without a permission card', async () => {
+    const client = await startCore();
+    const threadId = await museThread(client, { permissionMode: 'yolo' });
+    const requested: string[] = [];
+    client.on('permission.requested', request => {
+      requested.push(request.id);
+      void client.call('permissions.answer', { requestId: request.id, decision: 'deny' });
+    });
+    const finished = client.next('turn.finished', turn => turn.threadId === threadId, 20000);
+    await client.call('turns.start', { threadId, prompt: '[approve]' });
+    expect((await finished).status).toBe('done');
+    const parts = await lastParts(client, threadId);
+    expect(textsOf(parts)).toEqual(['allowed']);
+    expect(parts.filter(part => part.type === 'permission')).toEqual([]);
+    expect(requested).toEqual([]);
+  });
+
   test('an approval is asked, and allow and deny pick the matching choice', async () => {
     const client = await startCore();
     const threadId = await museThread(client);
@@ -354,13 +398,14 @@ describe('muse driver', () => {
     expect((await finished).status).toBe('done');
     expect(fakeLog()).toContain(`turn/steer ${JSON.stringify('> Which database?\n\nSQLite')} uuid=true`);
     expect(harness?.core.threads.deferred.deferredAnswers.has(threadId)).toBe(false);
-    const messages = (await client.call('threads.get', { threadId })).messages;
-    expect(textsOf(messages.filter(message => message.role === 'assistant').at(-1)?.parts ?? [])).toEqual(['working heard: > Which database?\n\nSQLite']);
     const thread = await client.call('threads.get', { threadId });
-    const prompts = thread.messages.filter(message => message.role === 'user');
-    expect(prompts).toHaveLength(2);
-    expect(textsOf(prompts[1]!.parts)).toEqual(['> Which database?\n\nSQLite']);
-    expect(new Set(prompts.map(message => message.turnId)).size).toBe(1);
+    expect(textsOf(thread.messages.findLast(message => message.role === 'assistant')?.parts ?? [])).toEqual(['working heard: > Which database?\n\nSQLite']);
+    const users = thread.messages.filter(message => message.role === 'user');
+    expect(users).toHaveLength(2);
+    expect(users[1]?.parts).toEqual([{ type: 'text', text: '> Which database?\n\nSQLite' }]);
+    expect(thread.pendingAnswers).toEqual([]);
+    expect(thread.turns).toHaveLength(1);
+    expect(new Set(users.map(message => message.turnId)).size).toBe(1);
   });
 
   test('a steer the host refuses keeps the answer for the turn after', async () => {

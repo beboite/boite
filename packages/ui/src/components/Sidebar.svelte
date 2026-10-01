@@ -1,6 +1,6 @@
 <script lang="ts">
   import WhipButton from './WhipButton.svelte';
-  import { Bot, ChevronRight, Ellipsis, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
+  import { Bot, ChevronRight, Ellipsis, FolderX, GripVertical, LoaderCircle, Plus, Settings } from '@lucide/svelte';
   import type { Project } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { workspace, type Machine } from '../lib/workspace.svelte';
@@ -210,8 +210,8 @@
               onclick={() => owner.toggleProject(project.id)}
             >
               {#if projectView.order === 'manual'}<GripVertical size={12} />{/if}<span class="caret" class:collapsed><ChevronRight size={12} /></span><ProjectTile {project} store={owner}
-              /><span class="name">{projectName(project)}</span
-              >{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
+              /><span class="name" class:gone={project.missing === true}>{projectName(project)}</span
+              >{#if project.missing === true}<span class="missing" data-testid="project-missing" title={strings.sidebar.projectMissing} aria-label={strings.sidebar.projectMissing}><FolderX size={13} aria-hidden="true" /></span>{/if}{#if rollup}{@const label = fill(rollup.count === 1 ? strings.sidebar.rollupOne : strings.sidebar.rollupMany, { count: String(rollup.count), state: strings.sidebar.state[rollup.kind] })}<span
                   class="rollup {rollup.kind}" data-testid="project-rollup" data-state={rollup.kind} title={label} aria-label={label}
                   >{#if rollup.kind === 'working'}<LoaderCircle size={11} class="spinner" aria-hidden="true" />{:else}<span class="dot" aria-hidden="true"></span>{/if}{#if rollup.count > 1}{rollup.count}{/if}</span
                 >{/if}{#if multi}<span class="host" data-testid="project-host" class:offline={owner.connection !== 'ready'}
@@ -247,13 +247,13 @@
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
         oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
     {/if}
-    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
     {/if}
-  {#if experimentOn('whip')}<WhipButton onerror={error => { store.error = error instanceof Error ? error.message : String(error); }} />{/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
+    {#if experimentOn('whip')}<WhipButton />{/if}
+    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
@@ -333,6 +333,9 @@
     white-space: nowrap;
     font-weight: 600;
   }
+  /* Its folder left the disk: the name steps back and a mark says why. */
+  .name.gone { color: var(--color-muted-foreground); }
+  .missing { display: flex; flex: none; color: var(--color-danger); }
   /* A folded project still says what its threads do: the most urgent state, the count beside it. */
   .rollup {
     display: inline-flex;

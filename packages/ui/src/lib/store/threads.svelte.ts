@@ -39,7 +39,7 @@ export class Threads {
   loadingOlder = $state(false);
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
-  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
+  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; reservePrompt?: string | null; followPrompt?: string | null }>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
   /** The number of the newest `open()`, so an older one writes nothing. */
@@ -188,6 +188,7 @@ export class Threads {
     if (!client) return;
     const generation = ++this.openGeneration;
     this.#openTarget = threadId;
+    if (s.connection !== 'ready') { this.#openOffline(threadId, navigate); return; }
     const newest = (): boolean => this.openGeneration === generation;
     if (this.openThread?.id !== threadId && s.delegationSelectedAgentId && s.delegationSelectedAgentId !== threadId) {
       await s.selectDelegatedAgent(null);
@@ -282,6 +283,42 @@ export class Threads {
       }
     } catch (error) {
       if (newest()) this.ctx.fail(error);
+    }
+  }
+
+  /**
+   * A machine that dropped keeps its rows, and one of them still opens: the
+   * timeline this client last read, or the bare row, so a prompt can wait in
+   * the composer's queue until the machine is back. Nothing is asked of the
+   * core; the reconnect's boot reopens the thread and fetches what it holds.
+   */
+  #openOffline(threadId: ThreadId, navigate: boolean): void {
+    const s = this.ctx.store;
+    const row = this.threads.find((t) => t.id === threadId);
+    if (this.openThread?.id !== threadId) {
+      const held = this.readingThreads.get(threadId);
+      if (!row && !held) return;
+      this.rememberReadingThread();
+      this.ctx.drafts.park();
+      s.draft = null;
+      this.loadingOlder = false;
+      const { delegation } = this.ctx;
+      delegation.delegationEpoch++;
+      delegation.delegationConfigureEpoch++;
+      s.delegation = null;
+      s.delegationLoading = false;
+      s.delegationSaving = false;
+      s.delegationError = null;
+      this.leaveArchived(threadId);
+      // A bare row has no messages in hand and says so: nothing above it to page in.
+      this.openThread = held ? { ...held, ...row } : { ...row!, messages: [], turns: [], commands: [], messagesBefore: null };
+      this.ctx.requests.keepRequestsOf(threadId);
+    }
+    if (navigate) {
+      s.page = 'chat';
+      s.sidebarOpen = false;
+      const projectId = this.openThread?.projectId;
+      if (projectId) this.ctx.projects.rememberProject(projectId);
     }
   }
 

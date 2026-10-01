@@ -3,7 +3,8 @@ import { DIFF_MAX_BYTES } from '@boite/contracts';
 import type { FileHandle } from 'node:fs/promises';
 import { open } from 'node:fs/promises';
 import type { Core } from '../core.ts';
-import { messageOf, refused } from '../errors.ts';
+import { existsSync } from 'node:fs';
+import { folderGone, messageOf, refused } from '../errors.ts';
 
 /**
  * What one side of a diff may weigh before it is refused outright. Well past
@@ -31,6 +32,8 @@ function spawnRead(core: Core, threadId: ThreadId, cwd: string, args: string[], 
   try {
     return core.procs.spawn(threadId, 'git', args, { cwd, env: { GIT_OPTIONAL_LOCKS: '0' } });
   } catch (error) {
+    // A spawn in a folder that is gone fails with the same ENOENT as a git that is not installed.
+    if (!existsSync(cwd)) throw folderGone(cwd, { threadId, field: 'cwd' });
     throw refused(`git did not start (${messageOf(error)}): ${needs} needs git on PATH`, { args });
   }
 }

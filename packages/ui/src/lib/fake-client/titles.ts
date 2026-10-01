@@ -1,4 +1,5 @@
 import type { Thread, ThreadSummary } from '@boite/contracts';
+import { pathKey } from './checks';
 import { RETITLE_DELAY_MS } from './providers';
 import { refusal, toSummary } from './shared';
 import type { FakeContext } from './context';
@@ -23,6 +24,23 @@ export async function writeTitle(ctx: FakeContext, thread: Thread, automatic = f
     if (words.length > 0) {
       thread.title = `Echo: ${words.slice(0, 5).join(' ')}`;
       thread.titleSource = 'agent';
+      if (thread.branchNamingPending && thread.branch) {
+        const slug = words.slice(0, 5).join('-').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '') || 'update';
+        let branch = `boite/${slug}`;
+        for (let n = 2; ctx.worktrees.some(entry => entry.projectId === thread.projectId && entry.branch === branch); n += 1) branch = `boite/${slug}-${n}`;
+        const previous = thread.branch;
+        for (const entry of ctx.worktrees) {
+          if (pathKey(entry.path) === pathKey(thread.cwd) && entry.branch === previous) entry.branch = branch;
+        }
+        for (const holder of ctx.threads.values()) {
+          if (holder.cwd === thread.cwd && holder.branch === previous) {
+            holder.branch = branch;
+            holder.branchNamingPending = false;
+            if (holder.id !== thread.id) ctx.touch(holder);
+          }
+        }
+      }
+
     } else if (!automatic && prompt.trim()) {
       thread.title = prompt.trim().split('\n')[0]!.slice(0, 60);
       thread.titleSource = 'prompt';

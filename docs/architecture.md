@@ -78,14 +78,17 @@ Nothing replays events, so they are a recent trail: a pass a minute after start
 and then daily deletes those older than 30 days, 5,000 per timer tick, keeping
 the newest agents event whose id is the agents revision. Removing a project
 deletes its threads' events with them. Deleting a conversation stops its work
-and hides it and its sub-threads behind session deletion markers. The owner
-can undo from the toast or the separate session deletion list while this core
-runs; history and prior archive flags are retained without restarting agents.
-Closing a shell or reconnecting leaves undo available on a resident core.
-Journal close purges unrestored families, including delegation and workflow
-history, in one transaction; startup does the same after a hard stop. Project
-removal also purges that project's pending deletions. Delete acts immediately
-without a confirmation dialog; the session undo offer remains available.
+and hides it and its sub-threads behind persistent deletion markers. The owner
+can restore them from the toast or Settings, including after a restart;
+history and prior archive flags are retained without restarting agents.
+`threadDeletionRetentionDays` defaults to 30 days after deletion. Settings
+accepts an integer from 0 to 3650; 0 disables automatic purge. Changing the
+delay also applies to existing deletions. A pass at startup and every minute
+purges expired families, including delegation and workflow history, in one
+transaction and broadcasts the updated deletion list. Reading that list or
+restoring a thread also checks expiry. Project removal purges that project's
+pending deletions immediately. Project files, worktrees and Git branches stay
+on disk. Delete acts immediately without a confirmation dialog.
 
 Text deltas are coalesced per thread every 16 ms before they reach a socket or
 the message. Streamed text is no event of its own: it is journaled as the
@@ -210,6 +213,10 @@ and `finishedAt` on every tool part, so a tool's line shows how long a command
 has run. Skip resolves a question without an answer: a blocking question stops
 waiting, while an asynchronous question leaves the composer dock without a
 steer or another user prompt. Both desktop and paired phones use `questions.skip`.
+A driver writes its whole answer under one message. A message the user sends
+or an asynchronous answer that reaches a running turn cuts it: the next part the
+driver opens starts a new assistant message, so the timeline shows the input
+where it arrived. The earlier message completes once its running tools finish.
 Work a Claude session leaves in the background (a shell, an agent, a monitor)
 is reported as `thread.background`: the CLI stays alive while it runs, the turn
 footer counts it, Stop on the idle thread ends it, and what the CLI writes when

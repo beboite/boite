@@ -24,7 +24,7 @@ export const SIDEBAR_DEFAULT = 280;
 export const SIDEBAR_MIN = 208;
 export const SIDEBAR_MAX = 440;
 
-const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'];
+const MODES: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'yolo', 'dontAsk'];
 
 export function defaultPrefs(): ComposerPrefs {
   return { providerId: null, accountId: null, permissionMode: 'default', model: null, effort: null };

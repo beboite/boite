@@ -34,11 +34,18 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('phone settings separate device preferences from remote administration, including owner sessions', async () => {
+test('phone settings expose owner protection and keep paired devices out of remote administration', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
   await page.click('[data-testid=mobile-settings]');
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
-  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') === null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('[data-testid=settings-tab-resources]') !== null && document.querySelector('[data-testid=settings-tab-keyboard]') === null`)).toBe(true);
+  await page.click('[data-testid=settings-tab-resources]');
+  await page.waitFor(`document.querySelector('[data-testid=setting-memory-protection]')`);
+  await page.click('[data-testid=mobile-settings-back]');
+  await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('session'); store.principal='session'; })()`);
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]') === null`);
+  await page.evaluate(`(() => { const store=__boiteTest.workspace.active; store.client.becomes('owner'); store.principal='owner'; })()`);
+  await page.waitFor(`document.querySelector('[data-testid=settings-tab-resources]')`);
   await capture('phone-settings-home-dark.png');
   await page.click('[data-testid=mobile-settings-phone]');
   await page.waitFor(`document.querySelector('[data-testid=phone-settings]')`);
@@ -149,21 +156,45 @@ test('returning to a long conversation preserves the reading position', async ()
 }, 15_000);
 
 test('leaving a long conversation right after a scroll returns to that scroll', async () => {
-  // The same round trip as above, without the capture between the scroll and
-  // the tap: an anchor read later than the scroll restored the next message.
+  // Hold the new rows' measurements until navigation starts, as a loaded
+  // runner does. Their estimates must not replace the message being read.
   const origin = await page.evaluate<string>('location.origin');
-  await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
+  const { identifier } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const Native = ResizeObserver;
+    globalThis.__pendingMeasurements = [];
+    globalThis.ResizeObserver = class extends Native {
+      constructor(callback) { super((entries, observer) => {
+        if (globalThis.__holdMeasurements) __pendingMeasurements.push(() => callback(entries, observer));
+        else callback(entries, observer);
+      }); }
+    };
+  })()` }) as { identifier: string };
+  try { await page.navigate(`${origin}/?fake=1&open=recent&long=1`); }
+  finally { await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
-  await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  await page.evaluate(`(() => { globalThis.__holdMeasurements = true; const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   await page.click('[data-testid=mobile-conversations]');
+  await page.evaluate(`(() => { globalThis.__holdMeasurements = false; globalThis.__pendingMeasurements.splice(0).forEach(deliver => deliver()); })()`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  const savedAnchor = await page.evaluate<{ id: string; offset: number }>(`globalThis.__boiteTest.workspace.active.readingPositions.get('t-long').anchor`);
+  expect(savedAnchor.id).toBe(anchor.id);
+  expect(Math.abs(savedAnchor.offset - anchor.offset)).toBeLessThan(1);
   await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  // Returning mounts the list before ResizeObserver restores its reading anchor.
+  // Keep the immediate departure above, but wait for restoration before measuring it.
+  await page.waitFor(`document.querySelector('[data-mid="${anchor.id}"]') && (() => {
+    const restored = ${visibleAnchor};
+    return restored.id === ${JSON.stringify(anchor.id)} && Math.abs(restored.offset - ${anchor.offset}) < 10;
+  })()`, 5_000);
   const restoredAnchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   expect(restoredAnchor.id).toBe(anchor.id);
   expect(Math.abs(restoredAnchor.offset - anchor.offset)).toBeLessThan(10);
@@ -262,14 +293,14 @@ test('a phone pins and archives a thread without a right-click, from the header 
   const id = await page.evaluate<string>('__boiteTest.workspace.active.openThread.id');
   const trigger = await page.evaluate<{ width: number; height: number }>(`(() => { const r = document.querySelector('[data-testid=thread-menu-trigger]').getBoundingClientRect(); return { width: r.width, height: r.height }; })()`);
   expect(trigger.height).toBeGreaterThanOrEqual(44);
-  // Agents and Terminal move into the title's sheet, so the title keeps most of the row.
+  // Subagents and Terminal sit in the title's sheet, so the title keeps most of the row.
   expect(trigger.width).toBeGreaterThan(200);
-  expect(await page.evaluate(`['agents-toggle', 'terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null, null]);
+  expect(await page.evaluate(`['terminal-toggle'].map(id => document.querySelector('[data-testid=' + id + ']')?.offsetParent ?? null)`)).toEqual([null]);
   await page.click('[data-testid=thread-menu-trigger]');
   await page.waitFor(`document.querySelector('[data-testid=thread-menu-trigger-menu]')`);
-  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'find', 'move', 'archive', 'delete']);
-  // No team on this thread: the entry offers to start one, as the desktop title menu does.
-  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Hand work to other agents');
+  expect(await page.evaluate(`[...document.querySelectorAll('[data-testid=thread-menu-trigger-menu] [data-value]')].map(row => row.dataset.value)`)).toEqual(['agents', 'terminal', 'rename', 'retitle', 'pin', 'copy', 'coordination', 'find', 'move', 'archive', 'delete']);
+  // The entry reads the same with or without subagents, as on the desktop title menu.
+  expect(await page.evaluate(`document.querySelector('[data-testid=thread-menu-trigger-menu] [data-value=agents]').textContent.trim()`)).toBe('Subagents');
   await capture('mobile-thread-menu.png');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
   await page.waitFor(`document.querySelector('[data-testid=right-panel]') && __boiteTest.workspace.active.panel.active?.kind === 'agents'`);

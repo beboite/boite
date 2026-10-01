@@ -106,12 +106,18 @@ export async function closeAllBrowsers(): Promise<void> {
 }
 
 /**
- * Kills the browser's process tree, then waits for the browser itself to exit
+ * Lets a closing browser exit, then kills a stalled browser's process tree
  * before its profile is removed: a profile deleted under a live browser was
  * the 0.5 GB each full run used to leave behind in the temp folder.
  */
 async function stopBrowser(proc: Subprocess, userDataDir: string | null): Promise<void> {
-  await killProcessTreeAsync(proc.pid);
+  if (proc.exitCode === null) {
+    // POSIX's captured-PID kill cannot reap Chrome's children. SIGTERM lets
+    // Chrome do that itself, including when startup failed before CDP opened.
+    if (process.platform !== 'win32') proc.kill('SIGTERM');
+    const graceful = await Promise.race([proc.exited.then(() => true), Bun.sleep(2_000).then(() => false)]);
+    if (!graceful && proc.exitCode === null) await killProcessTreeAsync(proc.pid);
+  }
   const exited = await Promise.race([proc.exited.then(() => true), Bun.sleep(EXIT_TIMEOUT_MS).then(() => false)]);
   if (!exited) console.warn(`e2e: browser ${proc.pid} still running ${EXIT_TIMEOUT_MS} ms after its kill`);
   if (userDataDir !== null) await removeDirectory(userDataDir);
@@ -160,8 +166,11 @@ export class BrowserPage {
       cmd: [
         executable,
         '--headless=new',
-        '--use-gl=angle',
-        '--use-angle=d3d11',
+        // Hosted CI has no hardware GPU. Use CPU compositing there, with
+        // software GL disabled so Chrome cannot fall back to SwiftShader.
+        ...(process.env.CI === 'true'
+          ? ['--disable-gpu', '--disable-software-rasterizer']
+          : process.platform === 'win32' ? ['--use-gl=angle', '--use-angle=d3d11'] : []),
         '--mute-audio',
         // The suite's assertions are written in English and its numbers read
         // with the browser's own `toLocaleString`: both follow this, not the
@@ -186,13 +195,25 @@ export class BrowserPage {
         'about:blank',
       ],
       stdout: 'ignore',
-      stderr: 'ignore',
+      stderr: 'pipe',
       windowsHide: true,
     });
 
+    // Drain continuously: a full pipe must never hold Chrome's startup.
+    // Keep a bounded tail for failures instead of discarding GPU/crash errors.
+    let stderr = '';
+    const drainErrors = (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of proc.stderr) {
+        stderr = (stderr + decoder.decode(chunk, { stream: true })).slice(-16_384);
+      }
+      stderr = (stderr + decoder.decode()).slice(-16_384);
+    })();
+    void drainErrors.catch(() => undefined);
+
     let page: BrowserPage | null = null;
     try {
-      const target = await waitForPageTarget(port);
+      const target = await waitForPageTarget(port, '', proc);
       const socket = await openSocket(target);
       page = new BrowserPage(socket, proc, ownsUserDataDir ? userDataDir : null);
       open.add(page);
@@ -213,7 +234,12 @@ export class BrowserPage {
     } catch (error) {
       if (page !== null) await page.close();
       else await stopBrowser(proc, ownsUserDataDir ? userDataDir : null);
-      throw error;
+      await drainErrors.catch(() => undefined);
+      const log = join(import.meta.dir, '..', '.artifacts', `browser-${proc.pid}.log`);
+      mkdirSync(dirname(log), { recursive: true });
+      writeFileSync(log, stderr);
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`${reason}\nBrowser stderr: ${log}\n${stderr}`, { cause: error });
     }
   }
 
@@ -245,14 +271,14 @@ export class BrowserPage {
   }
 
   /** The one place raw devtools JSON is handled. */
-  send(method: string, params: Record<string, unknown>): Promise<unknown> {
+  send(method: string, params: Record<string, unknown>, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
     if (this.#closed) return Promise.reject(new Error('the browser is closed'));
     const id = this.#nextId++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new Error(`${method} timed out`));
-      }, CALL_TIMEOUT_MS);
+      }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       this.#socket.send(JSON.stringify({ id, method, params }));
     });
@@ -388,7 +414,13 @@ export class BrowserPage {
 
   async close(): Promise<void> {
     if (this.#closed) return;
+    // Let Chrome stop its children and finish profile writes before removal.
+    // An unresponsive browser still falls through to the captured-PID kill.
+    const shutdown = this.#proc !== null && this.#proc.exitCode === null
+      ? this.send('Browser.close', {}, 2_000).catch(() => undefined)
+      : Promise.resolve();
     this.#closed = true;
+    await shutdown;
     try {
       this.#socket.close();
     } catch {
@@ -438,12 +470,13 @@ export class BrowserPage {
   }
 }
 
-async function waitForPageTarget(port: number, urlIncludes = ''): Promise<TargetInfo> {
+async function waitForPageTarget(port: number, urlIncludes = '', proc?: Subprocess): Promise<TargetInfo> {
   const deadline = Date.now() + CONNECT_TIMEOUT_MS;
   let last = 'the debugging port never answered';
   for (;;) {
+    if (proc && proc.exitCode !== null) throw new Error(`the browser exited before opening CDP with code ${proc.exitCode}`);
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) });
       const targets = (await response.json()) as TargetInfo[];
       const page = targets.find(
         (target) => target.type === 'page' && target.url.includes(urlIncludes) && typeof target.webSocketDebuggerUrl === 'string',

@@ -48,3 +48,64 @@ test('the limits and the effort chip read in French when the app speaks French, 
   const bolt = document.querySelector<HTMLElement>('[data-testid="effort-fast-mark"]')!;
   expect(bolt.title).toBe('Rapide');
 });
+
+test('exhausted accounts show read-only resets and the enabled monthly budget in French', async () => {
+  await setLocaleSetting('fr');
+  const row: AccountQuota = { ...quota, windows: [{ ...quota.windows[0]!, usedPercent: 100 }],
+    resetCredits: { availableCount: 2, nextExpiresAt: friday },
+    credits: { kind: 'budget', enabled: true, remaining: 75, limit: 100, unlimited: false } };
+  component = mount(UsageLimits, { target: document.body, props: { rows: [row] } });
+  flushSync();
+  expect(document.body.textContent).toContain('2 resets en réserve');
+  expect(document.body.textContent).toContain('2026');
+  expect(document.body.textContent).toContain('Budget mensuel restant');
+  expect(document.body.textContent).toContain('75 % restants');
+  expect(document.querySelector('[data-testid=quota-credits] [role=meter]')?.getAttribute('aria-valuenow')).toBe('75');
+  expect(document.querySelector('[data-testid=quota-extras] button')).toBeNull();
+});
+
+test('monthly budget fallback requires actual exhaustion and confirmed positive paid usage for that same account', () => {
+  const row: AccountQuota = { ...quota, windows: [{ ...quota.windows[0]!, usedPercent: 100 }],
+    credits: { kind: 'budget', enabled: true, remaining: 75, limit: 100, unlimited: false } };
+  const variants: AccountQuota[] = [
+    { ...row, accountId: 'disabled-paid', credits: { ...row.credits!, enabled: false } },
+    { ...row, accountId: 'unknown-paid', credits: { ...row.credits!, enabled: null } },
+    { ...row, accountId: 'zero-paid', credits: { ...row.credits!, remaining: 0 } },
+    { ...row, accountId: 'missing-paid', credits: { ...row.credits!, remaining: null } },
+    { ...row, accountId: 'unknown-cap', credits: { ...row.credits!, limit: null } },
+    { ...row, accountId: 'rounded-zero', windows: [{ ...row.windows[0]!, usedPercent: 99.99 }] },
+    { ...row, accountId: 'stale-paid', status: 'unavailable', resetCredits: { availableCount: 2, nextExpiresAt: null } },
+    { ...row, accountId: 'monitoring-off', enabled: false },
+    { ...row, accountId: 'not-exhausted', windows: quota.windows },
+    { ...row, accountId: 'valid-budget' },
+    { ...row, accountId: 'tiny-budget', credits: { ...row.credits!, remaining: 0.04 } },
+    { ...row, accountId: 'valid-balance', credits: { ...row.credits!, kind: 'balance', remaining: 42.5, limit: null } },
+  ];
+  component = mount(UsageLimits, { target: document.body, props: { rows: variants } });
+  flushSync();
+  expect([...document.querySelectorAll('[data-testid=quota-extras]')].map((element) => element.getAttribute('data-account-id'))).toEqual(['valid-budget', 'tiny-budget', 'valid-balance']);
+  expect(document.querySelectorAll('[data-testid=quota-credits] [role=meter]')).toHaveLength(2);
+  expect(document.body.textContent).toContain('Less than 0.1% left');
+  expect(document.body.textContent).toContain('42.5 credits');
+});
+
+test('Codex displays a reported credit balance without requiring automatic paid usage or exhaustion', () => {
+  const row: AccountQuota = { ...quota, providerId: 'codex', providerName: 'Codex',
+    windows: [{ ...quota.windows[0]!, usedPercent: 100 }],
+    credits: { kind: 'balance', enabled: null, remaining: 42.5, limit: null, unlimited: false } };
+  const variants: AccountQuota[] = [
+    { ...row, accountId: 'exhausted' },
+    { ...row, accountId: 'subscription-left', windows: quota.windows },
+    { ...row, accountId: 'disabled-balance', credits: { ...row.credits!, enabled: false } },
+    { ...row, accountId: 'zero-balance', credits: { ...row.credits!, remaining: 0 } },
+    { ...row, accountId: 'unknown-balance', credits: { ...row.credits!, remaining: null } },
+    { ...row, accountId: 'stale-balance', status: 'unavailable' },
+    { ...row, accountId: 'monitoring-off', enabled: false },
+  ];
+  component = mount(UsageLimits, { target: document.body, props: { rows: variants } });
+  flushSync();
+  expect([...document.querySelectorAll('[data-testid=quota-extras]')].map((element) => element.getAttribute('data-account-id'))).toEqual(['exhausted', 'subscription-left']);
+  expect(document.querySelectorAll('[data-testid=quota-credits]')).toHaveLength(2);
+  expect(document.body.textContent).toContain('42.5 credits');
+  expect(document.querySelector('[data-testid=quota-credits] [role=meter]')).toBeNull();
+});

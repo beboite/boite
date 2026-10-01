@@ -90,7 +90,7 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
       });
       const started = await rpc.request<{ turn: CodexTurnRecord }>('turn/start', {
         threadId: opened.thread.id,
-        input: [{ type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial), text_elements: [] }, ...imageInputsOf(ctx.attachments ?? [])],
+        input: [{ type: 'text', text: titleRequest(ctx.prompt, ctx.answer, ctx.initial, ctx.nameBranch), text_elements: [] }, ...imageInputsOf(ctx.attachments ?? [])],
         ...(model === null ? {} : { model }),
         effort: 'low',
       });

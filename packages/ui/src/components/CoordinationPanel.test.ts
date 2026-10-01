@@ -27,7 +27,7 @@ async function show(principal: 'owner' | 'session' = 'owner', embedded = false):
   return store;
 }
 
-test('an owner configures a thread and sees the hourly budgets', async () => {
+test('an owner turns communication off and on, and sees what was sent without a budget', async () => {
   const active = await show();
   expect(active.coordination?.config.mode).toBe('brief');
   expect(active.coordinationDirectory).toBeNull();
@@ -39,10 +39,12 @@ test('an owner configures a thread and sees the hourly budgets', async () => {
   document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-off"]')!.click();
   await settle();
   expect(active.coordination?.config.mode).toBe('off');
-  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-brief"]')!.click();
+  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-on"]')!.click();
   await settle();
   expect(active.coordination?.config.mode).toBe('brief');
-  expect(document.querySelector('[data-testid="coordination-budget"]')?.textContent).toContain('6 sends');
+  const budget = document.querySelector('[data-testid="coordination-budget"]')?.textContent ?? '';
+  expect(budget).toContain('0 sent this hour');
+  expect(budget).not.toContain(' of ');
 
   const resources = document.querySelector<HTMLTextAreaElement>('[data-testid="coordination-resources"]')!;
   resources.value = 'Owns the UI';
@@ -61,19 +63,18 @@ test('a contact shows its status in the words the app speaks, not the raw value'
   panel.open = true;
   panel.dispatchEvent(new Event('toggle'));
   await settle();
-  document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')!.click();
-  await settle();
   active.coordinationDirectory = {
-    agents: [{ coreId: 'core-x', threadId: 't-x', title: 'Other', machine: 'box', resources: '', status: 'waiting', mode: 'team' }],
+    agents: [{ coreId: 'core-x', threadId: 't-x', title: 'Other', machine: 'box', resources: '', status: 'waiting', mode: 'team', project: 'Site', agent: 'codex gpt-6' }],
     unavailable: []
   };
   await settle();
   expect(document.querySelector('[data-testid="coordination-contact"] .contact-status')?.textContent).toBe('waiting for you');
+  expect(document.querySelector('[data-testid="coordination-contact"] small')?.textContent).toBe('Site · box · codex gpt-6');
 });
 
 test('a paired device reads coordination but cannot change it', async () => {
   await show('session');
-  expect(document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-team"]')?.disabled).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-on"]')?.disabled).toBe(true);
   expect(document.body.textContent).toContain('Only the owner can change coordination');
 });
 

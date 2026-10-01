@@ -562,6 +562,9 @@ export class PiSession {
         });
         break;
       }
+      case 'tool_execution_update':
+        turn.ctx.reportProgress?.('tool', textOf(message['toolName']) || null);
+        break;
       case 'message_end': {
         const assistant = message['message'] as PiAssistantMessage | undefined;
         if (assistant === undefined || assistant.role !== 'assistant') break;
@@ -571,18 +574,23 @@ export class PiSession {
         break;
       }
       case 'auto_retry_start':
+        turn.ctx.reportProgress?.('retrying', `${String(message['attempt'])}/${String(message['maxAttempts'])}`);
         turn.ctx.log(
           'info',
           `pi: retrying the request (attempt ${String(message['attempt'])} of ${String(message['maxAttempts'])}, in ${String(message['delayMs'])} ms): ${textOf(message['errorMessage'])}`,
         );
         break;
       case 'auto_retry_end':
+        turn.ctx.reportProgress?.('working');
         if (message['success'] === false) {
           turn.noteOutcome(textOf(message['finalError']) || turn.pendingError || 'pi gave up retrying the request');
         }
         break;
       case 'compaction_end':
         this.onCompaction(turn, message);
+        break;
+      case 'compaction_start':
+        turn.ctx.reportProgress?.('compacting');
         break;
       case 'agent_settled':
         turn.settleRun();

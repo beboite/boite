@@ -1,6 +1,7 @@
 import { availableParallelism, totalmem } from 'node:os';
 import { LinuxLoad, linuxMachineMemory, linuxStartedAt } from './linux-load.ts';
 import type { ProcessPlatform } from './types.ts';
+import { linuxServerUpdates } from './linux-server-update.ts';
 
 /**
  * Linux and macOS currently track direct children through the registry. Linux
@@ -12,6 +13,7 @@ export function createPosixPlatform(
   load: Pick<LinuxLoad, 'add' | 'remove' | 'sample'> & Partial<Pick<LinuxLoad, 'killTree'>> | null = os === 'linux' ? new LinuxLoad(availableParallelism()) : null,
 ): ProcessPlatform {
   return {
+    ...(os === 'linux' ? { serverUpdates: linuxServerUpdates() } : {}),
     retain() {},
     release: () => Promise.resolve(),
     capability: () => ({ os, mode: 'poll', note: 'direct children only; Job Objects are Windows-only' }),

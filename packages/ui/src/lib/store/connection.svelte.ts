@@ -494,7 +494,9 @@ export class Connection {
       if (client === this.ctx.client && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
         void s.loadDelegation(open.id);
-        if (s.coordination?.self.threadId === open.id) void s.loadCoordination(open.id, s.coordinationDirectory !== null);
+        // Also when it was never read for this thread: one opened offline asked nothing.
+        const held = s.coordination?.self.threadId === open.id;
+        if (held || !s.openThread.agentSessionId) void s.loadCoordination(open.id, held && s.coordinationDirectory !== null);
       }
     }
   }

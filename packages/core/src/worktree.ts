@@ -2,15 +2,16 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'n
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Project, ThreadId, WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { messageOf, refused } from './errors.ts';
+import { folderGone, messageOf, refused } from './errors.ts';
+import { newId } from './ids.ts';
 
 /** Every branch the core makes on its own starts with this. */
 export const BRANCH_PREFIX = 'boite/';
 const SLUG_MAX = 40;
-/** How many `-2`, `-3` suffixes are tried before the title is refused as taken. */
+/** How many `-2`, `-3` suffixes are tried before a generated name is refused as taken. */
 const SUFFIX_MAX = 20;
 
-/** The lowercase hyphenated form of a title: what names the branch and its directory. */
+/** A bounded folder name for projects and explicitly named branches. */
 export function slugOf(title: string): string {
   const slug = title
     .toLowerCase()
@@ -33,6 +34,7 @@ export function worktreeRoot(projectPath: string, storage?: WorktreeStorage, pro
 export interface PlacedWorktree {
   branch: string;
   path: string;
+  namingPending?: boolean;
 }
 
 /**
@@ -74,10 +76,11 @@ export class Worktrees {
       if (added.code !== 0) throw refused(`cannot recover ${branch} at ${path}: ${added.stderr.trim()}`);
       return { path, branch };
     }
-    return this.add(threadId, project, branch, branch, path);
+    return this.add(threadId, project, branch, path);
   }
 
-  async add(threadId: ThreadId, project: Project, title: string, wanted?: string, recordedPath?: string): Promise<PlacedWorktree> {
+  async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string): Promise<PlacedWorktree> {
+    if (!existsSync(project.path)) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!existsSync(join(project.path, '.git'))) {
       throw refused(`${project.path} is not a git repository: a worktree needs one`, {
         projectId: project.id,
@@ -89,7 +92,7 @@ export class Worktrees {
     }
 
     const root = worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id);
-    const slug = wanted === undefined ? slugOf(title) : slugOf(wanted.startsWith(BRANCH_PREFIX) ? wanted.slice(BRANCH_PREFIX.length) : wanted);
+    const slug = wanted === undefined ? `wt-${newId('').slice(0, 8)}` : slugOf(wanted.startsWith(BRANCH_PREFIX) ? wanted.slice(BRANCH_PREFIX.length) : wanted);
     const tries = wanted === undefined ? SUFFIX_MAX : 1;
     for (let n = 1; n <= tries; n += 1) {
       const suffix = n === 1 ? '' : `-${n}`;
@@ -112,9 +115,27 @@ export class Worktrees {
           worktree: path,
         });
       }
-      return { branch, path };
+      return { branch, path, namingPending: wanted === undefined };
     }
-    throw refused(`${SUFFIX_MAX} worktrees already carry the name ${slug}: rename the thread`, { slug, root });
+    throw refused(`${SUFFIX_MAX} worktrees already carry the generated name ${slug}: try creating the thread again`, { slug, root });
+  }
+
+  /** Rename only the expected branch without an upstream or known remote ref. */
+  async nameBranch(threadId: ThreadId, cwd: string, oldBranch: string, slug: string): Promise<string | null> {
+    const head = await this.git(threadId, cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    if (head.code !== 0 || head.stdout.trim() !== oldBranch) return null;
+    const upstream = await this.git(threadId, cwd, ['for-each-ref', '--format=%(upstream)', `refs/heads/${oldBranch}`]);
+    if (upstream.code !== 0 || upstream.stdout.trim()) return null;
+    const published = await this.git(threadId, cwd, ['for-each-ref', '--format=%(refname)', `refs/remotes/*/${oldBranch}`]);
+    if (published.code !== 0 || published.stdout.trim()) return null;
+    for (let n = 1; n <= SUFFIX_MAX; n += 1) {
+      const branch = `${BRANCH_PREFIX}${slug}${n === 1 ? '' : `-${n}`}`;
+      if (await this.branchExists(threadId, cwd, branch)) continue;
+      const renamed = await this.git(threadId, cwd, ['branch', '-m', oldBranch, branch]);
+      if (renamed.code !== 0) throw refused(`cannot rename ${oldBranch} to ${branch}: ${renamed.stderr.trim()}`, { cwd, branch });
+      return branch;
+    }
+    throw refused(`cannot name ${oldBranch}: ${SUFFIX_MAX} branches already carry the name ${slug}`, { cwd, slug });
   }
 
   /**

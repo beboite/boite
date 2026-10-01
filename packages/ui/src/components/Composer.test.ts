@@ -615,18 +615,27 @@ test('a refused turn keeps the prompt for Enter and Ctrl+Enter', async () => {
   }
 });
 
-test('reconnecting blocks keyboard and button sends without clearing text', async () => {
+test('reconnecting queues a send instead of sending it, and a new thread waits for the machine', async () => {
   await mountOnFake();
   await store.open('t-trace');
   const submit = vi.spyOn(store, 'submit');
   store.connection = 'connecting';
   await type('wait for connection');
+  expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(false);
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates['t-trace']?.queued.length === 1);
+  expect(submit).not.toHaveBeenCalled();
+  // A draft has no thread to queue behind: its text stays and nothing goes out.
+  store.connection = 'ready';
+  await openDraft();
+  store.connection = 'connecting';
+  await type('a new thread');
   expect(query<HTMLButtonElement>('[data-testid=composer-send]').disabled).toBe(true);
   press('Enter');
   press('Enter', { ctrlKey: true });
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(submit).not.toHaveBeenCalled();
-  expect(input().value).toBe('wait for connection');
+  expect(input().value).toBe('a new thread');
 });
 
 test('ArrowUp removes the latest queued prompt and restores its images for editing', async () => {
@@ -665,6 +674,37 @@ test('Escape stops the running turn and sends pending input next', async () => {
   const prompts = store.openThread!.messages.filter((message) => message.role === 'user');
   expect(prompts.at(-1)?.parts).toEqual([{ type: 'text', text: 'Read this immediately' }]);
   expect(store.openThread!.turns.some((turn) => turn.status === 'stopped')).toBe(true);
+});
+
+test('a thread of a machine that dropped still opens and queues its prompts until the machine is back', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const other = store.threads.find((t) => t.id === 't-descriptors')!;
+  expect(other.status).toBe('idle');
+  const fake = store.client as FakeClient;
+  const rpc = vi.spyOn(fake, 'call');
+  fake.drop();
+  await waitFor(() => store.connection !== 'ready');
+  // Its rows turn grey and still open.
+  await waitFor(() => document.querySelector('[data-thread-id="t-descriptors"]')?.closest('.thread')?.classList.contains('offline') === true);
+  await store.open(other.id);
+  expect(store.openThread?.id).toBe(other.id);
+  expect(store.error).toBeFalsy();
+  await waitFor(() => input().placeholder.includes('offline'));
+  await type('Run this once you are back');
+  press('Enter');
+  await waitFor(() => input().value === '' && store.composerStates[other.id]?.queued.length === 1);
+  expect(query('[data-testid=composer-queued]').textContent).toContain('Run this once you are back');
+  expect(rpc).not.toHaveBeenCalled();
+  await fake.restore();
+  const start = () => rpc.mock.calls.find(([method]) => method === 'turns.start')?.[1] as { threadId: string; prompt: string } | undefined;
+  await waitFor(() => start() !== undefined && store.composerStates[other.id]?.queued.length === 0);
+  const started = start();
+  expect(started).toMatchObject({ threadId: other.id, prompt: 'Run this once you are back' });
+  // What the offline open skipped is read once the machine is back.
+  const asked = (method: string) => rpc.mock.calls.some(([name, params]) => name === method && (params as { threadId?: string }).threadId === other.id);
+  await waitFor(() => asked('threads.get') && asked('collaboration.get') && asked('workflows.list') && asked('delegation.get'));
 });
 
 test('Enter in the emptied composer holds pending input behind an approval', async () => {
@@ -1083,7 +1123,7 @@ test('recognized slash tokens are colored without changing the editable prompt',
   }
 });
 
-test('permission menu offers three policies and preserves legacy modes until picked', async () => {
+test('permission menu offers YOLO beside Auto and preserves legacy modes until picked', async () => {
   await mountOnFake();
   await waitFor(() => !store.busy);
   for (const legacy of ['plan', 'dontAsk'] as const) {
@@ -1094,8 +1134,8 @@ test('permission menu offers three policies and preserves legacy modes until pic
   query('[data-testid=composer-mode]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-mode-menu]') !== null);
   const menu = query('[data-testid=composer-mode-menu]');
-  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['Auto', 'Edit freely', 'Ask']);
-  for (const [mode, label] of [['bypassPermissions', 'Auto'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
+  expect(Array.from(menu.querySelectorAll('.label')).map(row => row.textContent?.trim())).toEqual(['YOLO', 'Auto', 'Edit freely', 'Ask']);
+  for (const [mode, label] of [['yolo', 'YOLO'], ['bypassPermissions', 'Auto'], ['acceptEdits', 'Edit freely'], ['default', 'Ask']]) {
     query(`[data-testid=composer-mode-menu] [data-value="${mode}"]`).click();
     await waitFor(() => store.openThread?.permissionMode === mode);
     expect(query('[data-testid=composer-mode]').textContent?.trim()).toBe(label);

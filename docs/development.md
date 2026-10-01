@@ -35,6 +35,21 @@ phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
 `appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
 removed from production builds.
 
+`bun test packages/core/test/server-update.test.ts` verifies publisher signatures,
+archive paths, waiting and cancellation, complete installation and restoration
+of SQLite and pairing state after a failed restart. The helper uses isolated
+directories and a test service adapter. `bun test tests/e2e/server-updates.test.ts`
+checks the owning machine's update action at desktop and phone widths, including
+confirmation and cancellation. `?fake=1&machines=1&serverUpdate=available` previews
+the offer; `downloading`, `waiting` and `error` preview its other states.
+These fixtures spend no provider tokens and never update the real installation.
+
+After `bun run build:core:linux`, Linux hosts with a systemd user manager can
+also run `BOITE_E2E_SERVER_UPDATE=1 bun test packages/core/test/server-update-systemd.test.ts`.
+This opt-in smoke test creates its own service, runs the compiled update worker
+in another cgroup, verifies the backup and restart, then removes both test units.
+It uses a fresh data directory and an inert replacement, without provider calls.
+
 ## The core
 
 ```bash
@@ -172,10 +187,18 @@ unless the composer switch was chosen explicitly. Restored drafts keep their
 choice. The composer switch only changes that draft. Enabling the preference requires a Git repository other than Drafts.
 On, the first send passes
 `worktree: {}` to `threads.create` and the core runs `git worktree add -b`
-before writing the thread: the branch is `boite/<slug of the title>` (`-2`,
-`-3` when the name is taken, or the `branch` the call names), the directory
-defaults to `<project>/.boite/worktrees/<slug>`. Settings > General > Worktrees
-offers a shared folder instead, with `<project-name>-<project-id>/<slug>`
+before writing the thread: the branch is a short temporary `boite/wt-<id>`
+(or the `branch` the call names), and the directory defaults to
+`<project>/.boite/worktrees/wt-<id>`. When the title model names the conversation
+while its first turn runs, that same call also proposes an English branch
+slug such as `fix-worktree-names`. Git renames the temporary branch to
+`boite/<slug>` (`-2`, `-3` when taken), keeping the directory, commits and session.
+Explicit branch names, existing threads and branches already renamed, with an
+upstream or known remote-tracking ref, are left alone. Invalid model output or
+a failed call leaves the temporary name usable; `threads.retitle` can try again. The pending flag is
+persisted in journal schema 26 so a restart does not lose the naming request.
+Settings > General > Worktrees offers a shared folder instead, with
+`<project-name>-<project-id>/wt-<id>`
 under it so repositories with the same name stay separate. On a phone, owners
 reach the same setting through Settings > Worktrees. `settings.worktreeStorage`
 stores `{ mode: 'project', directory: null }` by default or
@@ -413,6 +436,9 @@ completion/blocker markers, including partial markers during streaming.
 Tasks come from ACP plans, Codex plan notifications or successful task tools
 such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
 tasks gets no invented task list. Pi uses the same successful-tool observation.
+Task tracking is optional, including for goals. The agent guide and goal
+instructions suggest a task list only when laying out steps helps the agent
+and the user follow the work.
 
 Each connected provider's row in Settings, Providers stores a default model and
 effort for that provider on this device.
@@ -558,6 +584,17 @@ and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
 
+A conversation at its bottom follows its answer in the frame that lays out the
+new paragraph, from the list's `ResizeObserver`. A wheel turned up leaves the
+bottom at once, unless a tool output under the pointer scrolls up first; a
+finger, a text selection or the scrollbar thumb holds the list until released,
+and a list pulled up that way stays where it was left. Jump to latest cuts to
+the last screen and a half and glides the rest in 380 ms on the app's
+ease-out curve, re-reading the bottom on every frame; reduced motion jumps.
+On the wide layout the conversation keeps its scrollbar's room from the first
+message, so the column does not move when a reply first overflows.
+`tests/e2e/chat-scroll.test.ts` checks the follow, the wheel and the glide.
+
 In forced colors (Windows high contrast) the browser drops the shadows and
 border tints the UI uses to mark focus. `app.css` then gives every
 `:focus-visible` control a 2 px `Highlight` outline, and
@@ -590,15 +627,32 @@ also cover queued targets, stale selections, image transfer and schema migration
 dialog and an unreachable remembered machine. The shell suite checks the native
 folder button with its dialog IPC stubbed, so no system dialog takes focus.
 
-`tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
-through ANGLE, muted, in a throwaway profile, and drives it over CDP.
+A project whose folder was deleted, moved or renamed outside Boite answers
+`missing: true`, checked on every `projects.list` like `repository`, and
+`project.updated` follows when the folder goes or comes back. A disk that gives
+no clear answer (a share whose host sleeps) is never read as missing. Every
+method that meets the folder refuses with the same sentence, `the folder <path>
+does not exist any more`: a new thread, a worktree, `git.status`. The sidebar
+marks the project and the composer shows the two ways out, checking again and
+removing the project. `tests/e2e/folder-gone.test.ts` captures both widths, and
+the shared contract scenario runs the rule on the core and the fake client.
+
+`tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, muted, in a
+throwaway profile, and drives it over CDP. Local Windows runs use the real GPU
+through ANGLE. With `CI=true`, the browser uses CPU compositing and disables
+software GL, so it needs neither Direct3D nor SwiftShader. A failed launch writes
+the last 16 KiB of browser stderr to `.artifacts/browser-<pid>.log` and includes
+it in the error. A browser that exits before opening CDP reports its exit code
+immediately instead of waiting for the 30-second connection deadline.
 `page.screenshot(path)` writes a PNG, and the suite puts its own under
 `tests/e2e/.artifacts/`, which is git-ignored. That is the proof for anything
 visual: a diff, a passing test and a green build all say nothing about what a
 screen looks like.
 
-`page.close()` kills the browser's process tree without blocking the other
-closes, waits up to 30 s for the browser to exit, then removes its profile,
+`page.close()` asks Chromium to close over CDP before removing its profile.
+On POSIX, shutdown also sends SIGTERM so Chrome can reap its children. After
+two seconds, a stalled browser falls back to the captured-PID process kill,
+waits up to 30 s for the browser to exit, then removes its profile,
 retrying for 15 s while Windows still holds a file. A directory it cannot
 remove is printed as `e2e: left <path>`. The test preload removes `boite-e2e-*`
 directories older than an hour, which an interrupted run left in the temp
@@ -740,13 +794,20 @@ trigger and the available viewport, so the sidebar and glass composer cannot
 cover them. Phone pickers share the bottom sheet; typing suggestions stay by
 the composer.
 
-The sidebar, right panel and terminal use the same short fade and vertical
-movement. The terminal and right panel stay mounted through their exit, and
-archive drawers use the shared grid fold. All durations honor reduced motion.
+The sidebar and right panel use a short fade and vertical movement. The thread
+terminal unfolds the frame below the chat, starting its shell at the click
+while the terminal renderer loads. Its fixed inner viewport avoids resizing
+the shell every animation frame. The terminal and right panel stay mounted
+through their exit, and archive drawers use the shared grid fold. All durations
+honor reduced motion.
 
 Unsent messages are saved in IndexedDB with strict transaction durability,
 separately for each core and data directory. A small synchronous text backup
-covers typing while a transaction is pending. A local core changing its port
+in `localStorage` is written on every keystroke. The IndexedDB journal follows
+800 ms after typing pauses, and at least every 5 s while it does not; a new
+attachment, a failed backup, `flushDrafts()`, hiding the page and leaving it
+write it at once. Writing the journal on every keystroke cloned each draft
+picture into IndexedDB while the user typed. A local core changing its port
 keeps the same drafts.
 New conversations keep one draft per project, visible in the sidebar after
 opening another thread. Existing conversations keep their own unsent reply.
@@ -789,6 +850,15 @@ panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
+An accepted prompt from this client glides to the top of the timeline. Reserved
+space below it shrinks as the answer grows; once the answer fills the viewport,
+the timeline follows its bottom. Wheel, touch, pointer and keyboard input release
+following. Reduced motion aligns immediately. Opening history or receiving input
+from another client leaves the reading position alone. Queued input moves only
+when accepted, including steering into a running turn.
+`bun test tests/e2e/chat-scroll.test.ts` checks this on desktop and phone, with
+short and virtualized histories, and writes captures to `tests/e2e/.artifacts/`.
+
 Scheduled goal and loop prompts journal the command and objective in `text`, with
 activity kind and iteration metadata. The core builds the execution instructions
 when starting the driver. Older messages can carry `displayText`, which the UI
@@ -817,6 +887,11 @@ diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
 in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
 edit with its diff. Failed and denied calls stay outside groups, with an
 output preview that remains visible when the call is closed.
+
+Failed commands preview a diagnostic such as the failing test or merge conflict,
+rather than the first output line. Codex command cards retain the provider's exit
+code and show it on failures; older messages and providers without that field
+keep their reported status. Output text and stderr never determine that status.
 
 Answered questions collapse to the actual answer. Expanding restores the
 question and the full answer without enabling another submission. Thinking

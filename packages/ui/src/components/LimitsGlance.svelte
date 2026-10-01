@@ -109,11 +109,11 @@
 <style>
   .glance { display: flex; flex-direction: column; width: 320px; padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
   .glance.closing { animation-name: pop-out; pointer-events: none; }
-  header, footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 14px; }
+  header, footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 14px; }
   header { border-bottom: 1px solid var(--color-border); }
   footer { justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--color-border); }
   h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
-  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px; }
+  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 5px 10px; }
   .failed { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 4px; color: var(--color-danger); font-size: var(--text-sm); }
   .failed p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
   .muted { margin: 0; padding: 14px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }

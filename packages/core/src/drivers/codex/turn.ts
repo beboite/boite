@@ -11,6 +11,7 @@ const LIVE_OUTPUT_MAX = 16_000;
 const LIVE_OUTPUT_BEAT_MS = 250;
 
 interface ToolEntry {
+  exitCode?: number | null;
   nativeAgents?: ToolView['nativeAgents'];
   index: number;
   name: string;
@@ -32,6 +33,7 @@ export class CodexTurn {
   /** The reasoning section the last thinking delta belonged to. */
   private thinkingSection: string | null = null;
   private readonly tools = new Map<string, ToolEntry>();
+  private readonly textItems = new Map<string, { index: number; text: string; complete: boolean }>();
   /** Tools whose streamed output waits for the next flush, so a chatty command costs one write per beat. */
   private readonly dirty = new Set<string>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -175,8 +177,20 @@ export class CodexTurn {
     return index;
   }
 
-  writeText(text: string): void {
+  writeText(text: string, itemId?: string): void {
     if (text.length === 0) return;
+    if (itemId) {
+      let entry = this.textItems.get(itemId);
+      if (entry?.complete) return;
+      if (!entry) {
+        entry = { index: this.takeIndex(), text: '', complete: false };
+        this.textItems.set(itemId, entry);
+        this.part(entry.index, { type: 'text', text: '' });
+      }
+      entry.text += text;
+      this.ctx.emit.delta(this.message(), entry.index, text);
+      return;
+    }
     if (this.textIndex === null) {
       const index = this.nextIndex;
       this.nextIndex += 1;
@@ -185,6 +199,14 @@ export class CodexTurn {
       this.part(index, { type: 'text', text: '' });
     }
     this.ctx.emit.delta(this.message(), this.textIndex, text);
+  }
+
+  completeText(itemId: string, text: string): void {
+    const entry = this.textItems.get(itemId) ?? { index: this.takeIndex(), text: '', complete: false };
+    if (entry.complete) return;
+    entry.text = text; entry.complete = true;
+    this.textItems.set(itemId, entry);
+    this.part(entry.index, { type: 'text', text, complete: true });
   }
 
   /**
@@ -247,6 +269,7 @@ export class CodexTurn {
     if (view.input !== undefined) entry.input = view.input;
     if (view.output !== null) entry.output = view.output;
     entry.status = view.status;
+    if (view.exitCode !== undefined) entry.exitCode = view.exitCode;
     entry.nativeAgents = view.nativeAgents;
     this.tools.set(itemId, entry);
     this.dirty.delete(itemId);
@@ -261,6 +284,7 @@ export class CodexTurn {
       input: entry.input,
       output: entry.output,
       status: entry.status,
+      ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
       ...(entry.nativeAgents ? { nativeAgents: entry.nativeAgents } : {}),
     });
   }
