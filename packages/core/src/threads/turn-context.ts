@@ -167,7 +167,9 @@ export class TurnContexts {
         }
         const { segment, messageId, partIndex } = route(driverId, driverIndex);
         const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;
-        const part = stamp(messageId, partIndex, raw);
+        const stamped = stamp(messageId, partIndex, raw);
+        // The agent calls a compaction it was asked for `manual`; one the core asked for by itself is not the user's.
+        const part: MessagePart = stamped.type === 'compaction' && turn.execution?.automatic ? { ...stamped, trigger: 'auto' } : stamped;
         const phase = part.type === 'thinking' ? 'thinking' : part.type === 'tool' && part.status === 'running' ? 'tool' : 'working';
         const detail = part.type === 'tool' && part.status === 'running' ? part.name : null;
         partProgress.set(`${messageId}:${partIndex}`, { phase, detail });
@@ -323,8 +325,8 @@ export class TurnContexts {
 
   /** The user message of the turn, read back from the journal: the text and the images it carried. */
   private lastUserInput(threadId: ThreadId, turnId: TurnId): { prompt: string; attachments: Attachment[]; moved?: true } {
-    const operation = this.core.journal.getTurn(turnId)?.execution?.operation;
-    const message = systemOperation(operation)
+    const execution = this.core.journal.getTurn(turnId)?.execution;
+    const message = systemOperation(execution?.operation) || execution?.automatic
       ? Array.from(this.core.journal.walkTurnMessages(threadId, turnId)).find(m => m.role === 'system') ?? null
       : this.core.journal.lastUserMessage(threadId, turnId);
     if (message !== null) {

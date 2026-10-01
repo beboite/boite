@@ -36,6 +36,7 @@ import { AgentState } from './threads/agent-state.ts';
 import { ThreadBranching } from './threads/branching.ts';
 import { CodeCheckpoints } from './threads/code-checkpoints.ts';
 import { ThreadCards } from './threads/cards.ts';
+import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
@@ -94,6 +95,8 @@ export class ThreadStore {
   readonly moves: ThreadMove;
   /** `agent.spawn`. */
   readonly spawns: ThreadSpawns;
+  /** The `autoCompact` setting: compactions the core opens between turns. */
+  readonly autoCompact: AutoCompaction;
   private readonly recovery: ThreadRecovery;
   private readonly removing = new Set<ThreadId>();
 
@@ -110,6 +113,7 @@ export class ThreadStore {
     this.codeCheckpoints = new CodeCheckpoints(core);
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
+    this.autoCompact = new AutoCompaction(core, this);
     this.recovery = new ThreadRecovery(core);
   }
 
@@ -548,16 +552,25 @@ export class ThreadStore {
     return this.titles.retitle(threadId);
   }
 
-  compact(threadId: ThreadId, expectedSelectionVersion?: number): Turn {
+  /** `automatic`: the core opens it by the `autoCompact` setting (`threads/auto-compact.ts`). */
+  compact(threadId: ThreadId, expectedSelectionVersion?: number, automatic = false): Turn {
     const thread = this.require(threadId);
+    const refusal = this.compactRefusal(thread);
+    if (refusal !== null) throw refused(refusal, { threadId });
     const protocol = this.core.providers.require(thread.providerId).protocol;
-    if (!thread.sessionId) throw refused('this thread has no native session to compact', { threadId });
-    if (protocol === 'acp' && !this.agentState.commands.get(threadId)?.some((command) => command.name === 'compact')) {
-      throw refused('this agent has not advertised a compact command', { threadId });
+    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact', undefined, undefined, automatic ? AUTO_COMPACT_LABEL : undefined);
+  }
+
+  /** Why this thread's agent cannot compact, or null. */
+  compactRefusal(thread: ThreadSummary): string | null {
+    const protocol = this.core.providers.require(thread.providerId).protocol;
+    if (!thread.sessionId) return 'this thread has no native session to compact';
+    if (protocol === 'acp' && !this.agentState.commands.get(thread.id)?.some((command) => command.name === 'compact')) {
+      return 'this agent has not advertised a compact command';
     }
     // agy's print mode refuses every interactive-only slash command, `/compact` among them.
-    if (protocol === 'agy') throw refused('the Antigravity CLI takes no /compact in print mode', { threadId });
-    return this.startTurn(threadId, protocol === 'echo' ? '[compact]' : '/compact', [], expectedSelectionVersion, 'compact');
+    if (protocol === 'agy') return 'the Antigravity CLI takes no /compact in print mode';
+    return null;
   }
 
   /** Edit a sent message: it and everything after it leave the thread (`threads/branching.ts`). */
@@ -618,6 +631,8 @@ export class ThreadStore {
     checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
+    // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.
+    const automatic = operation === 'compact' && displayText !== undefined;
     const now = Date.now();
     // The first message after a move carries the note to the agent. A compact
     // or a slash command goes to the agent as the command alone, so the note
@@ -638,15 +653,16 @@ export class ThreadStore {
         ...(thread.sessionId !== null && thread.sessionResumeAt ? { sessionResumeAt: thread.sessionResumeAt } : {}),
         sessionGeneration: thread.sessionGeneration ?? 0, selectionVersion: thread.selectionVersion ?? 0,
         ...(operation ? { operation } : {}),
+        ...(automatic ? { automatic: true as const } : {}),
       },
     };
     const message: Message = {
       id: newId('msg_'),
       threadId,
       turnId: turn.id,
-      role: systemOperation(operation) ? 'system' : 'user',
+      role: systemOperation(operation) || automatic ? 'system' : 'user',
       parts: [
-        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
+        { type: 'text', text: previewPrompt(prompt, previewReferences), ...(previewReferences.length ? { displayText: prompt, previewReferences } : {}), ...(systemOperation(operation) ? { displayText: displayText ?? SYSTEM_LABEL[operation] } : {}), ...(automatic ? { displayText } : {}), ...(activity ? { activity } : {}), ...(moved ? { moved } : {}), ...(startedBy ? { displayText: displayText ?? prompt, startedBy } : {}) },
         ...attachments.map((attachment): MessagePart => attachment.kind === 'file' ? { type: 'file', mimeType: attachment.mimeType, data: attachment.data, name: attachment.name } : ({
           type: 'image',
           mimeType: attachment.mimeType,
@@ -682,6 +698,7 @@ export class ThreadStore {
       if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
       accepted.dismissal?.();
     });
+    this.autoCompact.cancel(threadId);
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;
   }

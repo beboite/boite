@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import InfoTip from './InfoTip.svelte';
+  import AutoCompactSettings from './AutoCompactSettings.svelte';
   import SchedulerSettings from './SchedulerSettings.svelte';
   import { strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
@@ -32,6 +33,7 @@
   </header>
 
   <SchedulerSettings {store} />
+  <AutoCompactSettings {store} />
 
   {#if store.owner}
     <section class="card" id="settings-origins" data-testid="browser-origins">

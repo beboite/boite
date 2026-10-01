@@ -312,6 +312,7 @@ export class Core {
     this.workflows.beginClose();
     this.coordination.beginClose();
     this.activity.close();
+    this.threads.autoCompact.close();
     this.#drainPromise = this.agentRuntime.close().then(() => this.scheduler.drain(timeoutMs));
     return this.#drainPromise;
   }
@@ -327,6 +328,7 @@ export class Core {
 
   async close(): Promise<void> {
     this.threads.titles.close();
+    this.threads.autoCompact.close();
     await this.agentRuntime.close();
     this.#stopping = true;
     await this.brain.close();

@@ -9,6 +9,32 @@ export const BROWSER_ORIGINS_MAX = 32;
 /** A model id is a name, never a paragraph. */
 const TITLE_MODEL_MAX = 200;
 
+/**
+ * The moments the core can compact at. All of them sit between two turns: the
+ * core never cuts into a running one, where the agent's own compaction rules.
+ * - `turn-end`: the agent answered and left nothing running.
+ * - `background`: the agent answered and waits on work it left running (a
+ *   shell, a monitor), so the compaction uses time nobody is waiting for.
+ * - `cache-expiry`: the thread stayed idle until its prompt cache was about to
+ *   lapse, so the compaction reads the conversation at the cached price and
+ *   the next message does not pay for the whole of it again.
+ */
+export const AUTO_COMPACT_MOMENTS = ['turn-end', 'background', 'cache-expiry'] as const;
+export type AutoCompactMoment = (typeof AUTO_COMPACT_MOMENTS)[number];
+/** The bounds of `AutoCompact.tokens`. */
+export const AUTO_COMPACT_TOKENS = { min: 1_000, max: 10_000_000 } as const;
+
+export interface AutoCompact {
+  /**
+   * Compact only once the context meter reads at least this many tokens, so a
+   * model whose window is far away, or an agent that reports no reading, is
+   * left alone. Null: no size condition, every chosen moment compacts.
+   */
+  tokens: number | null;
+  /** At least one, each listed once. */
+  moments: AutoCompactMoment[];
+}
+
 const NUMERIC_KEYS = ['warmProcessMinutes', 'agentCpuCapPercent', 'threadMemoryCapMb', 'agentMemoryBudgetPercent', 'memoryReserveMb'] as const;
 const BOOLEAN_KEYS = ['listenOnLan', 'focusGuard', 'muteAgents', 'reapOrphans', 'memoryProtection', 'autoUpdateHarnesses', 'asyncQuestions'] as const;
 /** Keys whose value is a percentage of the machine, so anything past 100 is a mistake. */
@@ -118,6 +144,19 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
       return { ok: false, field: 'titleModel', message: `titleModel must be null or { providerId, model }, two non-empty strings, the model at most ${TITLE_MODEL_MAX} characters` };
     }
     next.titleModel = { providerId: text(providerId), model: text(model) };
+  }
+  if (patch.autoCompact !== undefined && patch.autoCompact !== null) {
+    const { tokens, moments } = (typeof patch.autoCompact === 'object' ? patch.autoCompact : {}) as Partial<AutoCompact>;
+    const TOKENS = AUTO_COMPACT_TOKENS, MOMENTS: readonly AutoCompactMoment[] = AUTO_COMPACT_MOMENTS;
+    const sized = tokens === null || (Number.isInteger(tokens) && tokens! >= TOKENS.min && tokens! <= TOKENS.max);
+    if (!sized) {
+      return { ok: false, field: 'autoCompact', message: `autoCompact.tokens must be null or an integer between ${TOKENS.min} and ${TOKENS.max}` };
+    }
+    const known = Array.isArray(moments) && moments.length > 0 && moments.every((moment) => MOMENTS.includes(moment));
+    if (!known) {
+      return { ok: false, field: 'autoCompact', message: `autoCompact.moments must list at least one of ${MOMENTS.join(', ')}` };
+    }
+    next.autoCompact = { tokens: tokens as number | null, moments: MOMENTS.filter((moment) => moments.includes(moment)) };
   }
   return { ok: true, patch: next };
 }
