@@ -331,7 +331,7 @@ export const fr: Translation = {
     downloaded: '{received} téléchargés',
     ready: 'La version {version} est prête à installer.',
     waiting: 'En attente de la fin du travail',
-    installing: "Démarrage du programme d'installation",
+    installing: "Les agents terminent leur étape, puis l'installation démarre",
     current: 'Boite est à jour.',
     failed: 'La mise à jour a échoué.',
     lastChecked: 'Vérifié à {time}',
@@ -345,7 +345,7 @@ export const fr: Translation = {
     install: 'Installer et redémarrer',
     readyAction: 'Mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
-    installBody: 'Boite se mettra à jour et redémarrera à la fin du travail. Vous pouvez annuler pendant l’attente.',
+    installBody: "Les agents terminent leur appel d'outil en cours, 30 secondes au plus. Boite se met ensuite à jour, redémarre et les reprend.",
   },
 
   connection: {

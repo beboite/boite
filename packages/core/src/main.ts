@@ -429,7 +429,17 @@ export function main(argv: string[]): void {
       });
   };
   process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  // What a service manager sends for a restart, an update or a reboot. The
+  // first one hands the running turns to the next core: each ends its tool
+  // call, 30 seconds at most, and resumes after the restart. A second one
+  // stops them now, and they still resume. A third exits.
+  let terms = 0;
+  process.on('SIGTERM', () => {
+    terms += 1;
+    if (stopping || terms > 2) shutdown();
+    else if (terms === 1) core.requestHandoffShutdown();
+    else core.requestShutdown();
+  });
   // The last line of defence: Bun exits on either anyway. This leaves a log
   // line, stops the turns and releases the lock on the way out; the process
   // never carries on after an error nobody expected.

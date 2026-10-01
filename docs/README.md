@@ -3,6 +3,7 @@
 ## Using boite
 
 - [Desktop updates](updates.md): Boite, Boite Nightly, downloads and restarting.
+- [Restart handoff](restart-handoff.md): how an update stops running agents and resumes them.
 - [The tour](onboarding.md): the first launch, and what it sets up.
 - [Language](language.md): English and French, and where the sentences live.
 - [Drafts](drafts.md): conversations with no project, a folder each in Documents/Boite.

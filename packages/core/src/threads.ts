@@ -40,6 +40,7 @@ import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
 import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
@@ -95,6 +96,8 @@ export class ThreadStore {
   /** `agent.spawn`. */
   readonly spawns: ThreadSpawns;
   private readonly recovery: ThreadRecovery;
+  /** Turns a restart hands to the next core (`threads/handoff.ts`). */
+  readonly handoff: RestartHandoff;
   private readonly removing = new Set<ThreadId>();
 
   constructor(private readonly core: Core) {
@@ -111,6 +114,7 @@ export class ThreadStore {
     this.moves = new ThreadMove(core, this);
     this.spawns = new ThreadSpawns(core, this);
     this.recovery = new ThreadRecovery(core);
+    this.handoff = new RestartHandoff(core, this);
   }
 
   // -- reads ----------------------------------------------------------------
@@ -688,6 +692,7 @@ export class ThreadStore {
 
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
+    this.handoff.forget(threadId);
     this.core.coordination.pause(threadId);
     const childrenStopped = this.core.delegation.stop(threadId) + this.core.workflows.stopRoot(threadId, 'Stopped with its thread');
     if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;

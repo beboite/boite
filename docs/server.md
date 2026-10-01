@@ -69,8 +69,13 @@ Record the current image digest and stop the core before backing up:
 
 ```sh
 docker image inspect ghcr.io/beboite/boite/boite-server:latest --format '{{index .RepoDigests 0}}'
-docker compose stop
+docker compose stop -t 60
 ```
+
+The stop is a [restart handoff](restart-handoff.md): agents at work finish the
+tool call they are in, 30 seconds at most, and their threads resume when the
+container is back within the hour. Without `-t 60` Docker kills the container
+after 10 seconds; the threads resume all the same.
 
 Back up all three volumes, including the complete SQLite data directory. Then:
 
@@ -255,6 +260,8 @@ ExecStart=%h/.local/lib/boite/boite-core --host <private address> --port <port>
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
+KillMode=mixed
+TimeoutStopSec=60
 
 [Install]
 WantedBy=default.target
@@ -266,8 +273,17 @@ that still has members. The core's own shutdown, on SIGTERM, SIGINT or SIGHUP,
 does the same to every group and waits for it before it exits. A tool that
 leaves the group on purpose (a daemon calling `setsid`) escapes it, and a core
 killed hard leaves the groups it started running. Stopping the unit still reaps
-them: systemd's default `KillMode=control-group` stops everything in the
-service's cgroup, so keep that default and never set `KillMode=process`.
+them: `KillMode=mixed` sends `SIGTERM` to the core alone, then ends whatever is
+left in the service's cgroup once the core exited or `TimeoutStopSec` passed.
+Never set `KillMode=process`, which leaves them running.
+
+`systemctl --user restart boite` is how an update is installed: replace the
+files, then restart. On `SIGTERM` the core starts a
+[restart handoff](restart-handoff.md): running agents finish the tool call
+they are in, 30 seconds at most, and their threads resume once the new core is
+up. `TimeoutStopSec=60` covers that wait. An agent that restarts the unit from
+one of its own commands uses `--no-block`, or its command is the tool call the
+core waits 30 seconds for.
 
 The data directory is `~/.local/share/boite2` on the stable channel and
 `~/.local/share/boite2-dev` on the dev one, or whatever `--data-dir` or

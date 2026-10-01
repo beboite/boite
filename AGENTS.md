@@ -106,6 +106,8 @@ and assertions when making the suite faster.
 - [Agent updates](docs/agent-updates.md): version checks, the agent's own
   updater and what a remote machine does by itself.
 - [Desktop updates](docs/updates.md): signed app updates and switching nightly channels.
+- [Restart handoff](docs/restart-handoff.md): the 30 second wait before an update
+  stops a turn, and how the next core resumes it.
 - [Workflows](docs/workflows.md): JSON plans of delegated steps and their graph.
 - [Model switching](docs/model-switching.md) and [context](docs/context.md):
   session reuse, queued turns and compaction.

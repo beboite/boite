@@ -183,6 +183,20 @@ export class Core {
   }
 
   /**
+   * A restart that does not wait for idle: each running turn ends the tool
+   * call it is in, 30 seconds at most, then stops, and the next core resumes
+   * those threads (`threads/handoff.ts`). No new turn starts meanwhile; the
+   * RPC surface stays open so a tool that calls `boite` can still finish.
+   */
+  requestHandoffShutdown(graceMs?: number): 'accepted' | 'unsupported' {
+    if (!this.#onShutdown) return 'unsupported';
+    if (this.#shutdownRequested || this.threads.handoff.active) return 'accepted';
+    this.#stopping = true;
+    void this.threads.handoff.begin(graceMs).then(() => this.requestShutdown());
+    return 'accepted';
+  }
+
+  /**
    * Asks the process to stop the way `core.shutdown` does: the answer goes out
    * first, then the process drains and exits. False for an embedded core,
    * which has no process of its own to stop. `POST /shutdown` calls it too,
