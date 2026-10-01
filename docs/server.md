@@ -142,6 +142,8 @@ Check for updates action. When a signed server release is available, Update
 appears on that machine's card and in the sidebar's update menu. That menu is
 hidden when neither the app nor a server has an update available. The desktop
 app's own manual check and channel choices remain in Settings, General.
+Cards show the installed and offered versions together. Details expands the
+idle wait, backup and recovery behavior without adding it to the confirmation.
 
 Server updates require an owner connection, including on a phone. Ordinary
 paired devices cannot stop or update the server. The action always goes to the

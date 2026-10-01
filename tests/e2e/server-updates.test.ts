@@ -41,7 +41,7 @@ test('current servers hide update actions and available updates open their ownin
   await page.navigate(`${base}/?fake=1&machines=1&open=recent&serverUpdate=available`);
   await page.waitFor(`document.querySelector('${id('nav-app-update')}')`);
   await page.click(id('nav-app-update'));
-  await page.waitFor(`document.querySelector('${id('nav-server-update')}')`);
+  await page.waitFor(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).some(button => button.textContent.includes('Builder'))`);
   await page.evaluate(`Array.from(document.querySelectorAll('${id('nav-server-update')}')).find(button => button.textContent.includes('Builder')).click()`);
   await page.waitFor(`window.__boiteTest.workspace.active.machineId === 'http://builder.test' && document.querySelector('${card} ${id('server-update-install')}')`);
   await capture('available-desktop');
@@ -63,6 +63,14 @@ test('the phone can update and cancel its server without overflowing the screen'
   await page.navigate(`${base}/?fake=1&machines=1&open=recent&serverUpdate=available`);
   await machines();
   await capture('available-phone');
+  const details = `${card} ${id('server-update-details')}`;
+  expect(await page.evaluate(`document.querySelector('${details}')?.open`)).toBe(false);
+  await page.click(`${card} ${id('server-update-details-toggle')}`);
+  await page.waitFor(`document.querySelector('${details}')?.open`);
+  expect(await page.text(details)).toContain('the previous version is restored');
+  await capture('details-phone');
+  await page.click(`${card} ${id('server-update-details-toggle')}`);
+  await page.waitFor(`!document.querySelector('${details}')?.open`);
   await page.click(`${card} ${id('server-update-install')}`);
   await page.waitFor(`document.querySelector('${id('confirm-ok')}')`);
   await capture('confirm-phone');

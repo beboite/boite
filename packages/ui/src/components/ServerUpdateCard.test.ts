@@ -28,7 +28,7 @@ test('a server at the current version offers a manual check and no update action
   view = mount(ServerUpdateCard, { target: document.body, props: { store, label: 'Build server' } });
   expect(document.querySelector('[data-testid=server-update-install]')).toBeNull();
   expect(document.querySelector('[data-testid=server-update-check]')).not.toBeNull();
-  expect(document.body.textContent).toContain('The server is up to date.');
+  expect(document.querySelector('[data-testid=server-update-status]')?.textContent).toBe('Up to date');
 });
 
 test('a confirmed update stays with its owning machine, shows waiting and can be cancelled', async () => {
