@@ -6,12 +6,13 @@ other unarchived conversations across projects and linked machines, and a
 message can wake an idle agent. There is no hourly budget on messages, wake
 turns or threads an agent starts.
 
-Open **Communication settings** above a conversation to turn communication
-off, or to restrict it to the current project. Explicit owner settings are
-preserved; a conversation saved in the former Brief or Team mode is on.
-Describe what the agent is working on in Resources so another agent can find
-the right contact. Archived conversations are unavailable. Persistent agents
-use their own group and mission permissions instead of ordinary thread
+Open the conversation title menu and choose Communication between conversations
+to turn communication off or restrict it to the current project. The settings
+open in a dialog and remain available in the Agents panel. Explicit owner
+settings are preserved; a conversation saved in the former Brief or Team mode
+is on. Describe what the agent is working on in Resources so another agent can
+find the right contact. Archived conversations are unavailable. Persistent
+agents use their own group and mission permissions instead of ordinary thread
 coordination.
 
 Nothing but the agents' instructions keeps two agents from answering each

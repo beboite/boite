@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { MediaQuery } from 'svelte/reactivity';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
@@ -12,10 +13,16 @@
   import { controlMenu } from '../lib/controls';
   import type { Store } from '../lib/store.svelte';
   import Menu from './Menu.svelte';
+  import CoordinationDialog from './CoordinationDialog.svelte';
   let { store }: { store: Store } = $props();
   let thread = $derived(store.openThread);
+  const mobile = new MediaQuery('(max-width: 720px)');
   let renaming = $state(false);
   let renameText = $state('');
+  let coordinationThreadId = $state<string | null>(null);
+  $effect(() => {
+    if (thread?.id !== coordinationThreadId) coordinationThreadId = null;
+  });
 
   function beginRename() {
     const thread = store.openThread;
@@ -60,6 +67,7 @@
       { id: 'retitle', label: retitling ? strings.sidebar.retitling : strings.sidebar.retitle, disabled: retitling },
       { id: 'pin', label: thread.pinned ? strings.sidebar.unpin : strings.sidebar.pin },
       { id: 'copy', label: strings.sidebar.copyPath, title: thread.cwd },
+      ...(!thread.agentSessionId ? [{ id: 'coordination', label: strings.coordination.heading, glyph: Network }] : []),
       // A phone has no Ctrl+F: this sheet is its way to the find bar.
       { id: 'find', label: strings.keyboard.commands.find },
       ...(thread.parentThreadId || thread.projectId === null ? [] : moveItems(store, thread)),
@@ -100,7 +108,8 @@
   function titleAction(action: string) {
     const open = store.openThread;
     if (!open) return;
-    if (action === 'agents') store.panel.toggleKind('agents');
+    if (action === 'coordination') coordinationThreadId = open.id;
+    else if (action === 'agents') store.panel.toggleKind('agents');
     else if (action === 'terminal') store.toggleTerminal();
     else if (action === 'rename') beginRename();
     else if (action === 'retitle') void store.retitle(open.id);
@@ -116,10 +125,11 @@
     else if (action === 'delete') void deleteThread(store, open);
   }
 
+  let desktopItems = $derived(hasTeam ? titleItems : [{ id: 'agents', label: strings.delegation.openTeam }, separator('sep-team'), ...titleItems]);
+
   function openTitleMenu(event: MouseEvent) {
     if (!store.openThread) return;
-    const items = hasTeam ? titleItems : [{ id: 'agents', label: strings.delegation.openTeam }, separator('sep-team'), ...titleItems];
-    contextMenu.open(event, items, titleAction);
+    contextMenu.open(event, desktopItems, titleAction);
   }
 
 </script>
@@ -148,9 +158,9 @@
           >
             {thread.title}
           </button>
-          <!-- A phone has no right-click: the title opens the same actions as a sheet. -->
+          <!-- A small chevron exposes thread actions; on phones it also holds the title. -->
           <span class="title-menu">
-            <Menu items={phoneItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
+            <Menu items={mobile.current ? phoneItems : desktopItems} onpick={titleAction} label={strings.sidebar.threadMenu} placement="bottom" variant="text" testid="thread-menu-trigger">
               <span class="title-text">{thread.title}</span><ChevronDown size={14} />
             </Menu>
           </span>
@@ -235,6 +245,10 @@
       {/if}
 </div>
 
+{#if coordinationThreadId && thread?.id === coordinationThreadId}
+  <CoordinationDialog {store} threadId={coordinationThreadId} onclose={() => coordinationThreadId = null} />
+{/if}
+
 <style>
   .thread-header { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; }
   .title {
@@ -307,7 +321,8 @@
   .pending-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .title { min-width: 0; }
-  .title-menu { display: none; }
+  .title-menu { display: flex; flex: none; }
+  .title-text { display: none; }
   @media (max-width: 720px) {
     /* The title is what tells one conversation from another: the buttons give
        up their words for it, and keep a finger-sized square. */
@@ -326,7 +341,7 @@
     .title-menu { display: flex; min-width: 0; flex: 0 1 auto; margin-left: -6px; }
     .title-menu :global(.menu) { min-width: 0; max-width: 100%; }
     .title-menu :global(.trigger) { min-width: 0; max-width: 100%; min-height: var(--touch-target); font-weight: 600; color: var(--color-foreground); }
-    .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .title-menu :global(.trigger svg) { flex: none; color: var(--color-muted-foreground); }
   }
 </style>

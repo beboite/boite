@@ -17,6 +17,7 @@ beforeAll(async () => {
   server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `${uiUrl}/?fake=1&open=recent` });
   await page.waitFor(`document.querySelector('[data-testid="chat"]')`);
+  await page.evaluate(`window.__boiteTest.setTheme('dark')`);
   await page.evaluate(`(async () => {
     const [{ workspace }, { FakeClient }] = await Promise.all([import('/src/lib/workspace.svelte.ts'), import('/src/lib/fake-client.ts')]);
     const local = workspace.active.client;
@@ -41,8 +42,7 @@ beforeAll(async () => {
     });
   })()`);
   await page.waitFor(`document.querySelectorAll('[data-testid="forwarded-agent-message"]').length === 2`);
-  // Reachable by other agents now, the conversation shows its coordination bar.
-  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')`);
+  await page.waitFor(`document.querySelector('[data-testid="thread-menu-trigger"]')`);
 }, 60_000);
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
@@ -71,7 +71,7 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   };
   await checkDirection();
   expect(await page.evaluate(`document.querySelector('[data-testid="timeline"]')?.textContent ?? ''`)).not.toContain('Boite agent coordination');
-  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]')?.hasAttribute('open')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-panel"]') === null`)).toBe(true);
   await page.evaluate(`document.querySelector('[data-letter-id="incoming-deployment"]').scrollIntoView({ block: 'center' })`);
   await settled();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-desktop.png'));
@@ -83,11 +83,39 @@ test('forwarded agent messages sit in the conversation at desktop and phone widt
   await checkDirection();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-phone.png'));
 
-  await page.click('[data-testid="coordination-panel"] > summary');
-  await page.waitFor(`document.querySelector('[data-testid="coordination-panel"]')?.hasAttribute('open')`);
+  // The same title menu exposes settings on phones and desktops.
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.click('[data-value="coordination"]');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
+  await settled();
+  expect(await page.evaluate(`document.activeElement.closest('[data-testid="coordination-dialog"]') !== null`)).toBe(true);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-settings-phone.png'));
   await page.click('.options > summary');
   const budget = await page.evaluate<string>(`document.querySelector('[data-testid="coordination-budget"]')?.textContent ?? ''`);
   expect(budget).toContain('sent this hour');
   expect(budget).not.toContain(' of ');
   expect(await page.evaluate(`document.querySelectorAll('[data-testid="coordination-contact"]').length`)).toBeGreaterThan(0);
+  await page.click('[data-testid="coordination-mode-off"]');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-mode-off"]').getAttribute('aria-checked') === 'true'`);
+  await page.evaluate('history.back()');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
+  expect(await page.evaluate(`document.activeElement.dataset.testid`)).toBe('thread-menu-trigger');
+
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.click('[data-value="coordination"]');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
+  expect(await page.evaluate(`document.querySelector('[data-testid="coordination-mode-off"]').getAttribute('aria-checked')`)).toBe('true');
+  await settled();
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'coordination-settings-desktop.png'));
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' });
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
+  expect(await page.evaluate(`document.activeElement.dataset.testid`)).toBe('thread-menu-trigger');
+
+  await page.click('[data-testid="thread-menu-trigger"]');
+  await page.click('[data-value="coordination"]');
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]')?.open`);
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-bench')`);
+  await page.waitFor(`document.querySelector('[data-testid="coordination-dialog"]') === null`);
 }, 30_000);
