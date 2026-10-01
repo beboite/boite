@@ -2312,18 +2312,22 @@ test('automatic settings sync follows the chosen source outside settings and sto
   const remote = workspace.machines.find(machine => machine.store !== store)!;
   await store.client!.call('brain.configure', { path: '/home/user/source-brain', enabled: false });
   await remote.store.client!.call('brain.configure', { path: '/home/user/target-brain', enabled: false });
-  await store.client!.call('settings.set', { warmProcessMinutes: 9 });
+  await remote.store.client!.call('settings.set', { warmProcessMinutes: 3, agentCpuCapPercent: 35 });
+  await store.client!.call('settings.set', { asyncQuestions: false, warmProcessMinutes: 9, agentCpuCapPercent: 85 });
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
   const checkbox = query<HTMLInputElement>('[data-testid=machine-sync]');
   expect(checkbox.type).toBe('checkbox');
   checkbox.click();
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 9);
+  await waitFor(() => remote.store.settings?.asyncQuestions === false);
   expect(document.querySelector('[data-testid=confirm-ok]')).toBeNull();
+  expect(document.querySelector('[data-testid=machines-page]')).not.toBeNull();
+  expect(document.querySelector('[data-testid=machine-settings]')).toBeNull();
+  expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   store.showChat();
-  await store.client!.call('settings.set', { warmProcessMinutes: 12 });
+  await store.client!.call('settings.set', { asyncQuestions: true });
   await store.client!.call('keybindings.set', { command: 'terminal', chord: 'Ctrl+Shift+J' });
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 12 && remote.store.keybindings?.bindings.terminal === 'ctrl+shift+j');
+  await waitFor(() => remote.store.settings?.asyncQuestions === true && remote.store.keybindings?.bindings.terminal === 'ctrl+shift+j');
   const brain = await store.client!.call('brain.status', {});
   await store.client!.call('brain.configure', { ...brain.config, boiteGuide: false });
   await waitFor(() => workspace.settingsSync.reports[remote.id]?.report.brain === 'copied');
@@ -2331,21 +2335,22 @@ test('automatic settings sync follows the chosen source outside settings and sto
   // Missed changes catch up when the destination reconnects.
   remote.store.connection = 'closed';
   flushSync();
-  await store.client!.call('settings.set', { warmProcessMinutes: 14 });
+  await store.client!.call('settings.set', { asyncQuestions: false });
   remote.store.connection = 'ready';
   flushSync();
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 14);
+  await waitFor(() => remote.store.settings?.asyncQuestions === false);
+  expect(remote.store.settings).toMatchObject({ warmProcessMinutes: 3, agentCpuCapPercent: 35 });
   // Switching the visible host does not reverse the saved source.
   await workspace.select(remote.store);
-  await store.client!.call('settings.set', { warmProcessMinutes: 15 });
-  await waitFor(() => remote.store.settings?.warmProcessMinutes === 15);
+  await store.client!.call('settings.set', { asyncQuestions: true });
+  await waitFor(() => remote.store.settings?.asyncQuestions === true);
   await workspace.select(store);
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=machine-sync]') !== null);
   query<HTMLInputElement>('[data-testid=machine-sync]').click();
-  await store.client!.call('settings.set', { warmProcessMinutes: 18 });
+  await store.client!.call('settings.set', { asyncQuestions: false });
   await new Promise(resolve => setTimeout(resolve, 300));
-  expect(remote.store.settings?.warmProcessMinutes).toBe(15);
+  expect(remote.store.settings?.asyncQuestions).toBe(true);
 });
 
 test('a remote terminal keeps output arriving while its opening response is in flight', async () => {

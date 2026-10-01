@@ -17,26 +17,20 @@ import { connected } from './provider-setup';
  * The client does it with the calls each core already answers, so a core needs
  * nothing new and an older one simply lacks what it cannot take.
  *
- * What moves is how the user works: the limits, the process guards, the agent
- * updates, the keybindings file and the brain's switches. What stays is what
- * belongs to the machine: its network face (LAN, public URL, browser origins),
- * its brain folder, and above all its providers. A login is a token, and a
- * token never crosses machines here: the report names every provider signed in
+ * Deleted-history retention, process guards, question mode, keybindings and
+ * brain switches follow the user.
+ * Resource limits, process retention, agent updates, storage, network access,
+ * the brain folder and providers stay on their owning machine. Login tokens
+ * never cross machines here: the report names every provider signed in
  * on the source and not on the target, so the user signs in there once.
  */
 
 /** The settings that describe the user, not the machine they sit on. */
 export const PORTABLE_SETTINGS = [
   'threadDeletionRetentionDays',
-  'warmProcessMinutes',
-  'agentCpuCapPercent',
-  'agentMemoryBudgetPercent',
-  'threadMemoryCapMb',
-  'memoryProtection',
   'focusGuard',
   'muteAgents',
   'reapOrphans',
-  'autoUpdateHarnesses',
   'asyncQuestions'
 ] as const satisfies readonly (keyof Settings)[];
 

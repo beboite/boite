@@ -7,7 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
   const uid = $props.id();
 
   let cpuCap = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
@@ -42,6 +42,7 @@
 </script>
 
 <div class="page" data-testid="resources-page">
+  {#if !limitsOnly}
   <header>
     <div>
       <h1>{strings.settings.tabs.resources}</h1>
@@ -63,6 +64,7 @@
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
     </label>
   </section>
+  {/if}
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
@@ -96,6 +98,7 @@
       </dl>
     {:else}<p class="hint">{strings.resources.unknown}</p>{/if}
   </section>
+  {#if !limitsOnly}
   <div class="group-heading" id="settings-tasks">
     <h2 class="tasks-heading">{strings.protection.tasks}<span class="live-dot" aria-hidden="true"></span></h2>
   </div>
@@ -142,6 +145,7 @@
       </table></div>
     </section>
   {/each}
+  {/if}
 </div>
 
 <style>

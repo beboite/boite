@@ -101,14 +101,20 @@ this client is offline.
 
 The client copies:
 
-- limits, process guards, agent updates and question mode;
+- deleted-history retention, process guards and question mode;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Use with agents, instructions, guide and automatic pull switches
   when both machines have a brain folder. The target keeps its own folder.
 
-Network access, public URLs, browser origins and provider sign-ins stay on their
-own machine. The report names providers that still need signing in on the target
+Resource limits, memory protection, process retention, automatic agent updates,
+worktree storage, network access, public URLs, browser origins and provider
+sign-ins stay on their own machine. Each owner machine card has a Settings for
+this machine button beside its synchronization control. It opens resource and
+execution settings for that core without changing the active conversation.
+Checking synchronization leaves the machine list open. The button is available
+on desktop and phone; offline machines cannot be edited. The report names
+providers that still need signing in on the target
 and opens that machine's Providers page. Methods absent on an older core are
 skipped for that part. Automatic brain changes require the source core's
 `brain.configured` event. A failure names its stage; earlier changes stay copied,
