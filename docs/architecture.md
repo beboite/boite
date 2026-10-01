@@ -81,6 +81,8 @@ deletes its threads' events with them. Deleting a conversation stops its work
 and hides it and its sub-threads behind persistent deletion markers. The owner
 can restore them from the toast or Settings, including after a restart;
 history and prior archive flags are retained without restarting agents.
+Archive and deletion toasts dismiss automatically after eight seconds; errors
+and update notices wait for the user's action.
 `threadDeletionRetentionDays` defaults to 30 days after deletion. Settings
 accepts an integer from 0 to 3650; 0 disables automatic purge. Changing the
 delay also applies to existing deletions. A pass at startup and every minute

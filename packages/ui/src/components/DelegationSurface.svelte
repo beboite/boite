@@ -1,54 +1,51 @@
 <script lang="ts">
-  import { ArrowLeft, Pause, Play, Plus, Send, Square, Trash2, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, Pause, Play, Plus, Settings, Square, Trash2, UsersRound, Workflow } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import { DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import type { BoundPanel, Surface } from '../lib/right-panel.svelte';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
+  import { isLive, runProgress } from '../lib/workflow-view';
   import EffortSlider from './EffortSlider.svelte';
   import DelegationTranscript from './DelegationTranscript.svelte';
   import ModelPicker from './ModelPicker.svelte';
-  import ProviderLogo from './ProviderLogo.svelte';
   import StatusMark from './StatusMark.svelte';
   import AgentElapsed from './AgentElapsed.svelte';
-  import CoordinationPanel from './CoordinationPanel.svelte';
   import NativeAgents from './NativeAgents.svelte';
+  import WorkflowMark from './WorkflowMark.svelte';
+  import WorkflowRunPane from './WorkflowRunPane.svelte';
   import { agentProgress } from '../lib/delegation-progress';
 
-  let { store }: { store: Store } = $props();
-  let task = $state('');
-  let selectedProfileId = $state<string | null>(null);
-  let message = $state('');
-  let sending = $state(false);
-  let launching = $state(false);
-  let delivery = $state('');
+  /**
+   * What this conversation handed out: its workflow runs, its subagents and the
+   * provider's own. A run opens its graph, a subagent its conversation. Nothing
+   * is launched from here; the agent does that.
+   */
+  let { store, surface, panel }: { store: Store; surface: Surface; panel: BoundPanel } = $props();
+  let settings = $state(false);
 
   let view = $derived(store.delegation);
   let config = $derived(view?.config ?? DEFAULT_DELEGATION_CONFIG);
-  let selected = $derived(view?.agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
-  // The conversation's own model is always there to hand work to; the owner's profiles add other models.
-  let routes = $derived([
-    ...(store.openThread && !config.profiles.some(profile => profile.id === CONVERSATION_PROFILE_ID) ? [{ id: CONVERSATION_PROFILE_ID, name: strings.delegation.conversationProfile, providerId: store.openThread.providerId }] : []),
-    ...config.profiles,
-  ]);
-  let selectedProfile = $derived(routes.find(profile => profile.id === selectedProfileId) ?? config.profiles[0] ?? routes[0] ?? null);
-  let selectedLetters = $derived(selected ? view?.messages.filter(letter => letter.from.threadId === selected.thread.id || letter.to.threadId === selected.thread.id) ?? [] : []);
-  let totalTokens = $derived(view ? view.usage.inputTokens + view.usage.outputTokens + view.usage.cacheReadTokens + view.usage.cacheWriteTokens : 0);
-
-  let openThreadId = $derived(store.openThread?.id);
+  let openThreadId = $derived(store.openThread?.id ?? null);
+  let runs = $derived(openThreadId ? store.workflowsOf(openThreadId) : []);
+  let run = $derived(runs.find(entry => entry.id === surface.runId) ?? null);
+  let agents = $derived(view?.agents ?? []);
+  let selected = $derived(agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
+  let busy = $derived(agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status)) || runs.some(isLive));
 
   $effect(() => {
     const threadId = openThreadId;
-    task = '';
-    selectedProfileId = null;
-    if (threadId) void store.loadDelegation(threadId);
-  });
-  $effect(() => {
-    store.delegationSelectedAgentId;
-    message = '';
-    delivery = '';
+    settings = false;
+    if (!threadId) return;
+    void store.loadDelegation(threadId);
+    void store.loadWorkflows(threadId);
   });
   onDestroy(() => { void store.selectDelegatedAgent(null); });
+
+  function showRun(runId: string | undefined): void {
+    panel.update(surface.id, { runId });
+  }
 
   function save(patch: Partial<DelegationConfig>): void {
     if (!store.owner) return;
@@ -58,16 +55,14 @@
   function addProfile(): void {
     const choice = store.defaultChoice();
     if (!choice?.model) return;
-    const count = config.profiles.length + 1;
     const profile: DelegationProfile = {
       id: `agent-${Date.now().toString(36)}`,
-      name: fill(strings.delegation.profileName, { count: String(count) }),
+      name: fill(strings.delegation.profileName, { count: String(config.profiles.length + 1) }),
       providerId: choice.providerId,
       accountId: choice.accountId,
       model: choice.model,
       effort: choice.effort
     };
-    selectedProfileId = profile.id;
     save({ profiles: [...config.profiles, profile] });
   }
 
@@ -88,27 +83,6 @@
     patchProfile(profile, { providerId, accountId, model, effort: patch.effort ?? store.defaultEffortOf(providerId, accountId, model) });
   }
 
-  async function launch(): Promise<void> {
-    if (!selectedProfile || !task.trim() || launching) return;
-    launching = true;
-    const agent = await store.spawnDelegatedAgent(selectedProfile.id, task);
-    launching = false;
-    if (!agent) return;
-    task = '';
-    await store.selectDelegatedAgent(agent.thread.id);
-  }
-
-  async function steer(): Promise<void> {
-    if (!selected || !message.trim() || sending) return;
-    const recipient = selected.thread.id;
-    sending = true;
-    const sent = await store.messageDelegatedAgent(recipient, message);
-    sending = false;
-    if (!sent || store.delegationSelectedAgentId !== recipient) return;
-    message = '';
-    delivery = strings.delegation.queuedDelivery;
-  }
-
   async function openChild(): Promise<void> {
     if (!selected) return;
     const id = selected.thread.id;
@@ -118,182 +92,122 @@
 </script>
 
 <section class="delegation" data-testid="delegation-surface">
-  <header class="surface-head">
-    <div>
+  {#if run}
+    <WorkflowRunPane {store} {run} onback={() => showRun(undefined)} />
+  {:else}
+    <header class="surface-head">
       <h2><UsersRound size={17} strokeWidth={1.75} />{strings.delegation.heading}</h2>
-    </div>
-  </header>
-
-  {#if view && !selected}
-    <div class="managed" data-testid="delegation-state">
-      <h3>{config.enabled ? config.paused ? strings.delegation.workflowsPaused : strings.delegation.workflowsEnabled : strings.delegation.workflowsDisabled}</h3>
-      <p>{config.enabled ? strings.delegation.boiteHint : store.owner ? strings.delegation.enableHint : strings.delegation.ownerSetupHint}</p>
-      {#if config.enabled || view.agents.length > 0}
-      <div class="usage" title={strings.delegation.usage} data-testid="delegation-usage">
-        <strong>{view.agents.length}</strong> {strings.delegation.agentsShort}
-        <span>·</span>
-        <strong>{view.turnsUsed}</strong> {strings.delegation.turnsShort}
-        <span>·</span>
-        <strong>{formatTokens(totalTokens)}</strong> {strings.units.tokens}
-      </div>
-      <p class="scope">{strings.delegation.usageScope}</p>
+      {#if view && (!config.enabled || config.paused)}<span class="state" data-testid="delegation-state">{config.enabled ? strings.delegation.paused : strings.delegation.off}</span>{/if}
+      <span class="spacer"></span>
+      {#if busy}
+        <button type="button" class="quiet small" data-testid="delegation-stop-all" onclick={() => void store.stopDelegatedAgent()}><Square size={11} fill="currentColor" />{strings.delegation.stopAll}</button>
       {/if}
-    </div>
-  {/if}
+      {#if store.owner && view}
+        <button type="button" class="ghost small icon" class:on={settings} aria-label={strings.delegation.configure} title={strings.delegation.configure} aria-pressed={settings} data-testid="delegation-settings-toggle" onclick={() => (settings = !settings)}><Settings size={15} strokeWidth={1.75} /></button>
+      {/if}
+    </header>
 
-  {#if store.delegationLoading && !view}
-    <p class="empty">{strings.delegation.loading}</p>
-  {:else if view}
-    {#if store.owner && config.enabled && !config.paused && !selected}
-      <details class="launch-section" open={view.agents.length === 0}>
-        <summary>{strings.delegation.launch}</summary>
-      <div class="launch" data-testid="delegation-launch">
-        <div class="profile-picks" role="radiogroup" aria-label={strings.delegation.profileLabel}>
-          {#each routes as profile (profile.id)}
-            <button type="button" class="chip" class:chosen={selectedProfile?.id === profile.id} role="radio" aria-checked={selectedProfile?.id === profile.id} onclick={() => (selectedProfileId = profile.id)}>
-              <ProviderLogo providerId={profile.providerId} size={14} />{profile.name}
-            </button>
+    {#if settings && view && store.owner}
+      <div class="settings" data-testid="delegation-settings">
+        <label class="switch-row">
+          <span><strong>{strings.delegation.enabled}</strong></span>
+          <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
+        </label>
+
+        <div class="profiles-head">
+          <strong>{strings.delegation.profiles}</strong>
+          <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
+        </div>
+        <div class="profiles">
+          {#each config.profiles as profile (profile.id)}
+            {@const choice = profileChoice(profile)}
+            {@const model = store.modelOf(choice)}
+            <div class="profile" data-testid="delegation-profile">
+              <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
+              <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
+              {#if model?.effort?.levels.length}
+                <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
+              {/if}
+              <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id)})}><Trash2 size={14} /></button>
+            </div>
           {/each}
         </div>
-        <textarea rows="2" maxlength="12000" bind:value={task} placeholder={strings.delegation.taskPlaceholder} data-testid="delegation-task"></textarea>
-        <button type="button" class="primary" disabled={!task.trim() || !selectedProfile || launching} data-testid="delegation-spawn" onclick={() => void launch()}><Plus size={14} />{launching ? strings.delegation.launching : strings.delegation.launch}</button>
+
+        {#if config.enabled}
+          <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
+            {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
+          </button>
+        {/if}
       </div>
-      </details>
-    {/if}
-
-
-    <div class="team" class:detail={selected !== null}>
-      <div class="members" aria-label={strings.delegation.team}>
-        {#if view.agents.length === 0}
-          <p class="empty">{strings.delegation.empty}</p>
-        {:else}
-          {#each view.agents as agent (agent.thread.id)}
+    {:else if view}
+      <div class="team" class:detail={selected !== null}>
+        <div class="members" aria-label={strings.delegation.heading}>
+          {#each runs as entry (entry.id)}
+            {@const progress = runProgress(entry)}
+            <button type="button" class="member" data-testid="delegation-run" data-run-id={entry.id} onclick={() => showRun(entry.id)}>
+              <WorkflowMark status={entry.status} run />
+              <span class="member-main"><strong><Workflow size={13} strokeWidth={1.75} />{entry.name}</strong></span>
+              <span class="status">{strings.workflow.status[entry.status]}</span>
+              <span class="member-usage">{fill(strings.workflow.steps, { done: String(progress.done), total: String(progress.total) })} · <AgentElapsed startedAt={entry.createdAt} finishedAt={entry.finishedAt} active={entry.status === 'running'} /></span>
+            </button>
+          {/each}
+          {#each agents as agent (agent.thread.id)}
             {@const progress = agentProgress(agent)}
             <button type="button" class="member" class:selected={selected?.thread.id === agent.thread.id} data-testid="delegation-member" data-agent-id={agent.thread.id} onclick={() => void store.selectDelegatedAgent(agent.thread.id)}>
               <StatusMark status={agent.thread.status} />
               <span class="member-main"><strong>{agent.thread.title}</strong><small>{store.providerOf(agent.thread.providerId)?.name ?? agent.thread.providerId} · {agent.thread.model ?? strings.thread.defaultModel}</small></span>
               <span class="status">{progress.status === 'done' ? strings.delegation.doneStatus : progress.status === 'stopped' ? strings.delegation.stoppedStatus : strings.threadStatus[agent.thread.status]}</span>
               <span class="task">{agent.task}</span>
-              <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} /></span>
-              {#if agent.lastTurn?.usage}<span class="member-usage">{formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}</span>{/if}
+              <span class="member-usage"><AgentElapsed startedAt={progress.startedAt} finishedAt={progress.finishedAt} active={progress.active} />{#if agent.lastTurn?.usage} · {formatTokens(agent.lastTurn.usage.inputTokens + agent.lastTurn.usage.outputTokens + agent.lastTurn.usage.cacheReadTokens + agent.lastTurn.usage.cacheWriteTokens)} {strings.units.tokens}{/if}</span>
               {#if agent.result}<span class="result">{agent.result}</span>{/if}
             </button>
           {/each}
-        {/if}
-        {#if view.agents.some(agent => ['queued', 'running', 'waiting'].includes(agent.thread.status))}
-          <button type="button" class="quiet stop-all" data-testid="delegation-stop-all" onclick={() => void store.stopDelegatedAgent()}><Square size={12} fill="currentColor" />{strings.delegation.stopAll}</button>
+        </div>
+
+        {#if selected}
+          <article class="detail-pane" data-testid="delegation-detail">
+            <header>
+              <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
+              <div><strong>{selected.thread.title}</strong><small>{selected.task}</small></div>
+              <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}>{strings.delegation.openThread}</button>
+              {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" />{strings.delegation.stop}</button>{/if}
+            </header>
+            {#if store.delegationThread}
+              <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
+            {/if}
+          </article>
         {/if}
       </div>
-
-      {#if selected}
-        <article class="detail-pane" data-testid="delegation-detail">
-          <header>
-            <button type="button" class="ghost small icon back" aria-label={strings.delegation.backToTeam} onclick={() => void store.selectDelegatedAgent(null)}><ArrowLeft size={15} /></button>
-            <div><strong>{selected.thread.title}</strong><small>{selected.task}</small></div>
-            <button type="button" class="quiet small" data-testid="delegation-open-thread" onclick={() => void openChild()}>{strings.delegation.openThread}</button>
-            {#if ['queued', 'running', 'waiting'].includes(selected.thread.status)}<button type="button" class="danger small" onclick={() => void store.stopDelegatedAgent(selected.thread.id)}><Square size={11} fill="currentColor" />{strings.delegation.stop}</button>{/if}
-          </header>
-          {#if store.delegationThread}
-            <div class="transcript"><DelegationTranscript messages={store.delegationThread.messages} /></div>
-          {:else}
-            <p class="empty">{strings.delegation.loadingTranscript}</p>
-          {/if}
-          {#if selectedLetters.length > 0}
-            <div class="letters">
-              {#each selectedLetters.slice(-4) as letter (letter.id)}
-                <p><strong>{letter.from.threadId === view.rootThreadId ? strings.delegation.parent : selected.thread.title}:</strong> {letter.text}<span>{strings.coordination.bubbleStatus[letter.status]}</span></p>
-              {/each}
-            </div>
-          {/if}
-          <form class="steer" onsubmit={(event) => { event.preventDefault(); void steer(); }}>
-            <input bind:value={message} maxlength="4000" placeholder={strings.delegation.messagePlaceholder} oninput={() => (delivery = '')} data-testid="delegation-message" />
-            <button type="submit" class="primary icon" aria-label={strings.delegation.send} disabled={!message.trim() || sending}><Send size={15} /></button>
-          </form>
-          {#if delivery}<p class="delivery" role="status">{delivery}</p>{/if}
-        </article>
-      {/if}
-    </div>
-    {#if !selected && view.nativeAgents?.length}<NativeAgents agents={view.nativeAgents} />{/if}
-    {#if store.owner}
-      <details class="settings" data-testid="delegation-settings">
-        <summary>{strings.delegation.configure}</summary>
-        <div class="settings-body">
-          <label class="switch-row">
-            <span><strong>{strings.delegation.enabled}</strong></span>
-            <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
-          </label>
-
-          <div class="profiles-head">
-            <div><strong>{strings.delegation.profiles}</strong><small>{strings.delegation.profilesHint}</small></div>
-            <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
-          </div>
-          <div class="profiles">
-            {#each config.profiles as profile (profile.id)}
-              {@const choice = profileChoice(profile)}
-              {@const model = store.modelOf(choice)}
-              <div class="profile" data-testid="delegation-profile">
-                <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
-                <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
-                {#if model?.effort?.levels.length}
-                  <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
-                {/if}
-                <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id)})}><Trash2 size={14} /></button>
-              </div>
-            {/each}
-          </div>
-
-          {#if config.enabled}
-            <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
-              {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
-            </button>
-          {/if}
-        </div>
-      </details>
-    {:else}
-      <p class="notice">{strings.delegation.ownerOnly}</p>
+      {#if !selected && view.nativeAgents?.length}<NativeAgents agents={view.nativeAgents} />{/if}
     {/if}
-  {/if}
 
-  {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}
-  {#if store.openThread && !store.openThread.agentSessionId && !selected}
-    {#key store.openThread.id}<CoordinationPanel {store} threadId={store.openThread.id} embedded />{/key}
+    {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}
+    {#if store.workflowsError}<p class="error" role="alert">{store.workflowsError}</p>{/if}
   {/if}
 </section>
 
 <style>
   .delegation { container-type: inline-size; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
-  .managed { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
-  .managed h3 { font-size: var(--text-sm); font-weight: 600; }
-  .managed p { margin: 5px 0 0; font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); }
-  .managed .usage { margin-top: 8px; justify-content: flex-start; }
-  .team:not(.detail) { flex: none; }
-  .surface-head { flex: none; padding: 14px 16px 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--color-border); }
+  .surface-head { flex: none; min-height: 44px; padding: 6px 10px 6px 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--color-border); }
   .surface-head h2 { display: flex; align-items: center; gap: 7px; font-size: var(--text-md); }
-  .usage { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px 5px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
-  .usage strong { color: var(--color-foreground); }
-  .settings { flex: none; border-bottom: 1px solid var(--color-border); }
-  .settings > summary { padding: 10px 16px; cursor: pointer; color: var(--color-muted-foreground); font-size: var(--text-sm); font-weight: 600; }
-  .settings-body { max-height: min(52dvh, 520px); padding: 0 16px 14px; overflow-y: auto; }
+  .surface-head .on { background: var(--color-active); color: var(--color-foreground); }
+  .state { padding: 1px 7px; border-radius: 999px; background: var(--color-surface-3); color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .spacer { flex: 1; }
+  .settings { flex: none; padding: 4px 16px 14px; }
+  .profiles-head { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .member-usage { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0 4px; font-variant-numeric: tabular-nums; }
+  .error { margin: 12px 16px; color: var(--color-danger); font-size: var(--text-sm); }
+  .team:not(.detail) { flex: none; }
   .switch-row { min-height: var(--control-lg); display: flex; align-items: center; gap: 14px; }
   .switch-row > span { flex: 1; }
-  .switch-row strong, .profiles-head strong { display: block; }
-  .profiles-head small { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); }
   input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
   input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input[role='switch']:checked { background: var(--color-foreground); }
   input[role='switch']:checked::after { transform: translateX(16px); background: var(--color-background); }
-  .profiles-head { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .profiles { margin-top: 7px; display: grid; gap: 5px; }
   .profile { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(140px, 1fr) auto var(--control-sm); gap: 6px; align-items: center; }
   .profile > input { min-width: 0; }
   .pause { margin-top: 10px; }
-  .launch { flex: none; padding: 10px 16px; display: grid; grid-template-columns: 1fr auto; gap: 7px; border-bottom: 1px solid var(--color-border); }
-  .launch-section { flex: none; }
-  .launch-section > summary { padding: 10px 16px; cursor: pointer; color: var(--color-muted-foreground); font-size: var(--text-sm); border-bottom: 1px solid var(--color-border); }
-  .profile-picks { grid-column: 1 / -1; display: flex; gap: 5px; overflow-x: auto; }
-  .profile-picks .chosen { background: var(--color-active); color: var(--color-foreground); }
-  .launch textarea { resize: vertical; min-height: 52px; }
-  .launch .primary { height: auto; }
   .team { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; }
   .team.detail { grid-template-columns: minmax(160px, .42fr) minmax(0, 1fr); }
   .members { min-height: 0; padding: 8px; overflow-y: auto; }
@@ -302,12 +216,11 @@
   .member:hover, .member.selected { background: var(--color-hover); border-color: var(--color-border); }
   .member-main strong, .member-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .member-main strong { font-size: var(--text-sm); }
+  .member-main strong :global(svg) { margin-right: 5px; vertical-align: -2px; }
   .member-main small, .status, .member-usage { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .task, .result { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .task { color: var(--color-muted-foreground); line-clamp: 2; -webkit-line-clamp: 2; }
   .result { margin-top: 3px; padding: 5px 7px; line-clamp: 4; -webkit-line-clamp: 4; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); white-space: pre-wrap; }
-  .member-usage { grid-column: 2 / -1; }
-  .stop-all { margin: 8px; }
   .detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .detail-pane > header { flex: none; min-height: 48px; padding: 7px 9px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--color-border); }
   .detail-pane > header > div { flex: 1; min-width: 0; }
@@ -315,24 +228,9 @@
   .detail-pane > header small { color: var(--color-muted-foreground); font-size: var(--text-xs); }
   .back { display: none; }
   .transcript { flex: 1; min-height: 0; display: flex; overflow: hidden; }
-  .letters { flex: none; max-height: 112px; padding: 7px 10px; overflow-y: auto; border-top: 1px solid var(--color-border); background: var(--color-surface-2); }
-  .letters p { margin: 0; font-size: var(--text-xs); line-height: 1.45; }
-  .letters p + p { margin-top: 5px; }
-  .letters span { margin-left: 5px; color: var(--color-muted-foreground); }
-  .steer { flex: none; padding: 8px; display: flex; gap: 6px; border-top: 1px solid var(--color-border); }
-  .steer input { flex: 1; min-width: 0; }
-  .delivery { flex: none; margin: -4px 10px 7px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
-  .empty, .notice, .error { margin: 12px 16px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  .notice { padding: 8px 10px; border-left: 2px solid var(--color-edge); background: var(--color-surface-2); }
-  .error { color: var(--color-danger); }
   @container (max-width: 520px) {
-    .surface-head { display: block; }
-    .usage { margin-top: 6px; justify-content: flex-start; }
     .profile { grid-template-columns: minmax(0, 1fr) auto; }
     .profile > :global(.picker) { grid-column: 1 / -1; }
-    .launch { grid-template-columns: 1fr; }
-    .launch textarea { min-height: 64px; }
-    .launch .primary { min-height: var(--control); }
     .team.detail { grid-template-columns: 1fr; }
     .team.detail .members { display: none; }
     .back { display: inline-flex; }

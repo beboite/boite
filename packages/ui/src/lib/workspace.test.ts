@@ -77,6 +77,43 @@ test('an old endpoint connection cannot update a newer workspace lifecycle', asy
   expect(endpoints.readEnvironments().some((saved) => saved.url === endpoint.url)).toBe(false);
 });
 
+test('a pairing link replaces the key of a machine that never stopped connecting', async () => {
+  const { w, a } = await setup();
+  const url = 'https://core.test';
+  a.endpointUrl = url;
+  w.machines = [{ id: url, label: 'This PC', store: a }];
+  const connect = vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    this.connection = 'ready';
+  });
+  // Answering: the link is refused and the working connection is left alone.
+  expect(await w.pair(`${url}/?grant=g1`, '')).toBe(false);
+  expect(w.error).toBe('This machine is already connected.');
+  expect(connect).not.toHaveBeenCalled();
+  // Retrying a refused key forever, as a phone whose session is gone does.
+  a.connection = 'connecting';
+  expect(await w.pair(`${url}/?grant=g2`, '')).toBe(true);
+  expect(connect).toHaveBeenCalledWith({ url, grant: 'g2', token: '' });
+  expect(w.error).toBeNull();
+  expect(w.machines).toHaveLength(1);
+});
+
+test('a second machine never takes a name already listed, and a link says which machine it reaches', async () => {
+  const { w } = await setup();
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    this.connection = 'ready';
+  });
+  // Typed after a machine already listed: the address tells them apart.
+  expect(await w.pair('https://other.test/?grant=g1', 'Local')).toBe(true);
+  expect(w.machines.map((machine) => machine.label)).toEqual(['Local', 'Remote', 'Local (other.test)']);
+  expect(endpoints.readEnvironments().find((saved) => saved.url === 'https://other.test')).toBeUndefined();
+  // Renamed onto another machine's name: same rule, and the first holder keeps its own.
+  w.customize('remote', 'local');
+  expect(w.machines.map((machine) => machine.label)).toEqual(['Local', 'local (remote)', 'Local (other.test)']);
+  expect(w.linkTarget('https://other.test/?grant=g2')).toMatchObject({ host: 'other.test', machine: { label: 'Local (other.test)' } });
+  expect(w.linkTarget('https://new.test:8443/?grant=g3')).toEqual({ host: 'new.test:8443', machine: null });
+  expect(w.linkTarget('not a link')).toBeNull();
+});
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt++) {
     if (check()) return;

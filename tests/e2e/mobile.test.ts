@@ -156,18 +156,36 @@ test('returning to a long conversation preserves the reading position', async ()
 }, 15_000);
 
 test('leaving a long conversation right after a scroll returns to that scroll', async () => {
-  // The same round trip as above, without the capture between the scroll and
-  // the tap: an anchor read later than the scroll restored the next message.
+  // Hold the new rows' measurements until navigation starts, as a loaded
+  // runner does. Their estimates must not replace the message being read.
   const origin = await page.evaluate<string>('location.origin');
-  await page.navigate(`${origin}/?fake=1&open=recent&long=1`);
+  const { identifier } = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const Native = ResizeObserver;
+    globalThis.__pendingMeasurements = [];
+    globalThis.ResizeObserver = class extends Native {
+      constructor(callback) { super((entries, observer) => {
+        if (globalThis.__holdMeasurements) __pendingMeasurements.push(() => callback(entries, observer));
+        else callback(entries, observer);
+      }); }
+    };
+  })()` }) as { identifier: string };
+  try { await page.navigate(`${origin}/?fake=1&open=recent&long=1`); }
+  finally { await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }); }
   await page.waitFor(`document.querySelector('[data-testid=thread-title]')?.textContent.includes('Four hundred')`);
-  await page.evaluate(`(() => { const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
+  await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
+  await page.evaluate(`(() => { globalThis.__holdMeasurements = true; const t=document.querySelector('[data-testid=timeline]'); t.scrollTop = t.scrollHeight - t.clientHeight - 1200; t.dispatchEvent(new Event('scroll')); })()`);
   await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   const visibleAnchor = `(() => { const t=document.querySelector('[data-testid=timeline]'); const top=t.getBoundingClientRect().top; const m=[...t.querySelectorAll('[data-mid]')].find(m=>m.getBoundingClientRect().bottom>top); return {id:m.dataset.mid,offset:m.getBoundingClientRect().top-top}; })()`;
   const anchor = await page.evaluate<{ id: string; offset: number }>(visibleAnchor);
   await page.click('[data-testid=mobile-conversations]');
+  await page.evaluate(`(() => { globalThis.__holdMeasurements = false; globalThis.__pendingMeasurements.splice(0).forEach(deliver => deliver()); })()`);
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))');
   await page.click('[data-testid=mobile-list] .thread:not([data-testid=mobile-thread-t-long])');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);
+  const savedAnchor = await page.evaluate<{ id: string; offset: number }>(`globalThis.__boiteTest.workspace.active.readingPositions.get('t-long').anchor`);
+  expect(savedAnchor.id).toBe(anchor.id);
+  expect(Math.abs(savedAnchor.offset - anchor.offset)).toBeLessThan(1);
   await page.click('[data-testid=mobile-conversations]');
   await page.click('[data-testid=mobile-thread-t-long]');
   await page.waitFor(`!document.querySelector('[data-testid=mobile-list]')`);

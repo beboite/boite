@@ -25,6 +25,8 @@
   let settingsId = $state<string | null>(null);
   const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   let linkInput = $state<HTMLInputElement | null>(null);
+  /** Said before connecting: the link decides the machine, the name only labels it. */
+  let target = $derived(workspace.linkTarget(link));
   let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
   const sync = workspace.settingsSync;
   const canSync = (machine: Machine): boolean => source !== null && source !== machine
@@ -111,6 +113,11 @@
               autocomplete="off"
               spellcheck="false"
             /></label>
+          {#if target}
+            <p class="link-target" data-testid="machine-link-target">{target.machine
+              ? fill(target.machine.store.connection === 'ready' ? strings.machines.linkConnected : strings.machines.linkReplaces, { host: target.host, machine: target.machine.label })
+              : fill(strings.machines.linkReaches, { host: target.host })}</p>
+          {/if}
           <label>{strings.machines.labelOptional}<input bind:value={label} data-testid="machine-name" autocomplete="off" placeholder={strings.machines.labelPlaceholder} /></label>
           <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}
             ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.connect}</button
@@ -195,17 +202,17 @@
           </button>
         {/if}
         {#if sync.reports[machine.id]}
-
           {@const done = sync.reports[machine.id]!}
-          <div class="sync-report" role="status" data-testid="machine-sync-report">
-            <p>{fill(strings.machines.synced, { source: done.source })}</p>
-            {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
-            {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
-            {#if done.report.providers.length > 0}
-              <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
-              <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
-            {/if}
-          </div>
+          {#if done.report.keybindings === null || done.report.brain === 'absent' || done.report.providers.length > 0}
+            <div class="sync-report" role="status" data-testid="machine-sync-report">
+              {#if done.report.keybindings === null}<p>{strings.machines.syncKeysAbsent}</p>{/if}
+              {#if done.report.brain === 'absent'}<p>{strings.machines.syncBrainAbsent}</p>{/if}
+              {#if done.report.providers.length > 0}
+                <p>{fill(strings.machines.syncProviders, { providers: done.report.providers.map((row) => row.name).join(', ') })}</p>
+                <button class="small" data-testid="machine-sync-providers" onclick={() => void openProviders(machine)}>{strings.machines.syncOpenProviders}</button>
+              {/if}
+            </div>
+          {/if}
         {/if}
         {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
         {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
@@ -288,6 +295,12 @@
     margin-top: 6px;
   }
 
+  .link-target {
+    margin: -4px 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-muted-foreground);
+    overflow-wrap: anywhere;
+  }
   .machines {
     display: grid;
     gap: 8px;

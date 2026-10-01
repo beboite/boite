@@ -5,7 +5,11 @@
   import { dockRoom, questionDock } from '../lib/question-dock.svelte';
   import QuestionCard from './QuestionCard.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, reserveInComposer = false, onroom }: {
+    store: Store;
+    reserveInComposer?: boolean;
+    onroom?: (height: number) => void;
+  } = $props();
   let activity = $derived(store.openThread?.activity);
   let expanded = $state(false);
   let saving = $state(false);
@@ -58,12 +62,14 @@
   let history = $derived([...(loop?.history ?? [])].reverse());
   const detailsId = $props.id();
 
-  // Task details overlay the reading position; folded rows and questions reserve room.
+  // Task details overlay the timeline. Queued prompts reserve the full dock
+  // above the input so neither tasks nor questions cover them.
   let height = $state(0);
   let readingHeight = $state(0);
   $effect(() => {
-    dockRoom.height = visible ? readingHeight : 0;
-    dockRoom.clearance = visible ? height : 0;
+    onroom?.(visible ? height : 0);
+    dockRoom.height = visible && !reserveInComposer ? readingHeight : 0;
+    dockRoom.clearance = visible && !reserveInComposer ? height : 0;
   });
   $effect(() => () => {
     dockRoom.height = 0;
@@ -235,7 +241,7 @@
   /* Four pixels of card around every line: the rows and the toggle carry their
      own inline padding, so a hover fill sits inset by the same four pixels on
      every side and the air above the first line equals the air under the last. */
-  .activity { position: absolute; bottom: calc(100% - 4px); inset-inline: 0; z-index: 5; width: min(calc(100% - 40px), var(--content)); margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
+  .activity { position: absolute; bottom: calc(100% + 4px); inset-inline: 0; z-index: 5; width: 100%; margin-inline: auto; max-height: 45vh; overflow-y: auto; padding: 4px; border: 1px solid var(--color-border); border-top-color: var(--color-edge); border-radius: var(--radius-lg); background: var(--composer-glaze) var(--color-activity-surface); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); box-shadow: var(--shadow-e1); font-size: var(--text-sm); transition: opacity var(--dur-3), transform var(--dur-3); }
   .activity.hidden { opacity: 0; transform: translateY(8px); pointer-events: none; }
   .activity-row { display: flex; align-items: center; gap: 8px; min-height: var(--control); min-width: 0; padding: 0 2px 0 8px; }
   /* The questions sit above the goal, the loop and the tasks, a hairline between. */
@@ -281,6 +287,6 @@
   .history p { margin: 4px 0 0; white-space: pre-wrap; }
   .cadence { margin: 8px 8px 0; }
   .error { color: var(--color-danger); margin: 2px 8px 6px; overflow-wrap: anywhere; }
-  @media (max-width: 720px) { .activity { width: min(calc(100% - 20px), var(--content)); } .activity-row { gap: 6px; } }
+  @media (max-width: 720px) { .activity-row { gap: 6px; } }
   @media (prefers-reduced-motion: reduce) { .activity, .task-disclosure, progress::-webkit-progress-value, .toggle-line > :global(svg:last-child) { transition: none; } }
 </style>

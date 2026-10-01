@@ -65,7 +65,8 @@ export class ArtifactPreviews {
         try {
           // Check both roots on every request: replacing a folder by a junction cannot widen the preview.
           const target = existingInside(root, relative, 'file', 'preview asset');
-          existingInside(thread.cwd, target.absolute, 'file', 'preview asset');
+          // macOS /var aliases and linked project folders must compare canonical paths.
+          existingInside(realpathSync(thread.cwd), target.absolute, 'file', 'preview asset');
           if (realpathSync(root) !== root || target.stats.size > MAX_ASSET_BYTES) return notFound();
           const file = Bun.file(target.absolute);
           return fileResponse(file, request.headers.get('range'), {

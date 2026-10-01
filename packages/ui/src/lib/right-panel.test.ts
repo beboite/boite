@@ -5,6 +5,7 @@ import {
   PANEL_DEFAULT,
   PANEL_MIN,
   PANEL_STORAGE_KEY,
+  PANEL_VERSION,
   PANEL_WIDTH_KEY,
   RightPanelStore,
   ZOOM_DEFAULT,
@@ -23,7 +24,7 @@ describe('the right panel', () => {
     window.localStorage.clear();
   });
 
-  test('one workflow tab follows the run it was last pointed at, across a reload', () => {
+  test('a workflow run opens in the subagents tab, which follows the run it was last pointed at across a reload', () => {
     const { bound } = panel();
 
     bound.showSurface({ kind: 'workflow', runId: 'wfr_1' });
@@ -31,8 +32,17 @@ describe('the right panel', () => {
     bound.openWorkflow();
 
     expect(bound.surfaces).toHaveLength(1);
-    expect(bound.active).toMatchObject({ kind: 'workflow', runId: 'wfr_2' });
-    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'workflow', runId: 'wfr_2' });
+    expect(bound.active).toMatchObject({ kind: 'agents', runId: 'wfr_2' });
+    expect(new RightPanelStore().for('t-1').active).toMatchObject({ kind: 'agents', runId: 'wfr_2' });
+  });
+
+  test('a layout stored with a workflow tab of its own comes back as the subagents tab', () => {
+    window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify({ version: PANEL_VERSION, threads: { 't-1': { isOpen: true, activeSurfaceId: 'workflow', surfaces: [{ id: 'agents', kind: 'agents' }, { id: 'workflow', kind: 'workflow', runId: 'wfr_1' }, { id: 'trace', kind: 'trace' }] } } }));
+
+    const bound = new RightPanelStore().for('t-1');
+
+    expect(bound.surfaces.map((surface) => surface.kind)).toEqual(['agents', 'trace']);
+    expect(bound.active?.kind).toBe('agents');
   });
 
   test('opens the panel on the surface it just made', () => {

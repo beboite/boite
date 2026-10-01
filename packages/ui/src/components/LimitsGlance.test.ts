@@ -70,5 +70,5 @@ test('the glance shows fallback allowances without expanding and dates cached Mu
   expect(document.body.textContent).toContain('Observed');
   expect(document.querySelector('[data-testid=quota-banked-resets]')).toBeNull();
   expect(document.body.textContent).toContain('0.04 credits');
-  expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude"]')).not.toBeNull();
+  expect(document.querySelector('[aria-expanded="false"][aria-controls="usage-claude-account"]')).not.toBeNull();
 });
