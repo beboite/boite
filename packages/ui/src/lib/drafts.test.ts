@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { tick } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { FakeClient } from './fake-client';
 import { Store } from './store.svelte';
 import { strings } from './strings';
+import { writeDraftJournal } from './draft-journal';
+
+// jsdom has no IndexedDB: the durable journal is a recorder here, and reads come back empty.
+vi.mock('./draft-journal', () => ({ readDraftJournal: vi.fn(async () => null), writeDraftJournal: vi.fn(async () => {}) }));
 
 const stores: Store[] = [];
 async function ready(machine = '', local = false) {
@@ -15,7 +19,7 @@ async function ready(machine = '', local = false) {
   return store;
 }
 beforeEach(() => localStorage.clear());
-afterEach(() => { for (const store of stores.splice(0)) { store.client?.close(); store.detach(); } });
+afterEach(() => { vi.useRealTimers(); for (const store of stores.splice(0)) { store.client?.close(); store.detach(); } });
 
 test('unsent text survives a new Store without a clean shutdown and stays machine-scoped', async () => {
   const first = await ready('one');
@@ -98,4 +102,38 @@ test('new conversation drafts retain their project and text after navigation and
   expect(restored.composerStates.draft?.text).toBe('First project prompt');
   restored.startDraft(b!.id);
   expect(restored.composerStates.draft?.text).toBe('Second project prompt');
+});
+
+test('typing reaches the durable journal once it pauses, a new file at once', async () => {
+  const store = await ready('durable');
+  const writes = vi.mocked(writeDraftJournal);
+  writes.mockClear();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  for (const text of ['K', 'Ke', 'Kee', 'Keep']) {
+    store.editComposerText('t-trace', text);
+    flushSync();
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  // Every key is in the synchronous backup already; none of them cloned the journal into IndexedDB.
+  expect(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('boite.unsent'))!)!).inputs['t-trace'].text).toBe('Keep');
+  expect(writes).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(writes).toHaveBeenCalledOnce();
+  expect((writes.mock.lastCall![1] as { inputs: Record<string, { text: string }> }).inputs['t-trace']!.text).toBe('Keep');
+
+  // A picture exists nowhere else yet: its bytes go down without waiting for a pause.
+  writes.mockClear();
+  store.composerStates['t-trace']!.attachments = [{ kind: 'image', mimeType: 'image/png', name: 'shot.png', data: 'aGVsbG8=' }];
+  flushSync();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(writes).toHaveBeenCalledOnce();
+
+  // Typing that never pauses still reaches it within the longest wait.
+  writes.mockClear();
+  for (let at = 0; at < 60; at++) {
+    store.editComposerText('t-trace', `Keep ${'x'.repeat(at)}`);
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  expect(writes.mock.calls.length).toBeGreaterThanOrEqual(1);
+  expect(writes.mock.calls.length).toBeLessThanOrEqual(2);
 });

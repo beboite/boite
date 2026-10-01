@@ -287,13 +287,36 @@ compositing, the case a WebView2 without acceleration meets:
 - Scrolling reads layout as little as it can: the outline rail follows once
   per frame, and a message's height comes from its `ResizeObserver` entry. A
   wheel up a 400-message thread went from 340 to 310 ms of main thread per
-  1,000 px. The reading anchor is still read right after each scroll event:
-  read a frame or a timer later, a tap that left the thread right after a
-  scroll brought it back on the next message.
+  1,000 px. The reading anchor is still read right after each scroll event,
+  once the window has rendered: read before that render, or a frame or a timer
+  later, a navigation that left the thread right after a scroll brought it
+  back on the wrong message.
+- What a scroll changes eases only a transform or opacity. The outline rail's
+  active bar eased its width, and the active prompt changes every few lines:
+  that dirtied layout before every scroll event, and a wheel up the
+  400-message thread ran 333 layouts in about 180 frames. Easing a transform
+  took it to 153. The rail keys its two groups by side, so the prompts a
+  scroll passes rewrite them instead of rebuilding them.
+- A message mounts cheaply, because a scroll mounts one every few lines.
+  Lucide icons draw through `LucideGlyph.svelte`, which clones shapes built
+  once per icon instead of spreading attributes on each one; date formatters
+  are built once per language; a finished paragraph's markup is kept, up to
+  four million characters. In a CPU profile of the same wheel, mounting the
+  user messages took 71 ms instead of 139.
+- A keystroke lays the page out once. The composer sizes itself with
+  `field-sizing: content` where the engine has it; measuring its own height
+  inside the input event made three layouts per key. The IndexedDB draft
+  journal waits for a pause in typing: writing it on every key cloned a draft
+  picture each time, and at CPU x4 a key with a 1.5 MB picture took 40 ms to
+  reach the screen instead of 19.
+- A conversation at its bottom follows its answer from its `ResizeObserver`,
+  after layout and before paint, so a paragraph lands already in view. Caught
+  up ten times a second, it was painted up to 36 px below the fold first.
 
 `packages/ui/src/render-cost.test.ts` fails on a blur outside the named
 surfaces or on any `inset: 0` rule, on an endless animation of anything else,
-and on a `:has()` on `html`, `body`, `#app`, `.app` or `.body`.
+on a `:has()` on `html`, `body`, `#app`, `.app` or `.body`, and on an outline
+bar that eases its width.
 
 ## Benches
 
@@ -304,6 +327,7 @@ bun run bench/bandwidth.ts --core <other checkout>/packages/core/src/main.ts --s
 bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
 bun bench/ui-frames.ts --noblur                # fps and main thread per UI scenario, software compositing
 bun bench/ui-frames.ts --ui <other checkout>/packages/ui --cpu 4 --size 1920x1080@1.5
+bun bench/ui-frames.ts --trace --only "typing,long thread scroll"   # layouts per window, and how many a script forced
 ```
 
 `bench/bandwidth.ts` puts a TCP relay between the client and the core, counts
@@ -317,11 +341,15 @@ WebView2 profile, and reads the page's own timings over the debugging port.
 
 `bench/ui-frames.ts` builds the fake-client UI in a child process, serves it,
 and plays each scenario in headless Chrome without a GPU: frames drawn, long
-tasks and main-thread time, per 1,000 px for the scroll scenarios. `--noblur`
-repeats each one with backdrop filters off, `--ui` measures another checkout.
+tasks and main-thread time, per 1,000 px for the scroll scenarios, and each
+key's latency for the typing ones. `--noblur` repeats each one with backdrop
+filters off, `--ui` measures another checkout. `--trace` counts the layouts of
+each window and those a script forced, numbers that hold on a busy machine;
+`--profile <dir>` writes a CPU profile per scenario.
 
 Results: [bench/results/2026-09-19-wire-and-startup.md](../bench/results/2026-09-19-wire-and-startup.md),
-[bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md).
+[bench/results/2026-09-30-ui-frames.md](../bench/results/2026-09-30-ui-frames.md),
+[bench/results/2026-09-30-typing-and-scroll.md](../bench/results/2026-09-30-typing-and-scroll.md).
 
 ## The Windows sidecar is the signed runtime
 

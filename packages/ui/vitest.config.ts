@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { lucideGlyph } from './icon-plugin.ts';
 
 /**
  * Vitest 5 runs on the same Vite 8 the app builds on, so the tests use the real
@@ -8,7 +9,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
  * no longer ships.
  */
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [lucideGlyph(), svelte()],
   resolve: { conditions: ['browser'] },
   test: {
     maxWorkers: 8,

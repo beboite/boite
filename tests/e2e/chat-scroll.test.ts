@@ -211,3 +211,45 @@ for (const phone of [false, true]) {
     expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   }, 30_000);
 }
+
+test('a pinned conversation follows its answer on every frame, and a wheel turned up leaves it', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 844, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url.replace('&long=1', '&stream=tokens'));
+  await page.waitFor('window.__boiteTest?.workspace.active.booted');
+  // The recent thread already runs a turn; the trace thread is at rest and answers at once.
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-trace')`);
+  await page.waitFor(`document.querySelector('[data-testid=composer-input]') && document.querySelector('${timeline}') && !window.__boiteTest.workspace.active.busy`);
+  await settled();
+  // The fake agent reasons over the prompt, then echoes it back sixteen characters a delta.
+  // A streaming answer shows whole paragraphs, so the echo is made of short ones.
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid=composer-input]');
+    input.value = 'A paragraph long enough to wrap across the conversation column, sent back word for word.\\n\\n'.repeat(24);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await page.click('[data-testid=composer-send]');
+  await page.waitFor(`document.querySelectorAll('${timeline} .prose.live .paragraph').length >= 2`, 30_000);
+  // Read after each layout, once the list's own observer has run: the distance from the bottom the frame paints.
+  const gaps = await page.evaluate<number[]>(`new Promise((done) => {
+    const box = document.querySelector('${timeline}');
+    const gaps = [];
+    const watch = new ResizeObserver(() => gaps.push(box.scrollHeight - box.clientHeight - box.scrollTop));
+    watch.observe(document.querySelector('${timeline} .prose.live'));
+    setTimeout(() => { watch.disconnect(); done(gaps); }, 1000);
+  })`);
+  expect(gaps.length).toBeGreaterThan(5);
+  // Before, the list caught up ten times a second and painted the new lines below the fold in between.
+  expect(Math.max(...gaps)).toBeLessThanOrEqual(1);
+
+  const box = await page.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('${timeline}').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -120 });
+  await page.waitFor(`document.querySelector('${jump}')`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 300))');
+  expect(await page.evaluate<boolean>(`!!document.querySelector('${timeline} .prose.live')`)).toBe(true);
+  const left = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+  await page.evaluate('new Promise((done) => setTimeout(done, 400))');
+  // The answer keeps growing below; the text being read stays where the wheel put it.
+  expect(Math.abs((await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`)) - left)).toBeLessThanOrEqual(1);
+  await page.click(jump);
+  await page.waitFor(`!document.querySelector('${jump}') && (() => { const t = document.querySelector('${timeline}'); return t.scrollHeight - t.clientHeight - t.scrollTop < 2; })()`);
+}, 45_000);
