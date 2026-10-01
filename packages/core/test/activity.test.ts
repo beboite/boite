@@ -305,6 +305,9 @@ test('goal messages expose a display command while the driver receives its instr
   expect(received).toContain('[BOITE_GOAL_COMPLETE]');
   expect(received).toContain('Codex: update_plan');
   expect(received).toContain('Boite displays those task updates');
+  expect(received).toContain('Task tracking is optional.');
+  expect(received).toContain('Use a task list only when laying out steps helps you and the user follow the work.');
+  expect(received).not.toContain('Create the plan before working');
   expect(thread.messages.find(m => m.role === 'user')?.parts[0]).toMatchObject({ text: '/goal Check two tasks', activity: { kind: 'goal', iteration: 1 } });
 });
 
