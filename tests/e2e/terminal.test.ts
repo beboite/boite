@@ -45,9 +45,26 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
         return result;
       };
       globalThis.__chatBeforeTerminal = document.querySelector('[data-testid=chat]').getBoundingClientRect().height;
+      // Observe the frame as it opens, before the lazy terminal can finish loading.
+      globalThis.__terminalUnfold = new Promise(resolve => {
+        const opening = event => {
+          if (event.propertyName !== 'height' || event.target.dataset.testid !== 'terminal-drawer') return;
+          document.removeEventListener('transitionrun', opening, true);
+          const drawer = event.target;
+          const transition = drawer.getAnimations().find(animation => animation.transitionProperty === 'height');
+          transition.pause();
+          transition.currentTime = 150;
+          resolve();
+        };
+        document.addEventListener('transitionrun', opening, true);
+      });
     })()`);
+    // A cold chunk can arrive after the one-second frame transition has ended.
+    await page.send('Network.emulateNetworkConditions', { offline: false, latency: 1_400, downloadThroughput: -1, uploadThroughput: -1 });
     await chord(page, "j", "KeyJ", 74);
+    await page.evaluate('globalThis.__terminalUnfold');
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm")');
+    await page.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     expect(await page.evaluate('globalThis.__terminalStarts')).toBe(1);
     const unfolding = await page.evaluate<{ before: number; during: number; total: number; chat: number }>(`(() => {
       const drawer = document.querySelector('[data-testid=terminal-drawer]');
