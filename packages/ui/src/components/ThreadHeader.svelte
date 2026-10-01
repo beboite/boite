@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
-  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, SquareTerminal, UsersRound } from '@lucide/svelte';
+  import { ArrowLeft, ChevronDown, FolderInput, GitBranch, Network, PanelRight, SquareTerminal } from '@lucide/svelte';
   import { focusOnMount } from '../lib/actions';
   import { contextMenu } from '../lib/context-menu.svelte';
   import { archiveThread } from '../lib/archive';
@@ -79,17 +79,6 @@
 
   let agentsOn = $derived(store.panelOpen && store.panel.active?.kind === 'agents');
 
-  /**
-   * The Team button is for a conversation that has one: delegation switched on,
-   * a profile set up, an agent launched, or this thread being one of them. On
-   * every other thread it was a word with no referent, so the way in is the
-   * title's menu until then.
-   */
-  let hasTeam = $derived.by(() => {
-    if (agentsOn || thread?.parentThreadId) return true;
-    const team = store.delegation;
-    return team !== null && (team.config.enabled || team.config.profiles.length > 0 || team.agents.length > 0 || (team.nativeAgents?.length ?? 0) > 0);
-  });
 
   /**
    * A phone's header has room for the title or for every toggle, not both: the
@@ -98,9 +87,7 @@
   let phoneItems = $derived.by((): MenuItem[] => {
     if (!thread) return [];
     const toggles: MenuItem[] = [];
-    // Without a team, the same entry the desktop title menu offers to start one.
-    if (!hasTeam) toggles.push({ id: 'agents', label: strings.delegation.openTeam });
-    else if (work.shows('header.agents')) toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
+    toggles.push({ id: 'agents', label: strings.delegation.heading, active: agentsOn });
     if (store.owner && work.shows('header.terminal')) toggles.push({ id: 'terminal', label: strings.terminal.title, active: store.terminalShown(thread.id) });
     return toggles.length ? [...toggles, separator('sep-toggles'), ...titleItems] : titleItems;
   });
@@ -125,7 +112,8 @@
     else if (action === 'delete') void deleteThread(store, open);
   }
 
-  let desktopItems = $derived(hasTeam ? titleItems : [{ id: 'agents', label: strings.delegation.openTeam }, separator('sep-team'), ...titleItems]);
+  // Subagents has no header button: the title's menu and the side panel open it.
+  let desktopItems = $derived([{ id: 'agents', label: strings.delegation.heading, active: agentsOn }, separator('sep-team'), ...titleItems]);
 
   function openTitleMenu(event: MouseEvent) {
     if (!store.openThread) return;
@@ -191,22 +179,6 @@
           <GitBranch size={13} strokeWidth={1.75} />
           {thread.branch}
         </span>
-      {/if}
-      {#if thread && hasTeam && work.shows('header.agents')}
-        <button
-          type="button"
-          class="ghost trace in-title-menu"
-          class:on={agentsOn}
-          title={strings.delegation.panelHint}
-          aria-label={strings.delegation.heading}
-          aria-pressed={agentsOn}
-          data-testid="agents-toggle"
-          onclick={() => store.panel.toggleKind('agents')}
-          oncontextmenu={(event) => controlMenu(event, store, 'header.agents')}
-        >
-          <UsersRound size={16} strokeWidth={1.75} />
-          <span class="label">{strings.delegation.heading}</span>
-        </button>
       {/if}
       <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
       {#if thread && store.owner}
@@ -331,7 +303,6 @@
     .pending { flex: none; min-width: var(--touch-target); justify-content: center; }
     .pending-text { display: none; }
     .trace { padding: 0; min-width: var(--touch-target); justify-content: center; }
-    .trace .label { display: none; }
     /* The title's sheet holds these on a phone. */
     .in-title-menu { display: none; }
     .rename { width: 100%; }

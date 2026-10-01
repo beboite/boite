@@ -1,5 +1,5 @@
 import type { AgentDraft, AgentEntities, AgentEntityKind, AgentRecord, AgentSave, AgentWork, AgentsRpcMethods, AgentsSnapshot, RpcParams, AgentProfile, Turn } from '@boite/contracts';
-import { RpcErrorCode, DEFAULT_DELEGATION_CONFIG, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
+import { RpcErrorCode, AGENT_HISTORY_PAGE, AGENT_HISTORY_MAX_PAGE } from '@boite/contracts';
 import type { AgentAccountGrant, AgentBrain, AgentRuntimeConfig, AgentSchedule, AgentHistoryCursor, AgentHistoryKind, AgentsHistoryPage, AgentRun, AgentRunSummary, AgentScope } from '@boite/contracts';
 import { RpcFailure } from './client';
 
@@ -24,7 +24,7 @@ export class FakeAgents {
   private grants: AgentAccountGrant[] = [];
   private runtime(id: string): AgentRuntimeConfig {
     const agent = this.get('profile', id);
-    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: DEFAULT_DELEGATION_CONFIG, compactAfterTurns: 12, maxRunMinutes: 10 });
+    return structuredClone(this.configs.get(id) ?? { defaultRoute: agent.selection, allowedRoutes: [{ ...agent.selection, model: agent.selection.model ?? 'default', id: 'default', name: 'Default' }], subagents: { enabled: false, paused: false, profiles: [] }, compactAfterTurns: 12, maxRunMinutes: 10 });
   }
   private closed = false;
   private pumping = false;

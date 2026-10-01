@@ -8,6 +8,8 @@ import { DEFAULT_WORKFLOW_LIMITS, WORKFLOW_LIMITS } from './workflows';
 
 const STEP_ID = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
+/** `CONVERSATION_PROFILE_ID` of the contract index, repeated here: this module imports nothing at runtime but workflow limits. */
+const CONVERSATION_PROFILE = 'conversation';
 const RESERVED = new Set(['item', 'index', 'steps']);
 // One greedy class and the spaces trimmed after: `\s*` around a lazy group backtracks quadratically on a long run of spaces.
 const TEMPLATE = /\{\{([^{}]*)\}\}/g;
@@ -82,7 +84,7 @@ export interface CheckedStep extends WorkflowStepPlan {
 }
 
 export interface CheckOptions {
-  /** Owner-approved profile ids. */
+  /** The thread's delegation profile ids. A step may name one; without, it runs on the conversation's model. */
   profiles: string[];
   /** Step ids already in the run, for `extend`, with their dependencies. */
   existing?: { id: string; after: string[] }[];
@@ -95,7 +97,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
   const ids = new Set(existing.map(s => s.id));
   const declared = value.map((raw, i) => {
     const at = `${field}[${i}]`;
-    if (!isRecord(raw)) fail(`${at}: expected an object with id, profile and task`);
+    if (!isRecord(raw)) fail(`${at}: expected an object with id and task`);
     const id = raw.id;
     if (typeof id !== 'string' || !STEP_ID.test(id)) fail(`${at}.id: expected a letter then up to 31 letters, digits, _ or -`);
     if (RESERVED.has(id)) fail(`${at}.id: "${id}" is reserved`);
@@ -104,8 +106,8 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     return { raw, at, id };
   });
   const steps = declared.map(({ raw, at, id }): CheckedStep => {
-    const profile = text(raw.profile, `${at}.profile`, 64);
-    if (!options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not an approved profile; expected one of ${options.profiles.join(', ') || '(none: the owner has configured no profile)'}`);
+    const profile = raw.profile === undefined || raw.profile === null ? undefined : text(raw.profile, `${at}.profile`, 64);
+    if (profile !== undefined && profile !== CONVERSATION_PROFILE && !options.profiles.includes(profile)) fail(`${at}.profile: "${profile}" is not a profile of this thread; ${options.profiles.length ? `expected one of ${options.profiles.join(', ')}, or` : 'none is configured:'} leave profile out to run the step on the conversation's model`);
     const task = text(raw.task, `${at}.task`, WORKFLOW_LIMITS.taskChars);
     const title = raw.title === undefined ? undefined : text(raw.title, `${at}.title`, 80);
     const deps = new Set<string>();
@@ -133,7 +135,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (when) needStep(when.path.split('.'), `${at}.when.path`, false);
     for (const ref of templateRefs(task, `${at}.task`)) needStep(ref, `${at}.task`, forEach !== undefined);
     const output = raw.output === undefined ? undefined : checkShapeDefinition(raw.output, `${at}.output`);
-    return { id, profile, task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
+    return { id, ...(profile && profile !== CONVERSATION_PROFILE ? { profile } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);

@@ -1,29 +1,33 @@
-# Agent delegation
+# Subagents
 
-Open Team in a conversation to configure delegation. Add named profiles with
-the same harness, account, model and reasoning picker used by the composer.
-Enable delegation when the profiles are ready. The main agent can
-then delegate through the `boite` CLI, and the owner can launch a brief from
-the panel.
+Delegation is on in every conversation, with nothing to set up. The main agent
+delegates through the `boite` CLI and the owner can launch a brief from the
+Subagents tab of the side panel. The built-in profile `conversation` is the conversation's own
+harness, account, model and effort. Open Subagents > Settings to add named profiles for other
+models, with the same picker the composer uses, or to turn delegation off for
+that conversation.
 
 Every child is a normal Boite conversation with its own provider session,
 permissions, process trace and usage. It inherits the parent's project,
 checkout and permission mode at creation. Profiles can use any installed,
 runnable provider and account. Native provider subagents are separate from
-these Boite-managed teams, and appear in their own section of Team. The global
+these Boite subagents, and appear in their own section of the tab. The global
 Persistent agents page holds agents with their own roles, memory and missions;
 it is not the list of children of a conversation. Enable it in Settings >
 Experiments to reveal its bottom-left launcher, which opens a dedicated
 interface. It adds no conversation panel or mobile navigation tab.
 
-Team shows whether Boite workflows are disabled, enabled or paused before the
-settings are expanded. Its agent, turn and token totals count only Boite
+Subagents lists the Boite subagents first, with a way to launch one, then the
+provider's own, then Settings. Its first block says whether Boite subagents are
+on, off or paused. The tab opens from the side panel and from the title's menu;
+the header has no button for it. Workflows do not depend on it: they run with delegation
+off, and only a paused team holds them. Its agent, turn and token totals count only Boite
 delegation. Communication between conversations is a separate setting; its
 Off label does not disable provider-native subagents.
 
 ## Native provider subagents
 
-Team shows native agents' reported names, tasks, models, status and bounded
+Subagents shows native agents' reported names, tasks, models, status and bounded
 results. Running agents also appear below the chat. Ask the main agent to steer
 or stop them: these records are not Boite conversations. Explicit provider IDs
 join updates across turns; inferred tool IDs are scoped to a turn so repeated
@@ -42,7 +46,7 @@ A provider that sends only text or shell output exposes no native agent list.
 A successful spawn call is not a completed child. Missing individual states,
 background launch acknowledgements, and unfinished children after a parent
 turn ends show Status unknown. A live background-agent list can still confirm
-that a child is running. Team retains reported results across message paging
+that a child is running. The tab retains reported results across message paging
 and restart. Native events discarded by an older Boite version cannot be
 reconstructed from its journal.
 
@@ -73,8 +77,11 @@ existing child to reuse its session.
 
 ## Controls and usage
 
-Delegation starts disabled. Only the owner can configure profiles or resume
-a paused team. A paired phone can inspect, message and stop an enabled team.
+Delegation starts enabled, on the `conversation` profile alone. The agent is
+told about it when the request is about handing work out (delegation,
+subagents, parallel work, a workflow), and on every turn once the owner added a
+profile. Persistent agents keep their own setting, which starts off. Only the
+owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect, message and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
 turns or turn duration. Previously saved quotas are ignored. Each conversation
@@ -95,21 +102,26 @@ unfinished turn and reads the team and coordination views again, since events
 sent while the socket was down reach no client.
 
 Stop all pauses the team and cancels queued and running children. Stopping or
-archiving the parent does the same. Parent failure and core restart pause the
-team. Resume is an owner action. An unsuccessful child is not retried by Boite.
+archiving the parent does the same, and so does a parent failure. A team with
+no child is never paused that way: there is nothing to stop. A core restart
+pauses only a team with a message still to deliver or a child turn it cut
+short. Resume is an owner action. An unsuccessful child is not retried by Boite.
 
 ## Workflows
 
 A [workflow](workflows.md) is a plan of delegated steps the core runs by
 itself: dependencies, one step per item of an earlier step's output, and steps
-that run only when a condition holds. Its steps are ordinary children on this
-team's profiles. The plan controls step concurrency. Workflow steps are not
+that run only when a condition holds. Its steps are ordinary children on the
+conversation's model, or on one of this team's profiles when a step names it,
+so a workflow needs neither a profile nor an enabled team. The plan controls
+step concurrency. Workflow steps are not
 listed among the team's agents.
 
 ## Agent commands
 
 ```sh
 boite delegate profiles
+boite delegate spawn conversation "List the parser's entry points. Do not edit files."
 boite delegate spawn reviewer "Review the parser changes. Do not edit files."
 boite delegate list
 boite delegate send <child-thread-id> "Focus on malformed inputs."

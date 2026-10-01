@@ -689,7 +689,8 @@ export class ThreadStore {
   stopTurn(threadId: ThreadId): boolean {
     this.require(threadId);
     this.core.coordination.pause(threadId);
-    const childrenStopped = this.core.delegation.stop(threadId) + this.core.workflows.stopRoot(threadId, 'Stopped with its thread');
+    // Runs first: once they are stopped, a team with no child has nothing left to pause.
+    const childrenStopped = this.core.workflows.stopRoot(threadId, 'Stopped with its thread') + this.core.delegation.stop(threadId);
     if (this.core.scheduler.stop(threadId) || childrenStopped > 0) return true;
     // No turn left, but the agent still runs work in the background: Stop ends
     // the agent process, and that work with it.

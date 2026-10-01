@@ -9,29 +9,31 @@ import type { WorkflowNode, WorkflowPlan, WorkflowRun, WorkflowStepPlan } from '
 import type { CoreClient } from './client.ts';
 
 export const WORKFLOW_HELP = `A workflow is a JSON plan the core runs for you: every step is a child
-agent on an approved profile (boite delegate profiles), steps run as soon as
-the steps they depend on end, and the results come back to you in one message.
+agent on this conversation's model, steps run as soon as the steps they depend
+on end, and the results come back to you in one message. Nothing has to be
+enabled first.
 
 {
   "name": "Review the parser",
   "limits": { "maxConcurrent": 3, "maxSteps": 24 },
   "steps": [
-    { "id": "scan", "profile": "fast",
+    { "id": "scan",
       "task": "List the source files of src/parser that changed this week.",
       "output": { "files": ["string"] } },
     { "id": "review", "profile": "reviewer", "forEach": "scan.files",
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
-    { "id": "fix", "profile": "fast", "when": { "path": "review.bugs", "notEmpty": true },
+    { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
       "task": "Fix these bugs, one commit each: {{review.bugs}}" },
-    { "id": "report", "profile": "fast", "after": ["fix"],
+    { "id": "report", "after": ["fix"],
       "task": "Summarize what was reviewed and fixed: {{review}}" }
   ]
 }
 
 Fields of a step:
   id        letters, digits, _ or -, starting with a letter
-  profile   an approved profile id
+  profile   optional: a profile id from boite delegate profiles, to run the
+            step on another model than this conversation's
   task      the brief; {{step}}, {{step.field}}, {{item}}, {{index}} are filled in
   after     step ids that must end first (steps named anywhere else are added)
   forEach   a path to a list: one execution per item, {{item}} is the item

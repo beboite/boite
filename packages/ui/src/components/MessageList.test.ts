@@ -82,7 +82,7 @@ test('the parent timeline retains one team row, updates completion counts and op
     running = mount(MessageList, { target: document.body, props: { store: owner, threadId: 't-trace', messages: owner.openThread!.messages } });
     flushSync();
     const row = document.querySelector<HTMLButtonElement>('[data-testid=delegation-activity]')!;
-    expect(row.textContent).toContain('Started 2 agents');
+    expect(row.textContent).toContain('Started 2 subagents');
     expect(row.textContent).toContain('1/2 completed');
     await owner.selectDelegatedAgent('t-team-running');
     row.click();

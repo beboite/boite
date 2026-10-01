@@ -486,7 +486,7 @@ export function threadMethods(ctx: FakeContext) {
       const thread = ctx.thread(params.threadId);
       const root = thread.parentThreadId ?? thread.id;
       let childrenStopped = 0;
-      if (thread.parentThreadId || delegationConfig(ctx, root).enabled || (ctx.delegationAgents.get(root)?.length ?? 0) > 0) {
+      if (thread.parentThreadId || (ctx.delegationAgents.get(root)?.length ?? 0) > 0) {
         childrenStopped = await stopDelegation(ctx, root, thread.parentThreadId ? thread.id : undefined);
         ctx.emit('delegation.changed', { threadId: root });
       }

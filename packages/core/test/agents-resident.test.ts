@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import type { AgentProfile, AgentRuntimeConfig } from '@boite/contracts';
-import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { startTestCore, waitFor, type TestCore } from './harness.ts';
 import { Core } from '../src/core.ts';
 import { SCHEMA_VERSION } from '../src/journal/schema.ts';
@@ -19,7 +18,7 @@ beforeEach(async () => {
  agent = await client.call('agents.profile.save', { value: { name:'Resident', domain:'Research', instructions:'Keep useful notes.', avatar:'', status:'active', tools:['memory','messages','decisions'], accountIntegration:'provider', selection:{providerId:'echo',accountId:account.id,model:'echo',effort:null,permissionMode:'default'} } });
 });
 afterEach(async () => { await h?.stop(); });
-function policy(): AgentRuntimeConfig { return { defaultRoute:agent.selection,allowedRoutes:[{...agent.selection,model:'echo',id:'main',name:'Main'}], subagents:structuredClone(DEFAULT_DELEGATION_CONFIG),compactAfterTurns:8,maxRunMinutes:10 }; }
+function policy(): AgentRuntimeConfig { return { defaultRoute:agent.selection,allowedRoutes:[{...agent.selection,model:'echo',id:'main',name:'Main'}], subagents:{enabled:false,paused:false,profiles:[]},compactAfterTurns:8,maxRunMinutes:10 }; }
 function unpause(){h.core.workforce.setLimits({paused:false,backgroundConcurrency:2,kebaccExperiment:false});}
 test('each identity owns a durable brain, with revision-checked edits',async()=>{
  const brain = await client.call('agents.brain.get',{agentId:agent.id});

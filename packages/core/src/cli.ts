@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { AGENT_ENV } from '@boite/contracts';
+import { AGENT_ENV, CONVERSATION_PROFILE_ID } from '@boite/contracts';
 import type { AgentTask, Channel, GitChange, PanelSurface, Todo } from '@boite/contracts';
 import { connect } from './client.ts';
 import type { CoreClient } from './client.ts';
@@ -76,7 +76,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   agent routines                list this identity's scheduled work
   agent schedule <json>          name, prompt, schedule; optional id, expectedRevision, enabled
   --request-id <id>              reuse to retry agent, agents send|reply or delegate spawn|send
-  delegate profiles|list         approved models, team status and bounded results
+  delegate profiles|list         usable profiles (conversation = this model), team status, results
   delegate spawn <profile> <brief>
   delegate send <thread-id> <text>
   delegate stop [thread-id]      stop one child, or pause the whole team
@@ -290,7 +290,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
           `turns: ${view.turnsUsed}`,
           ...(action === 'profiles'
-            ? view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)
+            ? [`${CONVERSATION_PROFILE_ID} "This conversation's model"`, ...view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)]
             : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
           'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
         ], view);

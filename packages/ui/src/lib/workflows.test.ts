@@ -106,7 +106,7 @@ test('a failed step stops what never launched, and a paused run still ends its r
     expect(retried.nodes[1]!.instances[0]!.error).toBeNull();
     await until(() => client.call('workflows.get', { threadId: 't-trace', runId: run.id }), value => value.status === 'failed');
 
-    const one = await client.call('workflows.start', { threadId: 't-trace', plan: { name: 'One', steps: [{ id: 'a', profile: 'implementer', task: 'Quick.' }] }, requestId: 'one' });
+    const one = await client.call('workflows.start', { threadId: 't-trace', plan: { name: 'One', steps: [{ id: 'a', task: 'Quick.' }] }, requestId: 'one' });
     await client.call('workflows.control', { threadId: 't-trace', runId: one.id, action: 'pause' });
     const done = await until(() => client.call('workflows.get', { threadId: 't-trace', runId: one.id }), value => value.status !== 'paused');
     expect(done.status).toBe('done');

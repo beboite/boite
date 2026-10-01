@@ -19,8 +19,8 @@ export interface WorkflowStepPlan {
   /** Letters, digits, `_` and `-`, starting with a letter; referenced by `after`, paths and `{{...}}`. */
   id: string;
   title?: string;
-  /** An owner-approved delegation profile id. */
-  profile: string;
+  /** A delegation profile id of the thread. Left out, the step runs on the conversation's own model. */
+  profile?: string;
   /** The brief. `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts. */
   task: string;
   /** Steps that must end first. Steps named in `forEach`, `when` or the task are added automatically. */
@@ -89,7 +89,8 @@ export interface WorkflowInstance {
 export interface WorkflowNode {
   id: string;
   title: string;
-  profileId: string;
+  /** Null: the conversation's own model. */
+  profileId: string | null;
   /** Normalized dependencies: `after` plus every step a path names. */
   after: string[];
   forEach: string | null;

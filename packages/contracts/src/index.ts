@@ -1982,9 +1982,15 @@ export interface DelegationConfig {
   paused: boolean;
   profiles: DelegationProfile[];
 }
+/**
+ * On from the first turn: a conversation delegates to its own model with
+ * nothing to set up. Owner profiles only add other models.
+ */
 export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
-  enabled: false, paused: false, profiles: [],
+  enabled: true, paused: false, profiles: [],
 };
+/** The profile every conversation has without configuring one: its own harness, account, model and effort. */
+export const CONVERSATION_PROFILE_ID = 'conversation';
 export interface DelegatedAgent {
   thread: ThreadSummary;
   profileId: string;

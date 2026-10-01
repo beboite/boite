@@ -4,7 +4,7 @@
  * so its icons and the panel's names load with the settings, not the app.
  */
 import type { Component } from 'svelte';
-import { ChartPie, Folder, FolderPlus, Gauge, GitBranch, SquareTerminal, UsersRound } from '@lucide/svelte';
+import { ChartPie, Folder, FolderPlus, Gauge, GitBranch, SquareTerminal } from '@lucide/svelte';
 import type { SurfaceKind } from './right-panel.svelte';
 import { strings } from './strings';
 import { CARDS, kindName } from './surface-labels';
@@ -34,7 +34,6 @@ export function controlGroups(owner: boolean): ControlGroup[] {
   const header: ControlEntry[] = [
     { id: 'header.project', label: strings.controls.project, icon: Folder },
     { id: 'header.branch', label: strings.controls.branch, icon: GitBranch },
-    { id: 'header.agents', label: strings.delegation.heading, icon: UsersRound },
     ...(owner ? [{ id: 'header.terminal' as const, label: strings.terminal.title, icon: SquareTerminal }] : [])
   ];
   const sidebar: ControlEntry[] = [

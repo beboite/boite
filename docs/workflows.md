@@ -1,22 +1,22 @@
 # Workflows
 
 A workflow is a JSON plan of steps that the core runs for a conversation. Each
-step is a child agent on one of the thread's [delegation](delegation.md)
-profiles. A step starts once every step it depends on has ended. When the run
+step is a child agent on the conversation's own harness, account, model and
+effort, or on a [delegation](delegation.md) profile the step names. A step starts once every step it depends on has ended. When the run
 ends, its results come back to the conversation as one message. No model sits
 in the middle deciding what runs next, so the plan behaves the same whichever
 provider wrote it or runs its steps.
 
 The main agent writes a plan and runs it with `boite workflow run`. The owner
-can save a run as a template and start it again from the panel. The owner must
-enable delegation first, because every step uses a profile approved for that
-team.
+can save a run as a template and start it again from the panel. Nothing has to
+be enabled or configured first: a plan whose steps name no profile runs in any
+conversation, on the model already chosen there.
 
-When a request mentions a workflow while delegation is disabled, every driver
-receives the same instruction to explain the block and point the owner to
-Team settings. Enabled teams receive the runner commands and must report the
-run ID. Native subagents and a checklist do not stand in for a requested Boite
-workflow. This guidance does not enable delegation or increase its limits.
+A plan is a template the agent may reach for, not an obligation. When a request
+mentions a workflow, every driver receives the runner commands and is asked to
+give the run ID of a run it starts. A conversation with an enabled team receives
+them on every turn, beside its profiles. The agent stays free to answer with
+native subagents or plain work when that fits better.
 
 ## A plan
 
@@ -25,15 +25,15 @@ workflow. This guidance does not enable delegation or increase its limits.
   "name": "Review the parser",
   "limits": { "maxConcurrent": 3, "maxSteps": 24 },
   "steps": [
-    { "id": "scan", "profile": "fast",
+    { "id": "scan",
       "task": "List the source files of src/parser that changed this week.",
       "output": { "files": ["string"] } },
     { "id": "review", "profile": "reviewer", "forEach": "scan.files",
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
-    { "id": "fix", "profile": "fast", "when": { "path": "review.bugs", "notEmpty": true },
+    { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
       "task": "Fix these bugs, one commit each: {{review.bugs}}" },
-    { "id": "report", "profile": "fast", "after": ["fix"],
+    { "id": "report", "after": ["fix"],
       "task": "Summarize what was reviewed and fixed: {{review}}" }
   ]
 }
@@ -42,7 +42,7 @@ workflow. This guidance does not enable delegation or increase its limits.
 | Field | Meaning |
 | --- | --- |
 | `id` | Letters, digits, `_` and `-`, starting with a letter |
-| `profile` | A delegation profile id the owner approved for this thread |
+| `profile` | Optional. A delegation profile id of this thread, to run the step on another model. Left out, the step runs on the conversation's model |
 | `task` | The brief. `{{step}}`, `{{step.field}}`, `{{item}}` and `{{index}}` are filled in when the step starts |
 | `after` | Steps that must end first. A step named in `forEach`, `when` or the task is added automatically |
 | `forEach` | A path to a list. The step runs once per item |
@@ -51,7 +51,7 @@ workflow. This guidance does not enable delegation or increase its limits.
 
 A path reads a step's structured output, or its final answer when it has none.
 On a fanned-out step, `review.bugs` collects the bugs of every item into one
-list. The core checks the whole plan before anything starts: unknown profiles,
+list. The core checks the whole plan before anything starts: a name that is no profile,
 cycles, a path to a step that does not exist and a bad shape are refused with
 the field named.
 
@@ -96,15 +96,16 @@ error in the prompt; an execution whose conversation was archived since gets a
 new one. The executions held back as "Not started" wait again with it, in any
 step.
 
-Handing the summary back is a turn of the parent. If delegation is disabled or
-paused before delivery, the run keeps the reason as `deliveryError` and the
-panel shows it. The summary goes again when the parent ends another turn or
-the owner enables or resumes the team.
+Handing the summary back is a turn of the parent. If the team is paused before
+delivery, the run keeps the reason as `deliveryError` and the panel shows it.
+The summary goes again when the parent ends another turn or the owner resumes
+the team.
 
 Stop cancels every running step and marks the steps that did not start as
 stopped; retry runs them again. Stopping or archiving the parent conversation
-stops its runs too. A parent turn that ends in an error pauses the team, and so
-every running run, until the owner resumes it. Pause launches nothing new, but
+stops its runs too. A parent turn that ends in an error pauses every running
+run, and the team when there is one, until the owner resumes it. A team that is
+merely disabled holds nothing: only a paused one does. Pause launches nothing new, but
 the steps already running still finish, and a paused run whose every step ended
 is done. A core restart never resumes paid work by itself: running runs pause,
 and each interrupted execution waits on its own thread. Resume runs it again
@@ -168,7 +169,7 @@ The plan checks and the path rules are shared by the core and the UI in
 `packages/contracts/src/workflow-plan.ts`. The core's runner is
 `packages/core/src/workflows.ts`. It keeps one JSON record per run and reloads
 it after every change, because a step's turn can end inside the call that
-started it. Step threads are ordinary delegated children, recorded in
+started it. Step threads are ordinary child conversations, recorded in
 `workflow_steps`. The CLI is `packages/core/src/workflow-cli.ts`, the panel tab
 is `packages/ui/src/components/WorkflowSurface.svelte`, and the fake client
 runs plans in memory in `packages/ui/src/lib/fake-client/workflows.ts`. A task

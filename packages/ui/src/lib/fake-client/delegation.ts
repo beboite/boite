@@ -1,5 +1,5 @@
 /** Delegation: a parent thread's team of child threads, their usage and letters. */
-import { collectNativeAgents, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
+import { collectNativeAgents, CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, RpcErrorCode, type AgentLetter, type DelegatedAgent, type DelegationConfig, type DelegationProfile, type DelegationView, type Message, type Thread, type ThreadId, type Turn } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { addUsage, emptyUsage, toSummary } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -44,7 +44,8 @@ export async function stopDelegation(ctx: FakeContext, rootId: ThreadId, agentId
   const rows = ctx.delegationAgents.get(rootId) ?? [];
   const selected = agentId ? rows.filter(row => row.threadId === agentId) : rows;
   if (agentId && selected.length === 0) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'agentId must name a direct child' });
-  if (!agentId) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
+  // Nothing delegated, nothing to stop: the team stays usable.
+  if (!agentId && rows.length) ctx.delegationConfigs.set(rootId, { ...delegationConfig(ctx, rootId), paused: true });
   let stopped = 0;
   for (const row of selected) {
     const thread = ctx.thread(row.threadId);
@@ -194,7 +195,6 @@ export function delegationMethods(ctx: FakeContext) {
         return { ...profile, name: profile.name.trim() };
       });
       if (new Set(profiles.map(profile => profile.id)).size !== profiles.length) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'profile ids must be unique' });
-      if (value.enabled && profiles.length === 0) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'choose at least one profile before enabling delegation' });
       const config: DelegationConfig = {
         enabled: value.enabled,
         paused: value.paused,
@@ -222,7 +222,9 @@ export function delegationMethods(ctx: FakeContext) {
       const config = delegationConfig(ctx, parent.id);
       if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       const rows = ctx.delegationAgents.get(parent.id) ?? [];
-      const profile = config.profiles.find(entry => entry.id === params.profileId);
+      const profile: DelegationProfile | undefined = params.profileId === CONVERSATION_PROFILE_ID
+        ? { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model ?? '', effort: parent.effort ?? null }
+        : config.profiles.find(entry => entry.id === params.profileId);
       if (!profile) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'unknown delegation profile' });
       const id = `t-${++ctx.seq}`;
       const at = ctx.now();

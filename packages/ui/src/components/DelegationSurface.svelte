@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, Pause, Play, Plus, Send, Square, Trash2, UsersRound } from '@lucide/svelte';
   import { onDestroy } from 'svelte';
-  import { DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
+  import { CONVERSATION_PROFILE_ID, DEFAULT_DELEGATION_CONFIG, type DelegationConfig, type DelegationProfile } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
   import { formatTokens } from '../lib/tokens';
@@ -26,7 +26,12 @@
   let view = $derived(store.delegation);
   let config = $derived(view?.config ?? DEFAULT_DELEGATION_CONFIG);
   let selected = $derived(view?.agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
-  let selectedProfile = $derived(config.profiles.find(profile => profile.id === selectedProfileId) ?? config.profiles[0] ?? null);
+  // The conversation's own model is always there to hand work to; the owner's profiles add other models.
+  let routes = $derived([
+    ...(store.openThread ? [{ id: CONVERSATION_PROFILE_ID, name: strings.delegation.conversationProfile, providerId: store.openThread.providerId }] : []),
+    ...config.profiles,
+  ]);
+  let selectedProfile = $derived(routes.find(profile => profile.id === selectedProfileId) ?? config.profiles[0] ?? routes[0] ?? null);
   let selectedLetters = $derived(selected ? view?.messages.filter(letter => letter.from.threadId === selected.thread.id || letter.to.threadId === selected.thread.id) ?? [] : []);
   let totalTokens = $derived(view ? view.usage.inputTokens + view.usage.outputTokens + view.usage.cacheReadTokens + view.usage.cacheWriteTokens : 0);
 
@@ -120,10 +125,9 @@
   </header>
 
   {#if view && !selected}
-    {#if view.nativeAgents?.length}<NativeAgents agents={view.nativeAgents} />{/if}
     <div class="managed" data-testid="delegation-state">
       <h3>{config.enabled ? config.paused ? strings.delegation.workflowsPaused : strings.delegation.workflowsEnabled : strings.delegation.workflowsDisabled}</h3>
-      {#if !config.enabled}<p>{store.owner ? config.profiles.length ? strings.delegation.enableHint : strings.delegation.setupHint : strings.delegation.ownerSetupHint}</p>{/if}
+      <p>{config.enabled ? strings.delegation.boiteHint : store.owner ? strings.delegation.enableHint : strings.delegation.ownerSetupHint}</p>
       {#if config.enabled || view.agents.length > 0}
       <div class="usage" title={strings.delegation.usage} data-testid="delegation-usage">
         <strong>{view.agents.length}</strong> {strings.delegation.agentsShort}
@@ -140,51 +144,12 @@
   {#if store.delegationLoading && !view}
     <p class="empty">{strings.delegation.loading}</p>
   {:else if view}
-    {#if store.owner}
-      <details class="settings" data-testid="delegation-settings">
-        <summary>{strings.delegation.configure}</summary>
-        <div class="settings-body">
-          <label class="switch-row">
-            <span><strong>{strings.delegation.enabled}</strong></span>
-            <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving || config.profiles.length === 0} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
-          </label>
-
-          <div class="profiles-head">
-            <div><strong>{strings.delegation.profiles}</strong></div>
-            <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
-          </div>
-          <div class="profiles">
-            {#each config.profiles as profile (profile.id)}
-              {@const choice = profileChoice(profile)}
-              {@const model = store.modelOf(choice)}
-              <div class="profile" data-testid="delegation-profile">
-                <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
-                <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
-                {#if model?.effort?.levels.length}
-                  <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
-                {/if}
-                <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id), ...(config.profiles.length === 1 ? { enabled: false } : {}) })}><Trash2 size={14} /></button>
-              </div>
-            {/each}
-          </div>
-
-          {#if config.enabled}
-            <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
-              {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
-            </button>
-          {/if}
-        </div>
-      </details>
-    {:else}
-      <p class="notice">{strings.delegation.ownerOnly}</p>
-    {/if}
-
     {#if store.owner && config.enabled && !config.paused && !selected}
       <details class="launch-section" open={view.agents.length === 0}>
         <summary>{strings.delegation.launch}</summary>
       <div class="launch" data-testid="delegation-launch">
         <div class="profile-picks" role="radiogroup" aria-label={strings.delegation.profileLabel}>
-          {#each config.profiles as profile (profile.id)}
+          {#each routes as profile (profile.id)}
             <button type="button" class="chip" class:chosen={selectedProfile?.id === profile.id} role="radio" aria-checked={selectedProfile?.id === profile.id} onclick={() => (selectedProfileId = profile.id)}>
               <ProviderLogo providerId={profile.providerId} size={14} />{profile.name}
             </button>
@@ -248,6 +213,45 @@
         </article>
       {/if}
     </div>
+    {#if !selected && view.nativeAgents?.length}<NativeAgents agents={view.nativeAgents} />{/if}
+    {#if store.owner}
+      <details class="settings" data-testid="delegation-settings">
+        <summary>{strings.delegation.configure}</summary>
+        <div class="settings-body">
+          <label class="switch-row">
+            <span><strong>{strings.delegation.enabled}</strong></span>
+            <input type="checkbox" role="switch" checked={config.enabled} disabled={store.delegationSaving} onchange={(event) => save({ enabled: event.currentTarget.checked, paused: false })} />
+          </label>
+
+          <div class="profiles-head">
+            <div><strong>{strings.delegation.profiles}</strong><small>{strings.delegation.profilesHint}</small></div>
+            <button type="button" class="quiet small" data-testid="delegation-add-profile" disabled={store.delegationSaving} onclick={addProfile}><Plus size={14} />{strings.delegation.addProfile}</button>
+          </div>
+          <div class="profiles">
+            {#each config.profiles as profile (profile.id)}
+              {@const choice = profileChoice(profile)}
+              {@const model = store.modelOf(choice)}
+              <div class="profile" data-testid="delegation-profile">
+                <input aria-label={strings.delegation.profileLabel} value={profile.name} maxlength="80" onchange={(event) => patchProfile(profile, { name: event.currentTarget.value })} />
+                <ModelPicker {store} {choice} onpick={(patch) => pickProfile(profile, patch)} disabled={store.delegationSaving} />
+                {#if model?.effort?.levels.length}
+                  <EffortSlider levels={model.effort.levels} active={profile.effort ?? model.effort.default} onpick={(effort) => patchProfile(profile, { effort })} />
+                {/if}
+                <button type="button" class="ghost small icon" aria-label={strings.delegation.removeProfile} onclick={() => save({ profiles: config.profiles.filter(entry => entry.id !== profile.id)})}><Trash2 size={14} /></button>
+              </div>
+            {/each}
+          </div>
+
+          {#if config.enabled}
+            <button type="button" class="quiet pause" onclick={() => save({ paused: !config.paused })}>
+              {#if config.paused}<Play size={14} />{strings.delegation.resume}{:else}<Pause size={14} />{strings.delegation.pause}{/if}
+            </button>
+          {/if}
+        </div>
+      </details>
+    {:else}
+      <p class="notice">{strings.delegation.ownerOnly}</p>
+    {/if}
   {/if}
 
   {#if store.delegationError}<p class="error" role="alert">{store.delegationError}</p>{/if}
@@ -273,6 +277,7 @@
   .switch-row { min-height: var(--control-lg); display: flex; align-items: center; gap: 14px; }
   .switch-row > span { flex: 1; }
   .switch-row strong, .profiles-head strong { display: block; }
+  .profiles-head small { display: block; margin-top: 2px; font-size: var(--text-xs); line-height: 1.5; color: var(--color-muted-foreground); }
   input[role='switch'] { appearance: none; position: relative; width: 40px; height: 24px; min-height: 24px; padding: 0; border-radius: 999px; background: var(--color-surface-3); }
   input[role='switch']::after { content: ''; position: absolute; width: 16px; height: 16px; top: 3px; left: 3px; border-radius: 50%; background: var(--color-muted-foreground); transition: transform var(--dur-2) var(--ease-out-quint); }
   input[role='switch']:checked { background: var(--color-foreground); }

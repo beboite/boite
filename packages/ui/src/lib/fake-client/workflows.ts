@@ -1,4 +1,5 @@
 import {
+  CONVERSATION_PROFILE_ID,
   RpcErrorCode,
   WorkflowPlanError,
   WORKFLOW_LIMITS,
@@ -274,13 +275,12 @@ export class FakeWorkflows {
 
   #team(rootId: ThreadId): DelegationConfig {
     const config = this.host.config(rootId);
-    if (!config.enabled) throw refusal('workflows run on delegation profiles: the owner enables delegation for this thread in Agents first');
-    if (config.paused) throw refusal('delegation is paused for this thread; the owner resumes it in Agents');
+    if (config.enabled && config.paused) throw refusal('subagents are paused for this thread; the owner resumes them in Subagents > Settings');
     return config;
   }
 
   #node(step: WorkflowStepPlan, after: string[]): WorkflowNode {
-    return { id: step.id, title: step.title ?? step.id, profileId: step.profile, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
+    return { id: step.id, title: step.title ?? step.id, profileId: step.profile ?? null, after, forEach: step.forEach ?? null, status: 'waiting', instances: [], error: null, startedAt: null, finishedAt: null };
   }
 
   #save(run: WorkflowRun): void {
@@ -320,8 +320,8 @@ export class FakeWorkflows {
     if (run.status !== 'running') return;
     this.#settleNodes(run);
     const config = this.host.config(run.rootThreadId);
-    if (!config.enabled || config.paused) {
-      Object.assign(run, { status: 'paused', error: 'Delegation is paused or disabled for this thread. Resume to continue.' });
+    if (config.enabled && config.paused) {
+      Object.assign(run, { status: 'paused', error: 'Subagents are paused for this thread. Resume to continue.' });
       this.#save(run);
       return;
     }
@@ -394,13 +394,16 @@ export class FakeWorkflows {
   #launch(run: WorkflowRun, node: WorkflowNode, inst: WorkflowInstance, config: DelegationConfig): void {
     const now = this.host.now();
     if (inst.threadId === null) {
-      const profile = config.profiles.find(p => p.id === node.profileId);
+      const root = this.host.thread(run.rootThreadId);
+      const profile: DelegationProfile | undefined = node.profileId === null || node.profileId === CONVERSATION_PROFILE_ID
+        ? { id: 'conversation', name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model ?? '', effort: root.effort ?? null }
+        : config.profiles.find(p => p.id === node.profileId);
       if (!profile) {
-        Object.assign(inst, { status: 'failed', error: `profile ${node.profileId} is no longer approved for this thread`, startedAt: now, finishedAt: now });
+        Object.assign(inst, { status: 'failed', error: `profile ${node.profileId} is no longer a profile of this thread`, startedAt: now, finishedAt: now });
         return;
       }
       const title = `${run.name} · ${node.title}${inst.label ? ` · ${inst.label}` : ''}`.slice(0, 120);
-      const threadId = this.host.child(this.host.thread(run.rootThreadId), profile, title, inst.task ?? '');
+      const threadId = this.host.child(root, profile, title, inst.task ?? '');
       this.#steps.set(threadId, { runId: run.id, key: inst.key });
       Object.assign(inst, { threadId, providerId: profile.providerId, model: profile.model });
     }
@@ -493,9 +496,8 @@ export class FakeWorkflows {
 
   #resumeTeam(rootId: ThreadId): void {
     const config = this.host.config(rootId);
-    if (!config.enabled) throw refusal('delegation is disabled for this thread; the owner enables it in Agents');
-    if (!config.paused) return;
-    if (this.host.principal() !== 'owner') throw refusal('delegation is paused for this thread; the owner resumes it');
+    if (!config.enabled || !config.paused) return;
+    if (this.host.principal() !== 'owner') throw refusal('subagents are paused for this thread; the owner resumes them');
     this.host.resumeTeam(rootId);
   }
 

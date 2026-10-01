@@ -18,7 +18,7 @@ beforeAll(async () => {
   await owner.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'review', name: 'Reviewer', providerId: 'echo', accountId: account.id, model: 'echo', effort: null }] } });
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
   await page.click(`[data-testid="thread-row"][data-thread-id="${threadId}"]`);
-  await page.click('[data-testid="agents-toggle"]');
+  await page.evaluate("__boiteTest.workspace.active.panel.toggleKind('agents')");
   await page.waitFor('!!document.querySelector("[data-testid=delegation-launch]")');
 }, 60_000);
 afterAll(async () => { await page?.close(); owner?.close(); await core?.stop(); }, 30_000);

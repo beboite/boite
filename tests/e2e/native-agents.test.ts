@@ -16,7 +16,7 @@ beforeAll(async () => {
   server = await startDevUi(port);
   page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&team=1`, windowSize: { width: 1310, height: 820 } });
   await page.click('[data-testid="thread-row"][data-thread-id="t-native"]');
-  await page.click('[data-testid="agents-toggle"]');
+  await page.evaluate("__boiteTest.workspace.active.panel.toggleKind('agents')");
   await page.waitFor('!!document.querySelector("[data-testid=delegation-settings]")');
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
@@ -32,7 +32,7 @@ test('native agents remain visible with disabled Boite workflows on desktop and 
   expect(await page.evaluate('!!document.querySelector("[data-testid=delegation-usage]")')).toBe(false);
   // Only native agents exist, so Team must stay reachable after the panel closes.
   await page.click('[data-testid="panel-close"]');
-  await page.click('[data-testid="agents-toggle"]');
+  await page.evaluate("__boiteTest.workspace.active.panel.toggleKind('agents')");
   await page.waitFor('document.querySelectorAll("[data-testid=native-agent]").length === 2');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.waitFor('innerWidth === 390');
@@ -41,7 +41,7 @@ test('native agents remain visible with disabled Boite workflows on desktop and 
   expect(await page.evaluate('(e => e.scrollWidth <= e.clientWidth)(document.querySelector("[data-testid=delegation-surface]"))')).toBe(true);
   await page.reload();
   await page.click('[data-testid="thread-row"][data-thread-id="t-native"]');
-  await page.click('[data-testid="agents-toggle"]');
+  await page.evaluate("__boiteTest.workspace.active.panel.toggleKind('agents')");
   await page.waitFor('document.querySelectorAll("[data-testid=native-agent]").length === 2');
   expect(page.errors()).toEqual([]);
 }, 40_000);
