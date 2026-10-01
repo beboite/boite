@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X } from '@lucide/svelte';
+  import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus, X, GripHorizontal } from '@lucide/svelte';
+  import { floatingPanel, RESIZE_DIRECTIONS } from '../lib/floating-panel';
   import { browserBridge } from '../lib/browser-bridge';
   import { stripOverflows } from '../lib/strip-overflow';
   import { contextMenu } from '../lib/context-menu.svelte';
@@ -246,6 +247,7 @@
 <button
   type="button"
   class="sheet-scrim"
+  class:floating={rightPanel.floating}
   aria-label={strings.common.close}
   onclick={() => panel.toggle()}
 ></button>
@@ -253,12 +255,14 @@
 <aside
   class="panel framed motion-panel"
   class:maximized={rightPanel.maximized}
+  class:floating={rightPanel.floating}
   class:dragging
   class:closing
   style="--panel-width: {rightPanel.width}px"
   data-testid="right-panel"
   bind:this={root}
   use:attach
+  use:floatingPanel={{ enabled: rightPanel.floating, maximized: rightPanel.maximized }}
   onanimationend={onexit}
   onpointerenter={() => (near = true)}
   onpointerleave={() => (near = false)}
@@ -267,9 +271,15 @@
     if (!root?.contains(event.relatedTarget as Node | null)) near = false;
   }}
 >
-  <PanelResizeHandle {store} bind:dragging />
+  {#if !rightPanel.floating}<PanelResizeHandle {store} bind:dragging />{/if}
 
-  <header class="strip">
+  <header class="strip" data-panel-move data-testid="panel-titlebar">
+    {#if rightPanel.floating}
+      <button type="button" class="ghost small icon move-handle" data-panel-move data-testid="panel-move"
+        title={strings.browser.move} aria-label={strings.browser.move} disabled={rightPanel.maximized}>
+        <GripHorizontal size={16} />
+      </button>
+    {/if}
     {#if overflowing}
       <button
         type="button"
@@ -412,6 +422,12 @@
       />
     {/if}
   </div>
+  {#if rightPanel.floating && !rightPanel.maximized}
+    {#each RESIZE_DIRECTIONS as direction}
+      <button type="button" class="float-resize" data-panel-resize={direction} data-testid={`panel-resize-${direction}`}
+        aria-label={strings.rightPanel.resize}></button>
+    {/each}
+  {/if}
 </aside>
 
 <style>
@@ -630,5 +646,54 @@
       width: var(--touch-target);
       height: var(--touch-target);
     }
+  }
+
+  .panel.floating {
+    position: fixed;
+    inset: auto;
+    left: var(--float-x);
+    top: var(--float-y);
+    width: var(--float-width);
+    height: var(--float-height);
+    min-width: 0;
+    flex: none;
+    z-index: 34;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-e3);
+  }
+  .panel.floating:not(.closing) { animation: none; }
+  .sheet-scrim.floating { display: none; }
+  .panel.floating:not(.maximized) .strip { cursor: grab; touch-action: none; user-select: none; }
+  .panel.floating:not(.maximized) .strip:active { cursor: grabbing; }
+  .move-handle { cursor: grab; touch-action: none; }
+  .move-handle:active { cursor: grabbing; }
+  .float-resize {
+    /* Outside the native webview: its OS surface would swallow inside handles. */
+    position: absolute; z-index: 1; padding: 0; min-width: 0; min-height: 0;
+    border: none; border-radius: 0; background: transparent; touch-action: none;
+  }
+  .float-resize[data-panel-resize='n'], .float-resize[data-panel-resize='s'] {
+    left: 6px; right: 6px; height: 6px; width: auto; cursor: ns-resize;
+  }
+  .float-resize[data-panel-resize='e'], .float-resize[data-panel-resize='w'] {
+    top: 6px; bottom: 6px; width: 6px; height: auto; cursor: ew-resize;
+  }
+  .float-resize[data-panel-resize='n'] { top: -6px; }
+  .float-resize[data-panel-resize='s'] { bottom: -6px; }
+  .float-resize[data-panel-resize='e'] { right: -6px; }
+  .float-resize[data-panel-resize='w'] { left: -6px; }
+  .float-resize[data-panel-resize='nw'], .float-resize[data-panel-resize='ne'],
+  .float-resize[data-panel-resize='sw'], .float-resize[data-panel-resize='se'] { width: 12px; height: 12px; }
+  .float-resize[data-panel-resize='nw'] { left: -6px; top: -6px; cursor: nwse-resize; }
+  .float-resize[data-panel-resize='ne'] { right: -6px; top: -6px; cursor: nesw-resize; }
+  .float-resize[data-panel-resize='sw'] { left: -6px; bottom: -6px; cursor: nesw-resize; }
+  .float-resize[data-panel-resize='se'] { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  .float-resize:focus-visible {
+    outline: 2px solid var(--color-foreground); outline-offset: 0;
+  }
+  .float-resize:active { transform: none; }
+  .float-resize:hover:not(:disabled), .float-resize:active { background: transparent; box-shadow: none; }
+  @media (max-width: 720px) {
+    .move-handle, .float-resize { display: none; }
   }
 </style>

@@ -1171,6 +1171,12 @@ export const fr: Translation = {
   },
 
   browser: {
+    resetViewport: 'Adapter la page à la fenêtre',
+    enlarge: 'Agrandir le navigateur',
+    restore: 'Réduire le panneau',
+    detach: 'Afficher en popup dans l’application',
+    dock: 'Ramener dans le panneau',
+    move: 'Déplacer le panneau flottant',
     loading: 'Chargement de la page',
     failed: "La page n'a pas pu être ouverte. {reason}",
     invalidUrl: 'Saisissez une adresse HTTP ou HTTPS valide, ou une recherche.',

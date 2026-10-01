@@ -19,6 +19,7 @@ import { CORE_VERSION } from './core.ts';
 import { resolveDataDir } from './paths.ts';
 import { agentCommand } from './agents/cli.ts';
 import { workflowCommand } from './workflow-cli.ts';
+import { browserCommand, BROWSER_HELP } from './browser-cli.ts';
 import { agentsCommand, AgentsUsage, WAIT_MAX_S } from './agents-cli.ts';
 
 export interface CliIo {
@@ -41,6 +42,7 @@ export const USAGE = `usage: boite <command> [args] [--json]
   show <file>[:line]             open a file in the panel, at a line
   diff [file]                    open the changes, or one file's diff
   browse <url>                   open a url in the panel's browser
+  browser help                   inspect, test and capture the built-in browser
   preview <file.html>             open a local HTML artifact with its assets
   preview-close <file.html>       stop serving a local HTML preview
   open trace|tasks|changes|files|workflow [dir|run-id]
@@ -261,6 +263,12 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'browser': {
+      if (rest[0] === 'help') { print([BROWSER_HELP], { help: BROWSER_HELP }); break; }
+      const result = await browserCommand(rest, io, client, threadId);
+      print([JSON.stringify(result, null, 2)], result);
+      break;
+    }
     case 'server': {
       const action = rest[0] ?? 'check';
       if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');

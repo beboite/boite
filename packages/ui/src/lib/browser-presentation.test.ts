@@ -1,0 +1,33 @@
+import { expect, test, vi } from 'vitest';
+import { browserPresentation } from './browser-presentation';
+import type { BrowserBridge } from './browser-bridge';
+
+test('menus park the native page, restore its bounds and reject captures arriving after close or teardown', async () => {
+  const pending: ((result: { data: string }) => void)[] = [];
+  const protocol = vi.fn(() => new Promise(resolve => pending.push(resolve)));
+  const setBounds = vi.fn(), preview = vi.fn();
+  const present = browserPresentation({ protocol, setBounds } as unknown as BrowserBridge, 'page', preview);
+  const rect = { x: 10, y: 80, width: 600, height: 400 };
+  present(rect, false);
+  present(rect, true);
+  present(rect, true);
+  expect(setBounds).toHaveBeenLastCalledWith('page', null);
+  expect(protocol).toHaveBeenCalledTimes(1);
+  pending.shift()!({ data: 'captured' });
+  await Promise.resolve();
+  expect(preview).toHaveBeenLastCalledWith('data:image/jpeg;base64,captured');
+  present(rect, false);
+  expect(setBounds).toHaveBeenLastCalledWith('page', rect);
+  expect(preview).toHaveBeenLastCalledWith(null);
+  present(rect, true);
+  present(rect, false);
+  pending.shift()!({ data: 'late' });
+  await Promise.resolve();
+  expect(preview).toHaveBeenLastCalledWith(null);
+  present(rect, true);
+  present(null, false);
+  pending.shift()!({ data: 'unmounted' });
+  await Promise.resolve();
+  expect(preview).toHaveBeenLastCalledWith(null);
+  expect(setBounds).toHaveBeenLastCalledWith('page', null);
+});

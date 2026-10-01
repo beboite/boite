@@ -172,6 +172,8 @@ export class RightPanelStore {
   width = $state(PANEL_DEFAULT);
   /** The chat column at zero width. Deliberately not persisted, like T3's. */
   maximized = $state(false);
+  /** A movable panel inside the app, never a separate operating-system window. */
+  floating = $state(false);
 
   /**
    * The unsaved text of each file tab, per thread. Switching tabs, hiding the

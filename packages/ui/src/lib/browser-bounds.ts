@@ -2,7 +2,7 @@ import type { SurfaceRect } from './browser-bridge';
 import { currentZoom, subscribeZoom } from './zoom';
 
 /** Measure when the layout changes. Keep following finite layout animations until they settle. */
-export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect | null) => void): () => void {
+export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect | null, covered: boolean) => void): () => void {
   const doc = node.ownerDocument;
   const win = doc.defaultView!;
   let frame = 0;
@@ -19,10 +19,17 @@ export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect |
     frame = 0;
     if (closed || doc.hidden) return;
     const rect = node.getBoundingClientRect();
-    const key = `${rect.x},${rect.y},${rect.width},${rect.height},${currentZoom()}`;
+    // Native child webviews paint above the document's top layer. Park them
+    // while a menu/dialog overlaps, including its closing animation.
+    const covered = [...doc.querySelectorAll<HTMLElement>(':popover-open,dialog[open],[role="dialog"],[role="menu"],[role="listbox"]')].some(overlay => {
+      const box = overlay.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && win.getComputedStyle(overlay).visibility !== 'hidden'
+        && box.left < rect.right && box.right > rect.left && box.top < rect.bottom && box.bottom > rect.top;
+    });
+    const key = `${rect.x},${rect.y},${rect.width},${rect.height},${currentZoom()},${covered}`;
     if (key !== last) {
       last = key;
-      send({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      send({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }, covered);
     }
     if (typeof win.requestAnimationFrame === 'function' && moving()) schedule();
   }
@@ -35,7 +42,7 @@ export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect |
     if (doc.hidden) {
       if (frame) win.cancelAnimationFrame(frame);
       frame = 0;
-      send(null);
+      send(null, false);
       last = '';
     } else schedule();
   }
@@ -46,12 +53,13 @@ export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect |
   const mutations = new MutationObserver(records => {
     if (records.some(record => !(record.target instanceof HTMLIFrameElement))) schedule();
   });
-  mutations.observe(doc.documentElement, { attributes: true, subtree: true, attributeFilter: ['class', 'style'] });
+  mutations.observe(doc.documentElement, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'style', 'open'] });
   win.addEventListener('resize', schedule);
   doc.addEventListener('scroll', schedule, true);
   doc.addEventListener('transitionrun', schedule, true);
   doc.addEventListener('animationstart', schedule, true);
   doc.addEventListener('visibilitychange', visibility);
+  doc.addEventListener('toggle', schedule, true);
   const offZoom = subscribeZoom(schedule);
   report();
   return () => {
@@ -65,6 +73,7 @@ export function watchBrowserBounds(node: HTMLElement, send: (rect: SurfaceRect |
     doc.removeEventListener('transitionrun', schedule, true);
     doc.removeEventListener('animationstart', schedule, true);
     doc.removeEventListener('visibilitychange', visibility);
-    send(null);
+    doc.removeEventListener('toggle', schedule, true);
+    send(null, false);
   };
 }

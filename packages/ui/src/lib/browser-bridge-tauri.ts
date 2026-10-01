@@ -19,6 +19,7 @@
 import type { BrowserBridge, BrowserEvent, SurfaceRect } from './browser-bridge';
 import type { PreviewReference } from '@boite/contracts';
 import { currentZoom } from './zoom';
+import { fitBrowserViewport } from './browser-viewport';
 
 /** The one event the shell emits for every surface. `src/browser.rs` sends it. */
 const EVENT = 'browser://event';
@@ -45,6 +46,40 @@ function boundsKey(rect: SurfaceRect | null): string {
 
 export class TauriBridge implements BrowserBridge {
   readonly paints = true;
+  #viewports = new Map<string, { width: number; height: number }>();
+  #slots = new Map<string, SurfaceRect | null>();
+  viewport(id: string): { width: number; height: number } | null { return this.#viewports.get(id) ?? null; }
+
+  /** Await native input in the same queue as create, navigation and layout. */
+  protocol(id: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (!this.#live.has(id)) return Promise.reject(new Error('the browser tab is closed'));
+    const result = (this.#queues.get(id) ?? Promise.resolve()).then(async () => {
+      const invoke = await this.#ready();
+      let answer: unknown;
+      if (method === 'Emulation.setDeviceMetricsOverride') {
+        const size = { width: Number(params.width), height: Number(params.height) };
+        answer = await this.#place(invoke, id, size);
+        this.#viewports.set(id, size); this.#emit({ type: 'viewport', id, size });
+      } else {
+        const slot = this.#slots.get(id), size = this.viewport(id);
+        const scale = slot && size ? fitBrowserViewport(slot, size).scale : 1;
+        // DevTools input uses the displayed viewport; DOM selectors report the
+        // requested CSS viewport. Match the presentation-only fit scale.
+        const input = method === 'Input.dispatchMouseEvent' && scale !== 1
+          ? { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale } : params;
+        answer = await invoke('browser_protocol', { id, method, params: input });
+      }
+      if (method === 'Emulation.clearDeviceMetricsOverride') {
+        this.#viewports.delete(id); this.#emit({ type: 'viewport', id, size: null });
+        await this.#place(invoke, id, null);
+      }
+      return answer;
+    });
+    const settled = result.then(() => {}, () => {});
+    this.#queues.set(id, settled);
+    void settled.then(() => { if (this.#queues.get(id) === settled) this.#queues.delete(id); });
+    return result;
+  }
 
   #handlers = new Set<(event: BrowserEvent) => void>();
   #queues = new Map<string, Promise<void>>();
@@ -89,6 +124,7 @@ export class TauriBridge implements BrowserBridge {
     const key = boundsKey(scaled);
     if (this.#bounds.get(id) === key) return;
     this.#bounds.set(id, key);
+    this.#slots.set(id, scaled);
     this.#run(id, 'browser_set_bounds', { rect: scaled });
   }
 
@@ -116,6 +152,8 @@ export class TauriBridge implements BrowserBridge {
     this.#live.delete(id);
     this.#loaded.delete(id);
     this.#bounds.delete(id);
+    this.#viewports.delete(id);
+    this.#slots.delete(id);
   }
 
   on(handler: (event: BrowserEvent) => void): () => void {
@@ -138,6 +176,16 @@ export class TauriBridge implements BrowserBridge {
     return this.#boot;
   }
 
+  async #place(invoke: Invoke, id: string, size = this.viewport(id)): Promise<unknown> {
+    const slot = this.#slots.get(id);
+    const layout = slot ? fitBrowserViewport(slot, size) : null;
+    await invoke('browser_set_bounds', { id, rect: layout?.rect ?? null });
+    if (size) return invoke('browser_protocol', { id, method: 'Emulation.setDeviceMetricsOverride', params: {
+      ...size, deviceScaleFactor: 1, mobile: false, scale: layout?.scale ?? 1,
+    } });
+    return null;
+  }
+
   /**
    * One chain per surface, so the shell sees the calls in the order the UI made
    * them. A refusal is reported as this surface's `failed` and swallowed there:
@@ -148,7 +196,8 @@ export class TauriBridge implements BrowserBridge {
     const next = queue
       .then(async () => {
         const invoke = await this.#ready();
-        await invoke<null>(command, { id, ...args });
+        if (command === 'browser_set_bounds') await this.#place(invoke, id);
+        else await invoke<null>(command, { id, ...args });
       })
       .catch((error: unknown) => {
         if (command === 'browser_highlight' && typeof args.requestId === 'string') {
