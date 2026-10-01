@@ -35,10 +35,17 @@ export function openCamera(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' } } });
 }
 
+type Decode = (data: Uint8ClampedArray, width: number, height: number) => string | null;
+
+/** The jsQR chunk, fetched once. A failed fetch rejects here, where the caller can say so. */
+async function loadDecoder(): Promise<Decode> {
+  const { default: jsQR } = await import('jsqr');
+  return (data, width, height) => jsQR(data, width, height, { inversionAttempts: 'dontInvert' })?.data || null;
+}
+
 /** One RGBA frame through jsQR, the path Safari takes. Null when no code is in it. */
 export async function decodeFrame(data: Uint8ClampedArray, width: number, height: number): Promise<string | null> {
-  const { default: jsQR } = await import('jsqr');
-  return jsQR(data, width, height, { inversionAttempts: 'dontInvert' })?.data || null;
+  return (await loadDecoder())(data, width, height);
 }
 
 async function reader(): Promise<(video: HTMLVideoElement) => Promise<string | null>> {
@@ -49,6 +56,9 @@ async function reader(): Promise<(video: HTMLVideoElement) => Promise<string | n
       return async video => (await detector.detect(video))[0]?.rawValue || null;
     } catch { /* a build without the QR format falls through to jsQR */ }
   }
+  // Loaded before the first frame: a chunk that cannot be fetched fails the scan
+  // by name instead of reading as one empty frame after another.
+  const decode = await loadDecoder();
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('no 2d canvas');
@@ -58,7 +68,7 @@ async function reader(): Promise<(video: HTMLVideoElement) => Promise<string | n
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
     context.drawImage(video, 0, 0, width, height);
-    return decodeFrame(context.getImageData(0, 0, width, height).data, width, height);
+    return decode(context.getImageData(0, 0, width, height).data, width, height);
   };
 }
 
@@ -73,6 +83,8 @@ export async function scanVideo(video: HTMLVideoElement, signal: AbortSignal, ac
     if (signal.aborted) throw new DOMException('scan stopped', 'AbortError');
     if (video.readyState >= 2 && video.videoWidth > 0) {
       const text = await read(video).catch(() => null);
+      // A frame still decoding when the view closed must not pair anything.
+      if (signal.aborted) throw new DOMException('scan stopped', 'AbortError');
       if (text && accept(text)) return text;
     }
     await new Promise(resolve => setTimeout(resolve, FRAME_MS));

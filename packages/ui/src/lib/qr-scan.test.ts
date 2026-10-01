@@ -1,6 +1,6 @@
 import { create } from 'qrcode';
 import { expect, test } from 'vitest';
-import { cameraFailure, decodeFrame } from './qr-scan';
+import { cameraFailure, decodeFrame, scanVideo } from './qr-scan';
 
 /** A pairing link drawn the way the desktop card draws it, as the RGBA pixels a camera frame is. */
 function frame(text: string, scale = 6, margin = 4): { data: Uint8ClampedArray; side: number } {
@@ -32,5 +32,23 @@ test('a page without a camera API says HTTPS, a refusal says permission', () => 
     expect(cameraFailure(new Error('boom'))).toBe('failed');
   } finally {
     delete (navigator as unknown as { mediaDevices?: unknown }).mediaDevices;
+  }
+});
+
+test('a frame decoded after the view closed pairs nothing', async () => {
+  let deliver: (codes: { rawValue: string }[]) => void = () => {};
+  class Detector { detect() { return new Promise<{ rawValue: string }[]>(resolve => { deliver = resolve; }); } }
+  Object.defineProperty(window, 'BarcodeDetector', { configurable: true, value: Detector });
+  try {
+    const stop = new AbortController();
+    const video = { readyState: 4, videoWidth: 640, videoHeight: 480 } as HTMLVideoElement;
+    const scan = scanVideo(video, stop.signal);
+    // The read is in flight when the view closes; its link arrives afterwards.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    stop.abort();
+    deliver([{ rawValue: 'https://boite.example.com/?grant=abcd' }]);
+    await expect(scan).rejects.toMatchObject({ name: 'AbortError' });
+  } finally {
+    delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
   }
 });
