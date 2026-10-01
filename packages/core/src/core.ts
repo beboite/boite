@@ -159,7 +159,7 @@ export class Core {
   #idleShutdownAdmitted = false;
 
   /** An update may stop only between executions. Admission and the gates share one event-loop turn. */
-  requestIdleShutdown(): 'accepted' | 'busy' | 'unsupported' {
+  requestIdleShutdown(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
@@ -170,6 +170,8 @@ export class Core {
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    // Persist an updater's acknowledgement before closing admission or scheduling exit.
+    beforeShutdown?.();
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
     this.threads.focus.close();

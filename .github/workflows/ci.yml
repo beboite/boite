@@ -369,7 +369,10 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
         run: |
-          export TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:-${THROWAWAY_UPDATER_KEY:-}}"
+          if [ -n "${THROWAWAY_UPDATER_KEY:-}" ]; then
+            unset TAURI_SIGNING_PRIVATE_KEY
+            export TAURI_SIGNING_PRIVATE_KEY_PATH="$THROWAWAY_UPDATER_KEY"
+          fi
           file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
           version=$(bun -e 'console.log(require("./package.json").version)')
           bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"

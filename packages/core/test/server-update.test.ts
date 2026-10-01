@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { generateKeyPairSync, createHash, randomBytes, sign } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { zipSync } from 'fflate';
@@ -82,8 +82,38 @@ test('server updates wait for running and queued work, cancel without stopping i
   } finally { release?.(); await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a failed update admission write leaves the server running and reports the error', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'boite-server-admission-'));
+  let stops = 0;
+  const platform: ServerUpdatePlatform = {
+    inspect: async () => ({ directory: join(root, 'install'), executable: join(root, 'install', 'boite-core'), service: 'test.service' }),
+    launch: async (_run, _executable, plan) => {
+      // A directory at the marker path makes the acknowledgement fail deterministically.
+      mkdirSync(join(dirname(plan), 'admitted'));
+      mkdirSync(join(dirname(plan), 'cancelled'));
+      writeFileSync(join(dirname(plan), 'ready'), '');
+    },
+    control: async () => undefined,
+    mainPid: async () => process.pid,
+  };
+  const h = await startTestCore({ onShutdown: () => { stops++; }, serverUpdates: { platform, pollMs: 5,
+    findOffer: async () => ({ version: '2.0.0-beta.2', publishedAt: '2026-10-01T00:00:00Z', url: 'https://example.test/signed.zip', signature: 'signed' }),
+    prepare: async () => 'a'.repeat(64) } });
+  try {
+    const client = await h.connect();
+    await client.call('core.updateStatus', { refresh: true });
+    await client.call('core.updateInstall', { version: '2.0.0-beta.2' });
+    await waitFor(() => h.core.serverUpdates.snapshot().phase === 'error');
+    expect(stops).toBe(0);
+    expect(h.core.stopping).toBe(false);
+    expect(h.core.serverUpdates.snapshot().phase).toBe('error');
+    expect(h.core.serverUpdates.snapshot().error).toContain('admitted');
+    expect((await client.call('core.updateStatus', {})).phase).toBe('error');
+  } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const fails of [false, true]) test(`update helper ${fails ? 'restores the previous binary, SQLite journal and pairing on a failed restart' : 'installs the complete bundle and checks the new process health'}`, async () => {
-  const root = mkdtempSync(join(tmpdir(), 'boite-server-apply-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'boite-server-apply-')));
   const install = join(root, 'install');
   const data = join(root, 'data');
   const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';

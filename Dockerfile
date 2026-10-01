@@ -11,6 +11,7 @@ COPY tsconfig.base.json ./
 COPY packages/contracts packages/contracts
 COPY packages/core packages/core
 COPY packages/ui packages/ui
+COPY apps/shell/src-tauri/tauri.conf.json apps/shell/src-tauri/tauri.conf.json
 ARG BOITE_VERSION
 RUN if [ -n "$BOITE_VERSION" ]; then bun -e 'const v=process.env.BOITE_VERSION; if (!/^\d+\.\d+\.\d+-nightly\.\d{8}\.[1-9]\d*$/.test(v)) throw Error("invalid nightly version"); const p="packages/core/package.json"; const j=await Bun.file(p).json(); j.version=v; await Bun.write(p,JSON.stringify(j));'; fi
 # Set by server.yml for a published image only; empty leaves the core without

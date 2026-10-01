@@ -145,7 +145,14 @@ export class ServerUpdates {
           return;
         }
       } else {
-        const admission = this.core.requestIdleShutdown();
+        let admission: 'accepted' | 'busy' | 'unsupported';
+        try {
+          admission = this.core.requestIdleShutdown(() => writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 }));
+        } catch (error) {
+          this.cancelFiles(); this.abort = null; this.poll = null;
+          this.move({ phase: 'error', error: messageOf(error) });
+          return;
+        }
         if (admission === 'unsupported') {
           this.cancelFiles(); this.abort = null;
           this.move({ phase: 'error', error: 'This core does not support an idle restart' });
@@ -153,7 +160,6 @@ export class ServerUpdates {
         }
         if (admission === 'accepted') {
           this.move({ phase: 'installing' });
-          writeFileSync(join(directory, 'admitted'), id, { mode: 0o600 });
           this.poll = null;
           return;
         }
@@ -176,10 +182,14 @@ export class ServerUpdates {
   }
   private cancelFiles(): void {
     if (!this.directory) return;
-    if (existsSync(this.directory)) {
-      if (this.workerLaunched) writeFileSync(join(this.directory, 'cancelled'), '', { mode: 0o600 });
-      else rmSync(this.directory, { recursive: true, force: true });
-    }
+    try {
+      if (existsSync(this.directory)) {
+        if (this.workerLaunched) {
+          try { writeFileSync(join(this.directory, 'cancelled'), '', { mode: 0o600 }); }
+          catch { rmSync(this.directory, { recursive: true, force: true }); }
+        } else rmSync(this.directory, { recursive: true, force: true });
+      }
+    } catch (error) { this.core.log('warn', `server update cleanup: ${messageOf(error)}`); }
     this.directory = null;
     this.workerLaunched = false;
   }
