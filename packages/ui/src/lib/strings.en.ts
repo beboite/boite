@@ -2020,12 +2020,12 @@ export const strings = {
 
     /** The question the preset hangs on: said plainly, with a smile, so nobody is unsure which one they are. */
     profile: {
-      title: 'First, which one are you?',
-      everyday: "I'm not a developer! Don't confuse me with code and commands!",
-      everydayHint: 'A new conversation waits in Documents/Boite until you give it a folder, and the agent asks before it acts.',
-      developer: "I'm a developer, give me the works.",
-      developerHint: 'The app opens on your last project, conversations show the terminal and the process trace, and the panel opens on the changes.',
-      later: 'Nothing is taken away either way. Settings, Appearance shows or hides any button, one by one.'
+      title: 'Do you write code?',
+      everyday: "No, I'm not a developer",
+      everydayHint: 'A simpler screen. You start chatting right away, without picking a folder, the side panel shows your files, and the agent asks before it acts.',
+      developer: "Yes, I'm a developer",
+      developerHint: 'Every tool in view. Boite reopens your last project, conversations get a terminal and the process trace, and the side panel shows the code changes.',
+      later: 'This only sets the starting layout: both do the same work. Settings, Appearance shows or hides any button later.'
     },
 
     welcome: {

@@ -114,7 +114,7 @@
       <header><BoiteMark size={18} /><span>{strings.onboarding.label}</span><button class="ghost icon" data-testid="onboarding-skip" aria-label={strings.onboarding.skip} onclick={finish}><X size={16} /></button></header>
       {#key step}
         <div class="screen" data-testid="onboarding-step" data-step={step}>
-          <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{strings.onboarding[step].title}</h1>
+          <h1 id="onboarding-title" tabindex="-1" class:soul={step === 'privacy'}>{strings.onboarding[step].title}{#if step === 'privacy'}<span class="soul-red" aria-hidden="true">{strings.onboarding[step].title}</span>{/if}</h1>
           {#if step === 'welcome'}
             <p class="lead">{strings.onboarding.welcome.body}</p>
             <OnboardingScene scene="welcome" />
@@ -218,12 +218,14 @@
   header button { margin-left: auto; }
   .screen { flex: 1; overflow-y: auto; min-height: 0; padding: 12px 28px 24px; }
   h1 { font-size: var(--text-lg); line-height: 1.35; margin: 0 0 8px; }
-  h1.soul { text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; animation: soul 10s linear forwards; }
-  @keyframes soul {
-    from { color: var(--color-foreground); text-shadow: 0 0 0 transparent; }
-    40% { color: color-mix(in srgb, var(--color-danger) 65%, var(--color-foreground)); text-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 20%, transparent); }
-    to { color: var(--color-danger); text-shadow: 0 0 18px color-mix(in srgb, var(--color-danger) 60%, transparent); }
-  }
+  h1.soul { position: relative; text-align: center; font-size: var(--text-xl); font-weight: 900; letter-spacing: .08em; }
+  /*
+   * The red copy fades in over the plain title rather than the title's color
+   * and text-shadow changing: opacity stays on the compositor, where animating
+   * the shadow restyled and laid out the page on every frame for ten seconds.
+   */
+  .soul-red { position: absolute; inset: 0; color: var(--color-danger); text-shadow: 0 0 18px color-mix(in srgb, var(--color-danger) 60%, transparent); opacity: 0; pointer-events: none; animation: soul 10s cubic-bezier(.3, .6, .6, 1) forwards; }
+  @keyframes soul { to { opacity: 1; } }
   p { margin: 0; }
   .lead, .detail { color: var(--color-muted-foreground); font-size: var(--text-base); line-height: 1.6; }
   .detail { margin-top: 6px; }
@@ -272,7 +274,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }
-    h1.soul { animation: none; color: var(--color-danger); }
+    .soul-red { animation: none; opacity: 1; }
     /* Keep animationend so closing also persists the completed tour. */
     .scrim.closing, .panel.closing { animation-duration: 1ms; }
   }

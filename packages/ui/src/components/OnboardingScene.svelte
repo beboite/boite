@@ -80,17 +80,17 @@
           <div class="recording-area">
             <div class="recording-live"><span class="record-dot"></span>{t.listening}</div>
             <div class="recording-done"><Check size={17} />{t.review}</div>
-            <svg class="waveform" viewBox="0 0 360 66" aria-hidden="true">
-              <path class="wave-axis" d="M4 33h352" />
+            <!-- Bars as boxes rather than SVG rects: a transform on an SVG child is laid out again every frame. -->
+            <div class="waveform" aria-hidden="true">
               {#each [8, 14, 26, 18, 38, 50, 28, 44, 60, 36, 20, 48, 32, 54, 24, 40, 16, 30, 12, 8] as height, i (i)}
-                <rect x={17 + i * 17} y={(66 - height) / 2} width="4" height={height} rx="2" style:--beat={`${i * 55}ms`} />
+                <span style:height="{height}px" style:--beat={`${i * 55}ms`}></span>
               {/each}
-            </svg>
+            </div>
           </div>
           <div class="composer voice-composer">
             <span class="draft-label">{t.draft}</span>
             <p class="transcript">{#each t.voiceWords.split(' ') as word, i (i)}<span style:--word={i}>{word + ' '}</span>{/each}<span class="caret"></span></p>
-            <div class="composer-tools"><span class="local"><LockKeyhole size={13} />{t.localLabel}</span><div class="voice-actions"><span class="mic-target"><Mic size={20} />{@render pointer('mic-pointer')}</span><span class="send voice-send"><ArrowUp size={17} /></span></div></div>
+            <div class="composer-tools"><span class="local"><LockKeyhole size={13} />{t.localLabel}</span><div class="voice-actions"><span class="mic-target"><span class="mic-ring"></span><Mic size={20} />{@render pointer('mic-pointer')}</span><span class="send voice-send"><ArrowUp size={17} /></span></div></div>
           </div>
         </div>
       {:else if scene === 'panel'}
@@ -192,16 +192,18 @@
   .recording-live { animation: first var(--demo-duration) both; color: var(--color-accent); }
   .recording-done { position: absolute; inset: 18px 0 auto; animation: second var(--demo-duration) both; color: var(--color-success); }
   .record-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-  .waveform { width: 100%; height: 68px; margin-top: 10px; overflow: visible; }
-  .waveform rect { fill: var(--color-accent); transform-box: fill-box; transform-origin: center; animation: waveform calc(var(--dur-3) * 3) 5 alternate both; animation-delay: var(--beat); }
-  .wave-axis { stroke: var(--color-edge); stroke-width: 1; }
+  .waveform { position: relative; display: flex; align-items: center; justify-content: space-evenly; height: 68px; margin-top: 10px; padding: 0 4px; }
+  .waveform::before { content: ''; position: absolute; inset: 50% 4px auto; border-top: 1px solid var(--color-edge); }
+  .waveform span { position: relative; width: 4px; border-radius: 2px; background: var(--color-accent); animation: waveform calc(var(--dur-3) * 3) 5 alternate both; animation-delay: var(--beat); }
   .draft-label { font-size: var(--text-xs); color: var(--color-muted-foreground); }
   .transcript { min-height: 44px; padding-top: 8px; font-size: var(--text-base); }
   .transcript > span:not(.caret) { animation: word var(--demo-duration) both; animation-delay: calc(var(--word) * var(--dur-2)); }
   .caret { display: inline-block; vertical-align: middle; margin-left: 3px; height: 1.1em; border-left: 2px solid var(--color-accent); }
   .local { display: inline-flex; align-items: center; gap: 5px; color: var(--color-muted-foreground); }
   .voice-actions { display: flex; align-items: center; gap: 12px; }
-  .mic-target { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: var(--color-accent); background: var(--color-accent-soft); animation: mic-active var(--demo-duration) both; }
+  .mic-target { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; isolation: isolate; color: var(--color-accent); background: var(--color-accent-soft); }
+  /* A ring element scaled out behind the button rather than a growing box-shadow, which repaints every frame; an element, so pause and reduced motion reach it. */
+  .mic-ring { position: absolute; inset: -5px; z-index: -1; border-radius: inherit; background: var(--color-accent-soft); opacity: 0; transform: scale(.85); animation: mic-active var(--demo-duration) both; }
   .mic-pointer { left: 20px; top: 22px; animation: tap var(--demo-duration) both; }
   .voice-send { animation: later var(--demo-duration) both; }
   .split-view { display: grid; grid-template-columns: .85fr 1.15fr; min-height: 270px; }
@@ -281,7 +283,7 @@
   @keyframes pop { 0%, 8% { opacity: 0; transform: translateY(6px); } 13%, 100% { opacity: 1; transform: none; } }
   @keyframes waveform { from { transform: scaleY(.2); opacity: .6; } to { transform: scaleY(1); opacity: 1; } }
   @keyframes word { 0%, 28% { opacity: 0; } 32%, 100% { opacity: 1; } }
-  @keyframes mic-active { 0%, 12% { box-shadow: 0 0 0 0 transparent; } 20%, 45% { box-shadow: 0 0 0 5px var(--color-accent-soft); } 60%, 100% { box-shadow: 0 0 0 0 transparent; } }
+  @keyframes mic-active { 0%, 12% { opacity: 0; transform: scale(.85); } 20%, 45% { opacity: 1; transform: none; } 60%, 100% { opacity: 0; transform: scale(.85); } }
   @keyframes meter { 0%, 13% { transform: scaleX(0); transform-origin: left; } 35%, 100% { transform: scaleX(1); transform-origin: left; } }
   @keyframes spin { to { transform: rotate(1turn); } }
   @keyframes sync { 0%, 32% { opacity: 0; transform: none; } 36% { opacity: 1; } 50% { opacity: 1; transform: translateX(36px); } 54%, 100% { opacity: 0; transform: translateX(36px); } }

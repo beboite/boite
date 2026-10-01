@@ -387,8 +387,8 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   await open();
   await click('onboarding-next');
   expect(step()).toBe('profile');
-  expect(query('[data-testid=onboarding-profile-everyday]').textContent).toContain("I'm not a developer! Don't confuse me with code and commands!");
-  expect(query('[data-testid=onboarding-profile-developer]').textContent).toContain("I'm a developer, give me the works.");
+  expect(query('[data-testid=onboarding-profile-everyday]').textContent).toContain("No, I'm not a developer");
+  expect(query('[data-testid=onboarding-profile-developer]').textContent).toContain("Yes, I'm a developer");
 
   store.prefs = { ...store.prefs, permissionMode: 'bypassPermissions' };
   await click('onboarding-profile-everyday');

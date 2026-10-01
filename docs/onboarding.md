@@ -64,15 +64,26 @@ redrawn under them on every frame. On 2026-09-30, headless Chrome with software
 compositing drew the welcome and agents scenes at 9 to 13 fps with the blur and
 50 to 60 fps without it, at 1280 x 890.
 
+For the same reason the scenes animate opacity and transform only. The privacy
+title fades a red copy in over itself instead of animating its color and
+text-shadow, the dictation waveform is a row of boxes rather than SVG rects,
+and the microphone's ring is an element scaled behind the button rather than a
+growing box-shadow. On 2026-10-01, headless Chrome at 1280 x 890 on the fake
+client spent 483 ms of main-thread work per 3 s on the privacy screen before
+the change (81 ms of it layout, one layout per frame) and 149 ms after (1 ms of
+layout). The dictation demo went from one layout per frame to one in 3 s.
+
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
 counts as much as finishing the last one: the tour is not asked twice.
 
 ## The question
 
-The second screen asks who is at the keyboard, in the user's words rather than
-a feature list: "I'm not a developer! Don't confuse me with code and
-commands!" or "I'm a developer, give me the works." The answer is a preset,
+The second screen asks "Do you write code?", answered "No, I'm not a
+developer" or "Yes, I'm a developer". Under each answer, one line says what it
+changes on screen: where the app opens, what the side panel shows, which tools
+are in view and, for the first, that the agent asks before it acts. The line
+under both says it only sets the starting layout. The answer is a preset,
 not a mode. It writes settings that already exist, and no component reads the
 answer itself:
 
