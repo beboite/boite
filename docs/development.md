@@ -103,6 +103,8 @@ in-memory fake.
 - `?fake=1&stream=tokens` streams answers and reasoning sixteen characters per
   delta, the echo driver's rate, instead of five deltas per answer, so a cost
   paid per delta shows. Tests pass `chunkSize` to `FakeClient` for the same.
+- `?fake=1&probeDelay=<ms>` holds every model probe that long, so the
+  picker's placeholder rows and its reading line stay on screen for a capture.
 - The app opens on a new thread's draft in the last used project, as if New
   thread had been pressed: the project last opened or drafted in on that
   device (kept per core in `localStorage`), else the project of the most recent

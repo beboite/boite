@@ -56,8 +56,8 @@ test('a column of hundreds of models draws its first rows until asked for all', 
   await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 
   const many: ModelInfo[] = Array.from({ length: 534 }, (_, index) => ({ id: `vendor${index % 4}/model-${index}`, name: `Model ${index}` }) as ModelInfo);
-  const real = store.modelsOf.bind(store);
-  vi.spyOn(store, 'modelsOf').mockImplementation((providerId, accountId) => (providerId === 'opencode' ? many : real(providerId, accountId)));
+  const real = store.listedModelsOf.bind(store);
+  vi.spyOn(store, 'listedModelsOf').mockImplementation((providerId, accountId) => (providerId === 'opencode' ? many : real(providerId, accountId)));
 
   document.querySelector<HTMLButtonElement>('[data-testid=new-thread]')!.click();
   await waitFor(() => store.draft !== null);
@@ -122,15 +122,20 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   await waitFor(() => probing() !== null);
   expect(rows()).toBe(0);
   expect(legacyFold()).toBeNull();
-  expect(document.querySelectorAll('[data-testid=composer-picker-menu] .skeleton').length).toBe(3);
+  expect(document.querySelectorAll('[data-testid=composer-picker-menu] .skeletons .model-entry').length).toBe(6);
+  // The search field stands from the first frame, and the reading line sits above the rows.
+  expect(document.querySelector('[data-testid=composer-picker-menu] [data-testid=picker-search]')).not.toBeNull();
+  expect(probing()!.compareDocumentPosition(document.querySelector('[data-testid=composer-picker-menu] .skeletons')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
   outcome = 'land';
   await waitFor(() => rows() > 0 && probing() === null);
   expect(document.querySelector('[data-model="claude-fable-5-1"]')).not.toBeNull();
   expect(legacyFold()).not.toBeNull();
 
-  // The account changed, so its answer is gone; this time the agent fails and
-  // the descriptor's list comes back instead of a column that reads forever.
+  // The account changed, so its answer is outdated: still listed while the
+  // agent reads again, never placeholders. This time the agent fails and the
+  // descriptor's list comes back instead of a column that reads forever.
+  const outdated = rows();
   document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   outcome = 'wait';
@@ -138,10 +143,14 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   await waitFor(() => !store.probedModels['claude::a-claude-main']);
   await openClaude();
   await waitFor(() => probing() !== null);
-  expect(rows()).toBe(0);
+  expect(rows()).toBe(outdated);
+  expect(document.querySelectorAll('[data-testid=composer-picker-menu] .skeleton').length).toBe(0);
+  expect(probing()!.compareDocumentPosition(document.querySelector('[data-testid=composer-picker-menu] [data-model]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   outcome = 'fail';
-  await waitFor(() => rows() > 0 && probing() === null);
+  await waitFor(() => probing() === null);
+  expect(rows()).toBeGreaterThan(0);
   expect(document.querySelector('[data-model="claude-fable-5-1"]')).not.toBeNull();
   expect(legacyFold()).not.toBeNull();
+  expect(store.modelsOutdated('claude', 'a-claude-main')).toBe(false);
   expect(store.probedModels['claude::a-claude-main']).toBeUndefined();
 });

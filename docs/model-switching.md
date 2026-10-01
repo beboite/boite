@@ -40,8 +40,13 @@ available through the SDK.
 Model catalogs persist in client storage, scoped to the core endpoint and data
 directory and checked against the current provider/account records. Opening an
 agent shows the cached list immediately while discovery runs in the background.
-With no cached list, the column shows placeholder rows and the reading line until
-the first answer lands, and the descriptor's list if that answer fails.
+With no cached list, the column shows placeholder rows and the reading line from
+its first frame until the first answer lands, and the descriptor's list if that
+answer fails; it never shows the descriptor's list first. A catalog outdated by
+a descriptor reload, an account change or a snapshot saved under other records
+stays listed while the next probe reads, and the new answer replaces it whole.
+An outdated list is never offered: a pick probes first and checks the model
+against the current answer.
 Reopening the picker after five minutes refreshes that account's catalog, and a
 catalog restored from storage is also revalidated. These reads replace the
 displayed models and their legacy flags without changing per-provider defaults.

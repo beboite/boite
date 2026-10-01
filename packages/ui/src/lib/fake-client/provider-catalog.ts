@@ -27,6 +27,13 @@ export function checkSpeed(ctx: FakeContext, providerId: string, accountId: stri
  * ACP, Codex and pi probe their own catalogs. Demo models are explicitly
  * named as such; only OpenCode uses the large catalog fixture.
  */
+/** `?probeDelay=<ms>` slows every probe, so a demo can watch the picker read. */
+function probeDelay(): number | null {
+  if (typeof location === 'undefined') return null;
+  const delay = Number(new URLSearchParams(location.search).get('probeDelay'));
+  return Number.isFinite(delay) && delay > 0 ? delay : null;
+}
+
 async function probe(ctx: FakeContext, providerId: string, accountId: string): Promise<RpcResult<'providers.probe'>> {
   const provider = ctx.providers.find((p) => p.id === providerId);
   if (!provider) {
@@ -47,8 +54,9 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
       ...models,
       { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : provider.protocol === 'muse' ? { effort: MUSE_EFFORT } : {}) }
     ];
-    await new Promise((resolve) => setTimeout(resolve, PROBE_MS));
   }
+  const delay = probeDelay() ?? (dynamic ? PROBE_MS : 0);
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
   ctx.modelCatalogs.set(providerId + '::' + accountId, models);
   const probedAt = ctx.now();
   ctx.emit('providers.probed', { providerId, accountId, models: structuredClone(models), probedAt });

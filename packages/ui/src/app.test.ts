@@ -420,7 +420,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   expect(store.openThread?.model).toBe('claude-opus-5');
 });
 
-test('the picker reads an ACP agent models, showing the descriptor and a probing line meanwhile', async () => {
+test('the picker reads an ACP agent models, holding placeholders and a probing line meanwhile', async () => {
   await mountOnFake();
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -429,9 +429,10 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   query<HTMLButtonElement>('[data-testid=composer-picker]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') !== null);
   query<HTMLButtonElement>('[data-testid=composer-picker-menu] [data-provider=opencode]').click();
+  flushSync();
 
-  // While the agent is being asked, its descriptor's one model stands.
-  await waitFor(() => document.querySelector('[data-testid=picker-probing]') !== null);
+  // The first frame already waits for the agent: its descriptor's one model never shows.
+  expect(document.querySelector('[data-testid=picker-probing]')).not.toBeNull();
   expect(shownModels()).toEqual([]);
 
   await waitFor(() => document.querySelector('[data-testid=picker-probing]') === null);
