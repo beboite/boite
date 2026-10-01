@@ -272,14 +272,13 @@ of reset credits even when the optional details are absent. Only counts and
 expiration times reach the client. Boite never redeems a reset or changes paid
 usage settings.
 
-Once any subscription window is exhausted, a confirmed enabled, positive paid
-allowance appears beneath it. Claude's allowance is the remaining monthly
-spending budget, displayed as a percentage of its cap; it is not a prepaid
-wallet balance. Codex reports a credit balance but does not confirm automatic
-paid usage, so Boite retains the balance with an unknown activation state and
-hides it in the automatic fallback display. Missing, disabled and zero paid
-allowances remain hidden; a failed read does not advertise stale resets or
-credits as available.
+Once any subscription window is exhausted, Claude's confirmed enabled, positive
+monthly spending budget appears beneath it as a percentage of its cap.
+Codex's reported positive credit balance appears in the compact panel and
+Limits page even while subscription quota remains. Its automatic spending
+activation state stays unknown: displaying a balance does not confirm that
+paid usage is active. Missing, disabled and zero allowances remain hidden;
+a failed read does not advertise stale resets or credits as available.
 
 Muse Code hosts that support `usage/changed` (1.4.0 or later) contribute their
 last observed subscription windows through an existing conversation. Listing

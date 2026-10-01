@@ -64,7 +64,7 @@ test('exhausted accounts show read-only resets and the enabled monthly budget in
   expect(document.querySelector('[data-testid=quota-extras] button')).toBeNull();
 });
 
-test('credit fallback requires actual exhaustion and confirmed positive paid usage for that same account', () => {
+test('monthly budget fallback requires actual exhaustion and confirmed positive paid usage for that same account', () => {
   const row: AccountQuota = { ...quota, windows: [{ ...quota.windows[0]!, usedPercent: 100 }],
     credits: { kind: 'budget', enabled: true, remaining: 75, limit: 100, unlimited: false } };
   const variants: AccountQuota[] = [
@@ -87,4 +87,25 @@ test('credit fallback requires actual exhaustion and confirmed positive paid usa
   expect(document.querySelectorAll('[data-testid=quota-credits] [role=meter]')).toHaveLength(2);
   expect(document.body.textContent).toContain('Less than 0.1% left');
   expect(document.body.textContent).toContain('42.5 credits');
+});
+
+test('Codex displays a reported credit balance without requiring automatic paid usage or exhaustion', () => {
+  const row: AccountQuota = { ...quota, providerId: 'codex', providerName: 'Codex',
+    windows: [{ ...quota.windows[0]!, usedPercent: 100 }],
+    credits: { kind: 'balance', enabled: null, remaining: 42.5, limit: null, unlimited: false } };
+  const variants: AccountQuota[] = [
+    { ...row, accountId: 'exhausted' },
+    { ...row, accountId: 'subscription-left', windows: quota.windows },
+    { ...row, accountId: 'disabled-balance', credits: { ...row.credits!, enabled: false } },
+    { ...row, accountId: 'zero-balance', credits: { ...row.credits!, remaining: 0 } },
+    { ...row, accountId: 'unknown-balance', credits: { ...row.credits!, remaining: null } },
+    { ...row, accountId: 'stale-balance', status: 'unavailable' },
+    { ...row, accountId: 'monitoring-off', enabled: false },
+  ];
+  component = mount(UsageLimits, { target: document.body, props: { rows: variants } });
+  flushSync();
+  expect([...document.querySelectorAll('[data-testid=quota-extras]')].map((element) => element.getAttribute('data-account-id'))).toEqual(['exhausted', 'subscription-left']);
+  expect(document.querySelectorAll('[data-testid=quota-credits]')).toHaveLength(2);
+  expect(document.body.textContent).toContain('42.5 credits');
+  expect(document.querySelector('[data-testid=quota-credits] [role=meter]')).toBeNull();
 });
