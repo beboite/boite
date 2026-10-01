@@ -1,6 +1,7 @@
 /**
  * Whether the engine sizes the composer to its text itself
- * (`field-sizing: content`), in the frame's own layout. Elsewhere `fitHeight`
+ * (`field-sizing: content`, capped at the eight lines `fitHeight` stops at in
+ * the composer's style), in the frame's own layout. Elsewhere `fitHeight`
  * measures it, which lays the page out twice more inside every input event.
  * Asked once per composer, so a test can stand in an engine without it.
  */

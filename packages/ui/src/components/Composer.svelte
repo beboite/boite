@@ -324,16 +324,14 @@
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
     track();
-    if (!sizesItself) grow();
-    else if (highlighted) syncInput();
+    if (!sizesItself) grow(); else if (highlighted) syncInput();
   }
 
   /** Where the caret is now: read after every key (twice: input and keyup), click and input. An unmoved caret writes nothing. */
   function track() {
     caret = box?.selectionEnd ?? text.length;
-    if (!box) return;
-    const state = stateForInput(), { selectionStart: start, selectionEnd: end } = box;
-    if (state.selection?.start !== start || state.selection?.end !== end) state.selection = { start, end };
+    const state = box && stateForInput(), start = box?.selectionStart ?? 0, end = box?.selectionEnd ?? 0;
+    if (state && (state.selection?.start !== start || state.selection?.end !== end)) state.selection = { start, end };
   }
 
   /** Writes a recalled or restored prompt in, caret at its end. */
@@ -878,7 +876,6 @@
 
   textarea { display: block; }
   .input-paint { max-height: none; }
-  /* The box grows with its text in the frame's own layout, to the eight lines `fitHeight` stops at. */
   @supports (field-sizing: content) { textarea { field-sizing: content; max-height: min(200px, calc(8lh + 16px)); } }
 
   textarea:focus {
