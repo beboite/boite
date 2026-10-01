@@ -107,7 +107,7 @@ test('a failed update admission write leaves the server running and reports the 
     expect(stops).toBe(0);
     expect(h.core.stopping).toBe(false);
     expect(h.core.serverUpdates.snapshot().phase).toBe('error');
-    expect(h.core.serverUpdates.snapshot().error).toContain('admitted');
+    expect(h.core.serverUpdates.snapshot().error).toContain('EISDIR');
     expect((await client.call('core.updateStatus', {})).phase).toBe('error');
   } finally { await h.stop(); rmSync(root, { recursive: true, force: true }); }
 });
