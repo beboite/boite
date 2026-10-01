@@ -73,10 +73,15 @@ coordination as soon as both are ready: each core trusts the other's public
 key and address, then both check the link. Their agents can then find, read
 and message each other ([coordination](coordination.md)). Paired-device
 connections are never linked. Each core needs an HTTPS public address the
-other can reach; a pair that cannot link shows the reason in the Agent links
+other can reach. When a core advertises loopback, the client uses its connected
+HTTPS origin if available. Otherwise, it asks for a reachable public address
+before exchanging trust or probing the link. A pair that cannot link shows the
+reason in the Agent links
 section and is tried again when one of the machines reconnects. A link removed
 there is remembered on this device and stays removed until Link agents is
-used again.
+used again. Link failures name the source, destination and address without
+broadcasting an internal-error notification. Owners can inspect and retry links
+on desktop and phone.
 
 ## Automatic settings synchronization
 

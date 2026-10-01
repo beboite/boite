@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'node:crypto';
-import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
+import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
@@ -161,6 +161,22 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   two.h.core.coordination.untrust(cardA.coreId);
   expect((await one.h.core.coordination.directory(one.a)).unavailable).toEqual([cardB.name]);
 }, 25000);
+
+test('an unreachable coordination check names the destination without broadcasting an internal error', async () => {
+  const one = await setup(); const two = await setup();
+  const peer = { ...two.h.core.coordination.identity(), name: 'Remote test machine', url: 'http://127.0.0.1:1' };
+  one.h.core.coordination.trust(peer);
+  const log = spyOn(one.h.core, 'log');
+  try {
+    await expect(one.owner.call('collaboration.check', { coreId: peer.coreId })).rejects.toMatchObject({
+      rpc: {
+        code: RpcErrorCode.Unavailable,
+        message: expect.stringContaining('Remote test machine at http://127.0.0.1:1'),
+      },
+    });
+    expect(log.mock.calls.some(([level]) => level === 'error')).toBe(false);
+  } finally { log.mockRestore(); }
+});
 
 test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
   const one = await setup(); const two = await setup();

@@ -5,7 +5,7 @@ import { defaultCoordinationConfig } from '@boite/contracts';
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
 import type { Core } from './core.ts';
-import { invalidParams, messageOf, refused, RpcFailure } from './errors.ts';
+import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 
 const HOUR = 3_600_000;
 /** How long a delivered, expired, rejected or uncertain letter stays in the journal. */
@@ -132,7 +132,13 @@ export class Coordination {
   async check(coreId: string): Promise<{ ok: true }> {
     const peer = this.peers().find(p => p.coreId === coreId);
     if (!peer) throw refused('machine is not trusted for coordination');
-    await this.exchange(peer, 'directory', {});
+    try { await this.exchange(peer, 'directory', {}); }
+    catch (error) {
+      if (error instanceof RpcFailure) throw error;
+      const source = this.core.info().hostname ?? 'Boite';
+      this.core.log('warn', `agent link ${source} -> ${peer.name} at ${peer.url}: ${messageOf(error)}`);
+      throw unavailable(`${source} could not verify the agent link to ${peer.name} at ${peer.url}. Check that both machines can reach each other's HTTPS address.`);
+    }
     return { ok: true };
   }
   trust(peer: CoordinationPeer): CoordinationPeer {
