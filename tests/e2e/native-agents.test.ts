@@ -18,7 +18,7 @@ beforeAll(async () => {
   await page.click('[data-testid="thread-row"][data-thread-id="t-native"]');
   await page.click('[data-testid=thread-menu-trigger]');
   await page.click('[data-testid=thread-menu-trigger-menu] [data-value=agents]');
-  await page.waitFor('!!document.querySelector("[data-testid=delegation-settings]")');
+  await page.waitFor('!!document.querySelector("[data-testid=native-agents]")');
 }, 60_000);
 afterAll(async () => { await page?.close(); await server?.close(); }, 30_000);
 
@@ -48,11 +48,11 @@ test('native agents remain visible beside Boite subagents on desktop and phone',
   expect(page.errors()).toEqual([]);
 }, 40_000);
 
-test('a running native agent has a dock entry without changing Boite team usage', async () => {
+test('a running native agent has a dock entry without becoming a Boite subagent', async () => {
   await onStore('store.delegation.nativeAgents[1].status = "running";');
   await page.waitFor('!!document.querySelector("[data-testid=native-agent-dock-member]")');
   await page.click('[data-testid="panel-close"]');
   await page.click('[data-testid="native-agent-dock-member"]');
   await page.waitFor('!!document.querySelector("[data-testid=native-agents]")');
-  expect((await page.text('[data-testid="delegation-usage"]')).replace(/\s+/g, ' ')).toContain('0 subagents');
+  expect(await page.evaluate('document.querySelectorAll("[data-testid=delegation-member]").length')).toBe(0);
 }, 15_000);
