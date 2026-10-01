@@ -2,9 +2,11 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { AccountQuota } from '@boite/contracts';
 import { SvelteMap } from 'svelte/reactivity';
-import type { Store } from '../lib/store.svelte';
+import { Store } from '../lib/store.svelte';
 import { strings } from '../lib/strings';
 import LimitsPage from './LimitsPage.svelte';
+import { FakeClient } from '../lib/fake-client';
+import { quotaReader } from '../lib/quota-reader.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (mounted) await unmount(mounted); mounted = undefined; document.body.innerHTML = ''; });
@@ -128,4 +130,40 @@ test('the read waits for the socket, a failure shows with a retry, and a kept re
   state.set('connection', 'ready');
   await settle();
   expect(call).toHaveBeenCalledTimes(4);
+});
+
+
+test('renaming a tracked subscription updates cached cards immediately and cancelling leaves it alone', async () => {
+  const store = new Store();
+  const client = new FakeClient({ delayMs: 0 });
+  store.attach(client);
+  await store.connect();
+  const read = vi.spyOn(client, 'call');
+  mounted = mount(LimitsPage, { target: document.body, props: { store } });
+  await vi.waitFor(() => expect(document.querySelector('[data-testid="tracked-account"][data-account-id="a-codex"]')).not.toBeNull());
+  const row = () => document.querySelector<HTMLElement>('[data-testid="tracked-account"][data-account-id="a-codex"]')!;
+  try {
+    row().querySelector<HTMLButtonElement>('[data-testid="account-rename"]')!.click(); flushSync();
+    const input = row().querySelector<HTMLInputElement>('[data-testid="account-name"]')!;
+    expect(document.activeElement).toBe(input);
+    input.value = ' ';
+    input.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+    expect(row().querySelector<HTMLButtonElement>('[data-testid="account-save"]')!.disabled).toBe(true);
+    input.value = ' Personal ';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(store.accountOf('a-codex')!.label).toBe('Personal'));
+    await settle();
+    expect(document.querySelector('[data-testid="usage-limit-provider"][data-account-id="a-codex"] strong')!.textContent).toBe('Personal');
+    expect(row().querySelector('.account')!.textContent).toBe('Personal');
+    // No quota refresh is needed and the cache itself still has the older label.
+    expect(read.mock.calls.filter(([method]) => method === 'quotas.list')).toHaveLength(1);
+    expect(quotaReader(store.endpointUrl ?? 'here').rows!.find(row => row.accountId === 'a-codex')!.label).toBe('Default');
+    row().querySelector<HTMLButtonElement>('[data-testid="account-rename"]')!.click(); flushSync();
+    row().querySelector<HTMLInputElement>('[data-testid="account-name"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(row().querySelector('[data-testid="account-name"]')).toBeNull();
+    expect(document.activeElement).toBe(row().querySelector('[data-testid="account-rename"]'));
+    expect(store.accountOf('a-codex')!.label).toBe('Personal');
+  } finally { store.detach(); client.close(); }
 });

@@ -131,7 +131,8 @@ in-memory fake.
   answered a hello.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
-a reload shows.
+a reload shows. Run `svelte-check` before source-based browser scenarios: writing
+its generated tsconfig makes Vite reload the page and can reset a fixture mid-test.
 
 Opening a project uses one dialog from the sidebar, the drafts' project menu
 and `Work in a folder of mine`, settings and the command palette. Choose a machine, then type an absolute path or browse
