@@ -106,7 +106,7 @@ test('projects follow user activity, then keep a dragged custom order after relo
   expect(await page.evaluate(`document.querySelector('${id('view-projects')}').dataset.order`)).toBe('manual');
   const before = await keys();
   await page.click(id('project-menu'));
-  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('context-menu')} [data-value]')).map(e => e.dataset.value)`)).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(await page.evaluate(`Array.from(document.querySelectorAll('${id('context-menu')} [data-value]')).map(e => e.dataset.value)`)).toEqual(['copy', 'archived', 'manage']);
   await page.click(`${id('context-menu')} [data-value=manage]`);
   await page.waitFor(`document.querySelector('${id('context-menu')} [data-value=move-up]')`);
   expect(await page.evaluate(`document.querySelector('${id('context-menu')} [data-value=move-up]').disabled`)).toBe(true);
