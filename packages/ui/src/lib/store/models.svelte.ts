@@ -293,25 +293,31 @@ export class Models {
     writePrefs(this.prefs);
   }
 
-  /**
-   * The composer's one action. On a draft it creates the thread first, titled
-   * from the prompt; on an open thread it starts a turn. An image alone is a
-   * turn too, so an empty prompt with an attachment goes out.
-   */
+  /** Validate a draft's choice against the owning core before creating its thread. */
   async prepareDraftChoice(choice: Choice): Promise<Choice | null> {
     const s = this.ctx.store;
     const provider = s.providerOf(choice.providerId);
     if (!choice.model || !provider) return choice;
-    const models = s.modelsOf(choice.providerId, choice.accountId);
-    if ((!models.some((model) => model.id === choice.model) ||
-      (provider.protocol === 'claude-sdk' && !this.probedModels[probeKey(provider.id, choice.accountId)])) &&
-      ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
+    if (['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
       const client = this.ctx.client;
       if (!client) return null;
+      const epoch = this.probeEpoch;
       try {
-        const result = await client.call('providers.probe', { providerId: choice.providerId, accountId: choice.accountId });
+        // Browser storage can outlive the core's in-memory catalog. Always ask
+        // the owning core; its probe reuses an existing catalog without a refresh.
+        const result = await client.call('providers.probe', {
+          providerId: choice.providerId,
+          accountId: choice.accountId,
+          // ACP can expose the effort scale only for its current model.
+          ...(provider.protocol === 'acp' && choice.effort !== null ? { model: choice.model } : {})
+        });
+        if (client !== this.ctx.client || epoch !== this.probeEpoch) return null;
         this.probedModels = { ...this.probedModels, [probeKey(choice.providerId, choice.accountId)]: result.models };
-      } catch (error) { this.ctx.fail(error); return null; }
+        this.saveModels();
+      } catch (error) {
+        if (client === this.ctx.client && epoch === this.probeEpoch) this.ctx.fail(error);
+        return null;
+      }
     }
     if (!s.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model)) {
       s.error = strings.settings.modelDefaultUnavailable.replace('{model}', choice.model).replace('{provider}', provider.name);
