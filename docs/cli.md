@@ -202,6 +202,8 @@ or claimed cards, with the count in the refusal; the user's adds have no limit.
 
 `ask` draws a question card in the thread without stopping the agent: the
 thread does not turn `waiting` and the card stays open after the turn ends.
+A core restart keeps it too: an open card is read back from the journal at
+startup, for as long as events are kept (30 days).
 Each extra argument is an option label; with none the question takes free
 text, and `--multiple` lets the user pick several. The answer reaches the agent
 as a message that quotes the question, `> question` then the answer: steered

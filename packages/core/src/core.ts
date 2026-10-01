@@ -242,6 +242,7 @@ export class Core {
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
+    this.threads.cards.restoreAsyncQuestions();
     queueMicrotask(() => this.threads.titles.recover());
     this.agentRuntime = new AgentRuntime(this);
     this.brain.start();
