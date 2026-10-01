@@ -1,6 +1,7 @@
 # Desktop updates
 
-The sidebar footer has an update icon beside the other controls. Its popup
+The sidebar footer shows an update icon when the app or a remote server has
+an update available or in progress. Its popup
 names the release and how long ago it was published, links to its changelog on
 GitHub, and offers installation with a restart confirmation. Release channel
 options show the installed version and let you switch channels.
@@ -9,6 +10,9 @@ A dot marks an update ready to install. Hide reminder clears that dot for the
 version and channel, including after restarting the app. The icon stays
 available for installation; a different release lights the dot again.
 The settings navigation keeps the same icon at its foot.
+When the app is current, the icon is hidden. Settings, General keeps the manual
+check and channel controls available. Remote server entries open the owning
+machine's update card; see [server updates](server.md#updating-from-the-app).
 
 ## Boite and Boite Nightly
 

@@ -91,7 +91,7 @@ jobs:
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
           # updater-manifest.ts refused any file outside this set.
-          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz)
+          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz ./boite-server_*.zip)
           sha256sum "${installers[@]}" > SHA256SUMS.txt
           flags=()
           [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)

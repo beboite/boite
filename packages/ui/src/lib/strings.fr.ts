@@ -288,6 +288,23 @@ export const fr: Translation = {
     quitHoldHint: 'ou appuyez deux fois'
   },
 
+  serverUpdate: {
+    heading: 'Serveur',
+    updates: 'Mises à jour',
+    current: 'Le serveur est à jour.',
+    waiting: 'En attente de la fin des agents et du travail en arrière-plan sur ce serveur. Vous pouvez continuer à discuter ou annuler.',
+    installing: 'Redémarrage du serveur avec la mise à jour',
+    reconnecting: 'Redémarrage du serveur. La connexion reprend automatiquement.',
+    progress: 'Téléchargement de la mise à jour du serveur',
+    release: 'Changements de la version {version}',
+    confirmTitle: 'Mettre à jour {machine} ?',
+    confirmBody: 'Installer la version {version} après la fin du travail sur ce serveur. Les conversations et les réglages sont sauvegardés. Si le démarrage échoue, la version précédente est restaurée. Les appareils connectés se reconnectent automatiquement. Vous pouvez annuler pendant l’attente.',
+    manualTitle: 'Comment mettre à jour ce serveur',
+    docker: 'Exécutez cette commande dans le dossier Compose du serveur après la fin des agents. Docker conserve les volumes de données existants.',
+    manual: 'L’installation automatique nécessite un serveur Linux autonome lancé par un service systemd utilisateur. Consultez le guide pour cette installation.',
+    legacy: 'Ce serveur est antérieur aux mises à jour depuis l’app. Mettez-le à jour une fois avec le guide pour activer ce contrôle.',
+    guide: 'Ouvrir le guide de mise à jour du serveur'
+  },
   appUpdate: {
     released: 'Sortie {time}',
     changelog: 'Changelog sur GitHub',

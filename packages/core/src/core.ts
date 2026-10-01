@@ -40,6 +40,7 @@ import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
+import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -53,6 +54,7 @@ export interface SubscriptionSink {
 }
 
 export interface CoreOptions {
+  serverUpdates?: ServerUpdateOptions;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -131,6 +133,7 @@ export class Core {
   readonly speech: SpeechStore;
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
+  readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
@@ -223,6 +226,7 @@ export class Core {
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
+    this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
@@ -321,6 +325,7 @@ export class Core {
     this.#stopping = true;
     await this.brain.close();
     this.updates.close();
+    this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();

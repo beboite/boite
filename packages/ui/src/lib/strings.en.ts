@@ -281,6 +281,23 @@ export const strings = {
     quitHoldHint: 'or press it twice'
   },
 
+  serverUpdate: {
+    heading: 'Server',
+    updates: 'Updates',
+    current: 'The server is up to date.',
+    waiting: 'Waiting for agents and background work to finish on this server. You can keep chatting or cancel.',
+    installing: 'Restarting the server with the update',
+    reconnecting: 'Restarting the server. Reconnecting automatically.',
+    progress: 'Server update download',
+    release: 'What changed in {version}',
+    confirmTitle: 'Update {machine}?',
+    confirmBody: 'Install version {version} after all work on this server finishes. Conversations and settings are backed up. If startup fails, the previous version is restored. Connected devices reconnect automatically. You can cancel while the update waits.',
+    manualTitle: 'How to update this server',
+    docker: 'Run this in the server\'s Compose directory after agents finish. Docker keeps the existing data volumes.',
+    manual: 'Automatic installation needs a standalone Linux server running as a systemd user service. Use the server guide for this installation.',
+    legacy: 'This server predates in-app updates. Update it once using the server guide to enable this control.',
+    guide: 'Open the server update guide'
+  },
   appUpdate: {
     released: 'Released {time}',
     changelog: 'Changelog on GitHub',

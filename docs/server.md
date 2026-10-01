@@ -135,6 +135,56 @@ authentication, installed provider executables, an echo turn, graceful shutdown
 and persistence after restart, then removes its container and volume. It makes
 no real provider call and uses no existing login directory.
 
+## Updating from the app
+
+Open Settings, Machines. Each remote server shows its installed version and a
+Check for updates action. When a signed server release is available, Update
+appears on that machine's card and in the sidebar's update menu. That menu is
+hidden when neither the app nor a server has an update available. The desktop
+app's own manual check and channel choices remain in Settings, General.
+
+Server updates require an owner connection, including on a phone. Ordinary
+paired devices cannot stop or update the server. The action always goes to the
+machine on the card, even after switching to another machine.
+
+Automatic server installation supports standalone Linux x64 and ARM64 cores
+started by a systemd user service. Keep the compiled `boite-core`, `boite` shim
+and `ui` folder together in one writable directory, outside the data directory.
+The default service name is `boite.service`; set `BOITE_SERVER_SERVICE` in the
+service environment for another name. Its `ExecStart` must name that core
+directly, and `Restart` must be `on-failure` or `no`. Desktop sidecars, source
+runs, symlinked installs and containers keep their own installation method.
+Docker cards show the Compose update command; other unmanaged or older cores
+link to this guide. A core predating this feature needs one manual update first.
+
+The server checks eight seconds after startup, then every six hours. It follows
+its installed stable or nightly channel, downloads an immutable release's
+signed server archive, and verifies the publisher signature and embedded
+version before staging the complete core, CLI and UI. No update stops a running
+turn. The download and idle wait can be cancelled. Running and queued turns,
+terminals, warm sessions, background tasks and authenticated requests must
+finish before the existing idle-shutdown gate admits installation.
+
+An independent systemd user job survives the core's shutdown. After the core
+stops, it backs up the complete data directory and installation, switches the
+staged installation into place, and restarts the same service. Health must
+report the target version and that service's new PID within 30 seconds.
+Failure restores both the previous installation and its data snapshot before
+restarting. Pairings and conversations survive; clients reconnect normally.
+Backups remain private beside the installation as `.boite-backup-<id>`.
+Failure artifacts also remain for diagnosis; inspect them before removing them.
+
+From a terminal on the server, the same owner actions need no thread:
+
+```sh
+boite server check
+boite server update
+boite server cancel
+```
+
+Use `--data-dir <directory>` or `--channel dev` when that server uses a different
+data directory. An agent's thread token cannot use these owner-only methods.
+
 ## Building without Docker
 
 ```bash

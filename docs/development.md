@@ -35,6 +35,21 @@ phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
 `appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
 removed from production builds.
 
+`bun test packages/core/test/server-update.test.ts` verifies publisher signatures,
+archive paths, waiting and cancellation, complete installation and restoration
+of SQLite and pairing state after a failed restart. The helper uses isolated
+directories and a test service adapter. `bun test tests/e2e/server-updates.test.ts`
+checks the owning machine's update action at desktop and phone widths, including
+confirmation and cancellation. `?fake=1&machines=1&serverUpdate=available` previews
+the offer; `downloading`, `waiting` and `error` preview its other states.
+These fixtures spend no provider tokens and never update the real installation.
+
+After `bun run build:core:linux`, Linux hosts with a systemd user manager can
+also run `BOITE_E2E_SERVER_UPDATE=1 bun test packages/core/test/server-update-systemd.test.ts`.
+This opt-in smoke test creates its own service, runs the compiled update worker
+in another cgroup, verifies the backup and restart, then removes both test units.
+It uses a fresh data directory and an inert replacement, without provider calls.
+
 ## The core
 
 ```bash

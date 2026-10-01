@@ -162,7 +162,7 @@ jobs:
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
           # updater-manifest.ts refused any file outside this set.
-          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz)
+          installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz ./boite-server_*.zip)
           sha256sum "${installers[@]}" > SHA256SUMS.txt
           apks=(../android/boite-*.apk)
           test "${#apks[@]}" -eq 1 && test -f "${apks[0]}"

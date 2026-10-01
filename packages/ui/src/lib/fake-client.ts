@@ -38,6 +38,7 @@ import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
 import { worktreeMethods } from './fake-client/worktrees';
+import { serverUpdateMethods } from './fake-client/server-update';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -283,6 +284,7 @@ export class FakeClient implements ObservableClient {
         return { core: ctx.core, principal: ctx.bus.principal };
       },
       ...brainMethods(ctx),
+      ...serverUpdateMethods(ctx),
       ...hookMethods(ctx),
       ...pairingMethods(ctx),
       ...projectMethods(ctx),
