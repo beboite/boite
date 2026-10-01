@@ -182,7 +182,6 @@ export class Delegation {
         if (!p || typeof p !== 'object') throw invalidParams('profile: expected an object');
         const id = text(p.id, 'profile.id', 64);
         if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw invalidParams('profile.id: expected letters, numbers, underscores or hyphens');
-        if (id === CONVERSATION_PROFILE_ID) throw invalidParams(`profile.id: "${CONVERSATION_PROFILE_ID}" names the conversation's own model; expected another id`);
         const provider = this.core.providers.require(text(p.providerId, 'profile.providerId', 128));
         const account = this.core.accounts.require(text(p.accountId, 'profile.accountId', 128));
         if (account.providerId !== provider.id) throw refused('profile.accountId must belong to profile.providerId');
@@ -220,7 +219,7 @@ export class Delegation {
     }
     const config = this.available(parent);
     const profile = this.route(parent, config, params.profileId);
-    if (!profile) throw invalidParams(`profileId: expected ${[CONVERSATION_PROFILE_ID, ...config.profiles.map(p => p.id)].join(', ')}`);
+    if (!profile) throw invalidParams(`profileId: expected ${[...new Set([CONVERSATION_PROFILE_ID, ...config.profiles.map(p => p.id)])].join(', ')}`);
     const persistentOwner = this.core.workforce.resident.ownerOf(parent.id);
     if (persistentOwner && !this.core.workforce.resident.allowed(persistentOwner, { ...profile, permissionMode: parent.permissionMode }, true)) throw refused('account/model access was withdrawn from this agent');
     const provider = this.core.providers.require(profile.providerId);
@@ -245,10 +244,15 @@ export class Delegation {
     return this.member(row);
   }
 
-  /** The conversation's own route under its reserved id, or the owner profile of that id. */
+  /**
+   * The owner profile of that id, else the conversation's own route under its
+   * built-in id. A profile an owner already named `conversation` keeps its route.
+   */
   route(parent: ThreadSummary, config: DelegationConfig, profileId: string | null): ChildRoute | undefined {
+    const named = profileId === null ? undefined : config.profiles.find(p => p.id === profileId);
+    if (named) return named;
     if (profileId === null || profileId === CONVERSATION_PROFILE_ID) return { id: CONVERSATION_PROFILE_ID, name: parent.model ?? parent.providerId, providerId: parent.providerId, accountId: parent.accountId, model: parent.model, effort: parent.effort ?? null };
-    return config.profiles.find(p => p.id === profileId);
+    return undefined;
   }
 
   /**
@@ -445,7 +449,13 @@ export class Delegation {
     if (!thread.parentThreadId && !agentId && children.length === 0 && !this.core.workflows.active(root.id)) return 0;
     const ids = thread.parentThreadId ? [threadId] : agentId ? [agentId] : children.map(row => row.thread_id);
     for (const id of ids) if (this.core.threads.require(id).parentThreadId !== root.id) throw refused('agentId must name a direct child');
-    if (!thread.parentThreadId && !agentId) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
+    // Children that all finished and delivered are history: only unfinished work is worth a pause the owner must lift.
+    const wake = this.lastTurn(root.id);
+    const live = () => this.core.workflows.active(root.id)
+      || (wake?.execution?.operation === 'delegation' && ['queued', 'running'].includes(wake.status))
+      || children.some(row => ['queued', 'running', 'waiting'].includes(this.core.threads.require(row.thread_id).status))
+      || this.core.journal.db.query("SELECT 1 FROM delegation_messages WHERE root_id = ? AND status = 'received' LIMIT 1").get(root.id) !== null;
+    if (!thread.parentThreadId && !agentId && live()) this.saveConfig(root.id, { ...this.config(root.id), paused: true });
     let stopped = 0;
     for (const id of ids) {
       this.stopped.add(id);
@@ -476,7 +486,7 @@ export class Delegation {
     if (!config.enabled) return asked ? `\n${workflows}\n` : '';
     // A team nobody configured costs no prompt until the request is about handing work out.
     if (!named && !config.paused && !asked && !DELEGATION_WORDS.test(request!)) return '';
-    return `\nBoite delegation: ${config.paused ? 'paused' : 'enabled'}. Profiles: ${CONVERSATION_PROFILE_ID}=this conversation's model${named ? `; ${named}` : ''}.
+    return `\nBoite delegation: ${config.paused ? 'paused' : 'enabled'}. Profiles: ${config.profiles.some(p => p.id === CONVERSATION_PROFILE_ID) ? '' : `${CONVERSATION_PROFILE_ID}=this conversation's model${named ? '; ' : ''}`}${named}.
 boite delegate spawn <profile-id> <brief>: bounded task; boite delegate list: results; boite delegate send <thread-id> <text>: steer/reuse; boite delegate stop [thread-id]: stop. Children share checkout and permissions: assign distinct files, send only needed context. Results return automatically; work independently or end your turn, never poll while waiting.
 Only the owner changes profiles or resumes a paused team${config.paused ? '; new delegated work and workflow steps wait for that resume' : ''}.
 ${workflows}\n`;

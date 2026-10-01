@@ -28,7 +28,7 @@ native subagents or plain work when that fits better.
     { "id": "scan",
       "task": "List the source files of src/parser that changed this week.",
       "output": { "files": ["string"] } },
-    { "id": "review", "profile": "reviewer", "forEach": "scan.files",
+    { "id": "review", "forEach": "scan.files",
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
     { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
@@ -38,6 +38,9 @@ native subagents or plain work when that fits better.
   ]
 }
 ```
+
+Every step above runs on the conversation's model. A step that should run on
+another one names a profile: `{ "id": "review", "profile": "reviewer", ... }`.
 
 | Field | Meaning |
 | --- | --- |

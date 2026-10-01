@@ -135,7 +135,7 @@ export function checkSteps(value: unknown, options: CheckOptions, field = 'steps
     if (when) needStep(when.path.split('.'), `${at}.when.path`, false);
     for (const ref of templateRefs(task, `${at}.task`)) needStep(ref, `${at}.task`, forEach !== undefined);
     const output = raw.output === undefined ? undefined : checkShapeDefinition(raw.output, `${at}.output`);
-    return { id, ...(profile && profile !== CONVERSATION_PROFILE ? { profile } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
+    return { id, ...(profile && (profile !== CONVERSATION_PROFILE || options.profiles.includes(profile)) ? { profile } : {}), task, deps: [...deps], ...(title ? { title } : {}), ...(raw.after ? { after: raw.after.map(String) } : {}), ...(forEach ? { forEach } : {}), ...(when ? { when } : {}), ...(output ? { output } : {}) };
   });
   // Existing steps cannot depend on new ones, so a cycle can only run through the new ones.
   const graph = new Map<string, string[]>([...existing.map(s => [s.id, s.after] as const), ...steps.map(s => [s.id, s.deps] as const)]);

@@ -30,6 +30,7 @@ import {
 } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { refusal } from './shared';
+import type { ChildRoute } from './delegation';
 
 type WorkflowMethod = Extract<RpcMethodName, `workflows.${string}`>;
 type Handlers = { [M in WorkflowMethod]: (params: RpcParams<M>) => RpcResult<M> | Promise<RpcResult<M>> };
@@ -41,7 +42,7 @@ export interface WorkflowHost {
   /** Unpauses the delegation team, what an owner resume does in the core. */
   resumeTeam(rootId: ThreadId): void;
   /** A child thread of the root on that profile, its task as the first message. */
-  child(root: Thread, profile: DelegationProfile, title: string, task: string): ThreadId;
+  child(root: Thread, profile: ChildRoute, title: string, task: string): ThreadId;
   /** The child's answer lands and it goes idle; `ok` false leaves an error instead. */
   answer(threadId: ThreadId, text: string, ok: boolean): void;
   changed(rootId: ThreadId, runId: string): void;
@@ -395,9 +396,8 @@ export class FakeWorkflows {
     const now = this.host.now();
     if (inst.threadId === null) {
       const root = this.host.thread(run.rootThreadId);
-      const profile: DelegationProfile | undefined = node.profileId === null || node.profileId === CONVERSATION_PROFILE_ID
-        ? { id: 'conversation', name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model ?? '', effort: root.effort ?? null }
-        : config.profiles.find(p => p.id === node.profileId);
+      const profile: ChildRoute | undefined = config.profiles.find(p => p.id === node.profileId)
+        ?? (node.profileId === null || node.profileId === CONVERSATION_PROFILE_ID ? { id: CONVERSATION_PROFILE_ID, name: root.model ?? root.providerId, providerId: root.providerId, accountId: root.accountId, model: root.model, effort: root.effort ?? null } : undefined);
       if (!profile) {
         Object.assign(inst, { status: 'failed', error: `profile ${node.profileId} is no longer a profile of this thread`, startedAt: now, finishedAt: now });
         return;

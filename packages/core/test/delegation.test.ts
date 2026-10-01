@@ -364,7 +364,17 @@ test('a conversation delegates to its own model with nothing configured, and no 
     expect(runs.get(threadId)!.ctx.prompt).toContain('Reviewed');
     runs.get(threadId)!.finish();
     await waitFor(() => h.core.threads.require(threadId).status === 'idle');
-    await expect(owner.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [{ id: 'conversation', name: 'Mine', providerId: 'echo', accountId: parent.accountId, model: parent.model!, effort: null }] } })).rejects.toThrow('names the conversation');
+    // The child finished and its result was delivered: stopping a later turn pauses nothing.
+    await owner.call('turns.stop', { threadId });
+    expect(h.core.delegation.config(threadId).paused).toBe(false);
+    // A profile an owner already saved under the built-in id keeps its own route.
+    const mine = { id: 'conversation', name: 'Mine', providerId: 'echo', accountId: parent.accountId, model: parent.model!, effort: 'low' };
+    await owner.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [mine] } });
+    expect((await agent.call('delegation.spawn', { threadId, profileId: 'conversation', task: 'Again', requestId: 'mine' })).thread.effort).toBe('low');
+    // That child is still working, so Stop all pauses; the owner's resume leaves nothing pending for a restart.
+    await owner.call('delegation.stop', { threadId });
+    expect(h.core.delegation.config(threadId).paused).toBe(true);
+    await owner.call('delegation.configure', { threadId, config: { enabled: true, paused: false, profiles: [mine] } });
   } finally { agent.close(); }
   await h.core.close();
   const restarted = new Core({ dataDir: h.dataDir, token: h.token });

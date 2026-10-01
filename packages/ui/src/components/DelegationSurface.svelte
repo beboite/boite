@@ -28,7 +28,7 @@
   let selected = $derived(view?.agents.find(agent => agent.thread.id === store.delegationSelectedAgentId) ?? null);
   // The conversation's own model is always there to hand work to; the owner's profiles add other models.
   let routes = $derived([
-    ...(store.openThread ? [{ id: CONVERSATION_PROFILE_ID, name: strings.delegation.conversationProfile, providerId: store.openThread.providerId }] : []),
+    ...(store.openThread && !config.profiles.some(profile => profile.id === CONVERSATION_PROFILE_ID) ? [{ id: CONVERSATION_PROFILE_ID, name: strings.delegation.conversationProfile, providerId: store.openThread.providerId }] : []),
     ...config.profiles,
   ]);
   let selectedProfile = $derived(routes.find(profile => profile.id === selectedProfileId) ?? config.profiles[0] ?? routes[0] ?? null);

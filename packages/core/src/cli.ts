@@ -290,7 +290,7 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
           `delegation: ${!view.config.enabled ? 'disabled' : view.config.paused ? 'paused' : 'enabled'}`,
           `turns: ${view.turnsUsed}`,
           ...(action === 'profiles'
-            ? [`${CONVERSATION_PROFILE_ID} "This conversation's model"`, ...view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)]
+            ? [...(view.config.profiles.some(p => p.id === CONVERSATION_PROFILE_ID) ? [] : [`${CONVERSATION_PROFILE_ID} "This conversation's model"`]), ...view.config.profiles.map(p => `${p.id} ${JSON.stringify(p.name)} ${p.providerId}/${p.model} effort=${p.effort ?? 'default'}`)]
             : view.agents.map(a => `${a.thread.id} ${a.thread.status} ${a.thread.providerId}/${a.thread.model} ${JSON.stringify(a.thread.title)}${a.result ? ` result=${JSON.stringify(a.result)}` : ''}`)),
           'Results arrive automatically. Do not poll repeatedly or wait inside a running tool.',
         ], view);

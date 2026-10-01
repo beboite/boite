@@ -20,7 +20,7 @@ enabled first.
     { "id": "scan",
       "task": "List the source files of src/parser that changed this week.",
       "output": { "files": ["string"] } },
-    { "id": "review", "profile": "reviewer", "forEach": "scan.files",
+    { "id": "review", "forEach": "scan.files",
       "task": "Review {{item}} for malformed-input bugs. Do not edit files.",
       "output": { "bugs": [{ "line": "number", "text": "string" }] } },
     { "id": "fix", "when": { "path": "review.bugs", "notEmpty": true },
@@ -33,7 +33,8 @@ enabled first.
 Fields of a step:
   id        letters, digits, _ or -, starting with a letter
   profile   optional: a profile id from boite delegate profiles, to run the
-            step on another model than this conversation's
+            step on another model than this conversation's, as in
+            { "id": "review", "profile": "reviewer", "task": "..." }
   task      the brief; {{step}}, {{step.field}}, {{item}}, {{index}} are filled in
   after     step ids that must end first (steps named anywhere else are added)
   forEach   a path to a list: one execution per item, {{item}} is the item
