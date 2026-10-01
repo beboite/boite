@@ -281,7 +281,7 @@ export class Delegation {
     return true;
   }
   private contact(thread: ThreadSummary): AgentLetter['from'] {
-    return { coreId: 'local', threadId: thread.id, title: thread.title, machine: 'Boite', resources: '', status: thread.status, mode: 'team' };
+    return { coreId: 'local', threadId: thread.id, title: thread.title, project: thread.projectId ? this.core.journal.getProject(thread.projectId)?.name : undefined, machine: 'Boite', resources: '', status: thread.status, mode: 'team' };
   }
   send(params: RpcParams<'delegation.send'>, origin: NonNullable<AgentLetter['origin']> = 'agent'): AgentLetter {
     const sender = this.core.threads.require(params.threadId), recipient = this.core.threads.require(params.toThreadId);
@@ -300,7 +300,7 @@ export class Delegation {
     if (sender.archived || recipient.archived) throw refused('delegation messages require unarchived threads');
     const count = this.core.journal.db.query('SELECT count(*) AS n FROM delegation_messages WHERE root_id = ? AND created_at > ?').get(root.id, Date.now() - 3_600_000) as { n: number };
     if (origin !== 'result' && count.n >= 100) throw refused('delegation hourly message limit reached');
-    const letter: AgentLetter = { id: randomUUID(), origin, from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, text: body, replyTo: null, createdAt: Date.now(), expiresAt: origin === 'result' ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: 'received', error: null };
+    const letter: AgentLetter = { id: randomUUID(), origin, from: this.contact(sender), to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: this.contact(recipient).project, toMachine: 'Boite', text: body, replyTo: null, createdAt: Date.now(), expiresAt: origin === 'result' ? Number.MAX_SAFE_INTEGER : Date.now() + 15 * 60_000, status: 'received', error: null };
     this.core.journal.append({ type: 'delegation.sent', threadId: sender.id, version: 1, payload: letter }, () => {
       this.core.journal.db.query('INSERT INTO delegation_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(letter.id, root.id, sender.id, recipient.id, requestId, fingerprint, letter.status, letter.createdAt, JSON.stringify(letter));
     });

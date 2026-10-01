@@ -900,6 +900,7 @@ export const strings = {
     receivedFrom: 'Received from', sentTo: 'Your agent sent to', incoming: 'Incoming', outgoing: 'Outgoing',
     userSentTo: 'You sent to', userMessageVia: 'User message via',
     receivedStatus: 'Received',
+    machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
     warning: 'Coordination warning',
     status: {
