@@ -78,3 +78,19 @@ test('preview requests cannot reach other threads, dotfiles, adjacent directorie
   await expect(fetch(url)).rejects.toThrow();
   await expect(owner.call('artifacts.preview', { threadId, path: 'preview/index.html' })).rejects.toThrow('active thread');
 });
+
+test('previews work in a symlinked project folder and stop serving it when the link is replaced', async () => {
+  const alias = join(harness.dataDir, 'linked-project');
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  symlinkSync(join(harness.dataDir, 'preview'), alias, linkType);
+  const project = await owner.call('projects.add', { path: alias });
+  const accountId = harness.core.threads.require(threadId).accountId;
+  const linked = await owner.call('threads.create', { projectId: project.id, providerId: 'echo', accountId });
+  const { url } = await owner.call('artifacts.preview', { threadId: linked.id, path: 'index.html' });
+  expect(await (await fetch(url)).text()).toContain('<button');
+  expect(await (await fetch(new URL('style.css', url))).text()).toContain('green');
+  mkdirSync(join(harness.dataDir, 'replacement'));
+  rmSync(alias);
+  symlinkSync(join(harness.dataDir, 'replacement'), alias, linkType);
+  expect((await fetch(url)).status).toBe(404);
+});
