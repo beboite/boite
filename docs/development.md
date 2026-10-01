@@ -573,8 +573,8 @@ finger, a text selection or the scrollbar thumb holds the list until released,
 and a list pulled up that way stays where it was left. Jump to latest cuts to
 the last screen and a half and glides the rest in 380 ms on the app's
 ease-out curve, re-reading the bottom on every frame; reduced motion jumps.
-Except under a finger, the conversation keeps its scrollbar's room from the
-first message, so the column does not move when a reply first overflows.
+On the wide layout the conversation keeps its scrollbar's room from the first
+message, so the column does not move when a reply first overflows.
 `tests/e2e/chat-scroll.test.ts` checks the follow, the wheel and the glide.
 
 In forced colors (Windows high contrast) the browser drops the shadows and
@@ -811,6 +811,15 @@ panel end-to-end tests cover card spacing, folded drafts and phone controls.
 panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
+
+An accepted prompt from this client glides to the top of the timeline. Reserved
+space below it shrinks as the answer grows; once the answer fills the viewport,
+the timeline follows its bottom. Wheel, touch, pointer and keyboard input release
+following. Reduced motion aligns immediately. Opening history or receiving input
+from another client leaves the reading position alone. Queued input moves only
+when accepted, including steering into a running turn.
+`bun test tests/e2e/chat-scroll.test.ts` checks this on desktop and phone, with
+short and virtualized histories, and writes captures to `tests/e2e/.artifacts/`.
 
 Scheduled goal and loop prompts journal the command and objective in `text`, with
 activity kind and iteration metadata. The core builds the execution instructions

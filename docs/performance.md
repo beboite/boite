@@ -287,10 +287,10 @@ compositing, the case a WebView2 without acceleration meets:
 - Scrolling reads layout as little as it can: the outline rail follows once
   per frame, and a message's height comes from its `ResizeObserver` entry. A
   wheel up a 400-message thread went from 340 to 310 ms of main thread per
-  1,000 px. The reading anchor is read at each scroll event, before the scroll
-  renders the window's new messages, when the layout is still the one the
-  frame drew: read a frame or a timer later, a tap that left the thread right
-  after a scroll brought it back on the next message.
+  1,000 px. The reading anchor is still read right after each scroll event,
+  once the window has rendered: read before that render, or a frame or a timer
+  later, a navigation that left the thread right after a scroll brought it
+  back on the wrong message.
 - What a scroll changes eases only a transform or opacity. The outline rail's
   active bar eased its width, and the active prompt changes every few lines:
   that dirtied layout before every scroll event, and a wheel up the
