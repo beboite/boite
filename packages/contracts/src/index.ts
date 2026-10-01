@@ -1252,7 +1252,16 @@ export interface TelemetryState {
   pendingDeletion: boolean;
 }
 
+export const DEFAULT_THREAD_DELETION_RETENTION_DAYS = 30;
+
+/** A recoverable conversation, with the time its whole family was deleted. */
+export interface DeletedThreadSummary extends ThreadSummary {
+  deletedAt: number;
+}
+
 export interface Settings {
+  /** Days after deletion before history is purged. 0 keeps it indefinitely. Missing means 30. */
+  threadDeletionRetentionDays?: number;
   /** New worktrees only. Missing means project mode; existing checkouts keep their path. */
   worktreeStorage?: WorktreeStorage;
   /** Exact browser origins allowed to connect alongside the shell and this core's own origin. */
@@ -1913,6 +1922,8 @@ export interface AgentLetter {
   from: AgentContact;
   to: AgentAddress;
   toTitle: string;
+  toProject?: string;
+  toMachine?: string;
   text: string;
   replyTo: string | null;
   createdAt: Timestamp;
@@ -2590,12 +2601,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The
-   * owner can restore their history until this core stops; shutdown or the
-   * next startup purges unrestored deletions. Files and Git branches remain.
+   * owner can restore their history across restarts until the configured
+   * retention expires, measured from deletion. Files and Git branches remain.
    */
   'threads.remove': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** Owner-only conversations deleted during this core session, newest first. */
-  'threads.deleted': { params: Record<string, never>; result: ThreadSummary[] };
+  /** Owner-only recoverable deleted conversations, newest first. */
+  'threads.deleted': { params: Record<string, never>; result: DeletedThreadSummary[] };
   /** Undo deletion without restarting agents; restore each thread's previous archive state. Owner only. */
   'threads.restore': { params: { threadId: ThreadId }; result: ThreadSummary };
   /** Pin or unpin (`pinned: false`) a thread. An archived thread keeps its pin for when it comes back. */
@@ -2737,7 +2748,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.created': ThreadSummary;
   'thread.updated': ThreadSummary;
   'thread.removed': { threadId: ThreadId; undoable?: boolean };
-  /** The owner-only session deletion list changed, including removal with a project. */
+  /** The owner-only deletion list changed, including purge and removal with a project. */
   'thread.deletionsUpdated': Record<string, never>;
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };

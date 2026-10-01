@@ -471,7 +471,7 @@ export const fr: Translation = {
     archive: 'Archiver',
     delete: 'Supprimer',
     deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
-    deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
+    deletedToast: '« {title} » supprimée. Restauration possible dans les paramètres.',
     archivedToast: '« {title} » archivée',
     undo: 'Annuler',
     undoHint: 'Annuler (Ctrl+Z)',
@@ -853,6 +853,7 @@ export const fr: Translation = {
     receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à', incoming: 'Entrant', outgoing: 'Sortant',
     userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
     receivedStatus: 'Reçu',
+    machineNotConnected: 'Connectez cette machine dans les réglages pour ouvrir son fil.',
     noReceipt: "Remis signifie transmis à l'agent destinataire. Les protocoles des agents ne fournissent aucun accusé de lecture.",
     warning: 'Avertissement de coordination',
     status: {
@@ -1541,10 +1542,13 @@ export const fr: Translation = {
       open: 'Ouvrir'
     },
     deleted: {
-      heading: 'Supprimées pendant cette session',
-      intro: 'L’annulation reste disponible jusqu’à l’arrêt complet de Boite sur cette machine, même quand il continue en arrière-plan après la fermeture de sa fenêtre.',
+      heading: 'Conversations supprimées',
+      retentionLabel: 'Jours avant la suppression définitive',
+      retentionHint: 'À compter de la suppression. 0 conserve les conversations sans limite. Réduire le délai concerne aussi les conversations déjà supprimées.',
+      retentionError: 'Saisissez un nombre entier entre 0 et 3650 jours.',
+      purgesAt: 'Suppression définitive : {date}',
       show: 'Afficher les conversations supprimées',
-      empty: 'Aucune suppression à annuler pendant cette session.',
+      empty: 'Aucune conversation supprimée à restaurer sur cette machine.',
     },
     worktrees: {
       storage: 'Emplacement de stockage',

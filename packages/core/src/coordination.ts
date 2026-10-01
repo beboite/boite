@@ -210,7 +210,7 @@ export class Coordination {
     const config = this.config(threadId);
     return {
       self: this.self(threadId), config,
-      messages: this.rows('thread_id = ? ORDER BY created_at DESC LIMIT 100', threadId).map(r => JSON.parse(r.data) as AgentLetter).reverse(),
+      messages: this.rows('thread_id = ? ORDER BY created_at DESC LIMIT 100', threadId).map(r => this.withProjects(JSON.parse(r.data) as AgentLetter)).reverse(),
       sent: this.count(threadId, 'out'), sendLimit: null,
       wakes: (this.core.journal.db.query('SELECT count(*) AS n FROM coordination_wakes WHERE thread_id = ? AND at > ?').get(threadId, Date.now() - HOUR) as { n: number }).n,
       wakeLimit: null,
@@ -218,6 +218,18 @@ export class Coordination {
   }
   private count(threadId: string, direction: string): number {
     return (this.core.journal.db.query('SELECT count(*) AS n FROM coordination_letters WHERE thread_id = ? AND direction = ? AND created_at > ?').get(threadId, direction, Date.now() - HOUR) as { n: number }).n;
+  }
+  private projectName(threadId: string): string | undefined {
+    const projectId = this.core.journal.getThread(threadId)?.projectId;
+    return projectId ? this.core.journal.getProject(projectId)?.name.slice(0, 200) : undefined;
+  }
+  /** Old local letters predate project metadata. Fill it without rewriting history. */
+  private withProjects(letter: AgentLetter): AgentLetter {
+    const local = this.coreId;
+    return { ...letter,
+      from: letter.from.coreId === local && letter.from.project === undefined ? { ...letter.from, project: this.projectName(letter.from.threadId) } : letter.from,
+      toProject: letter.toProject ?? (letter.to.coreId === local ? this.projectName(letter.to.threadId) : undefined),
+    };
   }
   private contact(threadId: string): AgentContact {
     const thread = this.core.threads.require(threadId);
@@ -384,15 +396,21 @@ export class Coordination {
     }
     if (same(from, to)) throw refused('an agent cannot message itself');
     let toTitle: string;
+    let toProject: string | undefined;
+    let toMachine: string | undefined;
     if (to.coreId === from.coreId) {
       if (this.core.threads.require(to.threadId).projectId !== this.core.threads.require(from.threadId).projectId && !(config.remote && this.config(to.threadId).remote)) throw refused('both threads must enable coordination across projects');
-      toTitle = this.contact(to.threadId).title;
+      const target = this.contact(to.threadId);
+      toTitle = target.title;
+      toProject = target.project;
+      toMachine = target.machine;
     } else {
       if (!config.remote) throw refused('cross-machine coordination is disabled for this thread');
       const peer = this.peers().find(p => p.coreId === to.coreId);
       if (!peer) throw refused('destination machine is not trusted for coordination');
       // No directory round trip on send: a disconnected recipient can receive after reconnect.
       toTitle = to.threadId;
+      toMachine = peer.name;
     }
     if (params.replyTo) {
       const previous = this.rows('id = ? AND thread_id = ?', params.replyTo, params.threadId)[0];
@@ -402,7 +420,7 @@ export class Coordination {
     }
     // Recheck budgets after all validation, before the synchronous durable write.
     const createdAt = Date.now();
-    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + LETTER_TTL_MS, status: 'queued', error: null };
+    const letter: AgentLetter = { id: randomUUID(), from, to, toTitle, toProject, toMachine, text: body, replyTo: params.replyTo ?? null, createdAt, expiresAt: createdAt + LETTER_TTL_MS, status: 'queued', error: null };
     this.core.journal.append({ type: 'coordination.sent', threadId: from.threadId, version: 1, payload: letter }, () => this.put(letter, 'out', from.threadId, requestId, fingerprint));
     this.changed(from.threadId);
     if (to.coreId === from.coreId) {
@@ -429,7 +447,7 @@ export class Coordination {
       return existing;
     }
     if (!Number.isSafeInteger(letter.createdAt) || !Number.isSafeInteger(letter.expiresAt) || letter.createdAt > Date.now() + 60_000 || letter.expiresAt <= Date.now() || letter.expiresAt > letter.createdAt + LETTER_TTL_MS) throw refused('message expired or timestamps invalid');
-    const accepted: AgentLetter = { id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
+    const accepted: AgentLetter = { id: letter.id, from, to: this.self(target.threadId), toTitle: target.title, toProject: target.project, toMachine: target.machine, text: text(letter.text, 'letter.text'), replyTo: letter.replyTo === null ? null : text(letter.replyTo, 'letter.replyTo', 100), createdAt: Date.now(), expiresAt: letter.expiresAt, status: 'received', error: null };
     this.core.journal.append({ type: 'coordination.received', threadId: target.threadId, version: 1, payload: accepted }, () => this.put(accepted, 'in', target.threadId));
     this.update(accepted, 'received');
     if (!this.handToWaiter(accepted)) this.kick(target.threadId);
@@ -592,7 +610,8 @@ export class Coordination {
         if (!answer || answer.id !== letter.id || !same(answer.from, letter.from) || !same(answer.to, letter.to) || !['received', 'delivered', 'uncertain', 'expired', 'rejected'].includes(answer.status)) throw new Error('invalid delivery receipt');
         const title = text(answer.toTitle, 'receipt.toTitle', 200);
         const error = answer.error === null ? null : text(answer.error, 'receipt.error', 4000);
-        if (letter.status !== answer.status || letter.error !== error || letter.toTitle !== title) this.update({ ...letter, toTitle: title }, answer.status, error);
+        const projectName = answer.toProject === undefined ? undefined : text(answer.toProject, 'receipt.toProject', 200);
+        if (letter.status !== answer.status || letter.error !== error || letter.toTitle !== title || letter.toProject !== projectName || letter.toMachine !== peer.name) this.update({ ...letter, toTitle: title, toProject: projectName, toMachine: peer.name }, answer.status, error);
       } catch (error) {
         if (this.closed) return;
         // Transport failures remain retryable; signed explicit refusals are terminal.

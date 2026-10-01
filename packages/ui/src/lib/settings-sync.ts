@@ -17,7 +17,8 @@ import { connected } from './provider-setup';
  * The client does it with the calls each core already answers, so a core needs
  * nothing new and an older one simply lacks what it cannot take.
  *
- * Process guards, question mode, keybindings and brain switches follow the user.
+ * Deleted-history retention, process guards, question mode, keybindings and
+ * brain switches follow the user.
  * Resource limits, process retention, agent updates, storage, network access,
  * the brain folder and providers stay on their owning machine. Login tokens
  * never cross machines here: the report names every provider signed in
@@ -26,6 +27,7 @@ import { connected } from './provider-setup';
 
 /** The settings that describe the user, not the machine they sit on. */
 export const PORTABLE_SETTINGS = [
+  'threadDeletionRetentionDays',
   'focusGuard',
   'muteAgents',
   'reapOrphans',

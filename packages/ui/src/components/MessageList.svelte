@@ -23,6 +23,7 @@
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
+  import { workspace } from '../lib/workspace.svelte';
 
   let {
     store,
@@ -103,6 +104,15 @@
   function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
     if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
     return coordination?.self ?? null;
+  }
+
+  function letterProject(letter: AgentLetter): string | undefined {
+    const self = letterSelf(letter);
+    const address = letter.from.coreId === self?.coreId && letter.from.threadId === threadId ? letter.to : letter.from;
+    if (address.coreId !== self?.coreId) return undefined;
+    const thread = store.threads.find(thread => thread.id === address.threadId)
+      ?? delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread;
+    return store.projects.find(project => project.id === thread?.projectId)?.name;
   }
 
   /** How often the bottom message's height is allowed to speak to the pin. */
@@ -698,7 +708,8 @@
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
-            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+            {@const self = letterSelf(letter)!}
+            <ForwardedAgentMessage {letter} {self} projectName={letterProject(letter)} onopen={address => void workspace.openAgentThread(store, self, address)} />
           {:else if memoryRows.has(message.id)}
             <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}

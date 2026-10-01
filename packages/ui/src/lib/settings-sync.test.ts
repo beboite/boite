@@ -27,8 +27,8 @@ async function end(client: Client): Promise<SyncEnd> {
 test('the target takes the portable settings, the keybindings and the brain switches, and keeps what is its own', async () => {
   const from = await machine();
   const to = await machine();
-  await from.call('settings.set', { warmProcessMinutes: 7, agentCpuCapPercent: 80, agentMemoryBudgetPercent: 70, threadMemoryCapMb: 4096, memoryReserveMb: 1024, memoryProtection: false, autoUpdateHarnesses: true, asyncQuestions: false, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
-  await to.call('settings.set', { warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
+  await from.call('settings.set', { threadDeletionRetentionDays: 90, warmProcessMinutes: 7, agentCpuCapPercent: 80, agentMemoryBudgetPercent: 70, threadMemoryCapMb: 4096, memoryReserveMb: 1024, memoryProtection: false, autoUpdateHarnesses: true, asyncQuestions: false, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
+  await to.call('settings.set', { threadDeletionRetentionDays: 7, warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
   await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
   await to.call('keybindings.set', { command: 'theme-light', chord: 'mod+alt+t' });
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, globalInstructions: false, boiteGuide: false });
@@ -40,7 +40,7 @@ test('the target takes the portable settings, the keybindings and the brain swit
   const target = await to.call('settings.get', {});
   expect(target).toMatchObject({ warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false });
   for (const key of PORTABLE_SETTINGS) expect(target[key]).toEqual(source[key]);
-  expect(report.changed).toBe(3);
+  expect(report.changed).toBe(4);
   // The machine's network face stays its own.
   expect(target).toMatchObject({ listenOnLan: false, publicUrl: null });
   expect(report.settings).toEqual(target);

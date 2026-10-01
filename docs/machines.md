@@ -101,7 +101,7 @@ this client is offline.
 
 The client copies:
 
-- process guards and question mode;
+- deleted-history retention, process guards and question mode;
 - keybindings where the two differ, including unbound commands and restored
   defaults. A failed or canceled copy attempts to restore entries already changed;
 - the brain's Use with agents, instructions, guide and automatic pull switches
