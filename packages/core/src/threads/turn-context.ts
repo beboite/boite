@@ -89,30 +89,83 @@ export class TurnContexts {
       toolTimes.set(key, seen);
       return { ...part, startedAt: seen.startedAt, finishedAt: seen.finishedAt };
     };
+    /**
+     * A driver writes its whole answer under one message id. Input the user
+     * sends while the turn runs cuts that message: the next part the driver
+     * opens starts a new one, so the timeline shows the user's message where
+     * it arrived instead of under everything the turn wrote afterwards.
+     */
+    interface Segment { from: number; id: MessageId; open: boolean }
+    const answers = new Map<MessageId, { role: MessageRole; top: number; segments: Segment[] }>();
+    const open = (role: MessageRole, after: number | undefined): MessageId => {
+      const message: Message = {
+        id: newId('msg_'),
+        threadId,
+        turnId: turn.id,
+        role,
+        parts: [],
+        state: 'streaming',
+        // Strictly after the user's message, even within the same millisecond.
+        createdAt: Math.max(Date.now(), after === undefined ? 0 : after + 1),
+      };
+      this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
+        this.core.journal.putMessage(message);
+      });
+      this.core.bus.emit('message.started', message);
+      return message.id;
+    };
+    const close = (segment: Segment, state: Message['state']): void => {
+      if (!segment.open) return;
+      segment.open = false;
+      this.core.journal.append(
+        { type: 'message.completed', threadId, version: 1, payload: { messageId: segment.id, state } },
+        () => {
+          this.core.journal.setMessageState(segment.id, state);
+        },
+      );
+      this.core.bus.emit('message.completed', { threadId, messageId: segment.id, state });
+    };
+    /** A cut segment stays open only while one of its tools still runs. */
+    const closeIdle = (segment: Segment): void => {
+      for (const [key, times] of toolTimes) if (times.finishedAt === null && key.startsWith(`${segment.id}:`)) return;
+      close(segment, 'complete');
+    };
+    const route = (messageId: MessageId, partIndex: number): { segment: Segment | null; messageId: MessageId; partIndex: number } => {
+      const segment = answers.get(messageId)?.segments.findLast(one => one.from <= partIndex) ?? null;
+      return segment ? { segment, messageId: segment.id, partIndex: partIndex - segment.from } : { segment: null, messageId, partIndex };
+    };
+    const userInputAt = this.threads.runner.userInputAt;
     const emit: EmitSink = {
       startMessage: (role: MessageRole): MessageId => {
-        const message: Message = {
-          id: newId('msg_'),
-          threadId,
-          turnId: turn.id,
-          role,
-          parts: [],
-          state: 'streaming',
-          createdAt: Date.now(),
-        };
-        this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
-          this.core.journal.putMessage(message);
-        });
-        this.core.bus.emit('message.started', message);
-        return message.id;
+        const after = userInputAt.get(turn.id);
+        userInputAt.delete(turn.id);
+        const id = open(role, after);
+        answers.set(id, { role, top: -1, segments: [{ from: 0, id, open: true }] });
+        return id;
       },
-      delta: (messageId: MessageId, partIndex: number, text: string): void => {
+      delta: (driverId: MessageId, driverIndex: number, text: string): void => {
+        const { messageId, partIndex } = route(driverId, driverIndex);
         const last = partProgress.get(`${messageId}:${partIndex}`);
         if (text.length) progress(last?.phase ?? 'working', last?.detail ?? null);
         this.core.journal.appendDelta(threadId, messageId, partIndex, text);
         this.core.bus.emit('message.delta', { threadId, messageId, partIndex, text });
       },
-      part: (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
+      part: (driverId: MessageId, driverIndex: number, raw: MessagePart): void => {
+        const answer = answers.get(driverId);
+        if (answer && driverIndex > answer.top) {
+          const after = userInputAt.get(turn.id);
+          if (after !== undefined) {
+            userInputAt.delete(turn.id);
+            // Nothing written yet: the message is created after the input anyway, or holds nothing to cut.
+            if (answer.top >= 0 && answer.role === 'assistant') {
+              const previous = answer.segments.at(-1)!;
+              answer.segments.push({ from: driverIndex, id: open(answer.role, after), open: true });
+              closeIdle(previous);
+            }
+          }
+          answer.top = driverIndex;
+        }
+        const { segment, messageId, partIndex } = route(driverId, driverIndex);
         const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;
         const part = stamp(messageId, partIndex, raw);
         const phase = part.type === 'thinking' ? 'thinking' : part.type === 'tool' && part.status === 'running' ? 'tool' : 'working';
@@ -127,15 +180,10 @@ export class TurnContexts {
         );
         this.core.bus.emit('message.part', { threadId, messageId, partIndex, part });
         if (boundary) this.core.bus.emit('turn.toolCompleted', { threadId, turnId: turn.id, boundary: `${messageId}:${partIndex}` });
+        if (segment && answer && segment !== answer.segments.at(-1)) closeIdle(segment);
       },
-      complete: (messageId: MessageId, state: Message['state']): void => {
-        this.core.journal.append(
-          { type: 'message.completed', threadId, version: 1, payload: { messageId, state } },
-          () => {
-            this.core.journal.setMessageState(messageId, state);
-          },
-        );
-        this.core.bus.emit('message.completed', { threadId, messageId, state });
+      complete: (driverId: MessageId, state: Message['state']): void => {
+        for (const segment of answers.get(driverId)?.segments ?? []) close(segment, state);
       },
     };
 

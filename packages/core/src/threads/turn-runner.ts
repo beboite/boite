@@ -36,6 +36,11 @@ export class TurnRunner {
   private readonly stopRequested = new Set<ThreadId>();
   private readonly preparing = new Set<ThreadId>();
   readonly steering = new Set<ThreadId>();
+  /**
+   * Running turns the user wrote into, with when that message was journalled.
+   * The turn's emitter reads it to start a new assistant message after it.
+   */
+  readonly userInputAt = new Map<TurnId, number>();
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
@@ -111,6 +116,7 @@ export class TurnRunner {
       this.stopDeadlines.delete(threadId);
       this.stopRequested.delete(threadId);
       this.preparing.delete(threadId);
+      this.userInputAt.delete(turnId);
     }
 
     const checkpoint = this.threads.codeCheckpoints.end(turnId);

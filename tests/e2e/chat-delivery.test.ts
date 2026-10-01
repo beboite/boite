@@ -51,6 +51,26 @@ test('commands stay folded and parallel activity cannot reveal an unfinished par
   expect(await page.text(`${id('tool-card')} .line`)).toBe('Ran 1 command');
 });
 
+test('a reasoning without text shows no empty fold and leaves once the agent moves on', async () => {
+  await update(`
+    thread.status = 'running'; thread.turns[0].status = 'running'; thread.turns[0].finishedAt = null;
+    const message = thread.messages.at(-1); message.state = 'streaming';
+    message.parts = [{ type:'thinking', text:'' }];
+  `);
+  await page.waitFor(`document.querySelector('${id('thinking-part')}')`);
+  for (const width of [1300, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width < 720 });
+    await page.click(id('thinking-toggle'));
+    expect(await page.evaluate(`document.querySelector('${id('thinking-toggle')} .caret') === null`)).toBe(true);
+    expect(await page.evaluate(`document.querySelector('${id('thinking-part')} .fold').classList.contains('open')`)).toBe(false);
+    await capture(`chat-delivery-empty-thinking-${width < 720 ? 'phone' : 'desktop'}`);
+  }
+  await update(`thread.messages.at(-1).parts.push({ type:'tool', toolId:'second', name:'Bash', input:{command:'timeout 5 true'}, output:null, status:'running' });`);
+  await page.waitFor(`!document.querySelector('${id('thinking-part')}') && document.querySelector('${id('tool-card')}')`);
+  await capture('chat-delivery-empty-thinking-gone');
+  await update(`const message = thread.messages.at(-1); message.parts[1].status = 'done'; message.state = 'complete'; thread.status = 'idle'; thread.turns[0].status = 'done';`);
+});
+
 test('answering the docked question shows a queued user bubble, then one sent message', async () => {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1300, height: 850, deviceScaleFactor: 1, mobile: false });
   await update(`await store.client.call('turns.start', {threadId:thread.id, prompt:'Work [permission]'});`);

@@ -35,3 +35,20 @@ test('tools and reasoning arriving beside a text delta keep its unfinished parag
     expect(document.querySelector('[data-testid=paragraph]')).toBe(first);
   } finally { store.detach(); client.close(); }
 });
+
+test('a reasoning that never got any text disappears once the agent moves on', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  const store = new Store(); store.attach(client);
+  try {
+    await store.connect(); await store.open('t-trace');
+    const message = store.openThread!.messages.at(-1)!;
+    message.state = 'streaming';
+    message.parts = [{ type: 'thinking', text: '' }];
+    mounted = mount(AssistantMessage, { target: document.body, props: { store, threadId: message.threadId, message, progress: new TurnProgress(() => store.openThread!.messages), signedOut: null, showModel: false } });
+    flushSync();
+    expect(document.querySelector('[data-testid=thinking-part]')).not.toBeNull();
+    message.parts.push({ type: 'tool', toolId: 'read', name: 'Read', input: {}, output: null, status: 'running' });
+    flushSync();
+    expect(document.querySelector('[data-testid=thinking-part]')).toBeNull();
+  } finally { store.detach(); client.close(); }
+});
