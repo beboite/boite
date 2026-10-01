@@ -26,6 +26,7 @@ import { Scheduler } from './scheduler.ts';
 import { SessionStore } from './sessions.ts';
 import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
+import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -239,6 +240,7 @@ export class Core {
     });
     this.procs.applySettings(this.settings.get());
     this.accounts.ensureDefaults();
+    this.#stopDeletionRetention = scheduleThreadDeletionRetention(this);
     // The journal is open and no socket is accepted yet: whatever a dead core
     // left running or queued is closed here, or nothing ever would.
     this.threads.recoverStuckTurns();
@@ -308,6 +310,7 @@ export class Core {
   }
 
   #stopRetention: () => void;
+  #stopDeletionRetention: () => void;
 
   /** Share both an active wait and its completion across shutdown phases. */
   #drainPromise: Promise<void> | null = null;
@@ -341,6 +344,7 @@ export class Core {
     await this.telemetry.close();
     this.bus.dispose();
     this.#stopRetention();
+    this.#stopDeletionRetention();
     this.journal.close();
   }
 }

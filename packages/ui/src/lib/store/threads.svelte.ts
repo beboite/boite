@@ -39,7 +39,7 @@ export class Threads {
   loadingOlder = $state(false);
   /** The threads a `threads.retitle` is out for: their menu item waits. */
   retitling = $state<ThreadId[]>([]);
-  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number } }>();
+  readonly readingPositions = new Map<string, { top: number; pinned: boolean; heights: Map<string, number>; anchor?: { id: string; offset: number }; reservePrompt?: string | null; followPrompt?: string | null }>();
   readingThreads = new Map<string, Thread>();
   subscribedThreadId: ThreadId | null = null;
   /** The number of the newest `open()`, so an older one writes nothing. */

@@ -799,6 +799,15 @@ panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
+An accepted prompt from this client glides to the top of the timeline. Reserved
+space below it shrinks as the answer grows; once the answer fills the viewport,
+the timeline follows its bottom. Wheel, touch, pointer and keyboard input release
+following. Reduced motion aligns immediately. Opening history or receiving input
+from another client leaves the reading position alone. Queued input moves only
+when accepted, including steering into a running turn.
+`bun test tests/e2e/chat-scroll.test.ts` checks this on desktop and phone, with
+short and virtualized histories, and writes captures to `tests/e2e/.artifacts/`.
+
 Scheduled goal and loop prompts journal the command and objective in `text`, with
 activity kind and iteration metadata. The core builds the execution instructions
 when starting the driver. Older messages can carry `displayText`, which the UI
@@ -827,6 +836,11 @@ diff; when it failed, its output sits above the diff. In `?fake=1`, `[tools]`
 in a prompt plays a burst of six calls, one of them failing, and `[diff]` an
 edit with its diff. Failed and denied calls stay outside groups, with an
 output preview that remains visible when the call is closed.
+
+Failed commands preview a diagnostic such as the failing test or merge conflict,
+rather than the first output line. Codex command cards retain the provider's exit
+code and show it on failures; older messages and providers without that field
+keep their reported status. Output text and stderr never determine that status.
 
 Answered questions collapse to the actual answer. Expanding restores the
 question and the full answer without enabling another submission. Thinking

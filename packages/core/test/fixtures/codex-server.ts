@@ -24,11 +24,11 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIRECTIVE = /\[(agents|command|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
+const DIRECTIVE = /\[(agents|command|command-failed|approve|thought|summary|usage|late-context|slow|crash|input|async|stream|elicit|elicit-url|permissions|time|hook-block)\]/g;
 const CHUNKS = 3;
 
 type Directive =
-  | 'command' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
+  | 'command' | 'command-failed' | 'approve' | 'thought' | 'summary' | 'usage' | 'late-context' | 'slow' | 'crash' | 'input' | 'async' | 'stream'
   | 'elicit' | 'elicit-url' | 'permissions' | 'time' | 'hook-block' | 'agents';
 
 let threadCounter = 0;
@@ -217,7 +217,7 @@ function commandItem(itemId: string, status: string, output: string | null): unk
     status,
     commandActions: [],
     aggregatedOutput: output,
-    exitCode: status === 'completed' ? 0 : null,
+    exitCode: status === 'completed' ? 0 : status === 'failed' ? 128 : null,
     durationMs: 1,
   };
 }
@@ -269,7 +269,8 @@ async function runTurn(turnId: string, text: string): Promise<void> {
         notify('item/completed', { threadId, turnId, item: { type: 'subAgentActivity', id: 'activity-other-done', agentThreadId: 'native-other', agentPath: '/root/research', kind: 'completed' } });
         break;
       }
-      case 'command': {
+      case 'command':
+      case 'command-failed': {
         itemCounter += 1;
         const itemId = `item-${itemCounter}`;
         notify('item/started', {
@@ -279,7 +280,7 @@ async function runTurn(turnId: string, text: string): Promise<void> {
           startedAtMs: Date.now(),
         });
         notify('item/completed', {
-          item: commandItem(itemId, 'completed', 'ok'),
+          item: commandItem(itemId, directive === 'command-failed' ? 'failed' : 'completed', 'ok'),
           threadId,
           turnId,
           completedAtMs: Date.now(),

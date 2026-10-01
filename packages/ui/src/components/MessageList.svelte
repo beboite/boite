@@ -23,6 +23,7 @@
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
+  import { workspace } from '../lib/workspace.svelte';
 
   let {
     store,
@@ -105,6 +106,15 @@
     return coordination?.self ?? null;
   }
 
+  function letterProject(letter: AgentLetter): string | undefined {
+    const self = letterSelf(letter);
+    const address = letter.from.coreId === self?.coreId && letter.from.threadId === threadId ? letter.to : letter.from;
+    if (address.coreId !== self?.coreId) return undefined;
+    const thread = store.threads.find(thread => thread.id === address.threadId)
+      ?? delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread;
+    return store.projects.find(project => project.id === thread?.projectId)?.name;
+  }
+
   /** How often the bottom message's height is allowed to speak to the pin. */
   const TAIL_GAP_MS = 100;
 
@@ -162,12 +172,29 @@
   onDestroy(() => {
     if (!viewport || !store.readingPositions) return;
     store.readingPositions.delete(threadId);
-    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor });
+    store.readingPositions.set(threadId, { top: scrollTop, pinned, heights: new Map(heights), anchor: readingAnchor, reservePrompt, followPrompt: promptTarget });
     while (store.readingPositions.size > 32) store.readingPositions.delete(store.readingPositions.keys().next().value!);
   });
   let viewHeight = $state(0);
   let navigationTarget = $state<string | null>(null);
-  function releaseNavigation() { releaseAnchor(); navigationTarget = null; }
+  let promptTarget = $state<string | null>(savedReading?.followPrompt ?? null);
+  let reservePrompt = $state<string | null>(savedReading?.reservePrompt ?? null);
+  let lifting = $state(false);
+  let liftFrame = 0;
+  let liftFrom = 0;
+  let handledFocus = untrack(() => store.promptFocus);
+  function stopLift() {
+    cancelAnimationFrame(liftFrame);
+    liftFrame = 0;
+    lifting = false;
+  }
+  function releaseNavigation() {
+    releaseAnchor(); navigationTarget = null;
+    if (promptTarget) pinned = false;
+    promptTarget = null;
+    stopLift();
+  }
+  onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
     void measured;
     const total = totals(timeline);
@@ -179,7 +206,7 @@
   });
 
   function jumpToMessage(id: string) {
-    releaseAnchor();
+    releaseNavigation();
     const box = viewport;
     const index = timeline.findIndex(message => message.id === id);
     if (!box || index < 0) return;
@@ -218,6 +245,83 @@
   function totals(list: Message[]): number[] {
     return slots.totals(list, timelineOrder);
   }
+
+  // Keep one screen below the sent prompt. Real response height replaces the
+  // reserved space, including in a virtualized conversation, without moving it.
+  const promptRoom = $derived.by(() => {
+    void measured;
+    if (!reservePrompt) return 0;
+    const at = timeline.findIndex(message => message.id === reservePrompt);
+    if (at < 0) return 0;
+    const total = totals(timeline);
+    const content = (total[timeline.length] ?? 0) - (total[at] ?? 0) - GAP;
+    return Math.max(0, viewHeight - 40 - dockRoom.height - content);
+  });
+
+  function promptTop(id: string): number {
+    const box = viewport!;
+    const node = [...box.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === id);
+    if (node) {
+      node.style.animation = 'none';
+      return box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 20;
+    }
+    return totals(timeline)[timeline.findIndex(message => message.id === id)] ?? box.scrollTop;
+  }
+
+  $effect(() => {
+    const request = store.promptFocus;
+    if (!request || request === handledFocus || request.threadId !== threadId) return;
+    const message = messages.findLast(message => message.role === 'user' && message.turnId === request.turnId && message.id !== request.after);
+    if (!message || !viewport) return;
+    handledFocus = request;
+    untrack(() => {
+      releaseNavigation();
+      pinned = false;
+      behind = false;
+      reservePrompt = promptTarget = message.id;
+      lifting = true;
+      liftFrom = viewport!.scrollTop;
+      const style = getComputedStyle(viewport!);
+      const token = style.getPropertyValue('--dur-3').trim();
+      const duration = parseFloat(token) * (token.endsWith('ms') ? 1 : 1000) || 0;
+      let started: number | undefined;
+      const step = (now: number) => {
+        if (!viewport || promptTarget !== message.id) return;
+        started ??= now;
+        const progress = duration > 1 ? Math.min(1, (now - started) / duration) : 1;
+        viewport.scrollTop = liftFrom + (promptTop(message.id) - liftFrom) * (1 - (1 - progress) ** 5);
+        scrollTop = viewport.scrollTop;
+        if (progress < 1) liftFrame = requestAnimationFrame(step);
+        else { liftFrame = 0; lifting = false; }
+      };
+      liftFrame = requestAnimationFrame(step);
+    });
+  });
+
+  $effect(() => {
+    const id = promptTarget;
+    void measured;
+    void viewHeight;
+    void view;
+    const room = promptRoom;
+    if (!id || lifting || !viewport) return;
+    const frame = requestAnimationFrame(() => {
+      if (!viewport || promptTarget !== id) return;
+      if (room <= 1) {
+        viewport.scrollTop = viewport.scrollHeight;
+        scrollTop = viewport.scrollTop;
+        pinned = true;
+      } else {
+        pinned = false;
+        viewport.scrollTop = promptTop(id);
+        scrollTop = viewport.scrollTop;
+        behind = false;
+        markSeen();
+        rememberAnchor();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  });
 
   /**
    * The slice of messages that meets the viewport, the overscan added, and the
@@ -287,7 +391,10 @@
     }
     if (!moved) return;
     measured += 1;
-    if (box && shift !== 0 && !pinned) box.scrollTop += shift;
+    if (box && shift !== 0 && !pinned) {
+      box.scrollTop += shift;
+      if (lifting) liftFrom += shift;
+    }
   }
 
   /** The bottom message's height, at most ten times a second: what the pin follows. */
@@ -383,7 +490,7 @@
     if (!box) return;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
-    if (navigationTarget) return;
+    if (navigationTarget || promptTarget) return;
     pinned = atBottom(box);
     if (restoringAnchor) pinned = false;
     // Read right after each event, once the window has rendered. Deferred to
@@ -434,15 +541,18 @@
   // -- end paging ------------------------------------------------------------
 
   function jump() {
-    releaseAnchor();
+    releaseNavigation();
     const box = viewport;
     if (!box) return;
-    navigationTarget = null;
+    reservePrompt = null;
     pinned = true;
     behind = false;
     markSeen();
-    box.scrollTop = box.scrollHeight;
-    scrollTop = box.scrollTop;
+    void tick().then(() => {
+      if (!box.isConnected || !pinned) return;
+      box.scrollTop = box.scrollHeight;
+      scrollTop = box.scrollTop;
+    });
   }
 
   /**
@@ -457,7 +567,10 @@
     if (!box) return;
     const opened = shown !== threadId;
     shown = threadId;
-    if (opened || pinned) {
+    if (promptTarget && !pinned) {
+      behind = false;
+      untrack(markSeen);
+    } else if (opened || pinned) {
       box.scrollTop = box.scrollHeight;
       scrollTop = box.scrollTop;
       pinned = true;
@@ -595,7 +708,8 @@
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
-            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+            {@const self = letterSelf(letter)!}
+            <ForwardedAgentMessage {letter} {self} projectName={letterProject(letter)} onopen={address => void workspace.openAgentThread(store, self, address)} />
           {:else if memoryRows.has(message.id)}
             <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}
@@ -633,6 +747,9 @@
         <div class="spacer" data-testid="timeline-below" style="height: {view.below}px"></div>
       {/if}
     </div>
+    {#if promptRoom > 0}
+      <div class="spacer" data-testid="prompt-room" style:height="{promptRoom}px" aria-hidden="true"></div>
+    {/if}
   </div>
 
   {#if behind}
