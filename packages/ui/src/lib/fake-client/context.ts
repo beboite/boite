@@ -120,6 +120,8 @@ export class FakeContext {
   worktrees: FakeWorktree[] = [];
   /** The `pathKey` of each worktree `worktrees.remove` took, so a thread left in one is refused a turn. */
   readonly removedWorktrees = new Set<string>();
+  /** The `pathKey` of each folder `FakeClient.loseFolder` took: the fake's stand-in for a deleted repository. */
+  readonly goneFolders = new Set<string>();
   /** The sessions Claude Code kept, each tagged with the project whose folder it sits under. */
   importable: (ImportableSession & { projectId: string })[] = [];
   providers: ProviderSummary[] = [];

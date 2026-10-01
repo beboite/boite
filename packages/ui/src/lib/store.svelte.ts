@@ -393,6 +393,7 @@ export class Store {
   addProject(...args: Parameters<Projects['addProject']>) { return this.#ctx.projects.addProject(...args); }
   addProjects(...args: Parameters<Projects['addProjects']>) { return this.#ctx.projects.addProjects(...args); }
   removeProject(...args: Parameters<Projects['removeProject']>) { return this.#ctx.projects.removeProject(...args); }
+  refreshProjects() { return this.#ctx.projects.refreshProjects(); }
   archiveProject(...args: Parameters<Projects['archiveProject']>) { return this.#ctx.projects.archiveProject(...args); }
   projectIconUrl(...args: Parameters<Projects['projectIconUrl']>) { return this.#ctx.projects.projectIconUrl(...args); }
   loadProjectIcon(...args: Parameters<Projects['loadProjectIcon']>) { return this.#ctx.projects.loadProjectIcon(...args); }

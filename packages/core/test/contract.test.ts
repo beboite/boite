@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CoreClient } from '../src/client.ts';
 import { KNOWN_DIVERGENCES, SCENARIOS, type ContractEnv } from '../../../tests/contract/scenarios.ts';
@@ -30,6 +30,7 @@ function env(): ContractEnv {
     on: (event, handler) => client.on(event, handler),
     newFolder: async () => mkdtempSync(join(harness.dataDir, 'project-')),
     missingFolder: () => join(harness.dataDir, 'missing', 'folder'),
+    removeFolder: async (path) => rmSync(path, { recursive: true, force: true }),
     otherCase: (path) => (process.platform === 'win32' ? path.toUpperCase() : null),
   };
 }

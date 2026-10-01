@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'n
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Project, ThreadId, WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { messageOf, refused } from './errors.ts';
+import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
 
 /** Every branch the core makes on its own starts with this. */
@@ -80,6 +80,7 @@ export class Worktrees {
   }
 
   async add(threadId: ThreadId, project: Project, wanted?: string, recordedPath?: string): Promise<PlacedWorktree> {
+    if (!existsSync(project.path)) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!existsSync(join(project.path, '.git'))) {
       throw refused(`${project.path} is not a git repository: a worktree needs one`, {
         projectId: project.id,

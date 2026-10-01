@@ -10,6 +10,7 @@
 import {
   RpcErrorCode,
   type Account,
+  type Project,
   type ProviderSummary,
   type RpcEventName,
   type RpcEvents,
@@ -26,6 +27,8 @@ export interface ContractEnv {
   newFolder(): Promise<string>;
   /** A path where no folder is. */
   missingFolder(): string;
+  /** Takes a folder `newFolder` made off the disk, as a repository deleted outside the app. */
+  removeFolder(path: string): Promise<void>;
   /** The same folder spelt in another case, or null where the file system tells case apart. */
   otherCase(path: string): string | null;
 }
@@ -336,6 +339,26 @@ export const SCENARIOS: Record<string, Scenario> = {
   'projects.add refuses a folder that does not exist': async (env) => {
     const path = env.missingFolder();
     await refusedWith(env.call('projects.add', { path }), RpcErrorCode.Refused, ['path']);
+  },
+  'a project whose folder was deleted reads missing and refuses a new thread or a turn': async (env) => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    const listedBefore = (await env.call('projects.list', {})).find((entry) => entry.id === setup.projectId);
+    check(listedBefore?.missing !== true, 'a folder that is there is not missing');
+    const updates = record(env, ['project.updated']);
+    try {
+      await env.removeFolder(setup.projectPath);
+      const listed = (await env.call('projects.list', {})).find((entry) => entry.id === setup.projectId);
+      same(listed?.missing, true, 'the listed project');
+      same(listed?.repository, false, 'a folder that is gone is no repository');
+      const data = await refusedWith(thread(env, setup, 'after'), RpcErrorCode.Refused, ['projectId', 'path', 'expected']);
+      same(data.path, setup.projectPath, 'the refusal names the folder');
+      await refusedWith(env.call('turns.start', { threadId: created.id, prompt: 'hello' }), RpcErrorCode.Refused, ['cwd', 'expected']);
+      await until('project.updated says missing', () => updates.events.some((event) => (event.payload as Project).id === setup.projectId && (event.payload as Project).missing === true));
+      // What is left of it can still be put away: the project and its thread are removed.
+      await env.call('projects.remove', { projectId: setup.projectId });
+      check(!(await env.call('projects.list', {})).some((entry) => entry.id === setup.projectId), 'the project is still listed');
+    } finally { updates.stop(); }
   },
   'projects.add answers the same project for the same folder': async (env) => {
     const added = record(env, ['project.added']);

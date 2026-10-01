@@ -11,7 +11,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { Project, ProjectId, ThreadSummary, WorktreeEntry } from '@boite/contracts';
 import type { Core } from './core.ts';
-import { invalidParams, messageOf, refused } from './errors.ts';
+import { folderGone, invalidParams, messageOf, refused } from './errors.ts';
 import { GIT_READ_TIMEOUT_MS } from './git/read.ts';
 
 /**
@@ -195,6 +195,7 @@ export class WorktreeSweep {
 
   private async listed(project: Project): Promise<Listed[]> {
     // A `.git` folder, or the file a linked worktree has: the test `Worktrees.add` refuses on.
+    if (!(await present(project.path))) throw folderGone(project.path, { field: 'projectId', projectId: project.id, project: project.name });
     if (!(await present(resolve(project.path, '.git')))) {
       throw refused(`${project.path} is not a git repository: it has no worktrees`, {
         projectId: project.id, path: project.path, field: 'projectId', expected: 'a project that is a git repository',

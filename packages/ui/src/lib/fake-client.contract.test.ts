@@ -25,6 +25,7 @@ async function env(): Promise<ContractEnv> {
     // The fake has no disk: any folder exists, except under one named `missing`.
     newFolder: async () => `C:\\Users\\you\\contract\\folder-${++folders}`,
     missingFolder: () => 'C:\\Users\\you\\missing\\folder',
+    removeFolder: async (path) => client.loseFolder(path),
     // Its core runs on Windows, where a path's case does not matter.
     otherCase: (path) => path.toUpperCase(),
   };

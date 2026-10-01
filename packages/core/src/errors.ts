@@ -30,6 +30,15 @@ export function refused(message: string, data?: unknown): RpcFailure {
   return new RpcFailure(RpcErrorCode.Refused, message, data);
 }
 
+/**
+ * A folder the core was told to work in is no longer on the disk. One sentence
+ * for every method that meets it, so a deleted repository never reads as a
+ * missing git or an empty folder.
+ */
+export function folderGone(path: string, data: Record<string, unknown> = {}): RpcFailure {
+  return refused(`the folder ${path} does not exist any more: it was deleted, moved or renamed`, { ...data, path, expected: 'an existing folder' });
+}
+
 export function unavailable(message: string, data?: unknown): RpcFailure {
   return new RpcFailure(RpcErrorCode.Unavailable, message, data);
 }

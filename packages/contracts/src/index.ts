@@ -558,6 +558,15 @@ export interface Project {
    */
   archivedThreads?: number;
   /**
+   * The project's folder is gone from the disk: deleted, moved or renamed
+   * since it was added. Read on every answer like `repository`, and
+   * `project.updated` follows when it changes. A thread cannot start there
+   * until the folder is back; removing the project still works. Absent while
+   * the folder is there, while the disk gave no clear answer (a share whose
+   * host sleeps) and from a core older than this field.
+   */
+  missing?: boolean;
+  /**
    * What the sidebar draws in place of the project's initial, detected from
    * its folder after it was added and on `projects.refreshIcon`, never while a
    * list is answered. An `image` carries only its version: the bytes come

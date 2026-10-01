@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { ProjectStore, hasGitMarker } from '../src/projects.ts';
@@ -98,4 +98,46 @@ test.skipIf(process.platform !== 'win32')('a folder added again in another case 
   expect(again.id).toBe(first.id);
   expect(again.repository).toBe(true);
   expect(harness.core.projects.list().find((entry) => entry.id === first.id)?.repository).toBe(true);
+});
+
+test('a deleted project folder is named by every refusal, and a folder put back is a project again', async () => {
+  const client = await harness.connect();
+  const path = join(harness.dataDir, 'gone');
+  mkdirSync(join(path, '.git'), { recursive: true });
+  const project = await client.call('projects.add', { path });
+  const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+  const thread = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'gone' });
+  rmSync(path, { recursive: true, force: true });
+
+  const sentence = `the folder ${path} does not exist any more`;
+  // Reading the changes used to answer "git did not start: needs git on PATH".
+  await expect(client.call('git.status', { threadId: thread.id })).rejects.toThrow(sentence);
+  // These two used to answer "is not a git repository".
+  await expect(client.call('worktrees.list', { projectId: project.id })).rejects.toThrow(sentence);
+  await expect(client.call('projects.setWorktreeDefault', { projectId: project.id, enabled: true })).rejects.toThrow(sentence);
+  expect((await client.call('projects.list', {})).find((entry) => entry.id === project.id)?.missing).toBe(true);
+
+  const updated: (boolean | undefined)[] = [];
+  client.on('project.updated', (entry) => { if (entry.id === project.id) updated.push(entry.missing); });
+  mkdirSync(path, { recursive: true });
+  const back = (await client.call('projects.list', {})).find((entry) => entry.id === project.id);
+  expect(back?.missing).toBeUndefined();
+  expect(back?.repository).toBe(false);
+  await waitFor(() => updated.length > 0);
+  expect(updated.at(-1)).toBeUndefined();
+  await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'back' });
+});
+
+test('a disk that gives no clear answer does not mark a project missing', async () => {
+  const client = await harness.connect();
+  const path = join(harness.dataDir, 'asleep');
+  mkdirSync(path, { recursive: true });
+  const project = await client.call('projects.add', { path });
+  // A share whose host sleeps: neither check can say the folder is gone.
+  harness.core.projects.gitProbe = async () => false;
+  harness.core.projects.folderProbe = async () => null;
+  const listed = (await client.call('projects.list', {})).find((entry) => entry.id === project.id);
+  expect(listed?.missing).toBeUndefined();
+  const account = (await client.call('accounts.list', {})).find((entry) => entry.providerId === 'echo');
+  await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', title: 'asleep' });
 });

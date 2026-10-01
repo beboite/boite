@@ -627,6 +627,16 @@ also cover queued targets, stale selections, image transfer and schema migration
 dialog and an unreachable remembered machine. The shell suite checks the native
 folder button with its dialog IPC stubbed, so no system dialog takes focus.
 
+A project whose folder was deleted, moved or renamed outside Boite answers
+`missing: true`, checked on every `projects.list` like `repository`, and
+`project.updated` follows when the folder goes or comes back. A disk that gives
+no clear answer (a share whose host sleeps) is never read as missing. Every
+method that meets the folder refuses with the same sentence, `the folder <path>
+does not exist any more`: a new thread, a worktree, `git.status`. The sidebar
+marks the project and the composer shows the two ways out, checking again and
+removing the project. `tests/e2e/folder-gone.test.ts` captures both widths, and
+the shared contract scenario runs the rule on the core and the fake client.
+
 `tests/e2e/lib/cdp.ts` launches Chromium with `--headless=new`, on the real GPU
 through ANGLE, muted, in a throwaway profile, and drives it over CDP.
 `page.screenshot(path)` writes a PNG, and the suite puts its own under
