@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { Store } from './store.svelte';
 import { FakeClient } from './fake-client';
 import { archiveThread, reopenLastArchived } from './archive';
-import { undo } from './undo.svelte';
+import { UNDO_MS, undo } from './undo.svelte';
 import { confirm } from './confirm.svelte';
 import { deleteThread } from './thread-removal';
 import { RpcFailure } from './client';
@@ -53,16 +53,22 @@ test('deletion clears the owning machine composer and leaves colliding IDs on an
   expect(second.openThread?.id).toBe('t-trace');
 });
 
-test('deletion undo stays offered past the archive timeout and survives a temporary disconnect', async () => {
+test('deletion toast expires while Settings restoration, reconnect undo and session invalidation still work', async () => {
   const store = await ready();
   const ask = vi.spyOn(confirm, 'ask').mockResolvedValue(false);
   vi.useFakeTimers();
   try {
     expect(await deleteThread(store, store.threads.find(t => t.id === 't-trace')!)).toBe(true);
     expect(ask).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(UNDO_MS - 1);
     expect(undo.current).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(undo.current).toBeNull();
     const client = store.client as FakeClient;
+    expect(await client.call('threads.deleted', {})).toHaveLength(1);
+    expect(await store.restoreDeletedThread('t-trace')).toMatchObject({ id: 't-trace', archived: false });
+    expect((await client.call('threads.get', { threadId: 't-trace' })).archived).toBe(false);
+    await deleteThread(store, store.threads.find(t => t.id === 't-trace')!);
     client.drop(); client.restore();
     await store.reload();
     await undo.take();
