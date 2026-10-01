@@ -364,6 +364,18 @@ jobs:
           bun scripts/ci/desktop-smoke.ts "$RUNNER_TEMP/Boite.app/Contents/MacOS/boite-shell"
       - name: Collect release bundles
         run: bun scripts/ci/desktop-bundles.ts "$RUNNER_TEMP/desktop-bundles"
+      - name: Bundle and sign standalone Linux server
+        if: runner.os == 'Linux'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign-updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+        run: |
+          if [ -n "${THROWAWAY_UPDATER_KEY:-}" ]; then
+            unset TAURI_SIGNING_PRIVATE_KEY
+            export TAURI_SIGNING_PRIVATE_KEY_PATH="$THROWAWAY_UPDATER_KEY"
+          fi
+          file=$(bun scripts/ci/server-bundle.ts "$RUNNER_TEMP/desktop-bundles")
+          version=$(bun -e 'console.log(require("./package.json").version)')
+          bun run --cwd apps/shell tauri signer sign --password '' --app-version "$version" "$file"
       - name: Diagnose Linux packaging failures
         if: failure() && runner.os == 'Linux'
         run: |

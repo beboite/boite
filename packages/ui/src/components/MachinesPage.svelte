@@ -9,6 +9,7 @@
   import RemoteCoordination from './RemoteCoordination.svelte';
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import ServerUpdateCard from './ServerUpdateCard.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
@@ -193,6 +194,7 @@
             {/if}
           </div>
         {/if}
+        {#if !machine.store.localCore}<ServerUpdateCard store={machine.store} label={machine.label} />{/if}
         {#if machine.store.error}<p class="error">{machine.store.error}</p>{/if}
       </section>
     {/each}

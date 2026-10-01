@@ -41,6 +41,7 @@ import { Workflows } from './workflows.ts';
 import { BrainStore } from './brain.ts';
 import { HookLedger } from './hooks.ts';
 import { TerminalStore } from './terminals.ts';
+import { ServerUpdates, type ServerUpdateOptions } from './server-update.ts';
 
 export const CORE_VERSION: string = pkg.version;
 
@@ -54,6 +55,7 @@ export interface SubscriptionSink {
 }
 
 export interface CoreOptions {
+  serverUpdates?: ServerUpdateOptions;
   bundleHash?: string;
   dataDir: string;
   token: string;
@@ -132,6 +134,7 @@ export class Core {
   readonly speech: SpeechStore;
   readonly telemetry: Telemetry;
   readonly updates: HarnessUpdates;
+  readonly serverUpdates: ServerUpdates;
   readonly coordination: Coordination;
   readonly delegation: Delegation;
   readonly workflows: Workflows;
@@ -157,7 +160,7 @@ export class Core {
   #idleShutdownAdmitted = false;
 
   /** An update may stop only between executions. Admission and the gates share one event-loop turn. */
-  requestIdleShutdown(): 'accepted' | 'busy' | 'unsupported' {
+  requestIdleShutdown(beforeShutdown?: () => void): 'accepted' | 'busy' | 'unsupported' {
     if (!this.#onShutdown) return 'unsupported';
     if (this.#idleShutdownAdmitted) return 'accepted';
     if (this.#shutdownRequested || this.#stopping) return 'busy';
@@ -168,6 +171,8 @@ export class Core {
       || threads.runner.handles.size > 0 || threads.runner.steering.size > 0
       || threads.deferred.pendingWakes.size > 0 || threads.deferred.deferredAnswers.size > 0
       || [...threads.agentState.background.values()].some(tasks => tasks.length > 0)) return 'busy';
+    // Persist an updater's acknowledgement before closing admission or scheduling exit.
+    beforeShutdown?.();
     this.#idleShutdownAdmitted = true;
     this.#stopping = true;
     this.threads.focus.close();
@@ -224,6 +229,7 @@ export class Core {
     this.speech = new SpeechStore(this);
     this.telemetry = new Telemetry(this);
     this.updates = new HarnessUpdates(this);
+    this.serverUpdates = new ServerUpdates(this, options.serverUpdates);
     this.coordination = new Coordination(this);
     this.delegation = new Delegation(this);
     this.workflows = new Workflows(this);
@@ -324,6 +330,7 @@ export class Core {
     this.#stopping = true;
     await this.brain.close();
     this.updates.close();
+    this.serverUpdates.close();
     await this.drain();
     await this.delegation.close();
     await this.coordination.close();

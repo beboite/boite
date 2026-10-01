@@ -5,6 +5,8 @@
   import TelemetrySettings from './TelemetrySettings.svelte';
   import ArchivedThreads from './ArchivedThreads.svelte';
   import WorktreesCard from './WorktreesCard.svelte';
+  import AppUpdateContent from './AppUpdateContent.svelte';
+  import { showAppUpdateUi } from '../lib/app-update.svelte';
   import { strings } from '../lib/strings';
   import { openTour } from '../lib/onboarding.svelte';
   import type { Store } from '../lib/store.svelte';
@@ -59,11 +61,17 @@
     {#if inShell}<ShellSettings />{/if}
     <div class="switch-row">
       <span class="text">
-        <span>{strings.onboarding.label}</span><InfoTip topic={strings.onboarding.label} text={strings.onboarding.replayHint} />
+        <span>{strings.onboarding.label}</span>
       </span>
       <button type="button" data-testid="settings-tour" onclick={() => { store.showChat(); openTour(); }}>{strings.settings.tourReplay}</button>
     </div>
   </section>
 
   <TelemetrySettings {store} />
+  {#if showAppUpdateUi()}
+    <section class="card" id="settings-updates" data-testid="app-update-card">
+      <h2>{strings.appUpdate.heading}</h2>
+      <AppUpdateContent beforeInstall={() => undefined} />
+    </section>
+  {/if}
 </div>

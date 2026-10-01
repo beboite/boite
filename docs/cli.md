@@ -15,6 +15,8 @@ request, even without a connected brain. Enabled coordination and delegation
 add their commands and current limits; workflow syntax is loaded on demand
 through `boite workflow help`. The guide never creates a file in the brain or
 project. [Brain settings](brain.md#boite-guide) describes its switch.
+Task tracking is optional: agents use a task list only when laying out steps
+helps them and the user follow the work.
 
 ## How an agent finds the core
 

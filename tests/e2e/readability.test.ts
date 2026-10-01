@@ -257,12 +257,26 @@ test('PR links belong to a thread branch and disappear after a move to a plain f
   `);
   await page.waitFor(`Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
   const sharedRowsHaveNoPr = `Array.from(document.querySelectorAll('${id('thread-row')}')).filter(row => row.textContent.includes('shared-folder conversation')).every(row => !row.closest('.thread').querySelector('${id('thread-pr')}'))`;
+  const prBeforeBranch = (scope: string) => page.evaluate(`(() => {
+    const links = Array.from(document.querySelectorAll('${scope} ${id('thread-pr')}'));
+    return links.length > 0 && links.every(pr => {
+      const branch = pr.nextElementSibling;
+      return branch?.matches('${id('thread-branch')}') && pr.getBoundingClientRect().right < branch.getBoundingClientRect().left;
+    });
+  })()`);
   expect(await page.evaluate(sharedRowsHaveNoPr)).toBe(true);
+  expect(await prBeforeBranch(id('sidebar'))).toBe(true);
   await capture('pr-links-desktop');
+  await page.click(id('view-recent'));
+  await page.waitFor(`document.querySelector('${id('sidebar')} ${id('thread-project')}')`);
+  expect(await prBeforeBranch(id('sidebar'))).toBe(true);
+  await capture('pr-links-recent');
+  await page.click(id('view-projects'));
   await page.send('Emulation.setDeviceMetricsOverride', { width:390, height:844, deviceScaleFactor:1, mobile:true });
   await page.click(id('mobile-conversations'));
   await page.waitFor(`Array.from(document.querySelectorAll('${id('mobile-list')} .thread')).filter(row => row.textContent.includes('shared-folder conversation')).length === 2`);
   expect(await page.evaluate(`document.querySelector('${id('mobile-list')}').textContent.includes('#180')`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('mobile-list')} ${id('thread-pr')}') === null`)).toBe(true);
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await capture('pr-links-phone');
   await page.send('Emulation.setDeviceMetricsOverride', { width:1300, height:850, deviceScaleFactor:1, mobile:false });

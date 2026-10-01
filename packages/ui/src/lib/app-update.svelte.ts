@@ -113,7 +113,7 @@ function testBackend(fixture: AppUpdateTestFixture): AppUpdateBackend {
   };
   return {
     status: async () => current,
-    check: async (channel) => publish(fixture.checks?.[channel] ?? { ...current, phase: 'current', channel, error: null }),
+    check: async (channel) => publish(fixture.checks?.[channel] ?? { ...current, phase: 'current', channel, version: null, notes: null, publishedAt: null, error: null }),
     download: async () => publish(fixture.download ?? {
       ...current,
       phase: 'ready',
@@ -209,6 +209,10 @@ export class AppUpdater {
 
   get ready(): boolean {
     return this.snapshot.supported && this.snapshot.phase === 'ready';
+  }
+  get hasUpdate(): boolean {
+    return this.snapshot.supported && this.snapshot.version !== null
+      && ['available', 'downloading', 'ready', 'waiting', 'installing', 'error'].includes(this.snapshot.phase);
   }
 
   get announceReady(): boolean {

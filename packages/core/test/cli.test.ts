@@ -61,6 +61,19 @@ test('splits a trailing line off a path and leaves a drive letter alone', () => 
   expect(splitLine('C:\\x\\a.ts:3')).toEqual({ path: 'C:\\x\\a.ts', line: 3 });
 });
 
+test('server checks need no thread as owner and remain forbidden to thread agents', async () => {
+  writeFileSync(join(harness.dataDir, 'core.json'), JSON.stringify({ port: harness.server.port, host: '127.0.0.1', token: harness.token }), { mode: 0o600 });
+  let out = '';
+  let err = '';
+  const code = await runCli(['server', 'check', '--data-dir', harness.dataDir, '--json'], {
+    cwd, env: {}, out: text => { out += text; }, err: text => { err += text; }
+  });
+  expect(code).toBe(0); expect(err).toBe('');
+  expect(JSON.parse(out).currentVersion).toBe(harness.core.version);
+  const agent = await boite(['server', 'update']);
+  expect(agent.code).toBe(1); expect(agent.err).toContain('core.updateStatus');
+});
+
 test('agents commands discover, send and reply using the calling thread identity', async () => {
   const client = await harness.connect();
   const other = (await echoThread(harness, client, 'VM worker')).threadId;

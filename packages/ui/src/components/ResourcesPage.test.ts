@@ -73,8 +73,9 @@ test('memory protection toggles immediately, keeps configured values and explain
   await setup();
   const toggle = document.querySelector<HTMLInputElement>('[data-testid=setting-memory-protection]')!;
   expect(toggle.checked).toBe(true);
-  expect(document.getElementById(toggle.getAttribute('aria-describedby')!)?.textContent).toBe(strings.settings.memoryProtectionHint);
-  expect(document.body.textContent).toContain(strings.settings.memoryAutoHint);
+  // The explanation sits behind the switch's "i", and a field left at 0 shows what it resolved to.
+  expect(toggle.closest('label')!.querySelector('[data-testid=info-tip]')!.getAttribute('aria-label')).toContain(strings.settings.memoryProtection);
+  expect(document.querySelector('[data-testid=memory-cap-auto]')?.textContent).toBe(strings.resources.auto(9728));
   await store.saveSettings({ threadMemoryCapMb: 4096, memoryReserveMb: 512 });
   const budget = document.querySelector<HTMLInputElement>('[data-testid=memory-budget]')!;
   budget.value = '5'; budget.dispatchEvent(new Event('input', { bubbles: true }));
