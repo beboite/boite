@@ -476,7 +476,32 @@ export class ThreadStore {
     const saved = this.save({ ...thread, archived }, 'thread.archived');
     // The sidebar counts a project's archived threads; a sub-thread is not one of them.
     if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    // A removal waits for the same stops itself before it hides the family.
+    if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
     return saved;
+  }
+
+  /**
+   * Stopping the turn asks the agent to stop; what it started (a dev server, a
+   * background shell, a build) has no turn left to end it and would run on
+   * behind a thread nobody sees. Once the stopped turns have settled, the
+   * processes of the thread and of its sub-threads go. A thread restored in
+   * the meantime, or a sub-thread given new work, keeps its own.
+   */
+  private async endArchivedWork(threadId: ThreadId): Promise<void> {
+    try {
+      const family = this.core.journal.listThreads().filter(t => t.id === threadId || t.parentThreadId === threadId).map(t => t.id);
+      await Promise.all(family.map(id => this.core.scheduler.stopAndWait(id)));
+      if (this.core.stopping || this.core.journal.isClosed() || this.removing.has(threadId)) return;
+      if (this.core.journal.getThread(threadId)?.archived !== true) return;
+      const idle = family.filter((id) => {
+        const member = this.core.journal.getThread(id);
+        return member !== null && !['queued', 'running', 'waiting'].includes(member.status);
+      });
+      await Promise.all(idle.map(id => this.core.procs.stopAndWait(id)));
+    } catch (error) {
+      this.core.log('warn', `archived thread ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   markRead(threadId: ThreadId): void {

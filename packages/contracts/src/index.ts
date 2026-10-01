@@ -2669,6 +2669,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * pending move is refused naming `threadId`.
    */
   'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
+  /**
+   * Put a thread away, or bring it back with `archived: false`. Archiving
+   * stops its turn and its sub-threads' turns at once and answers; their
+   * processes end once those turns have settled. Restoring restarts nothing.
+   */
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The

@@ -107,7 +107,9 @@ totals.
 - `trace.get` gives one thread's processes, newest first.
 - `resources.list` gives each thread running at least one process now, archived
   or not, with those processes and the latest `ThreadLoad` sample of its tree,
-  busiest first. What already exited stays in `trace.get`. Settings, Protection
+  busiest first. Archiving a thread stops its turn, then ends its processes and
+  those of its sub-threads once the stopped turns have settled, as a deletion
+  does; an archived thread is listed only for what started under it afterwards. What already exited stays in `trace.get`. Settings, Protection
   asks again every two seconds while the page is visible.
 - `resources.killTree` kills one thread's tree, `TerminateJobObject` on Windows
   and the process group of each registered child elsewhere. It returns before the completion port has
