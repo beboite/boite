@@ -282,6 +282,23 @@ test('an offline peer recovers before expiry without duplicate delivery', async 
   expect(two.h.core.coordination.get(two.b).wakes).toBe(0);
 }, 14000);
 
+test('a pause left by Stop ends with the user\'s next message, the owner\'s pause does not', async () => {
+  const { h, a, b } = await setup(); enable(h, a, b);
+  h.core.threads.stopTurn(b);
+  await send(h, a, dest(h, b));
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+  h.core.threads.startTurn(b, 'Carry on');
+  expect(h.core.coordination.get(b).config.paused).toBe(false);
+  // The waiting letter reaches the agent, inside his turn or in a wake right after it.
+  await waitFor(() => h.core.coordination.get(b).messages[0]?.status === 'delivered', 8000);
+  await waitFor(() => h.core.threads.require(b).status === 'idle', 8000);
+
+  h.core.coordination.configure(b, { ...brief, paused: true });
+  h.core.threads.stopTurn(b);
+  h.core.threads.startTurn(b, 'Carry on again');
+  expect(h.core.coordination.get(b).config.paused).toBe(true);
+}, 20000);
+
 test('a letter wakes an idle recipient at once, without waiting for the sweep', async () => {
   const { h, a, b } = await setup();
   await send(h, a, dest(h, b));
