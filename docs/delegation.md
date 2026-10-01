@@ -1,11 +1,11 @@
 # Subagents
 
 Delegation is on in every conversation, with nothing to set up. The main agent
-delegates through the `boite` CLI and the owner can launch a brief from the
-Subagents tab of the side panel. The built-in profile `conversation` is the conversation's own
-harness, account, model and effort. Open Subagents > Settings to add named profiles for other
-models, with the same picker the composer uses, or to turn delegation off for
-that conversation.
+delegates through the `boite` CLI; nothing is launched by hand. The built-in
+profile `conversation` is the conversation's own harness, account, model and
+effort. The gear in the Subagents tab opens Settings, where the owner adds named
+profiles for other models, with the same picker the composer uses, or turns
+delegation off for that conversation.
 
 Every child is a normal Boite conversation with its own provider session,
 permissions, process trace and usage. It inherits the parent's project,
@@ -17,13 +17,16 @@ it is not the list of children of a conversation. Enable it in Settings >
 Experiments to reveal its bottom-left launcher, which opens a dedicated
 interface. It adds no conversation panel or mobile navigation tab.
 
-Subagents lists the Boite subagents first, with a way to launch one, then the
-provider's own, then Settings. Its first block says whether Boite subagents are
-on, off or paused. The tab opens from the side panel and from the title's menu;
-the header has no button for it. Workflows do not depend on it: they run with delegation
-off, and only a paused team holds them. Its agent, turn and token totals count only Boite
-delegation. Communication between conversations is a separate setting; its
-Off label does not disable provider-native subagents.
+Subagents is one list and nothing else: the conversation's
+[workflow](workflows.md) runs, then the Boite subagents, then the provider's
+own. With nothing handed out it is empty. A run opens its graph in place and a
+subagent its conversation, each with a way back to the list. The header shows
+Off or Paused only in those states, Stop all while something runs, and the
+owner's gear. The tab opens from the side panel, the title's menu and the
+palette's "Show the subagents"; the header has no button for it. Workflows run
+with delegation off, and only a paused team holds them. Communication between
+conversations is a separate setting in the title's menu; its Off label does not
+disable provider-native subagents.
 
 ## Native provider subagents
 
@@ -81,7 +84,7 @@ Delegation starts enabled, on the `conversation` profile alone. The agent is
 told about it when the request is about handing work out (delegation,
 subagents, parallel work, a workflow), and on every turn once the owner added a
 profile. Persistent agents keep their own setting, which starts off. Only the
-owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect, message and stop an enabled team.
+owner can configure profiles, turn delegation off or resume a paused team. A paired phone can inspect and stop an enabled team.
 
 Boite imposes no quota on the number of children, their concurrent turns, total
 turns or turn duration. Previously saved quotas are ignored. Each conversation

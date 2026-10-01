@@ -64,7 +64,7 @@ test('the list carries every app command, the thread ones only while one is open
     'find',
     'copy-answer',
     'panel',
-    'workflows',
+    'subagents',
     'changes',
     'files',
     'tasks',
