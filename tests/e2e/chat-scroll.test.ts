@@ -14,6 +14,65 @@ async function settled() {
   await page.evaluate(`Promise.all([document.fonts.ready, ...document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))])`);
 }
 
+test('sending from history respects reduced motion and preserves the prompt across navigation', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('${timeline}')`);
+  await settled();
+  await page.evaluate(`document.querySelector('${timeline}').scrollTop -= 1500`);
+  await page.waitFor(`document.querySelector('${jump}')`);
+  await page.evaluate(`window.__boiteTest.workspace.active.send('A prompt sent while reading history')`);
+  const aligned = `(() => {
+    const box = document.querySelector('${timeline}');
+    const prompt = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'user');
+    const row = box?.querySelector('[data-mid="' + prompt.id + '"]');
+    return !!row && Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - 20) < 2;
+  })()`;
+  await page.waitFor(`${aligned} && window.__boiteTest.workspace.active.openThread.status === 'idle'`).catch(async error => {
+    console.error(await page.evaluate(`(() => { const box = document.querySelector('${timeline}'); return { top: box.scrollTop, height: box.clientHeight, total: box.scrollHeight, room: document.querySelector('[data-testid=prompt-room]')?.getBoundingClientRect().height, rows: [...box.querySelectorAll('[data-mid]')].map(row => ({id: row.dataset.mid, top: row.getBoundingClientRect().top - box.getBoundingClientRect().top, height: row.getBoundingClientRect().height})), focus: window.__boiteTest.workspace.active.promptFocus }; })()`));
+    await page.screenshot(join(artifacts, 'prompt-reduced-failure.png'));
+    throw error;
+  });
+  await page.waitFor(`${aligned} && document.querySelector('[data-testid=prompt-room]')`);
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-trace')`);
+  await page.evaluate(`window.__boiteTest.workspace.active.open('t-long')`);
+  await page.waitFor(aligned);
+  await page.waitFor(`document.querySelector('[data-testid=prompt-room]')`);
+  expect(await page.evaluate(`document.querySelector('${jump}') === null`)).toBe(true);
+  await page.screenshot(join(artifacts, 'prompt-reduced-phone.png'));
+  await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+}, 30_000);
+
+test('reader input cancels the lift and input from another client preserves the reading position', async () => {
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 844, deviceScaleFactor: 1, mobile: false });
+  await page.navigate(url);
+  await page.waitFor(`document.querySelector('${timeline}')`);
+  await settled();
+  await page.evaluate(`(async () => {
+    const box = document.querySelector('${timeline}');
+    const store = window.__boiteTest.workspace.active;
+    box.scrollTop -= 1000;
+    await store.send('A cancellable lift [permission]');
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    box.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
+    box.scrollTop -= 300;
+  })()`);
+  await page.waitFor(`document.querySelector('${jump}')`);
+  const position = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+  // Wait several frames past the CSS motion duration to detect a surviving tween.
+  await page.evaluate(`new Promise(resolve => { const start = performance.now(); const frame = () => performance.now() - start > 350 ? resolve() : requestAnimationFrame(frame); requestAnimationFrame(frame); })`);
+  expect(Math.abs(await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`) - position)).toBeLessThan(2);
+  await page.evaluate(`(async () => {
+    const store = window.__boiteTest.workspace.active;
+    await store.stop();
+    await store.client.call('turns.start', { threadId: store.openThread.id, prompt: 'Input from another client [permission]' });
+  })()`);
+  await page.waitFor(`window.__boiteTest.workspace.active.openThread.messages.some(message => message.role === 'user' && message.parts[0].text.includes('another client'))`);
+  await settled();
+  expect(Math.abs(await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`) - position)).toBeLessThan(2);
+}, 30_000);
+
 beforeAll(async () => {
   const port = await freePort();
   server = await startDevUi(port);
@@ -24,6 +83,71 @@ afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
 for (const phone of [false, true]) {
   const name = phone ? 'phone' : 'desktop';
+  for (const long of [false, true]) {
+    test(`a sent prompt rises smoothly and its response takes the reserved space on ${name}, ${long ? 'windowed' : 'short'} history`, async () => {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
+      await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+      await page.navigate(long ? url : url.replace('&long=1', ''));
+      await page.waitFor(`document.querySelector('${timeline}')`);
+      await settled();
+      await page.type('[data-testid=composer-input]', 'Start a fresh view [permission]');
+      // Observe real frames from the send button through the end of the lift.
+      const positions = await page.evaluate<number[]>(`new Promise(resolve => {
+        const box = document.querySelector('${timeline}');
+        const positions = []; const started = performance.now();
+        document.querySelector('[data-testid=composer-input]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        const sample = () => {
+          positions.push(box.scrollTop);
+          if (performance.now() - started < 600) requestAnimationFrame(sample);
+          else resolve(positions);
+        }; requestAnimationFrame(sample);
+      })`);
+      expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
+      const offset = `(() => {
+        const box = document.querySelector('${timeline}');
+        const store = window.__boiteTest.workspace.active;
+        const prompt = store.openThread.messages.findLast(message => message.role === 'user');
+        const row = box.querySelector('[data-mid="' + prompt.id + '"]');
+        return row ? Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - 20) : Infinity;
+      })()`;
+      await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=permission-card]')`);
+      expect(await page.evaluate(`document.querySelector('${jump}') === null`)).toBe(true);
+      await page.screenshot(join(artifacts, `prompt-top-${name}-${long ? 'windowed' : 'short'}.png`));
+
+      await page.evaluate(`(() => {
+        const message = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant');
+        message.parts = [{ type: 'text', text: 'Here is the first part of the answer.\\n\\n' }];
+      })()`);
+      await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=prompt-room]')`);
+      await page.evaluate(`(() => {
+        const message = window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant');
+        message.parts[0].text = Array.from({length: 60}, (_, i) => 'Response paragraph ' + i + ': the answer fills the available screen.').join('\\n\\n') + '\\n\\n';
+      })()`);
+      await page.waitFor(`!document.querySelector('[data-testid=prompt-room]') && (() => { const box = document.querySelector('${timeline}'); return box.scrollHeight - box.clientHeight - box.scrollTop < 2; })()`).catch(async error => {
+        console.error(await page.evaluate(`(() => { const box = document.querySelector('${timeline}'); return { top: box.scrollTop, height: box.clientHeight, total: box.scrollHeight, room: document.querySelector('[data-testid=prompt-room]')?.getBoundingClientRect().height, rows: [...box.querySelectorAll('[data-mid]')].map(row => ({id: row.dataset.mid, height: row.getBoundingClientRect().height})), jump: !!document.querySelector('${jump}') }; })()`));
+        await page.screenshot(join(artifacts, `prompt-failure-${name}.png`));
+        throw error;
+      });
+
+      // Wheel input releases following; further response growth must preserve reading.
+      await page.evaluate(`(() => {
+        const box = document.querySelector('${timeline}');
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
+        box.scrollTop -= 300;
+      })()`);
+      await page.waitFor(`document.querySelector('${jump}')`);
+      const reading = await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`);
+      await page.evaluate(`window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'assistant').parts[0].text += 'More response content.\\n\\n'.repeat(10)`);
+      await settled();
+      expect(Math.abs(await page.evaluate<number>(`document.querySelector('${timeline}').scrollTop`) - reading)).toBeLessThan(2);
+      await page.click(jump);
+      await page.waitFor(`!document.querySelector('${jump}') && (() => { const box = document.querySelector('${timeline}'); return box.scrollHeight - box.clientHeight - box.scrollTop < 2; })()`);
+      await page.screenshot(join(artifacts, `prompt-response-${name}-${long ? 'windowed' : 'short'}.png`));
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+      expect(page.errors()).toEqual([]);
+    }, 30_000);
+  }
+
   test(`the return button stays centered throughout its entrance on ${name}`, async () => {
     await page.send('Emulation.setDeviceMetricsOverride', { width: phone ? 390 : 1280, height: 844, deviceScaleFactor: 1, mobile: phone });
     await page.navigate(url);

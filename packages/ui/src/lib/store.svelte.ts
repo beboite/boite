@@ -460,6 +460,7 @@ export class Store {
   submitAndDraft(...args: Parameters<Composer['submitAndDraft']>) { return this.#ctx.composer.submitAndDraft(...args); }
   send(...args: Parameters<Composer['send']>) { return this.#ctx.composer.send(...args); }
   get inputBoundaries() { return this.#ctx.composer.inputBoundaries; }
+  get promptFocus() { return this.#ctx.composer.promptFocus; }
   steer(...args: Parameters<Composer['steer']>) { return this.#ctx.composer.steer(...args); }
   sendQueuedNow(...args: Parameters<Composer['sendQueuedNow']>) { return this.#ctx.composer.sendQueuedNow(...args); }
   stop(...args: Parameters<Composer['stop']>) { return this.#ctx.composer.stop(...args); }
