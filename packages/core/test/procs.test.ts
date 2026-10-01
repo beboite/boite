@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -125,6 +126,37 @@ describe('procs', () => {
     expect(Date.now() - started).toBeLessThan(5000);
   }, 15000);
 
+  test('an archive stops the turn and the processes of the thread and its sub-threads, and leaves other threads alone', async () => {
+    const client = await harness.connect();
+    const { threadId } = await echoThread(harness, client, 'archived while working');
+    const { threadId: keptId } = await echoThread(harness, client, 'keeps working');
+    const output: Promise<unknown>[] = [];
+    const start = (id: string) => {
+      const child = harness.core.procs.spawn(id, process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+      output.push(new Response(child.proc.stdout).text(), new Response(child.proc.stderr).text());
+      return child;
+    };
+    const parent = harness.core.threads.require(threadId);
+    await client.call('delegation.configure', { threadId, config: { ...DEFAULT_DELEGATION_CONFIG, enabled: true, profiles: [{ id: 'worker', name: 'Worker', providerId: parent.providerId, accountId: parent.accountId, model: parent.model!, effort: null }] } });
+    const child = await client.call('delegation.spawn', { threadId, profileId: 'worker', task: 'long running '.repeat(500), requestId: 'archive-child' });
+    const own = start(threadId);
+    const sub = start(child.thread.id);
+    const kept = start(keptId);
+    const turn = await client.call('turns.start', { threadId, prompt: 'long running '.repeat(500) });
+    try {
+      await client.call('threads.archive', { threadId });
+      await Promise.all([own.exited, sub.exited]);
+      await waitFor(() => harness.core.procs.liveCount(threadId) === 0 && harness.core.procs.liveCount(child.thread.id) === 0, 5000);
+      expect(harness.core.journal.getTurn(turn.id)?.status).toBe('stopped');
+      expect(harness.core.scheduler.state()).toEqual({ running: [], queued: [] });
+      expect(kept.proc.exitCode).toBeNull();
+      expect(harness.core.procs.liveCount(keptId)).toBeGreaterThan(0);
+    } finally {
+      await Promise.all([threadId, child.thread.id, keptId].map(id => harness.core.procs.stopAndWait(id)));
+      await Promise.all(output);
+    }
+  }, 20000);
+
   test('resources.list carries only the threads running something now, archived or not', async () => {
     const client = await harness.connect();
     const running = await echoThread(harness, client, 'runs a process');
@@ -143,9 +175,10 @@ describe('procs', () => {
     await completed.exited;
     await waitFor(() => harness.core.procs.liveCount(done.threadId) === 0, 5000);
     const long = process.platform === 'win32' ? ['cmd', ['/c', 'ping -n 30 127.0.0.1 > nul']] as const : ['sleep', ['30']] as const;
+    // An archive ends what the thread ran; what starts under it afterwards is still listed.
+    await client.call('threads.archive', { threadId: running.threadId, archived: true });
     harness.core.procs.spawn(running.threadId, long[0], [...long[1]]);
     await waitFor(() => harness.core.procs.liveCount(running.threadId) > 0, 5000);
-    await client.call('threads.archive', { threadId: running.threadId, archived: true });
 
     try {
       const resources = await client.call('resources.list', {});
