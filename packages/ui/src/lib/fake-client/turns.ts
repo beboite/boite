@@ -339,14 +339,20 @@ export const FAKE_AUTO_COMPACT_SETTLE_MS = 400;
  * apply. A turn that opens first keeps the thread busy and the timer does nothing.
  */
 function autoCompact(ctx: FakeContext, thread: Thread, turn: Turn): void {
-  const rule = ctx.settings.autoCompact;
-  if (!rule || turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId) return;
-  if (!rule.moments.includes('turn-end') || (rule.tokens !== null && (thread.context?.tokens ?? 0) < rule.tokens)) return;
+  // Checked when the turn ends and again when the timer fires, on the setting and the thread as they are then.
+  const wanted = (now: Thread): boolean => {
+    const rule = ctx.settings.autoCompact;
+    if (!rule || !rule.moments.includes('turn-end') || (rule.tokens !== null && (now.context?.tokens ?? 0) < rule.tokens)) return false;
+    return now.activity?.goal?.status !== 'active' && now.activity?.loop?.status !== 'active';
+  };
+  if (turn.status !== 'done' || turn.execution?.operation === 'compact' || thread.parentThreadId || !wanted(thread)) return;
   setTimeout(() => {
+    // A closed client keeps its threads for a reconnection: nothing is added to them meanwhile.
+    if (ctx.bus.state === 'closed') return;
     // The thread may be gone by now; a refused compaction leaves it as it was.
     try {
       const now = ctx.thread(thread.id);
-      if (now.archived || now.status !== 'idle' || !now.sessionId || now.turns.at(-1)?.id !== turn.id || !ctx.settings.autoCompact) return;
+      if (now.archived || now.status !== 'idle' || !now.sessionId || now.turns.at(-1)?.id !== turn.id || !wanted(now)) return;
       startTurn(ctx, thread.id, '[compact]', [], 'compact', undefined, undefined, [], true);
     } catch { /* see above */ }
   }, FAKE_AUTO_COMPACT_SETTLE_MS);

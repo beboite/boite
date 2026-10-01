@@ -125,6 +125,26 @@ describe('automatic compaction', () => {
     client.close();
   });
 
+  test('a moment switched off, or work that ended, before the delay is up starts nothing', async () => {
+    AUTO_COMPACT.settleMs = 150;
+    const client = await h.connect();
+    const { threadId } = await quiet(client);
+    await client.call('settings.set', { autoCompact: { tokens: null, moments: ['turn-end'] } });
+    await turn(client, threadId, 'first');
+    // Echo's cache lives 300 s, so the only moment left is minutes away.
+    await client.call('settings.set', { autoCompact: { tokens: null, moments: ['cache-expiry'] } });
+    await pause(400);
+    expect(await compactions(client, threadId)).toEqual([]);
+
+    await client.call('settings.set', { autoCompact: { tokens: null, moments: ['background'] } });
+    h.core.threads.agentState.noteBackground(threadId, [{ id: 'bg1', kind: 'shell', description: 'watch', toolId: null, startedAt: Date.now() }]);
+    await turn(client, threadId, 'second');
+    h.core.threads.agentState.noteBackground(threadId, []);
+    await pause(400);
+    expect(await compactions(client, threadId)).toEqual([]);
+    client.close();
+  });
+
   test('an idle thread compacts just before its prompt cache lapses', async () => {
     const client = await h.connect();
     const { threadId } = await quiet(client);

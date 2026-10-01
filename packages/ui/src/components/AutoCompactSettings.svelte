@@ -36,8 +36,11 @@
   let valid = $derived(typeof tokens === 'number' && Number.isInteger(tokens) && tokens >= AUTO_COMPACT_TOKENS.min && tokens <= AUTO_COMPACT_TOKENS.max);
 
   /** A switch saves when it flips; a refusal puts it back. */
+  /** Every control builds the whole rule from the saved one, so none moves while a save is on its way. */
+  let saving = $state(false);
   async function save(next: AutoCompact | null, input?: HTMLInputElement) {
-    const ok = await store.saveSettings({ autoCompact: next });
+    saving = true;
+    const ok = await store.saveSettings({ autoCompact: next }).finally(() => { saving = false; });
     if (!ok && input) input.checked = !input.checked;
     return ok;
   }
@@ -68,7 +71,7 @@
         <span class="hint">{strings.settings.autoCompactHint}</span>
       </span>
       <input id="{uid}-on" aria-labelledby="{uid}-on-name" type="checkbox" role="switch" data-testid="auto-compact-on"
-        checked={rule !== null} disabled={!store.settings} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />
+        checked={rule !== null} disabled={!store.settings || saving} onchange={(event) => void save(event.currentTarget.checked ? FIRST : null, event.currentTarget)} />
     </label>
 
     {#if rule}
@@ -84,7 +87,7 @@
               <span class="hint">{moment.hint}</span>
             </span>
             <input id="{uid}-{moment.id}" aria-labelledby="{uid}-{moment.id}-name" type="checkbox" role="switch" data-testid="auto-compact-{moment.id}"
-              checked={on} onchange={(event) => toggleMoment(moment.id, event.currentTarget)} />
+              checked={on} disabled={saving} onchange={(event) => toggleMoment(moment.id, event.currentTarget)} />
           </label>
         {/each}
       </div>
@@ -100,14 +103,14 @@
               <span class="size">
                 <span class="presets" role="group" aria-label={strings.settings.autoCompactThreshold}>
                   {#each PRESETS as preset (preset)}
-                    <button type="button" class="chip" class:picked={tokens === preset} aria-pressed={tokens === preset} data-testid="auto-compact-preset-{preset}"
+                    <button type="button" class="chip" class:picked={tokens === preset} aria-pressed={tokens === preset} disabled={saving} data-testid="auto-compact-preset-{preset}"
                       onclick={() => { dirty = true; void saveTokens(preset); }}>{formatTokens(preset)}</button>
                   {/each}
                 </span>
                 <span class="field">
                   <input id="{uid}-tokens" type="number" inputmode="numeric" min={AUTO_COMPACT_TOKENS.min} max={AUTO_COMPACT_TOKENS.max} step="1000"
                     data-testid="auto-compact-tokens" aria-label={strings.settings.autoCompactThreshold} aria-invalid={!valid}
-                    aria-describedby={valid ? undefined : `${uid}-tokens-error`} bind:value={tokens}
+                    aria-describedby={valid ? undefined : `${uid}-tokens-error`} disabled={saving} bind:value={tokens}
                     oninput={() => { dirty = true; }} onchange={() => void saveTokens()} />
                   <span class="unit">{strings.settings.autoCompactUnit}</span>
                 </span>
@@ -118,7 +121,7 @@
             {/if}
           </span>
           <input id="{uid}-threshold" aria-labelledby="{uid}-threshold-name" type="checkbox" role="switch" data-testid="auto-compact-threshold"
-            checked={rule.tokens !== null} onchange={(event) => toggleThreshold(event.currentTarget)} />
+            checked={rule.tokens !== null} disabled={saving} onchange={(event) => toggleThreshold(event.currentTarget)} />
         </div>
       </div>
     {/if}

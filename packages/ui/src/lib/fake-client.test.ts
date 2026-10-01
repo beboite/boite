@@ -865,5 +865,22 @@ test('the fake core compacts by itself at the end of a turn once the threshold i
     const thread = await client.call('threads.get', { threadId });
     expect(thread.messages.findLast(message => message.role === 'system')?.parts[0]).toMatchObject({ displayText: 'Automatic compaction' });
     expect(thread.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'compaction', trigger: 'auto' });
+
+    // The timer checks again: a threshold raised, or a client closed, during the delay starts nothing.
+    const count = async () => (await client.call('threads.get', { threadId })).turns.filter(turn => turn.execution?.operation === 'compact').length;
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'third' });
+    await done;
+    await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['turn-end'] } });
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    expect(await count()).toBe(1);
+    await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['turn-end'] } });
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'fourth' });
+    await done;
+    client.close();
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    await client.connect();
+    expect(await count()).toBe(1);
   } finally { client.close(); }
 });

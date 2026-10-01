@@ -1,4 +1,4 @@
-import type { AutoCompact, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
+import type { AutoCompact, AutoCompactMoment, ThreadId, ThreadSummary, Turn } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { messageOf } from '../errors.ts';
 import type { ThreadStore } from '../threads.ts';
@@ -34,14 +34,17 @@ export class AutoCompaction {
     if (turn.status !== 'done' || turn.execution?.operation === 'compact') return;
     const rule = this.core.settings.get().autoCompact;
     if (!rule || this.refusal(thread, rule) !== null) return;
-    const delay = this.delay(thread, rule);
-    if (delay === null) return;
+    const due = this.due(thread, rule);
+    if (due !== null) this.arm(thread.id, due.delay);
+  }
+
+  private arm(threadId: ThreadId, delay: number): void {
     const timer = setTimeout(() => {
-      this.timers.delete(thread.id);
-      this.fire(thread.id);
+      this.timers.delete(threadId);
+      this.fire(threadId);
     }, delay);
     timer.unref?.();
-    this.timers.set(thread.id, timer);
+    this.timers.set(threadId, timer);
   }
 
   cancel(threadId: ThreadId): void {
@@ -56,15 +59,20 @@ export class AutoCompaction {
     this.timers.clear();
   }
 
-  /** Milliseconds until the first chosen moment that applies to this finished turn, or null. */
-  private delay(thread: ThreadSummary, rule: AutoCompact): number | null {
+  /**
+   * The first chosen moment that applies to the thread as it stands, and how
+   * long from now it comes: the settle delay counted from the end of the last
+   * turn, or the cache's last minute. Null when none applies.
+   */
+  private due(thread: ThreadSummary, rule: AutoCompact): { moment: AutoCompactMoment; delay: number } | null {
     const waiting = (this.threads.agentState.background.get(thread.id)?.length ?? 0) > 0;
-    if (rule.moments.includes(waiting ? 'background' : 'turn-end')) return AUTO_COMPACT.settleMs;
+    const moment: AutoCompactMoment = waiting ? 'background' : 'turn-end';
+    if (rule.moments.includes(moment)) return { moment, delay: Math.max(0, thread.updatedAt + AUTO_COMPACT.settleMs - Date.now()) };
     const cache = thread.promptCache ?? null;
     if (!rule.moments.includes('cache-expiry') || cache === null) return null;
     // Another model or account starts cold: there is no cached reading left to save.
     if (cache.model !== thread.model || cache.accountId !== thread.accountId) return null;
-    return Math.max(AUTO_COMPACT.settleMs, cache.at + cache.ttlSeconds * 1000 - AUTO_COMPACT.cacheMarginMs - Date.now());
+    return { moment: 'cache-expiry', delay: Math.max(0, cache.at + cache.ttlSeconds * 1000 - AUTO_COMPACT.cacheMarginMs - Date.now()) };
   }
 
   /** Why this thread is not compacted now, or null. */
@@ -84,6 +92,11 @@ export class AutoCompaction {
     if (!rule || thread === null || thread.status !== 'idle') return;
     if (this.threads.runner.handles.has(threadId) || this.threads.runner.steering.has(threadId)) return;
     if (this.refusal(thread, rule) !== null || this.expected(threadId)) return;
+    // The setting or the background work may have changed since the timer was
+    // armed: the moment is worked out again, and one that lies ahead waits for its own time.
+    const due = this.due(thread, rule);
+    if (due === null) return;
+    if (due.delay > 0) { this.arm(threadId, due.delay); return; }
     try {
       this.threads.compact(threadId, undefined, true);
     } catch (error) {

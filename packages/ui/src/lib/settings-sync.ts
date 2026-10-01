@@ -144,7 +144,8 @@ export async function syncSettings(source: SyncEnd, target: SyncEnd, signal?: Ab
       target.client.call('settings.get', {})
     ]);
     const patch = portable(fromSettings);
-    const changed = Object.entries(patch).filter(([key, value]) => toSettings[key as keyof Settings] !== value).length;
+    // `autoCompact` is an object: two equal ones are never the same reference.
+    const changed = Object.entries(patch).filter(([key, value]) => JSON.stringify(toSettings[key as keyof Settings]) !== JSON.stringify(value)).length;
     signal?.throwIfAborted();
     return { settings: changed ? await target.client.call('settings.set', patch) : toSettings, changed };
   });

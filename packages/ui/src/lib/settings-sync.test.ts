@@ -29,6 +29,8 @@ test('the target takes the portable settings, the keybindings and the brain swit
   const to = await machine();
   await from.call('settings.set', { threadDeletionRetentionDays: 90, warmProcessMinutes: 7, agentCpuCapPercent: 80, agentMemoryBudgetPercent: 70, threadMemoryCapMb: 4096, memoryReserveMb: 1024, memoryProtection: false, autoUpdateHarnesses: true, asyncQuestions: false, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
   await to.call('settings.set', { threadDeletionRetentionDays: 7, warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
+  // The same rule on both sides is two equal objects, and no change to count.
+  for (const client of [from, to]) await client.call('settings.set', { autoCompact: { tokens: 200_000, moments: ['turn-end'] } });
   await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
   await to.call('keybindings.set', { command: 'theme-light', chord: 'mod+alt+t' });
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, globalInstructions: false, boiteGuide: false });

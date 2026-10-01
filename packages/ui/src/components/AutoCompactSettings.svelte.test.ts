@@ -77,3 +77,18 @@ test('the size is its own switch: on it saves a valid number or a preset, off it
   await flip('auto-compact-threshold', true);
   expect(store.saveSettings).toHaveBeenLastCalledWith({ autoCompact: { tokens: 400_000, moments: ['turn-end'] } });
 });
+
+test('no control moves while a save is on its way, so a second change never rebuilds the rule from the old one', async () => {
+  const store = render({ tokens: null, moments: ['background', 'cache-expiry'] });
+  let answer!: (ok: boolean) => void;
+  store.saveSettings.mockImplementationOnce((patch: Partial<Settings>) => new Promise<boolean>(resolve => {
+    answer = ok => { store.settings = { ...store.settings, ...patch }; resolve(ok); };
+  }));
+  await flip('auto-compact-background', false);
+  for (const id of ['auto-compact-on', 'auto-compact-turn-end', 'auto-compact-cache-expiry', 'auto-compact-threshold']) expect(input(id).disabled).toBe(true);
+  answer(true);
+  await settle();
+  expect(input('auto-compact-turn-end').disabled).toBe(false);
+  await flip('auto-compact-turn-end', true);
+  expect(store.settings.autoCompact).toEqual({ tokens: null, moments: ['turn-end', 'cache-expiry'] });
+});
