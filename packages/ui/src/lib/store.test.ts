@@ -42,6 +42,33 @@ test('opening the drawer starts its shell before a view mounts and shares an in-
   } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
 });
 
+test('an older core keeps output arriving before the lazy terminal view attaches', async () => {
+  const { store, client } = await ready();
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const call = client.call.bind(client);
+  const stop = client.on('terminal.output', (event) => { Reflect.deleteProperty(event, 'sequence'); });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'terminals.open') {
+      // Older cores return snapshots without an output sequence.
+      Reflect.deleteProperty(result as object, 'sequence');
+      await gate;
+    }
+    return result;
+  });
+  try {
+    store.toggleTerminal();
+    await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'legacy-early-output' });
+    const attaching = store.openTerminal(threadId, 100, 30);
+    release();
+    const state = await attaching;
+    expect(state?.output.match(/legacy-early-output/g)).toHaveLength(1);
+  } finally { release(); stop(); spy.mockRestore(); client.close(); store.detach(); }
+});
+
 test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async () => {
   const { store, client } = await ready();
   const call = vi.spyOn(client, 'call').mockRejectedValue(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'Remote terminal transport unavailable' }));

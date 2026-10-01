@@ -52,6 +52,9 @@ export class Terminals {
     });
     const result = client.call('terminals.open', { threadId, cols, rows })
       .then((state) => {
+        // An older core cannot identify snapshot overlap. Refresh its history
+        // after the buffered events instead of dropping output the lazy view missed.
+        if (state.sequence === undefined && output.length > 0) return client.call('terminals.open', { threadId, cols, rows });
         const after = output.filter((event) => state.sequence !== undefined && event.sequence !== undefined && event.sequence > state.sequence);
         return after.length === 0 ? state : {
           ...state, output: state.output + after.map((event) => event.data).join(''), sequence: after.at(-1)!.sequence
