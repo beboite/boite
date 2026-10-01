@@ -137,7 +137,7 @@ async function withQuotaProbe(core: Core, account: Account, name: string, read: 
         return child;
       },
       killTree: () => core.procs.killTree(threadId),
-      log: () => undefined,
+      log: (level, message) => core.log(level, `${name} quota: ${message}`),
     });
   } finally {
     core.procs.killTree(threadId);
