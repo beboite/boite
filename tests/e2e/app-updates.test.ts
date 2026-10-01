@@ -95,7 +95,7 @@ test('footer icons open a compact update popup with release details and an exter
   await page.evaluate(`document.querySelectorAll('${id('machine-status-menu')} [data-value]')[2].click()`);
   await page.waitFor(`document.querySelector('${id('machine-status-menu')}') === null`);
   expect(await page.evaluate(`(() => {
-    const controls = ['machine-status', 'add-project', 'nav-app-update', 'nav-limits', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
+    const controls = ['machine-status', 'add-project', 'nav-limits', 'nav-app-update', 'nav-settings'].map(name => document.querySelector('[data-testid="' + name + '"]').getBoundingClientRect());
     const foot = document.querySelector('.foot').getBoundingClientRect();
     return controls.every((box, index) => box.width >= 26 && box.right <= foot.right && (!index || box.left >= controls[index - 1].right));
   })()`)).toBe(true);

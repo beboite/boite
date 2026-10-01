@@ -16,8 +16,9 @@ The opening arc uses unstretched links and fits the available side of the screen
 The physics and canvas load only when the experiment is enabled; the animation
 loop and audio context close when it is turned off.
 
-Throwing also shakes the native Boite window and returns it to its original
-position. Maximized and fullscreen windows, browsers, phones and window managers
+A crack plays one of six recorded cracks from Boite Legacy's sprite, with a
+synthesized burst as the fallback, and shakes the native Boite window before
+returning it to its original position. Throwing the rope does neither. Maximized and fullscreen windows, browsers, phones and window managers
 that ignore positioning shake the interface instead. Hits do not overlap.
 Reduced motion disables new throws and stops any visible rope.
 

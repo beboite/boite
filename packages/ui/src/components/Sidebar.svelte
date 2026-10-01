@@ -247,13 +247,13 @@
         title={strings.sidebar.addProject} aria-label={strings.sidebar.addProject}
         oncontextmenu={(event) => controlMenu(event, store, 'sidebar.add-project')}><Plus size={16} /></button>
     {/if}
-    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     {#if work.shows('sidebar.limits')}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <span class="control" oncontextmenu={(event) => controlMenu(event, store, 'sidebar.limits')}><LimitsGlance {store} /></span>
     {/if}
-  {#if experimentOn('whip')}<WhipButton onerror={error => { store.error = error instanceof Error ? error.message : String(error); }} />{/if}
     {#if experimentOn('resident-agents')}<button class="ghost icon" aria-label={strings.agents.heading} title={strings.agents.heading} data-testid="nav-agents" onclick={() => store.showAgents()}><Bot size={16} /></button>{/if}
+    {#if experimentOn('whip')}<WhipButton />{/if}
+    {#if store.page === 'chat'}<AppUpdateNotice />{/if}
     <button
       class="ghost icon"
       title={`${strings.sidebar.settings}${store.keyHint('settings')}`}
