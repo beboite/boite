@@ -1639,6 +1639,12 @@ export interface AgentProject {
   current: boolean;
 }
 
+/** The answer of `agent.addProject`: the project, and whether this call registered it. */
+export interface AgentProjectAdded extends AgentProject {
+  /** False when the folder was already a project; nothing changed then. */
+  added: boolean;
+}
+
 /**
  * One end of `agent.spawn`. On the new thread's first prompt as `startedBy`
  * (the thread whose agent started it), and on a system line of the starting
@@ -1740,6 +1746,9 @@ export interface GitStatus {
   behind: number;
   changes: GitChange[];
 }
+
+/** Maximum full name of a Git branch created by Boite, including prefix and collision suffix. */
+export const BRANCH_NAME_MAX = 48;
 
 /**
  * One linked worktree of a project's repository, as `worktrees.list` reads it
@@ -2317,6 +2326,19 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
   /**
+   * The agent registers an existing folder as a project, as the owner does
+   * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
+   * absolute; `name` defaults to the folder's name. A folder that is already a
+   * project answers it with `added: false` and changes nothing, an archived
+   * one included. Refused under the same Communication settings as
+   * `agent.spawn` across projects (off, paused, restricted to its own
+   * project), for a
+   * delegated child or a persistent agent session, and for a thread an agent
+   * started until the user has written in it. The caller's timeline gets a
+   * system line naming the project.
+   */
+  'agent.addProject': { params: { threadId: ThreadId; path: string; name?: string }; result: AgentProjectAdded };
+  /**
    * The agent starts a new top-level thread in a project the owner added
    * (id, name or absolute folder), on its own provider, account, model,
    * effort and permission mode, and sends `prompt` as the first message,
@@ -2573,6 +2595,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
        * the working directory stays fixed when the branch is renamed. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
+       * Explicit names must fit `BRANCH_NAME_MAX`, including any prefix.
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
@@ -2678,6 +2701,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * pending move is refused naming `threadId`.
    */
   'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
+  /**
+   * Put a thread away, or bring it back with `archived: false`. Archiving
+   * stops its turn and its sub-threads' turns at once and answers; their
+   * processes end once those turns have settled. Restoring restarts nothing.
+   */
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The

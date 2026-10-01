@@ -17,12 +17,12 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
-async function show(principal: 'owner' | 'session' = 'owner', embedded = false): Promise<Store> {
+async function show(principal: 'owner' | 'session' = 'owner'): Promise<Store> {
   store = new Store();
   store.attach(new FakeClient({ delayMs: 0, principal, coreId: `core-${principal}` }));
   await store.connect();
   await store.open('t-trace');
-  component = mount(CoordinationPanel, { target: document.body, props: { store, threadId: 't-trace', embedded } });
+  component = mount(CoordinationPanel, { target: document.body, props: { store, threadId: 't-trace' } });
   await settle();
   return store;
 }
@@ -76,12 +76,4 @@ test('a paired device reads coordination but cannot change it', async () => {
   await show('session');
   expect(document.querySelector<HTMLButtonElement>('[data-testid="coordination-mode-on"]')?.disabled).toBe(true);
   expect(document.body.textContent).toContain('Only the owner can change coordination');
-});
-
-test('the Agents panel copy is a row of its own, apart from the conversation bar', async () => {
-  const active = await show('owner', true);
-  expect(active.coordination?.config.mode).toBe('brief');
-  expect(document.querySelector('[data-testid="coordination-panel"]')).toBeNull();
-  const settings = document.querySelector<HTMLDetailsElement>('[data-testid="coordination-settings"]')!;
-  expect(settings.classList.contains('embedded')).toBe(true);
 });

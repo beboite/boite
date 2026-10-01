@@ -131,7 +131,8 @@ in-memory fake.
   answered a hello.
 
 The service worker never registers under `?fake=1`, so a rebuild is always what
-a reload shows.
+a reload shows. Run `svelte-check` before source-based browser scenarios: writing
+its generated tsconfig makes Vite reload the page and can reset a fixture mid-test.
 
 Opening a project uses one dialog from the sidebar, the drafts' project menu
 and `Work in a folder of mine`, settings and the command palette. Choose a machine, then type an absolute path or browse
@@ -260,16 +261,16 @@ thread. Under its rows, a project with archived threads shows a folded
 restores one in a click. The fold is not remembered between sessions.
 
 Delete is separate from Archive. The thread's row and title menus offer it to
-the owner, and both archived lists have a delete button. Every deletion asks
-for confirmation, even for an idle thread. `threads.remove { threadId }`
+the owner, and both archived lists have a delete button. Deletion happens
+immediately without confirmation. `threads.remove { threadId }`
 stops the conversation and its sub-threads, waits for their processes to exit,
 then hides them from the sidebar and archives while retaining their history.
-The Undo toast stays available until dismissed or replaced; Settings has a
-separate list of conversations deleted during this session for later undo.
+The Undo toast dismisses automatically after eight seconds; Settings has a
+separate list of deleted conversations for later restoration.
 `threads.deleted` lists them and `threads.restore { threadId }` restores their
-history and previous archive flags, without restarting agents. A window close
-or lost connection keeps undo available while its core runs. Complete core
-shutdown purges unrestored conversations; startup purges them after a crash.
+history and previous archive flags, without restarting agents. A window close,
+lost connection or core restart keeps deleted conversations available until
+their retention period expires (30 days by default, configurable in Settings).
 `thread.removed` with `undoable: true` updates connected clients and archive
 counts without erasing history. Project files, Git worktrees and branches,
 and transcripts stored by native providers stay on disk. Persistent agent

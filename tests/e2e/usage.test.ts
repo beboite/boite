@@ -156,7 +156,7 @@ test('the phone page fits 390 px and is reachable from the phone settings list',
   await page.waitFor(`document.querySelector('[data-testid=mobile-settings-home]')`);
 }, 60_000);
 
-test('the limits tab is its own page, one card per provider, no scrolling through the history', async () => {
+test('the limits tab is its own page, one card per account, no scrolling through the history', async () => {
   await viewport(1280, 800);
   await openLimits();
   await page.waitFor(`document.querySelectorAll('[data-testid=usage-limit-account]').length >= 3`);

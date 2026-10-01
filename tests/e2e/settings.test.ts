@@ -135,11 +135,11 @@ test('the Limits page turns the monitoring of each account on and off', async ()
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
   await page.click(id('nav-settings')); await page.click(id('settings-tab-limits'));
   await page.waitFor(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}')`);
-  const opencode = `${id('limits-tracked')} [data-account-id="a-opencode"]`;
+  const opencode = `${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="a-opencode"]`;
   await page.waitFor(`document.querySelector('${opencode}')`);
   expect(await page.evaluate(`document.querySelector('${opencode}').checked`)).toBe(true);
   // The Antigravity CLI's own reading starts off, and the only switch that turns it on is here.
-  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} [data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('limits-tracked')} ${id('quota-monitor')}[data-account-id="quota:antigravity-cli"]').checked`)).toBe(false);
   await page.click(opencode);
   await page.waitFor(`!document.querySelector('${opencode}').checked && !document.querySelector('${id('usage-limits')} [data-provider="opencode"]')`);
   await capture('limits-tracked.png');
@@ -204,13 +204,13 @@ test('the compact quota page shows limits and reset times', async () => {
   for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
-  // Unfolded, a provider lists each window with its own bar; there is nothing to set here.
+  // Unfolded, an account lists each window with its own bar; there is nothing to set here.
   await page.click('[data-provider="claude"] .summary');
-  await page.waitFor(`document.querySelectorAll('#usage-claude [role="meter"]').length === 3`);
+  await page.waitFor(`document.querySelectorAll('#usage-a-claude-main [role="meter"]').length === 3`);
   expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').querySelector('input') === null`)).toBe(true);
   await capture('quota-popup-open.png');
   await page.click('[data-provider="claude"] .summary');
-  await page.waitFor(`!document.querySelector('#usage-claude')`);
+  await page.waitFor(`!document.querySelector('#usage-a-claude-main')`);
   expect(await page.evaluate(`document.querySelector('section').scrollWidth <= document.querySelector('section').clientWidth`)).toBe(true);
   expect(await page.evaluate(`document.querySelector('section').scrollHeight <= document.querySelector('section').clientHeight`)).toBe(true);
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);
@@ -236,13 +236,22 @@ test('machines list each execution host and disconnect only the selected host', 
   await capture('machines.png');
   // Checking the option immediately copies settings and keeps following changes.
   expect(await page.evaluate(`document.querySelectorAll('${id('machine-sync')}').length`)).toBe(1);
+  await page.evaluate(`(async () => {
+    const w = globalThis.__boiteTest.workspace;
+    await w.machines.find(machine => machine.id === 'http://builder.test').store.client.call('settings.set', { asyncQuestions: true });
+    await w.active.client.call('settings.set', { asyncQuestions: false });
+  })()`);
   await page.click(id('machine-sync'));
-  await page.waitFor(`document.querySelector('${id('machine-sync-report')}')`);
-  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}').closest('${id('machine-card')}').querySelector('${id('machine-rename')}').value`)).toBe('Builder');
+  await page.waitFor(`globalThis.__boiteTest.workspace.settingsSync.reports['http://builder.test'] && !globalThis.__boiteTest.workspace.settingsSync.busy['http://builder.test']`);
+  expect(await page.evaluate(`globalThis.__boiteTest.workspace.machines.find(machine => machine.id === 'http://builder.test').store.settings.asyncQuestions`)).toBe(false);
+  expect(await page.evaluate(`document.querySelector('${id('machine-sync')}').closest('${id('machine-card')}').querySelector('${id('machine-rename')}').value`)).toBe('Builder');
+  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
+  expect(await page.evaluate(`document.querySelector('${id('machine-sync')}').checked`)).toBe(true);
   await capture('machines-sync.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  // The phone layout draws the page anew; the report stays.
-  await page.waitFor(`document.querySelector('${id('machine-sync-report')}')`);
+  // The phone layout draws the page anew; the checked state stays.
+  await page.waitFor(`document.querySelector('${id('machine-sync')}')?.checked`);
+  expect(await page.evaluate(`document.querySelector('${id('machine-sync-report')}') === null`)).toBe(true);
   await capture('machines-sync-phone.png');
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });

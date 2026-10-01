@@ -198,6 +198,24 @@ test('fake agent.spawn starts a real thread marked at both ends and keeps retrie
   } finally { client.close(); }
 });
 
+test('fake agent.addProject registers a folder once, with a line in the caller, and refuses a relative one', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const threadId = 't-descriptors';
+    const seen: string[] = [];
+    client.on('project.added', project => { seen.push(project.path); });
+    const added = await client.call('agent.addProject', { threadId, path: '/workspace/site', name: 'Website' });
+    expect(added).toMatchObject({ name: 'Website', path: '/workspace/site', current: false, added: true });
+    expect(await client.call('agent.addProject', { threadId, path: '/workspace/site' })).toMatchObject({ id: added.id, name: 'Website', added: false });
+    expect(seen).toEqual(['/workspace/site']);
+    expect((await client.call('agent.projects', { threadId })).map(p => p.id)).toContain(added.id);
+    const back = await client.call('threads.get', { threadId });
+    expect(back.messages.at(-1)).toMatchObject({ role: 'system', parts: [{ text: 'The agent added the project Website (/workspace/site).' }] });
+    await expect(client.call('agent.addProject', { threadId, path: 'site' })).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
+  } finally { client.close(); }
+});
+
 test('paired fake clients can inspect, message and stop delegation but cannot configure or spawn', async () => {
   const phone = new FakeClient({ delayMs: 0, principal: 'session', delegationDemo: true });
   await phone.connect();
