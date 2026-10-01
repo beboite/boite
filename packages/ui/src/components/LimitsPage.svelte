@@ -46,7 +46,7 @@
 
 <div class="page limits-page" data-testid="limits-page">
   <header class="top">
-    <h1>{strings.usage.limits}<InfoTip topic={strings.usage.limits} text={strings.usage.limitsIntro} /></h1>
+    <h1>{strings.usage.limits}</h1>
     {#if store.owner}
       <button type="button" class="quiet icon refresh" aria-label={strings.usage.refresh} title={strings.usage.refresh} data-testid="limits-refresh" aria-busy={reader.loading} onclick={refresh}>
         <RefreshCw size={15} strokeWidth={1.75} class={reader.loading ? 'spinning' : ''} />

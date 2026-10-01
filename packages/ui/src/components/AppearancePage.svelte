@@ -165,7 +165,7 @@
   <section class="card" id="settings-theme">
     <h2>{strings.settings.display}</h2>
     <div class="switch-row">
-      <span class="text">{strings.settings.language}<InfoTip topic={strings.settings.language} text={strings.settings.languageHint} /></span>
+      <span class="text">{strings.settings.language}</span>
       <div class="segmented" role="group" aria-label={strings.settings.language}>
         <button type="button" class:on={locale === 'system'} aria-pressed={locale === 'system'} data-testid="locale-system" onclick={() => pickLocale('system')}>
           {strings.settings.languageSystem}
@@ -195,7 +195,7 @@
     </div>
     <ThemeColors />
     <div class="switch-row">
-      <span class="text">{strings.settings.chatWidth}<InfoTip topic={strings.settings.chatWidth} text={strings.settings.chatWidthHint} /></span>
+      <span class="text">{strings.settings.chatWidth}</span>
       <div class="segmented" role="group" aria-label={strings.settings.chatWidth}>
         {#each widths as option (option.id)}
           <button type="button" class:on={chatWidth === option.id} aria-pressed={chatWidth === option.id} data-testid="chat-width-{option.id}" onclick={() => pickChatWidth(option.id)}>{option.label}</button>
@@ -205,7 +205,7 @@
     {#if hasMaterial}
       <div class="switch-row">
         <span class="text">
-          {strings.settings.material}<InfoTip topic={strings.settings.material} text={strings.settings.materialHint} />
+          {strings.settings.material}
         </span>
         <div class="segmented" role="group" aria-label={strings.settings.material}>
           {#each materials as option (option.id)}
@@ -227,7 +227,7 @@
   <section class="card" id="settings-reading">
     <h2>{strings.settings.reading}</h2>
     <div class="switch-row faces-row">
-      <span class="text">{strings.settings.font}<InfoTip topic={strings.settings.font} text={strings.settings.fontHint} /></span>
+      <span class="text">{strings.settings.font}</span>
       <div class="faces" role="group" aria-label={strings.settings.font}>
         {#each faces as face (face.id)}
           <button type="button" class="face" style:font-family="var(--face-{face.id})" aria-pressed={font === face.id} data-testid="font-{face.id}" onclick={() => pickFont(face.id)}>
@@ -262,7 +262,7 @@
   <section class="card" id="settings-workspace">
     <h2>{strings.settings.workspace}</h2>
     <div class="switch-row">
-      <span class="text">{strings.settings.startIn}<InfoTip topic={strings.settings.startIn} text={strings.settings.startInHint} /></span>
+      <span class="text">{strings.settings.startIn}</span>
       <div class="segmented" role="group" aria-label={strings.settings.startIn}>
         {#each starts as option (option.id)}
           <button type="button" class:on={work.current.startIn === option.id} aria-pressed={work.current.startIn === option.id} data-testid="start-in-{option.id}" onclick={() => work.setStartIn(option.id)}>{option.label}</button>
@@ -270,7 +270,7 @@
       </div>
     </div>
     <div class="switch-row">
-      <span class="text">{strings.settings.panelStart}<InfoTip topic={strings.settings.panelStart} text={strings.settings.panelStartHint} /></span>
+      <span class="text">{strings.settings.panelStart}</span>
       <div class="segmented" role="group" aria-label={strings.settings.panelStart}>
         {#each panels as option (option.id)}
           <button type="button" class:on={work.current.panel === option.id} aria-pressed={work.current.panel === option.id} data-testid="panel-start-{option.id}" onclick={() => work.setPanel(option.id)}>{option.label}</button>
