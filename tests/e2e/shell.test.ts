@@ -256,7 +256,8 @@ function spawnHiddenShell(ownDataDir: string, debugPort?: number, resident = fal
   if (debugPort !== undefined) {
     env.BOITE_SHELL_DEBUG_PORT = String(debugPort);
     // English whatever the machine speaks, as `lib/cdp.ts` launches its browser.
-    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11 --lang=en-US --accept-lang=en-US`;
+    // Keep the hidden WebView responsive, as BrowserPage.launch does for Chrome.
+    env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-port=${debugPort} --remote-allow-origins=* --mute-audio --use-angle=d3d11 --lang=en-US --accept-lang=en-US --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding`;
   }
   return Bun.spawn({ cmd: [EXE], env, stdout: 'ignore', stderr: 'ignore', windowsHide: true }).pid;
 }

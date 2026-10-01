@@ -159,12 +159,13 @@
   }
   /** Typing in a field never leaves the thread: a chord, Enter, Escape or a key outside a field reads the anchor. */
   function rememberBeforeKey(event: KeyboardEvent) { if (!typingKey(event)) rememberAnchor(); }
-  function restoreAnchor() {
-    if (!restoringAnchor || !readingAnchor || !viewport) return;
-    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === readingAnchor?.id);
+  function restoreAnchor(anchor = readingAnchor) {
+    if (!anchor || !viewport?.isConnected || pinned || navigationTarget || promptTarget) return;
+    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === anchor.id);
     if (!node) return;
-    const delta = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - readingAnchor.offset;
+    const delta = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - anchor.offset;
     if (Math.abs(delta) > 1) { viewport.scrollTop += delta; scrollTop = viewport.scrollTop; }
+    readingAnchor = anchor;
   }
   function releaseAnchor() { restoringAnchor = false; }
   onMount(() => {
@@ -483,8 +484,12 @@
         frame = 0;
         const batch = [...pending.values()].filter(entry => entry.target.isConnected);
         pending.clear();
+        // Estimated rows can be taller than their slot totals. Keep the actual
+        // visible message, then align it after Svelte updates the spacers.
+        rememberAnchor();
+        const anchor = readingAnchor;
         onMeasured(batch);
-        restoreAnchor();
+        void tick().then(() => restoreAnchor(anchor));
       });
     });
     boxes = observer;

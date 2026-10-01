@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { FakeClient } from '../lib/fake-client';
 import { Store, store as primary } from '../lib/store.svelte';
 import { workspace, type Machine } from '../lib/workspace.svelte';
+import { strings } from '../lib/strings';
 import MachinesPage from './MachinesPage.svelte';
 
 let mounted: ReturnType<typeof mount> | undefined;
@@ -58,6 +59,9 @@ test('sync stays on the list and the settings button edits the owning machine wi
   await target.store.client!.call('settings.set', { warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
   query<HTMLInputElement>('[data-machine-id="target"] [data-testid="machine-sync"]').click();
   await vi.waitFor(() => expect(target.store.settings?.asyncQuestions).toBe(false));
+  await vi.waitFor(() => expect(workspace.settingsSync.reports[target.id]).toBeDefined());
+  flushSync();
+  expect(document.querySelector('[data-testid="machine-sync-report"]')).toBeNull();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(target.store.settings).toMatchObject({ warmProcessMinutes: 2, agentMemoryBudgetPercent: 40 });
 
@@ -112,4 +116,21 @@ test('offline and paired machines cannot be edited and a removed target never fa
   flushSync();
   expect(document.querySelector('[data-testid="machine-settings"]')).toBeNull();
   expect(workspace.active).toBe(source.store);
+});
+
+test.each([
+  { name: 'missing keybindings', patch: { keybindings: null }, message: strings.machines.syncKeysAbsent },
+  { name: 'missing brain', patch: { brain: 'absent' as const }, message: strings.machines.syncBrainAbsent },
+  { name: 'provider sign-ins', patch: { providers: [{ id: 'codex', name: 'Codex', members: [] }] }, message: 'Codex' }
+])('sync still reports $name without repeating the checkbox label', async ({ patch, message }) => {
+  const { source, target } = await setup();
+  workspace.settingsSync.reports[target.id] = {
+    source: source.label,
+    report: { settings: target.store.settings!, changed: 0, keybindings: target.store.keybindings!, brain: 'none', providers: [], ...patch }
+  };
+  flushSync();
+  const report = query('[data-testid="machine-sync-report"]');
+  expect(report.textContent).toContain(message);
+  expect(report.querySelectorAll('p')).toHaveLength(1);
+  expect(!!report.querySelector('[data-testid="machine-sync-providers"]')).toBe('providers' in patch);
 });
