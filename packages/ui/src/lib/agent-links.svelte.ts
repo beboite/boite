@@ -7,6 +7,7 @@
 import { untrack } from 'svelte';
 import type { CoordinationPeer } from '@boite/contracts';
 import { workspace, type Machine } from './workspace.svelte';
+import { fill, strings } from './strings';
 
 const UNLINKED_KEY = 'boite.agent-links.unlinked';
 
@@ -42,6 +43,21 @@ export function isUnlinked(coreA: string, coreB: string): boolean {
   return unlinkedPairs().has(pairOf(coreA, coreB));
 }
 
+/** A loopback contact cannot be dialled by another machine. The authenticated
+ * connection can supply its HTTPS origin when no public address was configured. */
+function reachableIdentity(machine: Machine, identity: CoordinationPeer): CoordinationPeer {
+  const usable = (raw: string): string | null => {
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) return null;
+      return url.origin;
+    } catch { return null; }
+  };
+  const url = usable(identity.url) ?? usable(machine.store.endpointUrl ?? '');
+  if (!url) throw new Error(fill(strings.machines.agentLinkAddressRequired, { machine: machine.label }));
+  return { ...identity, url };
+}
+
 /**
  * Each core trusts the other, then both check the link in both directions.
  * A failure puts back what either core trusted before and throws.
@@ -55,6 +71,8 @@ export async function linkMachines(a: Machine, b: Machine): Promise<void> {
   let previousB: CoordinationPeer | undefined;
   try {
     [aIdentity, bIdentity] = await Promise.all([a.store.coordinationIdentity(), b.store.coordinationIdentity()]);
+    aIdentity = reachableIdentity(a, aIdentity);
+    bIdentity = reachableIdentity(b, bIdentity);
     const [peersA, peersB] = await Promise.all([a.store.coordinationPeers(), b.store.coordinationPeers()]);
     previousA = peersA.find(p => p.coreId === bIdentity!.coreId);
     previousB = peersB.find(p => p.coreId === aIdentity!.coreId);

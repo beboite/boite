@@ -255,6 +255,7 @@ export const strings = {
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
     autoLinkFailed: 'Not linked automatically: {reason}',
+    agentLinkAddressRequired: 'Set a reachable HTTPS address for {machine} in General settings to link its agents with another machine.',
     reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
   },
   app: {

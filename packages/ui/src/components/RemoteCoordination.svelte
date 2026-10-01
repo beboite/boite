@@ -111,7 +111,7 @@
     <div class="rows">
       {#each pairs as pair (`${pair.a.id}:${pair.b.id}`)}
         <div class="row" data-testid="agent-link-pair">
-          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : agentAutoLink.failureOf(pair.a, pair.b) ? fill(strings.machines.autoLinkFailed, { reason: agentAutoLink.failureOf(pair.a, pair.b)! }) : strings.machines.linkAgents}</small></span>
+          <span><strong>{pair.a.label} ↔ {pair.b.label}</strong><small class:link-failure={Boolean(agentAutoLink.failureOf(pair.a, pair.b))}>{pair.linkedA && pair.linkedB ? strings.machines.reciprocalLink : pair.linkedA || pair.linkedB ? strings.machines.oneSidedLink : agentAutoLink.failureOf(pair.a, pair.b) ? fill(strings.machines.autoLinkFailed, { reason: agentAutoLink.failureOf(pair.a, pair.b)! }) : strings.machines.linkAgents}</small></span>
           <button class="quiet small" disabled={Boolean(busy) || pair.linkedA && pair.linkedB} data-testid="agent-link" onclick={() => void link(pair.a, pair.b)}><Link2 size={13} />{strings.machines.linkAgents}</button>
         </div>
       {/each}
@@ -149,6 +149,7 @@
   .row strong, .row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row strong { font-size: var(--text-sm); font-weight: 500; }
   .row small { margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+  .row small.link-failure { white-space: normal; overflow-wrap: anywhere; }
   .icon-only { width: var(--control); padding: 0; flex: none; }
   .error { color: var(--color-danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
   @media (max-width: 720px) { .row { align-items: flex-start; flex-direction: column; } .row button { align-self: stretch; } }

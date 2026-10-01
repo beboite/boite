@@ -264,6 +264,7 @@ export const fr: Translation = {
     syncProviders: "À connecter sur cette machine : {providers}. Une connexion ne quitte jamais la machine où elle a été faite.",
     syncOpenProviders: 'Ouvrir ses fournisseurs',
     autoLinkFailed: 'Liaison automatique impossible : {reason}',
+    agentLinkAddressRequired: 'Définissez une adresse HTTPS joignable pour {machine} dans les réglages généraux pour relier ses agents à une autre machine.',
     reciprocalLink: 'Confiance mutuelle', oneSidedLink: 'Confiance sur cette machine seulement', publicIdentityHint: "Définissez l'adresse HTTPS publique de chaque cœur dans les réglages généraux avant de relier des PC distincts. Les deux cœurs doivent pouvoir se joindre. Le HTTP local ne fonctionne que sur le même PC.",
   },
   app: {
