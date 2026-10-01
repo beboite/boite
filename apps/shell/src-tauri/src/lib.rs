@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
 mod attachments;
+mod attachment_download;
 mod browser;
 mod channel;
 mod closing;
@@ -132,6 +133,7 @@ pub fn run() {
             local_core::core_endpoint,
             local_files::open_local_file,
             attachments::save_attachment,
+            attachment_download::save_attachment_url,
             window::shell_ready,
             whip::whip_window,
             tray::quit_shell,

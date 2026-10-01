@@ -131,6 +131,10 @@ pub async fn save_attachment(webview: Webview, request: Request<'_>) -> Result<S
         .download_dir()
         .map_err(|error| format!("downloads folder: {error}"))?;
     let path = save_into(&directory, &name, bytes)?;
+    finish_save(path, open)
+}
+
+pub(crate) fn finish_save(path: PathBuf, open: bool) -> Result<Saved, String> {
     let mut opened = false;
     if open {
         if openable(&path) {

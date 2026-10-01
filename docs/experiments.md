@@ -25,8 +25,14 @@ Reduced motion disables new throws and stops any visible rope.
 ## Chat files and previews
 
 An agent can run `boite attach "reports/review.pdf"` to deliver a file in its
-conversation. The core snapshots up to 5 MB from the thread's working directory
-and saves the bytes with an assistant message. Relative and absolute paths must
+conversation. The core snapshots up to 512 MB from the thread's working directory.
+Files up to 5 MB remain inline; larger files live in the core's `artifacts`
+directory and the message stores a reference. Downloads support HTTP ranges,
+so videos can seek without loading the entire file. The UI renews download
+tickets while the card is mounted. Unreferenced snapshots and interrupted
+copies older than a day are removed by daily maintenance; forks retain their
+referenced files. User uploads still have their separate 5 MB limit.
+Relative and absolute paths must
 stay inside that directory, including resolved symlinks. A missing file,
 directory, oversized file or archived thread is refused. The thread must have
 at least one turn. Every provider can use this CLI command.

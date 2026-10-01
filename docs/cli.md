@@ -61,7 +61,7 @@ boite thread new <project> <brief> [--worktree] [--title <title>]
                                  start a thread in a project; its first answer
                                  comes back as an agent message
 boite projects                   the projects the owner added
-boite attach <file>               publish a file snapshot in chat, at most 5 MB
+boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
 boite browse <url>               open the url in the panel's browser (http, https)
@@ -182,7 +182,7 @@ thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
 `drafts` on the drafts project. Archived projects are left out, although
 `thread new` and `thread move` still accept them by name.
 
-`attach` saves a copy in an assistant message, so it remains downloadable from
+`attach` saves a snapshot referenced by an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread
 must have a turn and must not be archived. The optional rich preview is under
 the [Chat files and previews experiment](experiments.md#chat-files-and-previews).
@@ -191,8 +191,9 @@ In the desktop app, clicking the file's name or icon saves it in the system's
 Downloads folder and opens it. The shell's `save_attachment` command opens only
 pictures, PDF, text, audio, video and office documents. It shows any other type
 selected in its folder, so an agent cannot run a program through that click.
-The download button saves the file without opening it. A file with the same
-name and the same bytes is reused, not copied again. In a browser the name
+The download button saves the file without opening it. Files above 5 MB stream
+directly into Downloads and receive a numbered name if that name is taken.
+Smaller inline files with the same name and bytes reuse the existing copy. In a browser the name
 opens a picture full size and downloads anything else. A picture's preview also
 opens it full size.
 

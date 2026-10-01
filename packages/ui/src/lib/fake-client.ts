@@ -143,6 +143,8 @@ export class FakeClient implements ObservableClient {
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
     ctx.plugins.close();
     ctx.workflows.close();
+    for (const url of ctx.artifactUrls) URL.revokeObjectURL(url);
+    ctx.artifactUrls.clear();
     ctx.bus.setState('closed');
     this.#dropPending('client closed');
   }

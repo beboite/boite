@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ChatFile from './ChatFile.svelte';
 import { writeExperiments } from '../lib/experiments';
+import type { Store } from '../lib/store.svelte';
 
 let running: Record<string, unknown> | null = null;
 const createObjectURL = URL.createObjectURL;
@@ -69,4 +70,21 @@ test('in the shell the name saves and opens the file, and Download saves it with
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   expect((invoke.mock.lastCall as unknown as unknown[])[2]).toEqual({ headers: { 'x-boite-name': 'build.zip', 'x-boite-open': '0' } });
   expect(document.querySelector('[data-testid=image-viewer]')).toBeNull();
+});
+
+test('a disk snapshot uses its owning store and streams its download without a full-body fetch', async () => {
+  writeExperiments(['chat-artifacts']);
+  const invoke = vi.fn(async () => ({ path: 'C:/Downloads/clip.mp4', opened: false }));
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const url = `http://127.0.0.1:4311/file/${'a'.repeat(64)}`;
+  const readArtifact = vi.fn(async () => ({ ok: true, value: { name: 'clip.mp4', mimeType: 'video/mp4', bytes: 24 * 1024 * 1024, url } }));
+  const store = { readArtifact } as unknown as Store;
+  running = mount(ChatFile, { target: document.body, props: { store, threadId: 'thread', messageId: 'message', file: { type: 'artifact', id: 'artifact', mimeType: 'video/mp4', name: 'clip.mp4', bytes: 24 * 1024 * 1024 } } });
+  await vi.waitFor(() => expect(document.querySelector('[data-testid=artifact-preview]')).not.toBeNull());
+  expect(readArtifact).toHaveBeenCalledWith('thread', 'message', 'artifact', undefined);
+  query<HTMLButtonElement>('[data-testid=artifact-preview]').click(); flushSync();
+  expect(query<HTMLVideoElement>('video').src).toBe(url);
+  query<HTMLAnchorElement>('[data-testid=artifact-download]').click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('save_attachment_url', { name: 'clip.mp4', url, open: false }, undefined));
+  expect(readArtifact).toHaveBeenLastCalledWith('thread', 'message', 'artifact', 'a'.repeat(64));
 });

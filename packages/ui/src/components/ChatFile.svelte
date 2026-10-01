@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Check, Download, FileText, X } from '@lucide/svelte';
-  import type { MessagePart } from '@boite/contracts';
+  import { FILE_TICKET_TTL_MS, type MessagePart } from '@boite/contracts';
   import type { Store } from '../lib/store.svelte';
   import { experimentOn } from '../lib/experiments.svelte';
   import { fill, strings } from '../lib/strings';
   import { bytes } from '../lib/format';
   import { localFileDirectory, openLocalFile } from '../lib/local-files';
-  import { browserDownload, decodeBase64, saveAttachment } from '../lib/attachment-save';
+  import { browserDownload, decodeBase64, saveAttachment, saveAttachmentUrl } from '../lib/attachment-save';
   import ImageViewer from './ImageViewer.svelte';
 
-  let { file, store, threadId, path, line, onclose }: {
-    file?: Extract<MessagePart, { type: 'file' }>; store?: Store; threadId?: string;
+  let { file, store, threadId, messageId, path, line, onclose }: {
+    file?: Extract<MessagePart, { type: 'file' | 'artifact' }>; store?: Store; threadId?: string; messageId?: string;
     path?: string; line?: number; onclose?: () => void;
   } = $props();
   let url = $state('');
@@ -55,8 +55,8 @@
     if (saving) return true;
     saving = true;
     try {
-      const data = body ?? new Uint8Array(await (await fetch(url)).arrayBuffer());
-      saved = (await saveAttachment(name, data, andOpen))?.path ?? '';
+      if (file?.type === 'artifact') await loadArtifact();
+      saved = (body ? await saveAttachment(name, body, andOpen) : await saveAttachmentUrl(name, url, andOpen))?.path ?? '';
       error = '';
     } catch (reason) { error = reason instanceof Error ? reason.message : String(reason); }
     finally { saving = false; }
@@ -74,9 +74,24 @@
   }
 
   function download(event: MouseEvent): void {
-    if (window.__TAURI_INTERNALS__ === undefined) return;
+    if (window.__TAURI_INTERNALS__ === undefined) {
+      if (file?.type === 'artifact') {
+        event.preventDefault();
+        void loadArtifact().then(() => browserDownload(url, name)).catch(reason => error = String(reason));
+      }
+      return;
+    }
     event.preventDefault();
     void save(false);
+  }
+
+  async function loadArtifact(): Promise<void> {
+    if (file?.type !== 'artifact' || !store || !threadId || !messageId) throw new Error(strings.artifacts.failed);
+    const result = await store.readArtifact(threadId, messageId, file.id, url.split('/file/')[1]);
+    if (!result.ok) throw new Error(result.error);
+    url = result.value.url;
+    mime = result.value.mimeType;
+    size = result.value.bytes;
   }
 
   onMount(() => {
@@ -85,7 +100,9 @@
     async function load() {
       loading = true;
       try {
-        if (file) {
+        if (file?.type === 'artifact') {
+          await loadArtifact();
+        } else if (file) {
           body = decodeBase64(file.data);
           mime = file.mimeType;
           if (mime === 'application/pdf' && new TextDecoder().decode(body.subarray(0, 5)) !== '%PDF-') mime = 'application/octet-stream';
@@ -111,7 +128,12 @@
       finally { if (!disposed) loading = false; }
     }
     void load();
-    return () => { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    const renewal = file?.type === 'artifact' ? setInterval(() => {
+      void loadArtifact().catch(() => {}); // A transient disconnect can retry on the next interval.
+    }, FILE_TICKET_TTL_MS / 2) : null;
+    const resume = () => { if (file?.type === 'artifact' && !document.hidden) void loadArtifact().catch(() => {}); };
+    document.addEventListener('visibilitychange', resume);
+    return () => { disposed = true; document.removeEventListener('visibilitychange', resume); if (renewal) clearInterval(renewal); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   });
 </script>
 
