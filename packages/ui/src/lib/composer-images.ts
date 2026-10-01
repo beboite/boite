@@ -101,3 +101,20 @@ export function editAcrossImageReferences(store: Store, key: string, value: stri
   state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
   return true;
 }
+
+/**
+ * What the box's input event writes to the draft. Cutting into `[Image 2]`
+ * takes the reference and its image, not one letter: the box is rewritten and
+ * the caret it should show comes back. Null when the edit went in as typed.
+ */
+export function editComposerInput(store: Store, key: string, box: HTMLTextAreaElement, undo: boolean, edit: { start: number; end: number } | undefined): number | null {
+  if (undo || !editAcrossImageReferences(store, key, box.value, edit)) {
+    store.editComposerText(key, box.value, undo, edit);
+    return null;
+  }
+  const state = store.composerStates[key]!;
+  const caret = state.selection?.end ?? state.text.length;
+  box.value = state.text;
+  box.setSelectionRange(caret, caret);
+  return caret;
+}

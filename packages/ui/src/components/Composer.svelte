@@ -8,7 +8,7 @@
   import { attachFiles } from '../lib/composer-attachments';
   import { rewindComposerEdit } from '../lib/composer-edit';
   import { fitHeight, selfSizing } from '../lib/composer-size';
-  import { editAcrossImageReferences, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
+  import { editComposerInput, insertImageReference, removeImageReferences, trackImageSend } from '../lib/composer-images';
   import { unresolvedAssetId } from '../lib/draft-attachments';
   import { sentPrompts, type SentPrompt } from '../lib/composer-queue';
   import { rankItems, type PaletteItem } from '../lib/palette';
@@ -316,19 +316,12 @@
       if (input.inputType.endsWith('Backward')) pendingEdit.start = element.selectionStart;
       else pendingEdit.end += Math.max(0, text.length - element.value.length);
     }
-    const history = input.inputType === 'historyUndo' || input.inputType === 'historyRedo';
-    // Cutting into `[Image 2]` takes the reference and its image, not one letter.
-    const whole = !history && editAcrossImageReferences(store, key, element.value, pendingEdit);
-    if (whole) {
-      element.value = text;
-      caret = composer?.selection?.end ?? text.length;
-      element.setSelectionRange(caret, caret);
-    } else store.editComposerText(key, element.value, history, pendingEdit);
+    const whole = editComposerInput(store, key, element, input.inputType === 'historyUndo' || input.inputType === 'historyRedo', pendingEdit);
     pendingEdit = undefined;
     recall = null;
     // Typing is proof the box has the keyboard, whatever the focus event did.
     focused = true;
-    if (!whole) track();
+    if (whole === null) track(); else caret = whole;
     if (!sizesItself) grow(); else if (highlighted) syncInput();
   }
 
