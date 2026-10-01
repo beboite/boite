@@ -685,6 +685,8 @@ export class ThreadStore {
       // A turn of the user's own, once accepted, takes whatever the agent wrote by itself first.
       if (operation !== 'background') this.deferred.pendingWakes.delete(threadId);
       accepted.dismissal?.();
+      // His own message puts the agent back to work, so a pause left by Stop or a restart ends with it.
+      if (!activity && !operation && !startedBy) this.core.coordination.resumeForUser(threadId);
     });
     this.core.scheduler.enqueue(turn, thread.accountId);
     return turn;

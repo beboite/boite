@@ -13,6 +13,8 @@ const HOUR = 3_600_000;
 export const LETTER_RETENTION_MS = 30 * 24 * HOUR;
 /** How long a letter waits for delivery before it expires. */
 const LETTER_TTL_MS = 15 * 60_000;
+/** Marks a pause the core applied by itself, as opposed to the owner's in Communication settings. */
+const AUTO_PAUSE_PREFIX = 'coordination-autopause:';
 /** The sweep's idle probes, each one read on the status index: letters it still has work for. */
 export const SWEEP_PROBES = [
   "SELECT 1 FROM coordination_letters WHERE status IN ('queued', 'received') LIMIT 1",
@@ -92,7 +94,7 @@ export class Coordination {
     for (const thread of core.journal.listThreads()) {
       const config = this.config(thread.id);
       const pending = core.journal.db.query("SELECT 1 FROM coordination_letters WHERE thread_id = ? AND (status IN ('queued', 'received') OR (status = 'uncertain' AND json_extract(data, '$.error') = 'Queued for provider delivery')) LIMIT 1").get(thread.id);
-      if (config.mode !== 'off' && !config.paused && (pending || ['queued', 'running', 'waiting'].includes(thread.status))) this.saveConfig(thread.id, { ...config, paused: true });
+      if (pending || ['queued', 'running', 'waiting'].includes(thread.status)) this.pause(thread.id);
     }
     // A thread that finishes a turn can take its waiting letters now, not at the next sweep.
     this.off = core.bus.onAny((name, payload) => {
@@ -189,6 +191,8 @@ export class Coordination {
     if (thread.agentSessionId) throw refused('persistent agent sessions collaborate through their group or mission');
     if (thread.archived) throw refused('coordination requires an unarchived thread');
     if (!config || !['off', 'brief', 'team'].includes(config.mode) || typeof config.resources !== 'string' || config.resources.length > 500 || typeof config.remote !== 'boolean' || typeof config.paused !== 'boolean') throw invalidParams('config: expected mode off/brief/team, resources up to 500 characters, remote and paused booleans');
+    // The owner's own choice, pause included, is never lifted by a later message.
+    this.core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
     this.saveConfig(threadId, { mode: config.mode, resources: config.resources, remote: config.remote, paused: config.paused });
     if (config.paused) this.core.threads.stopQueuedCoordination(threadId);
     if (config.mode === 'off' || !config.remote) {
@@ -208,9 +212,19 @@ export class Coordination {
     }
     return this.get(threadId);
   }
+  /** A pause the core applies by itself (Stop, a restart, a failed wake). It lasts until the user's next message. */
   pause(threadId: string): void {
     const config = this.config(threadId);
-    if (config.mode !== 'off') this.saveConfig(threadId, { ...config, paused: true });
+    if (config.mode === 'off' || config.paused) return;
+    this.core.journal.setSetting(`${AUTO_PAUSE_PREFIX}${threadId}`, true);
+    this.saveConfig(threadId, { ...config, paused: true });
+  }
+  /** The user wrote to the thread again: a pause the core applied by itself ends, the owner's stays. */
+  resumeForUser(threadId: string): void {
+    if (!this.core.journal.getSetting(`${AUTO_PAUSE_PREFIX}${threadId}`)) return;
+    this.core.journal.deleteSetting(`${AUTO_PAUSE_PREFIX}${threadId}`);
+    const config = this.config(threadId);
+    if (config.paused) this.saveConfig(threadId, { ...config, paused: false });
   }
   get(threadId: string): CoordinationView {
     this.core.threads.require(threadId);
