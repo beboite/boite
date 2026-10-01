@@ -72,6 +72,12 @@ none. Pasting a pairing link under Add a machine replaces the key of any
 listed machine that is not connected, the page's own included, which cannot
 be removed. Only a connected machine is refused as already connected.
 
+The link decides which machine is reached; the name only labels it. Once a
+link is pasted the form names the host it reaches and the listed machine at
+that address, if any. A name already used by another machine gets the
+newcomer's host beside it, as in `Studio (build.example)`, when pairing and
+when renaming.
+
 ## Agent links
 
 Two machines connected here with owner connections are linked for agent

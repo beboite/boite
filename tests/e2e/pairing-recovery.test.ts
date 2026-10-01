@@ -42,6 +42,9 @@ test('a phone with no key pairs again from Machines and sees its threads', async
 
   await page.click(id('machine-add-open'));
   await page.type(id('machine-link'), await mintPairing(core));
+  // Before anything connects, the form names the machine the link reaches.
+  await page.waitFor(`document.querySelector('${id('machine-link-target')}')?.textContent.includes(${JSON.stringify(new URL(core.url).host)})`);
+  await page.screenshot(join(import.meta.dir, '.artifacts', 'pairing-recovery-link-target-phone.png'));
   await page.click(id('machine-add'));
   await page.waitFor(`document.querySelector('${id('machine-card')} .status.ready')`);
   // The form folds on success; a refused link would have kept it open on its error.

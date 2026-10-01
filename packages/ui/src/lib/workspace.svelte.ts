@@ -171,10 +171,33 @@ export class Workspace {
     if (isThisPC(machine) && ['My computer', 'This computer'].includes(machine.label)) machine.label = strings.machines.local;
   }
 
+  /**
+   * Two machines under one name cannot be told apart in a list, and a link
+   * named after a machine already listed looked like it reached that one. The
+   * newcomer takes its address beside the name; the one already there keeps its own.
+   */
+  #distinct(machine: Machine): void {
+    const taken = new Set(this.machines.filter(m => m.store !== machine.store).map(m => m.label.trim().toLowerCase()));
+    if (!taken.has(machine.label.trim().toLowerCase())) return;
+    const base = `${machine.label.trim()} (${hostOf(machine.store.endpointUrl ?? machine.id) ?? machine.id})`;
+    let label = base;
+    for (let n = 2; taken.has(label.toLowerCase()); n++) label = `${base} ${n}`;
+    machine.label = label;
+  }
+
+  /** The machine a pairing link reaches, and the listed machine at that address if there is one. */
+  linkTarget(link: string): { host: string; machine: Machine | null } | null {
+    const parsed = parsePairingLink(link);
+    const identity = parsed && endpointIdentity({ url: parsed.url, token: '' });
+    if (!identity) return null;
+    return { host: identity.host, machine: this.machines.find(m => m.id === identity.id) ?? null };
+  }
+
   customize(id: string, label: string, icon?: MachineIconName): void {
     const machine = this.machines.find(m => m.id === id);
     if (!machine || !label.trim() || (icon && !machineIcons.includes(icon))) return;
     machine.label = label.trim();
+    this.#distinct(machine);
     machine.icon = icon;
     try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...profiles(), [profileKey(machine)]: { label: machine.label, icon } })); } catch { /* session only */ }
     const saved = readEnvironments().find(e => e.url === machine.id);
@@ -208,6 +231,7 @@ export class Workspace {
   #rememberConnected(machine: Machine, endpoint: Endpoint, label: string | undefined, host: string): void {
     machine.label = label?.trim() || machine.store.core?.hostname || host;
     this.restoreProfile(machine);
+    this.#distinct(machine);
     // Grant credentials are persisted by WsClient's onSession, never the grant itself.
     if (!endpoint.grant && !endpoint.local)
       upsertEnvironment({ url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label });
@@ -244,7 +268,10 @@ export class Workspace {
     target.machineId = id;
     target.visible = this.active === target;
     const machine: Machine = existing ?? { id, label: label?.trim() || host, store: target };
-    if (!existing) this.machines = [...this.machines, machine];
+    if (!existing) {
+      this.#distinct(machine);
+      this.machines = [...this.machines, machine];
+    }
     const connecting = target.connectEndpoint({ ...endpoint, url: id });
     const client = target.client;
     await connecting;

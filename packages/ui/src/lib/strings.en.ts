@@ -225,7 +225,7 @@ export const strings = {
     intro: 'Each machine runs its own agents on its own files.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, Machines and devices, make a pairing link and paste it here. Full control there lets this machine manage its accounts and settings.',
-    labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
+    linkReaches: 'This link connects to {host}.', linkReplaces: 'This link connects to {host}, listed here as {machine}. It replaces the key held for it.', linkConnected: 'This link is for {host}, already connected here as {machine}.', labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
     removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
     open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',

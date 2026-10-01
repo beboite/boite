@@ -97,6 +97,23 @@ test('a pairing link replaces the key of a machine that never stopped connecting
   expect(w.machines).toHaveLength(1);
 });
 
+test('a second machine never takes a name already listed, and a link says which machine it reaches', async () => {
+  const { w } = await setup();
+  vi.spyOn(Store.prototype, 'connectEndpoint').mockImplementation(async function (this: Store) {
+    this.connection = 'ready';
+  });
+  // Typed after a machine already listed: the address tells them apart.
+  expect(await w.pair('https://other.test/?grant=g1', 'Local')).toBe(true);
+  expect(w.machines.map((machine) => machine.label)).toEqual(['Local', 'Remote', 'Local (other.test)']);
+  expect(endpoints.readEnvironments().find((saved) => saved.url === 'https://other.test')).toBeUndefined();
+  // Renamed onto another machine's name: same rule, and the first holder keeps its own.
+  w.customize('remote', 'local');
+  expect(w.machines.map((machine) => machine.label)).toEqual(['Local', 'local (remote)', 'Local (other.test)']);
+  expect(w.linkTarget('https://other.test/?grant=g2')).toMatchObject({ host: 'other.test', machine: { label: 'Local (other.test)' } });
+  expect(w.linkTarget('https://new.test:8443/?grant=g3')).toEqual({ host: 'new.test:8443', machine: null });
+  expect(w.linkTarget('not a link')).toBeNull();
+});
+
 async function waitFor(check: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt++) {
     if (check()) return;
