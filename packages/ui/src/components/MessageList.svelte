@@ -4,7 +4,7 @@
   import type { AgentLetter, Message, MoveNotice, ThreadLink } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
-  import TurnSummary from './TurnSummary.svelte';
+  import MessageTurnSummary from './MessageTurnSummary.svelte';
   import TurnFiles from './TurnFiles.svelte';
   import { turnDiffs, turnFiles, type TurnDiff, type TurnFile } from '../lib/turn-files';
   import MessageOutline from './MessageOutline.svelte';
@@ -23,6 +23,9 @@
   import { ESTIMATE, GAP, OVERSCAN, SlotTotals, WINDOW_FROM, atOrBefore, reaches, windowStats } from '../lib/message-window';
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
+  import { glides } from '../lib/motion';
+  import { BottomGlide, PointerHold, typingKey, wheelsUp } from '../lib/timeline-follow';
+  import { workspace } from '../lib/workspace.svelte';
 
   let {
     store,
@@ -105,6 +108,15 @@
     return coordination?.self ?? null;
   }
 
+  function letterProject(letter: AgentLetter): string | undefined {
+    const self = letterSelf(letter);
+    const address = letter.from.coreId === self?.coreId && letter.from.threadId === threadId ? letter.to : letter.from;
+    if (address.coreId !== self?.coreId) return undefined;
+    const thread = store.threads.find(thread => thread.id === address.threadId)
+      ?? delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread;
+    return store.projects.find(project => project.id === thread?.projectId)?.name;
+  }
+
   /** How often the bottom message's height is allowed to speak to the pin. */
   const TAIL_GAP_MS = 100;
 
@@ -138,9 +150,15 @@
   function rememberAnchor() {
     if (!viewport?.isConnected || !viewport.clientHeight || restoringAnchor) return;
     const top = viewport.getBoundingClientRect().top;
-    const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.getBoundingClientRect().bottom > top);
-    if (node?.dataset.mid) readingAnchor = { id: node.dataset.mid, offset: node.getBoundingClientRect().top - top };
+    for (const node of viewport.querySelectorAll<HTMLElement>('[data-mid]')) {
+      const box = node.getBoundingClientRect();
+      if (box.bottom <= top) continue;
+      if (node.dataset.mid) readingAnchor = { id: node.dataset.mid, offset: box.top - top };
+      return;
+    }
   }
+  /** Typing in a field never leaves the thread: a chord, Enter, Escape or a key outside a field reads the anchor. */
+  function rememberBeforeKey(event: KeyboardEvent) { if (!typingKey(event)) rememberAnchor(); }
   function restoreAnchor() {
     if (!restoringAnchor || !readingAnchor || !viewport) return;
     const node = [...viewport.querySelectorAll<HTMLElement>('[data-mid]')].find(node => node.dataset.mid === readingAnchor?.id);
@@ -152,10 +170,10 @@
   onMount(() => {
     // Capture the settled layout before a navigation click removes this list.
     document.addEventListener('pointerdown', rememberAnchor, true);
-    document.addEventListener('keydown', rememberAnchor, true);
+    document.addEventListener('keydown', rememberBeforeKey, true);
     return () => {
       document.removeEventListener('pointerdown', rememberAnchor, true);
-      document.removeEventListener('keydown', rememberAnchor, true);
+      document.removeEventListener('keydown', rememberBeforeKey, true);
     };
   });
   let restoredReading = false;
@@ -183,6 +201,7 @@
     if (promptTarget) pinned = false;
     promptTarget = null;
     stopLift();
+    endGlide(false);
   }
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
@@ -268,6 +287,8 @@
       releaseNavigation();
       pinned = false;
       behind = false;
+      // A prompt sent brings the reader back to the live end, whatever the wheel did before.
+      leftBottom = false;
       reservePrompt = promptTarget = message.id;
       lifting = true;
       liftFrom = viewport!.scrollTop;
@@ -383,6 +404,9 @@
     measured += 1;
     if (box && shift !== 0 && !pinned) {
       box.scrollTop += shift;
+      // The window moves with it at once: computed on the old position, it mounted a message above
+      // for a frame and dropped it unmeasured, moving the text with no scroll event to read the anchor.
+      scrollTop = box.scrollTop;
       if (lifting) liftFrom += shift;
     }
   }
@@ -450,6 +474,9 @@
     const pending = new Map<Element, ResizeObserverEntry>();
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) pending.set(entry.target, entry);
+      // Pinned, the list follows what grows at its bottom in this same frame: the observer runs
+      // after layout, so the new line is painted already in view (docs/performance.md).
+      if (following()) box.scrollTop = box.scrollHeight;
       if (frame) return;
       // Applying slot heights inside ResizeObserver can resize that same batch.
       frame = requestAnimationFrame(() => {
@@ -478,20 +505,45 @@
   function onscroll() {
     const box = viewport;
     if (!box) return;
+    // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
+    if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
-    pinned = atBottom(box);
-    if (restoringAnchor) pinned = false;
-    // Read right after each event, once the window has rendered. Deferred to
-    // the next frame or to a timer, the read let a navigation that followed a
-    // scroll at once restore the message below (tests/e2e/mobile.test.ts).
+    // Read right after each event, once the window has rendered. Read before that render, or a frame or
+    // a timer later, a navigation that followed a scroll restored the wrong place (tests/e2e/mobile.test.ts).
     void tick().then(rememberAnchor);
+    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (glide.active) {
+      if (distance > 1) return;
+      endGlide(false);
+    }
+    // Only the very bottom takes back a list the wheel took up.
+    if (distance <= 1) leftBottom = false;
+    pinned = !leftBottom && atBottom(box);
+    if (restoringAnchor) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
     if (pinned) markSeen();
     pullOlder(box);
   }
+
+  /** A wheel turned up leaves the bottom at once: waiting for the 80 px that unpin it let a
+   *  streaming answer pull the first notches of a smooth wheel back down, frame after frame. */
+  let leftBottom = false;
+  function onwheel(event: WheelEvent) {
+    releaseNavigation();
+    if (!viewport || !wheelsUp(event, viewport)) return;
+    leftBottom = true;
+    if (pinned) { pinned = false; behind = true; }
+  }
+
+  /** A finger, a text selection or the scrollbar thumb holds the list where it is; the glide is what
+   *  "Jump to latest" starts, whose scroll events neither unpin the list nor bring the button back. */
+  const hold = new PointerHold(), glide = new BottomGlide();
+  function press(event: PointerEvent | TouchEvent) { releaseNavigation(); hold.press(event); }
+  /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
+  const following = () => pinned && !navigationTarget && !glide.active && !hold.held;
 
   // -- paging ----------------------------------------------------------------
   // Two things in this file belong to the paged history, and they are both here:
@@ -535,15 +587,38 @@
     const box = viewport;
     if (!box) return;
     reservePrompt = null;
-    pinned = true;
     behind = false;
     markSeen();
-    void tick().then(() => {
-      if (!box.isConnected || !pinned) return;
+    leftBottom = false;
+    // The room reserved under a lifted prompt leaves with this flush: the bottom is read after it.
+    void tick().then(() => { if (box.isConnected) descend(box); });
+  }
+
+  /** To the bottom of `box`: at once when it is there or motion is reduced, on a glide otherwise. */
+  function descend(box: HTMLDivElement) {
+    behind = false;
+    if (glides() && box.scrollHeight - box.clientHeight - box.scrollTop > 1) { glide.start(box, () => endGlide(true)); return; }
+    pinned = true;
+    box.scrollTop = box.scrollHeight;
+    scrollTop = box.scrollTop;
+  }
+
+  /** The glide is over: arrived or out of time, the list pins again; taken over by the reader, it stays where it stopped. */
+  function endGlide(arrived: boolean) {
+    if (!glide.active) return;
+    glide.stop();
+    const box = viewport;
+    if (!box) return;
+    if (arrived) {
       box.scrollTop = box.scrollHeight;
       scrollTop = box.scrollTop;
-    });
+    }
+    pinned = arrived || atBottom(box);
+    behind = !pinned;
+    if (pinned) markSeen();
   }
+
+  $effect(() => () => { glide.stop(); hold.release(); });
 
   /**
    * A message arriving, and the bottom one growing no more than ten times a
@@ -561,12 +636,15 @@
       behind = false;
       untrack(markSeen);
     } else if (opened || pinned) {
-      box.scrollTop = box.scrollHeight;
-      scrollTop = box.scrollTop;
+      // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
+      if (opened || untrack(following)) {
+        box.scrollTop = box.scrollHeight;
+        scrollTop = box.scrollTop;
+      }
       pinned = true;
       behind = false;
       untrack(markSeen);
-    } else {
+    } else if (!glide.active) {
       behind = true;
     }
   });
@@ -583,7 +661,7 @@
   /** The window moving under a pinned viewport changes the spacers: take the bottom again. */
   $effect(() => {
     void view;
-    if (!pinned) return;
+    if (!untrack(following)) return;
     const box = viewport;
     if (!box) return;
     box.scrollTop = box.scrollHeight;
@@ -675,7 +753,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} onwheel={releaseNavigation} ontouchstart={releaseNavigation} onpointerdown={releaseNavigation} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} {onscroll} {onwheel} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}
@@ -698,7 +776,8 @@
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
-            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+            {@const self = letterSelf(letter)!}
+            <ForwardedAgentMessage {letter} {self} projectName={letterProject(letter)} onopen={address => void workspace.openAgentThread(store, self, address)} />
           {:else if memoryRows.has(message.id)}
             <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}
@@ -714,15 +793,7 @@
             <TurnFiles {store} {...filesByTurn.get(turn.id)!} />
           {/if}
           {#if turn && lastInTurn.get(turn.id) === message.id}
-            <TurnSummary
-              {turn}
-              progress={store.openThread?.id === threadId ? store.openThread.progress : undefined}
-              trace={() => store.panel.open('trace')}
-              activeTool={message.parts.some((part) => part.type === 'tool' && part.status === 'running')}
-              waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
-              background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}
-              stop={() => void store.stop()}
-            >
+            <MessageTurnSummary {store} {threadId} {turn} {message}>
               {#snippet actions()}
                 <MessageActions
                   text={() => answerOf(turn.id)}
@@ -730,7 +801,7 @@
                   fork={branchable && message.state !== 'streaming' ? (worktree) => void store.fork(message.id, { worktree }) : undefined}
                 />
               {/snippet}
-            </TurnSummary>
+            </MessageTurnSummary>
           {/if}
         </article>
       {/each}
@@ -769,6 +840,10 @@
     padding: 20px 20px calc(var(--dock-room, 0px) + 20px) var(--outline-room);
     overscroll-behavior: contain;
   }
+
+  /* The scrollbar's room is kept on both sides from the first message: a reply that first fills the
+     window no longer shifts the column 5 px sideways. The phone layout has no width to give it. */
+  @media (min-width: 721px) { .timeline { scrollbar-gutter: stable both-edges; } }
 
   .column {
     display: flex;

@@ -19,6 +19,7 @@ beforeAll(async () => {
     projectId: project.id, providerId: 'echo', accountId: account.id, title: 'YOLO permissions',
   });
   threadId = thread.id;
+  await client.call('threads.subscribe', { threadId });
   page = await BrowserPage.launch({ url: pairingUrlOf(core) });
   await page.click(`[data-thread-id="${threadId}"]`);
   await page.waitFor(`document.querySelector('${selector('composer-mode')}')`);
@@ -29,8 +30,10 @@ afterAll(async () => { await page?.close(); client?.close(); await core?.stop();
 test('desktop and phone can select YOLO, run without a permission card and restore Ask', async () => {
   await page.click(selector('composer-mode'));
   const yolo = `${selector('composer-mode-menu')} [data-value="yolo"]`;
+  const yoloSaved = client.next('thread.updated', thread => thread.id === threadId && thread.permissionMode === 'yolo');
   await page.click(yolo);
   await page.waitFor(`document.querySelector('${selector('composer-mode')}')?.textContent.includes('YOLO')`);
+  await yoloSaved;
   expect((await client.call('threads.get', { threadId })).permissionMode).toBe('yolo');
   await page.click(selector('composer-mode'));
   await page.screenshot(join(import.meta.dir, '.artifacts/yolo-desktop.png'));
@@ -44,10 +47,14 @@ test('desktop and phone can select YOLO, run without a permission card and resto
 
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await page.click(selector('composer-options'));
+  const askSaved = client.next('thread.updated', thread => thread.id === threadId && thread.permissionMode === 'default');
   await page.click(`${selector('composer-options-sheet')} input[value="default"]`);
+  await askSaved;
   expect((await client.call('threads.get', { threadId })).permissionMode).toBe('default');
+  const phoneYoloSaved = client.next('thread.updated', thread => thread.id === threadId && thread.permissionMode === 'yolo');
   await page.click(`${selector('composer-options-sheet')} input[value="yolo"]`);
   await page.waitFor(`document.querySelector('${selector('composer-options-sheet')} input[value="yolo"]')?.checked`);
+  await phoneYoloSaved;
   expect((await client.call('threads.get', { threadId })).permissionMode).toBe('yolo');
   expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts/yolo-phone.png'));

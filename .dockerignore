@@ -8,6 +8,8 @@
 !apps/
 !apps/shell/
 !apps/shell/package.json
+!apps/shell/src-tauri/
+!apps/shell/src-tauri/tauri.conf.json
 !packages/
 !packages/contracts/
 !packages/contracts/**

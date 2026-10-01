@@ -7,6 +7,7 @@ import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { findHits } from '../lib/find';
 import { Store } from '../lib/store.svelte';
+import { workspace } from '../lib/workspace.svelte';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -256,6 +257,8 @@ test('delegation letters use local family identity when coordination has another
   };
   const coordinated = {
     ...store,
+    threads: [{ id: 't-child', projectId: 'p-team' }],
+    projects: [{ id: 'p-team', name: 'Review project' }],
     coordination: {
       self: { coreId: 'real-core-id', threadId: 't-short' },
       config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
@@ -271,6 +274,13 @@ test('delegation letters use local family identity when coordination has another
   const row = document.querySelector('[data-letter-id="delegation-user"]');
   expect(row?.getAttribute('data-direction')).toBe('outgoing');
   expect(row?.textContent).toContain('You sent to');
+  expect(row?.querySelector('[data-testid=agent-letter-project]')?.textContent).toBe('Review project');
+  expect(row?.querySelector('[data-testid=agent-letter-status] svg.lucide-check-check')).not.toBeNull();
+  const open = vi.spyOn(workspace, 'openAgentThread').mockResolvedValue();
+  try {
+    row?.querySelector<HTMLButtonElement>('[data-testid=agent-letter-open]')?.click();
+    expect(open).toHaveBeenCalledWith(coordinated, { coreId: 'local', threadId: 't-short' }, letter.to);
+  } finally { open.mockRestore(); }
 });
 
 /** A store whose thread still has older messages behind the window. */
@@ -384,7 +394,9 @@ test('scrolled up, the way to the bottom shows with nothing new below, and takes
 
   jumpButton()!.click();
   await settle();
-  expect(timeline.scrollTop).toBe(messages.length * ESTIMATE);
+  // The button goes at once; the list glides the last screen and a half down and lands at the bottom.
+  expect(jumpButton()).toBeNull();
+  await vi.waitFor(() => expect(timeline.scrollTop).toBe(messages.length * ESTIMATE), { timeout: 2_000 });
   expect(jumpButton()).toBeNull();
 });
 
@@ -688,4 +700,47 @@ test('a page in flight shows one line at the top of the list', async () => {
 
   const row = document.querySelector<HTMLElement>('[data-testid=loading-older]');
   expect(row?.textContent).toBe('Loading earlier messages');
+});
+
+test('a press holds the pinned list, and a release the window never saw still frees it', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  expect(timeline.scrollTop).toBe(scrollHeight);
+
+  let added = 0;
+  const arrive = async () => {
+    messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: `m-held-${added++}` });
+    scrollHeight = messages.length * ESTIMATE;
+    await settle();
+  };
+  const press = () => timeline.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { pointerType: 'mouse', buttons: 1 }));
+
+  // Held under the pointer, the list stays where it is while the answer grows below.
+  press();
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight - ESTIMATE);
+  // The button was let go outside the window, so no pointerup came: the pointer back with no button frees the list.
+  window.dispatchEvent(Object.assign(new Event('pointermove'), { buttons: 0 }));
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight);
+
+  // The same when the window loses focus mid-press.
+  press();
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight - ESTIMATE);
+  window.dispatchEvent(new Event('blur'));
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight);
+  expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
+  live.detach();
+  client.close();
 });

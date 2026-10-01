@@ -277,6 +277,39 @@ export class ThreadCards {
   }
 
   /**
+   * A stopped core takes this map with it, and an asynchronous card is meant
+   * to outlive its turn: the ones nobody answered come back from the journal,
+   * each with the part it is drawn in. A card whose message a rewind removed,
+   * or whose thread is put away or gone, stays closed.
+   */
+  restoreAsyncQuestions(): number {
+    let restored = 0;
+    for (const request of this.core.journal.openAsyncQuestions()) {
+      if (this.questions.has(request.id) || this.core.journal.getThread(request.threadId)?.archived !== false) continue;
+      for (const message of this.core.journal.walkTurnMessages(request.threadId, request.turnId)) {
+        const partIndex = message.parts.findIndex(part => part.type === 'question' && part.questionId === request.id && (part.answer ?? null) === null);
+        if (partIndex < 0) continue;
+        const part = message.parts[partIndex] as Extract<MessagePart, { type: 'question' }>;
+        // Whoever awaited the ticket died with the old core; the answer travels as a message.
+        this.questions.set(request.id, { request, resolve: () => undefined });
+        this.asyncCards.set(request.id, { threadId: request.threadId, messageId: message.id, partIndex, part });
+        restored += 1;
+        break;
+      }
+    }
+    return restored;
+  }
+
+  /** An asynchronous card closed without an answer is written down, or the next start would open it again. */
+  private closeUnanswered(request: QuestionRequest): void {
+    if (request.async !== true) return;
+    this.core.journal.append(
+      { type: 'question.answered', threadId: request.threadId, version: 1, payload: { questionId: request.id, answer: null } },
+      () => undefined,
+    );
+  }
+
+  /**
    * The turn ended with a question still open: it is cancelled, so the driver
    * settles. An asynchronous card outlives its turn and goes only with `all`,
    * when the thread is put away.
@@ -287,6 +320,7 @@ export class ThreadCards {
       if (pending.request.async === true && !all) continue;
       this.questions.delete(id);
       this.asyncCards.delete(id);
+      this.closeUnanswered(pending.request);
       this.core.bus.emit('question.answered', { questionId: id, threadId, answer: null });
       pending.resolve(null);
     }
@@ -298,6 +332,7 @@ export class ThreadCards {
     if (pending === undefined || pending.request.threadId !== threadId) return;
     this.questions.delete(questionId);
     this.asyncCards.delete(questionId);
+    this.closeUnanswered(pending.request);
     this.core.bus.emit('question.answered', { questionId, threadId, answer: null });
     if (pending.request.async !== true) setThreadStatus(this.core, threadId, this.waitingOn(threadId) ? 'waiting' : 'running');
     pending.resolve(null);

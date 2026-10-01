@@ -7,6 +7,7 @@ import type {
   PairingRole,
   Project,
   ProcessRecord,
+  QuestionRequest,
   ThreadSummary,
   Timestamp,
   Turn,
@@ -121,8 +122,8 @@ export class Journal {
   /**
    * Looks at the `limit` oldest events and deletes those written before
    * `before`; 0 means nothing old is left at the front. Only the front is read,
-   * never the whole table: ids grow with time. Nothing replays events, since
-   * the projections are written in the same transaction. The newest agents
+   * never the whole table: ids grow with time. Nothing replays events but
+   * `openAsyncQuestions`, since the projections are written in the same transaction. The newest agents
    * event stays, because its id is the agents revision and must never go back.
    */
   pruneEvents(before: number, limit: number): number {
@@ -437,6 +438,26 @@ export class Journal {
       .query("SELECT MIN(started_at) AS since FROM turns WHERE thread_id = ? AND status = 'running'")
       .get(threadId) as { since: number | null } | null;
     return row?.since ?? null;
+  }
+
+  /**
+   * The asynchronous questions asked and never answered or skipped, oldest
+   * first. The one place events are read back: a pending card has no
+   * projection, and the trail keeps it for as long as events are kept.
+   */
+  openAsyncQuestions(): QuestionRequest[] {
+    const rows = this.db
+      .query(
+        `SELECT asked.payload FROM events asked
+          WHERE asked.type = 'question.asked' AND json_extract(asked.payload, '$.async') = 1
+            AND NOT EXISTS (
+              SELECT 1 FROM events done
+               WHERE done.thread_id = asked.thread_id AND done.id > asked.id AND done.type = 'question.answered'
+                 AND json_extract(done.payload, '$.questionId') = json_extract(asked.payload, '$.id'))
+          ORDER BY asked.id`,
+      )
+      .all() as { payload: string }[];
+    return rows.map((row) => JSON.parse(row.payload) as QuestionRequest);
   }
 
   unfinishedTurns(): Turn[] {

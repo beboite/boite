@@ -35,6 +35,7 @@ import {
   type RpcResult,
   type SchedulerState,
   type Settings,
+  type ServerUpdateStatus,
   type SpeechConfig,
   type SpeechStatus,
   type TelemetryState,
@@ -61,6 +62,7 @@ import { fakeSpeechModels } from './speech';
 import { createAgentSession } from './threads';
 import { startTurn, stopTurn } from './turns';
 import { FakeWorkflows } from './workflows';
+import { initialServerUpdate } from './server-update';
 import type { FakeWorktree } from './worktrees';
 
 /** One handler per contract method; plugins, agents and workflows answer from their own classes. */
@@ -99,6 +101,7 @@ function tokenStream(): number | undefined {
 type Rest<F> = F extends (ctx: FakeContext, ...rest: infer R) => unknown ? R : never;
 
 export class FakeContext {
+  serverUpdate: ServerUpdateStatus = initialServerUpdate();
   readonly bus: FakeBus;
   readonly agents: FakeAgents;
   readonly plugins: FakePlugins;

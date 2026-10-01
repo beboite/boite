@@ -43,6 +43,8 @@ export const USAGE = `usage: boite <command> [args] [--json]
   browse <url>                   open a url in the panel's browser
   open trace|tasks|changes|files|workflow [dir|run-id]
   status                         git status of the working directory
+  server check|update|cancel      check or update this server, or cancel the
+                                 pending update; no thread needed as owner
   ask <question> [option ...]    ask the user without stopping; the answer
                                  arrives later as a message (--multiple)
   task list                      the agent's task list
@@ -182,7 +184,7 @@ function targetOf(parsed: Parsed, env: CliIo['env']): Target {
     }
     return { url, token, threadId: own };
   }
-  const threadId = parsed.thread ?? own;
+  const threadId = parsed.thread ?? own ?? (parsed.positional[0] === 'server' ? '' : undefined);
   if (threadId === undefined) {
     throw new Error(`not inside a Boite thread (${AGENT_ENV.threadId} is not set); pass --thread <id>`);
   }
@@ -257,6 +259,18 @@ async function run(parsed: Parsed, io: CliIo, client: CoreClient, threadId: stri
   };
 
   switch (command) {
+    case 'server': {
+      const action = rest[0] ?? 'check';
+      if (!['check', 'update', 'cancel'].includes(action)) throw new Usage('server expects check, update or cancel');
+      let state = action === 'cancel' ? await client.call('core.updateCancel', {}) : await client.call('core.updateStatus', { refresh: true });
+      if (action === 'update') {
+        if (state.mode !== 'systemd') throw new Error('This server needs a standalone Linux systemd user installation for automatic updates; see docs/server.md');
+        if (state.phase === 'error') throw new Error(state.error ?? 'Server update check failed');
+        if (state.version && state.phase === 'available') state = await client.call('core.updateInstall', { version: state.version });
+      }
+      print([`server: ${state.currentVersion}`, `update: ${state.phase}`, ...(state.version ? [`version: ${state.version}`] : []), ...(state.error ? [`error: ${state.error}`] : [])], state);
+      return;
+    }
     case 'agent': {
       const result = await agentCommand(client, threadId, rest, parsed.requestId ?? crypto.randomUUID());
       print([JSON.stringify(result)], result);

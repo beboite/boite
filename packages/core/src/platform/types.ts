@@ -1,4 +1,5 @@
 import type { Settings, TraceCapability } from '@boite/contracts';
+import type { ServerUpdatePlatform } from '../server-update/types.ts';
 
 export interface NativeProcessInfo {
   exe: string;
@@ -62,6 +63,7 @@ export interface GuardStatus {
 
 /** OS services used by the shared process registry. No native imports here. */
 export interface ProcessPlatform {
+  serverUpdates?: ServerUpdatePlatform;
   retain(jobs: ProcessEventSink, guards: GuardEventSink): void;
   /** Resolves once nothing native is left holding the user's state: hooks, muted sessions. */
   release(): Promise<void>;

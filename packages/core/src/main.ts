@@ -294,6 +294,14 @@ export function withUtf8Locale(env: Record<string, string | undefined>, platform
 
 export function main(argv: string[]): void {
   withUtf8Locale(process.env, process.platform);
+  if (argv[0] === 'update-apply') {
+    void (async () => {
+      if (!processPlatform.serverUpdates || !argv[1]) throw new Error('update-apply expects a private server update plan on Linux');
+      const { applyServerUpdate } = await import('./server-update/apply.ts');
+      await applyServerUpdate(argv[1], processPlatform.serverUpdates);
+    })().catch(error => { process.stderr.write(`boite-core update: ${messageOf(error)}\n`); process.exitCode = 1; });
+    return;
+  }
   // `boite-core cli ...` is the `boite` command an agent runs, behind its shim.
   if (argv[0] === 'cli') {
     // The exit code is set and the process left to end on its own: `process.exit`
@@ -360,6 +368,7 @@ export function main(argv: string[]): void {
   const host = resolveHost(flags, settings);
   const server = startServerOnStickyPort({ core, host, port: flags.port, explicitPort: flags.portExplicit, previousPort: previous.port });
   core.updates.start();
+  core.serverUpdates.start();
   if (core.cliDir === null) {
     console.warn('the boite CLI shim is not beside the core: agents started here cannot run `boite`. Copy `boite` next to the executable, or name its directory in BOITE_CLI_DIR');
   }

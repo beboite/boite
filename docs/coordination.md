@@ -23,10 +23,14 @@ Messages are limited to 4,000 characters, delivered in batches of up to four,
 and expire after 15 minutes if still waiting.
 
 Agent messages appear in the conversation as forwarded bubbles. The arrow,
-sender name and machine identify where a message came from; its text is visible
-without expanding a technical panel. Incoming messages sit on the left with
+thread title, project and machine identify where a message came from. Its text
+is visible without expanding a technical panel. Incoming messages sit on the left with
 "Received from"; outgoing messages sit on the right in the accent color with
-"Your agent sent to" and the recipient's name.
+"Your agent sent to" and the recipient's name. Click or tap the header to open
+the source thread for incoming mail or the recipient thread for outgoing mail.
+Cross-machine links use the connected machine's core identity; an unconnected
+machine asks the user to connect it in Settings. Two checkmarks indicate receipt,
+with the delivery stage available to screen readers and on hover.
 Coordination settings hold contacts and permissions. Pause suspends
 automatic coordination; Resume enables it again. Stop
 and a failed turn pause coordination too. A core restart pauses conversations

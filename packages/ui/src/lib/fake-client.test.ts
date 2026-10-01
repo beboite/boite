@@ -381,6 +381,10 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   expect((await first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).entries.length).toBeGreaterThan(0);
   await expect(phone.call('collaboration.bridge.register', { coreId: a.coreId, enabled: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
+  const project = (await first.call('projects.list', {})).find(project => project.id === 'p-boite')!;
+  expect(letter.from.project).toBe(project.name);
+  expect(letter.toProject).toBe(project.name);
+  expect(letter.toMachine).toBe('Second');
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
   await first.call('collaboration.untrust', { coreId: b.coreId });

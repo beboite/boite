@@ -21,6 +21,10 @@ interface Formatters {
   whole: Intl.NumberFormat;
   credits: Intl.NumberFormat;
   weekday: Intl.DateTimeFormat;
+  /** What `Date.toLocaleString(tag)` writes, built once rather than on every call. */
+  exact: Intl.DateTimeFormat;
+  /** The day spelled out and the time to the second: a message's hover title. */
+  full: Intl.DateTimeFormat;
 }
 
 const sets = new Map<string, Formatters>();
@@ -39,7 +43,9 @@ function formatters(): Formatters {
     tenths: new Intl.NumberFormat(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
     whole: new Intl.NumberFormat(tag, { maximumFractionDigits: 0 }),
     credits: new Intl.NumberFormat(tag, { maximumSignificantDigits: 6 }),
-    weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+    weekday: new Intl.DateTimeFormat(tag, { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+    exact: new Intl.DateTimeFormat(tag, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }),
+    full: new Intl.DateTimeFormat(tag, { dateStyle: 'full', timeStyle: 'medium' })
   };
   sets.set(tag, made);
   return made;
@@ -100,7 +106,12 @@ export function duration(startedAt: number, endedAt: number | null): string {
 
 /** The whole date and time, for the hover title of a relative or shortened stamp. */
 export function exactTime(value: number): string {
-  return new Date(value).toLocaleString(formatLocale());
+  return formatters().exact.format(value);
+}
+
+/** `Tuesday 30 September 2026 at 10:31:05`: every message builds one, so the formatter is kept. */
+export function fullTime(value: number): string {
+  return formatters().full.format(value);
 }
 
 export function time(value: number): string {

@@ -35,6 +35,21 @@ phone. Development-only `?fake=1&appUpdate=ready` and the `downloading` and
 `appUpdateCurrentChannel=nightly` for an installed nightly. These fixtures are
 removed from production builds.
 
+`bun test packages/core/test/server-update.test.ts` verifies publisher signatures,
+archive paths, waiting and cancellation, complete installation and restoration
+of SQLite and pairing state after a failed restart. The helper uses isolated
+directories and a test service adapter. `bun test tests/e2e/server-updates.test.ts`
+checks the owning machine's update action at desktop and phone widths, including
+confirmation and cancellation. `?fake=1&machines=1&serverUpdate=available` previews
+the offer; `downloading`, `waiting` and `error` preview its other states.
+These fixtures spend no provider tokens and never update the real installation.
+
+After `bun run build:core:linux`, Linux hosts with a systemd user manager can
+also run `BOITE_E2E_SERVER_UPDATE=1 bun test packages/core/test/server-update-systemd.test.ts`.
+This opt-in smoke test creates its own service, runs the compiled update worker
+in another cgroup, verifies the backup and restart, then removes both test units.
+It uses a fresh data directory and an inert replacement, without provider calls.
+
 ## The core
 
 ```bash
@@ -421,6 +436,9 @@ completion/blocker markers, including partial markers during streaming.
 Tasks come from ACP plans, Codex plan notifications or successful task tools
 such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
 tasks gets no invented task list. Pi uses the same successful-tool observation.
+Task tracking is optional, including for goals. The agent guide and goal
+instructions suggest a task list only when laying out steps helps the agent
+and the user follow the work.
 
 Each connected provider's row in Settings, Providers stores a default model and
 effort for that provider on this device.
@@ -565,6 +583,17 @@ The prompt outline uses at most 13 entries, keeping the first and last prompts
 and seven around the reading position. Distant prompts are grouped behind a
 keyboard-accessible list, so every loaded prompt remains reachable. Desktop
 markers are 12 px apart; the compact activity panel sits 4 px above the composer.
+
+A conversation at its bottom follows its answer in the frame that lays out the
+new paragraph, from the list's `ResizeObserver`. A wheel turned up leaves the
+bottom at once, unless a tool output under the pointer scrolls up first; a
+finger, a text selection or the scrollbar thumb holds the list until released,
+and a list pulled up that way stays where it was left. Jump to latest cuts to
+the last screen and a half and glides the rest in 380 ms on the app's
+ease-out curve, re-reading the bottom on every frame; reduced motion jumps.
+On the wide layout the conversation keeps its scrollbar's room from the first
+message, so the column does not move when a reply first overflows.
+`tests/e2e/chat-scroll.test.ts` checks the follow, the wheel and the glide.
 
 In forced colors (Windows high contrast) the browser drops the shadows and
 border tints the UI uses to mark focus. `app.css` then gives every
@@ -754,7 +783,11 @@ archive drawers use the shared grid fold. All durations honor reduced motion.
 
 Unsent messages are saved in IndexedDB with strict transaction durability,
 separately for each core and data directory. A small synchronous text backup
-covers typing while a transaction is pending. A local core changing its port
+in `localStorage` is written on every keystroke. The IndexedDB journal follows
+800 ms after typing pauses, and at least every 5 s while it does not; a new
+attachment, a failed backup, `flushDrafts()`, hiding the page and leaving it
+write it at once. Writing the journal on every keystroke cloned each draft
+picture into IndexedDB while the user typed. A local core changing its port
 keeps the same drafts.
 New conversations keep one draft per project, visible in the sidebar after
 opening another thread. Existing conversations keep their own unsent reply.

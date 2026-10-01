@@ -162,6 +162,14 @@ export const SCENARIOS: Record<string, Scenario> = {
       same((await summary(env, created.id)).permissionMode, 'default', 'restored mode');
     } finally { seen.stop(); }
   },
+  'server status is readable by the owner and a stale update cannot install': async env => {
+    const status = await env.call('core.updateStatus', {});
+    check(typeof status.currentVersion === 'string' && status.currentVersion.length > 0, 'server status includes the installed version');
+    check(status.version === null || typeof status.version === 'string', 'server update version is nullable');
+    await refusedWith(env.call('core.updateInstall', { version: '0.0.0-stale' }), RpcErrorCode.Refused);
+    const cancelled = await env.call('core.updateCancel', {});
+    same(cancelled.currentVersion, status.currentVersion, 'cancellation preserves the running version');
+  },
   'questions.skip removes only its own pending card without another turn': async (env) => {
     const { setup, threadId, questionId } = await asked(env);
     const other = await thread(env, setup, 'other');
