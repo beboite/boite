@@ -404,3 +404,21 @@ test('the second screen asks who is using Boite and writes the preset at once', 
   await settle();
   expect(JSON.parse(window.localStorage.getItem(WORK_STORAGE_KEY) ?? 'null')).toEqual({ profile: 'developer', startIn: 'project', panel: 'changes', hidden: [] });
 });
+
+test('at phone width the tour is two screens: no profile question, no host switch, no consent', async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(query => ({ matches: query === '(max-width: 720px)', media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+  await open();
+
+  expect([...document.querySelectorAll('.dot')].map(dot => dot.getAttribute('data-testid'))).toEqual(['onboarding-dot-welcome', 'onboarding-dot-reach']);
+  expect(document.querySelector('[data-testid=onboarding-theme-light]')).not.toBeNull();
+
+  await click('onboarding-next');
+  expect(step()).toBe('reach');
+  expect(query('#onboarding-title').textContent).toBe('Your computer does the work');
+  expect(query('[data-testid=onboarding-next]').textContent?.trim()).toBe("Let's Boite");
+
+  await click('onboarding-next');
+  await settle();
+  expect(readOnboarding()).toMatchObject({ version: ONBOARDING_VERSION });
+  expect(work.current.profile).toBeNull();
+});

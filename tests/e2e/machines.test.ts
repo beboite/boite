@@ -121,7 +121,6 @@ test('two real cores pair, route turns independently, reconnect and survive a re
     await page.click(id('settings-tab-machines'));
     const grant = await b.call('pairing.grant', { role: 'owner' });
     await page.click(id('machine-add-open'));
-    await page.type(id('machine-name'), 'Build host');
     await page.type(id('machine-link'), grant.url);
     await page.click(id('machine-add'));
     await page.waitFor(

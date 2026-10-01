@@ -234,8 +234,10 @@ export class Workspace {
     target.detach();
     target.machineId = id;
     target.visible = this.active === target;
-    const machine: Machine = existing ?? { id, label: label?.trim() || host, store: target };
-    if (!existing) this.machines = [...this.machines, machine];
+    if (!existing) this.machines = [...this.machines, { id, label: label?.trim() || host, store: target }];
+    // Read back from the list: the name the core reports is written through the
+    // reactive entry, or a card already drawn under the address keeps showing it.
+    const machine = existing ?? this.machines.find((m) => m.store === target)!;
     await target.connectEndpoint({ ...endpoint, url: id });
     if (!this.#current(lifecycle) || !this.machines.some((m) => m.store === target)) {
       if (!this.machines.some((m) => m.store === target)) {

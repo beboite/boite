@@ -235,7 +235,15 @@ export const fr: Translation = {
     intro: "Connectez des machines pour voir leurs projets et leurs conversations ensemble. Chaque machine exécute ses propres agents sur ses propres fichiers.",
     label: 'Nom de la machine', icon: 'Icône de la machine', icons: { desktop: 'Ordinateur fixe', laptop: 'Portable', server: 'Serveur', rack: 'Baie', cloud: 'Cloud', cpu: 'Processeur' }, link: "Lien d'appairage", add: 'Ajouter une machine', adding: 'Connexion', connect: 'Connecter',
     addHint: "Sur l'autre machine, ouvrez Réglages, Machines et appareils, Téléphones et appareils, créez un lien d'appairage et collez-le ici. Activez le contrôle total là-bas pour gérer ses comptes et ses réglages depuis celle-ci.",
-    labelOptional: 'Nom (facultatif)', labelPlaceholder: 'Serveur de build',
+    scan: 'Scanner un QR code', pasteLink: "Coller un lien d'appairage", scanTitle: "Scannez le code d'appairage",
+    scanHint: "Sur l'autre machine, ouvrez Réglages, Machines et appareils, créez un lien d'appairage et visez son QR code avec la caméra.",
+    scanStarting: 'Démarrage de la caméra', scanClose: 'Fermer la caméra',
+    scanErrors: {
+      insecure: "La caméra demande une adresse HTTPS. Ouvrez Boite par son adresse HTTPS, ou collez le lien d'appairage.",
+      denied: "L'accès à la caméra a été refusé. Autorisez-le pour ce site dans les réglages du navigateur, ou collez le lien d'appairage.",
+      missing: "Aucune caméra trouvée sur cet appareil. Collez le lien d'appairage à la place.",
+      failed: "La caméra n'a pas pu démarrer. Collez le lien d'appairage à la place."
+    },
     remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
     removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
     open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
@@ -1957,6 +1965,9 @@ export const fr: Translation = {
     },
 
     reach: {
+      onPhoneTitle: "Votre ordinateur fait le travail",
+      onPhoneBody: "Ce téléphone affiche les conversations de votre ordinateur. Les agents tournent là-bas et continuent quand vous rangez le téléphone.",
+      onPhoneSettings: "Les notifications et l'application sur l'écran d'accueil sont dans les Réglages.",
       title: 'Éloignez-vous. Gardez le fil.',
       phone: 'Sur votre téléphone',
       phoneBody: 'Scannez un QR code et votre téléphone retrouve les mêmes conversations, avec les notifications.',

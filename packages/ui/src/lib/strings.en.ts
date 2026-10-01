@@ -226,7 +226,15 @@ export const strings = {
     intro: 'Connect machines to see their projects and threads together. Each machine runs its own agents and files.',
     label: 'Machine name', icon: 'Machine icon', icons: { desktop: 'Desktop', laptop: 'Laptop', server: 'Server', rack: 'Server rack', cloud: 'Cloud', cpu: 'Processor' }, link: 'Pairing link', add: 'Add machine', adding: 'Connecting', connect: 'Connect',
     addHint: 'On the other machine, open Settings, Machines and devices, Phones and other devices, create a pairing link and paste it here. Turn on Full control there to manage its accounts and settings from this one.',
-    labelOptional: 'Name (optional)', labelPlaceholder: 'Build server',
+    scan: 'Scan a QR code', pasteLink: 'Paste a pairing link', scanTitle: 'Scan the pairing code',
+    scanHint: 'On the other machine, open Settings, Machines and devices, create a pairing link and point the camera at its QR code.',
+    scanStarting: 'Starting the camera', scanClose: 'Close the camera',
+    scanErrors: {
+      insecure: 'The camera needs an HTTPS address. Open Boite through its HTTPS address, or paste the pairing link.',
+      denied: 'Camera access was refused. Allow it for this site in the browser settings, or paste the pairing link.',
+      missing: 'No camera was found on this device. Paste the pairing link instead.',
+      failed: 'The camera could not start. Paste the pairing link instead.'
+    },
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
     removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
     open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
@@ -2043,6 +2051,9 @@ export const strings = {
 
     /** The two ways this core reaches further: a phone, and another core. */
     reach: {
+      onPhoneTitle: 'Your computer does the work',
+      onPhoneBody: 'This phone shows the conversations of your computer. The agents run there and keep going when you put the phone away.',
+      onPhoneSettings: 'Notifications and the home screen app are in Settings.',
       title: 'Step away. Keep the conversation.',
       phone: 'On your phone',
       phoneBody: 'Scan a QR code and your phone gets the same conversations, with notifications.',

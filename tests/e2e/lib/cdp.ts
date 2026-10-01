@@ -90,6 +90,8 @@ export interface BrowserOptions {
   showTour?: boolean;
   /** Experiments switched on before the first boot, as Settings, Experiments stores them. */
   experiments?: string[];
+  /** Extra Chromium switches, such as the fake camera a scan test reads its code from. */
+  args?: string[];
 }
 
 /** Every page `launch` opened and nobody closed yet, for `closeAllBrowsers`. */
@@ -180,6 +182,7 @@ export class BrowserPage {
         `--window-size=${size.width},${size.height}`,
         `--user-data-dir=${userDataDir}`,
         `--remote-debugging-port=${port}`,
+        ...(options.args ?? []),
         'about:blank',
       ],
       stdout: 'ignore',

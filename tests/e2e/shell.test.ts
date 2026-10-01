@@ -820,7 +820,6 @@ shellTest('the machine picker opens a folder on the selected core and reports a 
     await page?.click(testid('nav-settings'));
     await page?.click(testid('settings-tab-machines'));
     await page?.click(testid('machine-add-open'));
-    await page?.type(testid('machine-name'), 'Remote test');
     await page?.type(testid('machine-link'), grant.url);
     await page?.click(testid('machine-add'));
     await page?.waitFor(`document.querySelectorAll('[data-testid=machine-card]').length === 2`);
