@@ -69,6 +69,7 @@ describe('settings', () => {
     const client = await harness.connect();
     const defaults = await client.call('settings.get', {});
     expect(defaults).toEqual({
+      threadDeletionRetentionDays: 30,
       worktreeStorage: { mode: 'project', directory: null },
       warmProcessMinutes: 0,
       listenOnLan: false,

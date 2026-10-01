@@ -96,6 +96,10 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
     if (value !== undefined && value > 100) return { ok: false, field: key, message: `${key} must be between 0 and 100` };
   }
   const budget = patch.agentMemoryBudgetPercent;
+  const retention = patch.threadDeletionRetentionDays;
+  if (retention !== undefined && (!Number.isInteger(retention) || retention < 0 || retention > 3650)) {
+    return { ok: false, field: 'threadDeletionRetentionDays', message: 'threadDeletionRetentionDays must be an integer between 0 and 3650 days (0 keeps deleted conversations indefinitely)' };
+  }
   if (budget !== undefined && (!Number.isInteger(budget) || budget < 10 || budget > 90)) {
     return { ok: false, field: 'agentMemoryBudgetPercent', message: 'agentMemoryBudgetPercent must be an integer between 10 and 90' };
   }

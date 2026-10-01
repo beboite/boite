@@ -1,5 +1,5 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
@@ -61,6 +61,28 @@ export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
   ctx.heldAnswers.delete(thread.id);
   if ((thread.background?.length ?? 0) > 0) ctx.setBackground(thread, []);
   closeTerminal(ctx, `terminal:${thread.id}`);
+}
+
+/** Like the resident core, expire stopped families from their deletion date. */
+export function purgeDeletedThreads(ctx: FakeContext): void {
+  const days = ctx.settings.threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
+  if (days === 0) return;
+  const before = Date.now() - days * 86_400_000;
+  let changed = false;
+  for (const [id, family] of ctx.deletedThreads) {
+    if (family.deletedAt > before) continue;
+    ctx.deletedThreads.delete(id);
+    for (const thread of family.threads) {
+      ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && p.threadId !== `terminal:${thread.id}`);
+      ctx.coordination.delete(thread.id);
+      ctx.moveNotes.delete(thread.id);
+      ctx.delegationConfigs.delete(thread.id);
+      ctx.delegationAgents.delete(thread.id);
+      ctx.delegationLetters.delete(thread.id);
+    }
+    changed = true;
+  }
+  if (changed) ctx.emit('thread.deletionsUpdated', {});
 }
 
 /**
@@ -262,7 +284,7 @@ export function threadMethods(ctx: FakeContext) {
           ctx.activityTimers.delete(thread.id);
           ctx.emit('thread.removed', { threadId: thread.id, undoable: true });
         }
-        ctx.deletedThreads.set(threadId, { threads: family, archived });
+        ctx.deletedThreads.set(threadId, { threads: family, archived, deletedAt: Date.now() });
         ctx.emit('thread.deletionsUpdated', {});
         if (root.projectId !== null) announceProject(ctx, root.projectId);
         return { ok: true };
@@ -270,10 +292,14 @@ export function threadMethods(ctx: FakeContext) {
         for (const thread of family) removing.delete(thread.id);
       }
     },
-    'threads.deleted': async () => [...ctx.deletedThreads.values()].reverse().map(family => structuredClone(toSummary(family.threads[0]!))),
+    'threads.deleted': async () => {
+      purgeDeletedThreads(ctx);
+      return [...ctx.deletedThreads.values()].reverse().map(family => ({ ...structuredClone(toSummary(family.threads[0]!)), deletedAt: family.deletedAt }));
+    },
     'threads.restore': async ({ threadId }) => {
+      purgeDeletedThreads(ctx);
       const family = ctx.deletedThreads.get(threadId);
-      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no deletion to undo in this Boite session for ${threadId}`, data: { threadId } });
+      if (!family) throw new RpcFailure({ code: RpcErrorCode.NotFound, message: `threadId: no recoverable deletion for ${threadId}`, data: { threadId } });
       const root = family.threads.find(t => t.id === threadId)!;
       if (root.projectId !== null && !ctx.projects.some(p => p.id === root.projectId)) throw ctx.notFound('project', root.projectId);
       for (const [index, thread] of family.threads.entries()) {

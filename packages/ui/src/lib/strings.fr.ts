@@ -469,7 +469,7 @@ export const fr: Translation = {
     archive: 'Archiver',
     delete: 'Supprimer',
     deleteUnavailable: 'Mettez à jour Boite sur la machine qui héberge cette conversation pour la supprimer. La conversation a été conservée.',
-    deletedToast: '« {title} » supprimée. Annulation possible jusqu’à l’arrêt de Boite.',
+    deletedToast: '« {title} » supprimée. Restauration possible dans les paramètres.',
     archivedToast: '« {title} » archivée',
     undo: 'Annuler',
     undoHint: 'Annuler (Ctrl+Z)',
@@ -1537,10 +1537,15 @@ export const fr: Translation = {
       open: 'Ouvrir'
     },
     deleted: {
-      heading: 'Supprimées pendant cette session',
-      intro: 'L’annulation reste disponible jusqu’à l’arrêt complet de Boite sur cette machine, même quand il continue en arrière-plan après la fermeture de sa fenêtre.',
+      heading: 'Conversations supprimées',
+      intro: 'Restaurez les conversations pendant {days} jours après leur suppression, même après un redémarrage de Boite.',
+      keptIntro: 'Les conversations supprimées restent récupérables après un redémarrage de Boite, sans purge automatique.',
+      retentionLabel: 'Jours avant la suppression définitive',
+      retentionHint: 'À compter de la suppression. 0 conserve les conversations sans limite. Réduire le délai concerne aussi les conversations déjà supprimées.',
+      retentionError: 'Saisissez un nombre entier entre 0 et 3650 jours.',
+      purgesAt: 'Suppression définitive : {date}',
       show: 'Afficher les conversations supprimées',
-      empty: 'Aucune suppression à annuler pendant cette session.',
+      empty: 'Aucune conversation supprimée à restaurer sur cette machine.',
     },
     worktrees: {
       storage: 'Emplacement de stockage',

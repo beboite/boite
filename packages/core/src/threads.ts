@@ -1,6 +1,6 @@
 import type { AgentProfile } from '@boite/contracts';
 import { createHash } from 'node:crypto';
-import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX } from '@boite/contracts';
+import { previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -504,8 +504,9 @@ export class ThreadStore {
   }
 
   restoreDeleted(threadId: ThreadId): ThreadSummary {
+    this.purgeDeleted();
     const root = this.core.journal.listDeletedThreads().find(t => t.id === threadId);
-    if (!root) throw notFound(`threadId: no deletion to undo in this Boite session for ${threadId}`, { threadId });
+    if (!root) throw notFound(`threadId: no recoverable deletion for ${threadId}`, { threadId });
     if (root.projectId !== null) this.core.projects.require(root.projectId);
     const ids = this.core.journal.append(
       { type: 'thread.restored', threadId, version: 1, payload: { threadId } },
@@ -515,6 +516,15 @@ export class ThreadStore {
     this.core.bus.emit('thread.deletionsUpdated', {});
     if (root.projectId !== null) this.core.projects.announce(root.projectId);
     return this.withLoad(this.require(threadId));
+  }
+
+  /** Expiry uses the deletion date, never the conversation's creation or last message. */
+  purgeDeleted(): void {
+    const days = this.core.settings.get().threadDeletionRetentionDays ?? DEFAULT_THREAD_DELETION_RETENTION_DAYS;
+    if (days === 0) return;
+    if (this.core.journal.purgeDeletedThreads(Date.now() - days * 86_400_000) > 0) {
+      this.core.bus.emit('thread.deletionsUpdated', {});
+    }
   }
 
   pin(threadId: ThreadId, pinned: boolean): ThreadSummary {
