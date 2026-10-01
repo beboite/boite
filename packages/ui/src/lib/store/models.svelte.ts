@@ -135,15 +135,25 @@ export class Models {
     }
   }
 
+  /**
+   * The outdated answer the picker may list for this instance. Only an agent
+   * that lists its own models is asked again on its own, so any other provider
+   * goes straight back to its descriptor's list.
+   */
+  #staleOf(providerId: ProviderId, accountId: string | null): ModelInfo[] | undefined {
+    if (accountId === null || this.probedModels[probeKey(providerId, accountId)]) return undefined;
+    if (!discoversModels(this.ctx.store.providerOf(providerId)?.protocol)) return undefined;
+    return this.staleModels[probeKey(providerId, accountId)];
+  }
+
   /** What the picker lists: the answer, else the outdated one while the next is read, else the descriptor's. */
   listedModelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
-    const stale = accountId && !this.probedModels[probeKey(providerId, accountId)] ? this.staleModels[probeKey(providerId, accountId)] : undefined;
-    return stale ?? this.modelsOf(providerId, accountId);
+    return this.#staleOf(providerId, accountId) ?? this.modelsOf(providerId, accountId);
   }
 
   /** An outdated answer is listed and the next probe should replace it. */
   modelsOutdated(providerId: ProviderId, accountId: string | null): boolean {
-    return accountId !== null && !this.probedModels[probeKey(providerId, accountId)] && this.staleModels[probeKey(providerId, accountId)] !== undefined;
+    return this.#staleOf(providerId, accountId) !== undefined;
   }
 
   /** A fresh answer, or a failed read whose outdated list must not linger as if current. */
@@ -174,7 +184,7 @@ export class Models {
   modelsPending(providerId: ProviderId, accountId: string | null): boolean {
     if (accountId === null) return false;
     const key = probeKey(providerId, accountId);
-    if (this.probedModels[key] || this.staleModels[key]) return false;
+    if (this.probedModels[key] || this.#staleOf(providerId, accountId)) return false;
     if (this.isProbing(providerId, accountId)) return true;
     // The same guards as an automatic `probeModels`: what it would skip never pends.
     const s = this.ctx.store;

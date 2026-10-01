@@ -936,6 +936,34 @@ describe('Store', () => {
     expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(store.modelsOf('opencode', 'a-opencode'));
   });
 
+  test('a descriptor reload keeps an agent listing its outdated answer, a provider without discovery its descriptor', async () => {
+    const { store, client } = await ready();
+    await store.probeModels('opencode', 'a-opencode');
+    const listed = store.modelsOf('opencode', 'a-opencode');
+    const original = client.call.bind(client);
+    vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      // Nothing asks echo again after the reload, so an answer of its own would linger.
+      if (method === 'providers.probe' && (params as { providerId: string }).providerId === 'echo') {
+        return { models: [{ id: 'echo-probed', name: 'Echo probed' }], probedAt: Date.now() } as never;
+      }
+      return original(method, params);
+    });
+    await store.probeModels('echo', 'a-echo', true);
+    expect(store.listedModelsOf('echo', 'a-echo').map((m) => m.id)).toEqual(['echo-probed']);
+    // Installing re-reads the descriptors, which announces `providers.updated` once the files land.
+    vi.useFakeTimers();
+    try {
+      await client.call('providers.install', { providerId: 'antigravity' });
+      await vi.advanceTimersByTimeAsync(5_000);
+    } finally { vi.useRealTimers(); }
+    expect(store.modelsOutdated('opencode', 'a-opencode')).toBe(true);
+    expect(store.probedModels).toEqual({});
+    expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(listed);
+    expect(store.modelsOutdated('echo', 'a-echo')).toBe(false);
+    expect(store.listedModelsOf('echo', 'a-echo')).toEqual(store.modelsOf('echo', 'a-echo'));
+    expect(store.listedModelsOf('echo', 'a-echo').map((m) => m.id)).not.toContain('echo-probed');
+  });
+
   test('a saved answer from other descriptors is listed at startup instead of the descriptor', async () => {
     const first = await ready();
     await first.store.probeModels('opencode', 'a-opencode');
