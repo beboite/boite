@@ -1,6 +1,6 @@
 import { afterEach, expect, test, spyOn } from 'bun:test';
 import type { AccountQuota } from '@boite/contracts';
-import { QuotaStore, claudeQuotaWindows, codexQuotaWindows } from '../src/quotas.ts';
+import { QuotaStore, claudeQuotaWindows, claudeUsageAgent, codexQuotaWindows } from '../src/quotas.ts';
 import { claudeQuotaDetails, codexQuotaDetails, museQuotaReading } from '../src/quota-details.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,11 +16,13 @@ test('Claude collects resets and the budget with one GET against the isolated lo
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-token' } }));
   const accounts = spyOn(harness.core.accounts, 'list').mockReturnValue([account]);
+  // Anthropic answers `eligible: false` to a caller that does not name a recent CLI.
+  const version = spyOn(harness.core.updates, 'current').mockReturnValue('2.1.286');
   const fakeFetch: typeof fetch = Object.assign(async (url: string | URL | Request, options?: RequestInit) => {
     expect(url).toBe('https://api.anthropic.com/api/oauth/usage?cedar_ember=1');
     expect(options?.method ?? 'GET').toBe('GET');
     expect(options?.body).toBeUndefined();
-    expect(options?.headers).toMatchObject({ Authorization: 'Bearer fixture-token', 'anthropic-beta': 'oauth-2025-04-20' });
+    expect(options?.headers).toMatchObject({ Authorization: 'Bearer fixture-token', 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': 'claude-cli/2.1.286 (external, cli)' });
     expect(options?.redirect).toBe('error');
     return Response.json({ five_hour: { utilization: 100 }, cedar_ember: { eligible: true, next_grant_id: 'fixture-reset',
       grants: [{ id: 'fixture-reset', resets_left: 1, usable_now: true }] },
@@ -32,7 +34,9 @@ test('Claude collects resets and the budget with one GET against the isolated lo
     expect(row).toMatchObject({ status: 'ready', resetCredits: { availableCount: 1, nextExpiresAt: null },
       credits: { kind: 'budget', enabled: true, remaining: 75, limit: 100 } });
     expect(fetcher).toHaveBeenCalledTimes(1);
-  } finally { fetcher.mockRestore(); accounts.mockRestore(); }
+  } finally { fetcher.mockRestore(); accounts.mockRestore(); version.mockRestore(); }
+  expect(claudeUsageAgent(null)).toEqual({});
+  expect(claudeUsageAgent('2.1\r\nX: y')).toEqual({});
 });
 
 test('Codex trusts the total reset count when details are partial and never infers paid activation', () => {
