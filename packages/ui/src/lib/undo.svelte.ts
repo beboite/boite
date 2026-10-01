@@ -1,7 +1,6 @@
 /**
- * The current undo action: archives expire after a few seconds, deletions
- * remain until dismissed, replaced or their core session ends. Ctrl+Z outside
- * a text field runs it; the session deletion list keeps earlier deletions.
+ * The current undo action expires after a few seconds. Ctrl+Z outside
+ * a text field runs it; Settings keeps deletions after the toast expires.
  */
 
 /** How long the way back stays offered. */
@@ -19,11 +18,11 @@ class UndoStore {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #next = 0;
 
-  offer(message: string, run: () => Promise<unknown>, options: { persistent?: boolean; session?: UndoOffer['session'] } = {}): void {
+  offer(message: string, run: () => Promise<unknown>, options: { session?: UndoOffer['session'] } = {}): void {
     clearTimeout(this.#timer);
     const id = ++this.#next;
     this.current = { id, message, run, session: options.session };
-    if (!options.persistent) this.#timer = setTimeout(() => { if (this.current?.id === id) this.current = null; }, UNDO_MS);
+    this.#timer = setTimeout(() => { if (this.current?.id === id) this.current = null; }, UNDO_MS);
   }
 
   discardExpired(store: object, startedAt: number | undefined): void {

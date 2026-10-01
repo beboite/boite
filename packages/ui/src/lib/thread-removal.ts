@@ -17,7 +17,7 @@ export async function deleteThread(store: Store, thread: ThreadSummary): Promise
   undo.offer(fill(strings.sidebar.deletedToast, { title: thread.title }), async () => {
     if (!(await store.restoreDeletedThread(thread.id))) throw new Error(store.error ?? strings.connection.unavailable);
     await workspace.select(store, thread.id);
-  }, { persistent: true, session: store.core ? { store, startedAt: store.core.startedAt } : undefined });
+  }, { session: store.core ? { store, startedAt: store.core.startedAt } : undefined });
   await tick();
   focusComposer();
   return true;
