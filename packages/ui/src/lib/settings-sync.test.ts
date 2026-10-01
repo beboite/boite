@@ -27,8 +27,8 @@ async function end(client: Client): Promise<SyncEnd> {
 test('the target takes the portable settings, the keybindings and the brain switches, and keeps what is its own', async () => {
   const from = await machine();
   const to = await machine();
-  await from.call('settings.set', { warmProcessMinutes: 7, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
-  await to.call('settings.set', { warmProcessMinutes: 2, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
+  await from.call('settings.set', { warmProcessMinutes: 7, agentCpuCapPercent: 80, agentMemoryBudgetPercent: 70, threadMemoryCapMb: 4096, memoryReserveMb: 1024, memoryProtection: false, autoUpdateHarnesses: true, asyncQuestions: false, muteAgents: false, focusGuard: false, listenOnLan: true, publicUrl: 'https://source.example' });
+  await to.call('settings.set', { warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false, muteAgents: true, focusGuard: true, listenOnLan: false, publicUrl: null });
   await from.call('keybindings.set', { command: 'panel', chord: 'mod+shift+p' });
   await to.call('keybindings.set', { command: 'theme-light', chord: 'mod+alt+t' });
   await from.call('brain.configure', { path: 'D:/Source/brain', enabled: true, globalInstructions: false, boiteGuide: false });
@@ -38,6 +38,7 @@ test('the target takes the portable settings, the keybindings and the brain swit
 
   const source = await from.call('settings.get', {});
   const target = await to.call('settings.get', {});
+  expect(target).toMatchObject({ warmProcessMinutes: 2, agentCpuCapPercent: 30, agentMemoryBudgetPercent: 40, threadMemoryCapMb: 2048, memoryReserveMb: 3072, memoryProtection: true, autoUpdateHarnesses: false });
   for (const key of PORTABLE_SETTINGS) expect(target[key]).toEqual(source[key]);
   expect(report.changed).toBe(3);
   // The machine's network face stays its own.
@@ -154,12 +155,16 @@ test.each([
 });
 
 
-test('memory percentage travels between machines but the reserve stays local', async () => {
+test('memory settings stay local across copies and later adjustments on either machine', async () => {
   const from = await machine(); const to = await machine();
   try {
-    await from.call('settings.set', { agentMemoryBudgetPercent: 35, memoryReserveMb: 4096, memoryProtection: false });
+    await from.call('settings.set', { asyncQuestions: false, agentMemoryBudgetPercent: 35, memoryReserveMb: 4096, memoryProtection: false });
     await to.call('settings.set', { memoryReserveMb: 512 });
     await syncSettings(await end(from), await end(to));
-    expect(await to.call('settings.get', {})).toMatchObject({ agentMemoryBudgetPercent: 35, memoryReserveMb: 512, memoryProtection: false });
+    expect(await to.call('settings.get', {})).toMatchObject({ asyncQuestions: false, agentMemoryBudgetPercent: 60, memoryReserveMb: 512, memoryProtection: true });
+    await to.call('settings.set', { agentMemoryBudgetPercent: 45, memoryProtection: false });
+    await from.call('settings.set', { asyncQuestions: true, agentMemoryBudgetPercent: 85, memoryProtection: true });
+    await syncSettings(await end(from), await end(to));
+    expect(await to.call('settings.get', {})).toMatchObject({ asyncQuestions: true, agentMemoryBudgetPercent: 45, memoryReserveMb: 512, memoryProtection: false });
   } finally { from.close(); to.close(); }
 });

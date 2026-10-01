@@ -1,6 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { Plus, ArrowUpRight, RefreshCw, Trash2, X } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, Settings2, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -9,6 +9,7 @@
   import RemoteCoordination from './RemoteCoordination.svelte';
   import PairingCard from './PairingCard.svelte';
   import PhoneSettings from './PhoneSettings.svelte';
+  import MachineSettings from './MachineSettings.svelte';
   let { mobile = false }: { mobile?: boolean } = $props();
   let label = $state(''),
     link = $state(''),
@@ -20,6 +21,8 @@
   let open = $derived(adding || workspace.machines.length === 0);
   /** The one card whose icon choices are unfolded. */
   let customizing = $state<string | null>(null);
+  let settingsId = $state<string | null>(null);
+  const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   let linkInput = $state<HTMLInputElement | null>(null);
   let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
   const sync = workspace.settingsSync;
@@ -69,6 +72,11 @@
   }
 </script>
 
+{#if settingsMachine}
+  {#key settingsMachine.id}
+    <MachineSettings machine={settingsMachine} source={sync.source(settingsMachine)?.label} onback={() => settingsId = null} />
+  {/key}
+{:else}
 <div class="page machines-page" data-testid="machines-page">
   <header class="head">
     <div>
@@ -180,6 +188,11 @@
           </label>
           {#if sync.busy[machine.id]}<p class="sync-progress" role="status">{strings.machines.syncing}</p>{/if}
         {/if}
+        {#if machine.store.owner}
+          <button class="ghost small machine-settings-button" data-testid="machine-settings-open" disabled={machine.store.connection !== 'ready' || !machine.store.settings} onclick={() => settingsId = machine.id}>
+            <Settings2 size={14} />{strings.machines.settings}
+          </button>
+        {/if}
         {#if sync.reports[machine.id]}
 
           {@const done = sync.reports[machine.id]!}
@@ -209,6 +222,7 @@
     <PhoneSettings store={workspace.active} />
   {/if}
 </div>
+{/if}
 
 <style>
   .machines-page {
@@ -412,6 +426,7 @@
   }
   .sync-option input { width: auto; flex: none; }
   .sync-progress { margin: 6px 0 2px 52px; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+  .machine-settings-button { align-self: flex-start; margin: 8px 0 2px 52px; }
   .sync-report {
     display: grid;
     justify-items: start;
@@ -462,5 +477,6 @@
       padding-left: 0;
       margin-left: 0;
     }
+    .machine-settings-button { margin-left: 0; min-height: var(--touch-target); }
   }
 </style>

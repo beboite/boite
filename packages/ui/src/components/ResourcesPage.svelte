@@ -7,7 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import StatusMark from './StatusMark.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, limitsOnly = false }: { store: Store; limitsOnly?: boolean } = $props();
   const uid = $props.id();
 
   let cpuCap = $state(untrack(() => store.settings?.agentCpuCapPercent ?? 75));
@@ -42,6 +42,7 @@
 </script>
 
 <div class="page" data-testid="resources-page">
+  {#if !limitsOnly}
   <header>
     <div>
       <h1>{strings.settings.tabs.resources}<InfoTip topic={strings.settings.tabs.resources} text={strings.protection.intro} /></h1>
@@ -63,17 +64,20 @@
       <input id="{uid}-reap-orphans" aria-labelledby="{uid}-reap-orphans-name" type="checkbox" role="switch" data-testid="setting-reap-orphans" checked={store.settings?.reapOrphans ?? true} onchange={(event) => void store.saveSettings({reapOrphans: event.currentTarget.checked})} />
     </label>
   </section>
+  {/if}
   <section class="card" id="settings-limits">
     <h2>{strings.protection.limits}</h2>
     <label for="{uid}-memory-protection" class="switch-row">
-      <span class="text" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}</span>
-      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" aria-describedby="{uid}-memory-protection-hint" type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
+      <span class="text" id="{uid}-memory-protection-name">{strings.settings.memoryProtection}{#if limitsOnly}<InfoTip topic={strings.settings.memoryProtection} text="{strings.settings.memoryProtectionHint} {strings.settings.memoryAutoHint}" />{/if}</span>
+      <input id="{uid}-memory-protection" aria-labelledby="{uid}-memory-protection-name" aria-describedby={limitsOnly ? undefined : `${uid}-memory-protection-hint`} type="checkbox" role="switch" data-testid="setting-memory-protection" checked={memoryEnabled} onchange={async (event) => {
         const input = event.currentTarget;
         if (!await store.saveSettings({ memoryProtection: input.checked })) input.checked = memoryEnabled;
       }} />
     </label>
-    <p class="hint memory-explanation" id="{uid}-memory-protection-hint">{strings.settings.memoryProtectionHint}</p>
-    <p class="hint memory-explanation">{strings.settings.memoryAutoHint}</p>
+    {#if !limitsOnly}
+      <p class="hint memory-explanation" id="{uid}-memory-protection-hint">{strings.settings.memoryProtectionHint}</p>
+      <p class="hint memory-explanation">{strings.settings.memoryAutoHint}</p>
+    {/if}
     <form onsubmit={(event) => { event.preventDefault(); void store.saveSettings({agentCpuCapPercent: cpuCap, ...(memoryEnabled ? {agentMemoryBudgetPercent: memoryBudget, threadMemoryCapMb: memoryCap, memoryReserveMb: memoryReserve} : {})}); }}>
       <label><span class="name">{strings.settings.agentCpuCapPercent}<InfoTip topic={strings.settings.agentCpuCapPercent} text={strings.settings.agentCpuCapHint} /></span><input type="number" min="0" max="100" required bind:value={cpuCap} /></label>
       <label><span class="name">{strings.settings.agentMemoryBudgetPercent}<InfoTip topic={strings.settings.agentMemoryBudgetPercent} text={strings.settings.agentMemoryBudgetHint} /></span><input disabled={!memoryEnabled} aria-label={strings.settings.agentMemoryBudgetPercent} data-testid="memory-budget" type="number" min="10" max="90" step="1" required bind:value={memoryBudget} />
@@ -98,6 +102,7 @@
       </dl>
     {:else}<p class="hint">{strings.resources.unknown}</p>{/if}
   </section>
+  {#if !limitsOnly}
   <div class="group-heading" id="settings-tasks">
     <h2 class="tasks-heading">{strings.protection.tasks}<span class="live-dot" aria-hidden="true"></span></h2>
   </div>
@@ -144,6 +149,7 @@
       </table></div>
     </section>
   {/each}
+  {/if}
 </div>
 
 <style>
