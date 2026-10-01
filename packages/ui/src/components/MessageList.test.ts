@@ -691,3 +691,46 @@ test('a page in flight shows one line at the top of the list', async () => {
   const row = document.querySelector<HTMLElement>('[data-testid=loading-older]');
   expect(row?.textContent).toBe('Loading earlier messages');
 });
+
+test('a press holds the pinned list, and a release the window never saw still frees it', async () => {
+  window.localStorage.clear();
+  const client = new FakeClient({ delayMs: 0, long: true });
+  const live = new Store();
+  live.attach(client);
+  await live.connect();
+  await live.open('t-long');
+  const messages = live.openThread?.messages ?? [];
+  stubLayout(messages.length * ESTIMATE);
+  running = mount(MessageList, { target: document.body, props: { store: live, threadId: 't-long', messages } });
+  await settle();
+  const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+  expect(timeline.scrollTop).toBe(scrollHeight);
+
+  let added = 0;
+  const arrive = async () => {
+    messages.push({ ...JSON.parse(JSON.stringify(messages.at(-1)!)), id: `m-held-${added++}` });
+    scrollHeight = messages.length * ESTIMATE;
+    await settle();
+  };
+  const press = () => timeline.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true }), { pointerType: 'mouse', buttons: 1 }));
+
+  // Held under the pointer, the list stays where it is while the answer grows below.
+  press();
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight - ESTIMATE);
+  // The button was let go outside the window, so no pointerup came: the pointer back with no button frees the list.
+  window.dispatchEvent(Object.assign(new Event('pointermove'), { buttons: 0 }));
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight);
+
+  // The same when the window loses focus mid-press.
+  press();
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight - ESTIMATE);
+  window.dispatchEvent(new Event('blur'));
+  await arrive();
+  expect(timeline.scrollTop).toBe(scrollHeight);
+  expect(document.querySelector('[data-testid=jump-to-latest]')).toBeNull();
+  live.detach();
+  client.close();
+});

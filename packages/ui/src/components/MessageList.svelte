@@ -460,18 +460,31 @@
    * list where it is: the answer grows below until they let go.
    */
   let holding = false;
+  let releaseHold: (() => void) | undefined;
   function hold(event: PointerEvent | TouchEvent) {
     releaseNavigation();
     // A finger is followed by its touch events: the browser cancels its pointer as soon as it pans.
     const finger = !('pointerType' in event);
     if (!finger && event.pointerType === 'touch') return;
+    releaseHold?.();
     holding = true;
     const ends = finger ? ['touchend', 'touchcancel'] : ['pointerup', 'pointercancel'];
+    // A button let go outside the window never reports its release. The window
+    // losing focus, or the pointer moving with no button down, lets go too:
+    // a hold left behind would stop the list from following its answer.
+    const idle = (move: PointerEvent) => { if (move.buttons === 0) release(); };
     const release = () => {
       holding = false;
+      releaseHold = undefined;
       for (const name of ends) window.removeEventListener(name, release, true);
+      window.removeEventListener('pointermove', idle, true);
+      window.removeEventListener('blur', release);
     };
+    releaseHold = release;
     for (const name of ends) window.addEventListener(name, release, true);
+    if (!finger) window.addEventListener('pointermove', idle, true);
+    // Not captured: a field's blur does not bubble, so only the window's own reaches here.
+    window.addEventListener('blur', release);
   }
 
   /** Whether the list keeps to the bottom right now: pinned, and nobody is moving it. */
@@ -583,7 +596,7 @@
     if (pinned) markSeen();
   }
 
-  $effect(() => () => { clearTimeout(glideTimer); cancelAnimationFrame(glideFrame); });
+  $effect(() => () => { clearTimeout(glideTimer); cancelAnimationFrame(glideFrame); releaseHold?.(); });
 
   /**
    * A message arriving, and the bottom one growing no more than ten times a
