@@ -27,8 +27,51 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
   });
   try {
     await page.waitFor('document.querySelector("[data-testid=terminal-toggle]")');
+    await settled(page);
+    await page.evaluate(`(() => {
+      document.documentElement.style.setProperty('--dur-3', '1s');
+      const store = globalThis.__boiteTest.workspace.active;
+      const call = store.client.call.bind(store.client);
+      globalThis.__terminalStarts = 0;
+      const gate = new Promise(resolve => { globalThis.__releaseTerminal = resolve; });
+      store.client.call = async (method, params) => {
+        if (method === 'terminals.open') globalThis.__terminalStarts++;
+        const result = await call(method, params);
+        if (method === 'terminals.open') await gate;
+        return result;
+      };
+      globalThis.__chatBeforeTerminal = document.querySelector('[data-testid=chat]').getBoundingClientRect().height;
+    })()`);
     await chord(page, "j", "KeyJ", 74);
+    await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm")');
+    expect(await page.evaluate('globalThis.__terminalStarts')).toBe(1);
+    const unfolding = await page.evaluate<{ before: number; during: number; total: number; chat: number }>(`(() => {
+      const drawer = document.querySelector('[data-testid=terminal-drawer]');
+      const transition = drawer.getAnimations().find(animation => animation.transitionProperty === 'height');
+      if (!transition) throw new Error('The frame did not unfold');
+      transition.pause();
+      transition.currentTime = 150;
+      return { before: globalThis.__chatBeforeTerminal, during: drawer.getBoundingClientRect().height,
+        total: parseFloat(getComputedStyle(drawer).getPropertyValue('--terminal-height')) + 8,
+        chat: document.querySelector('[data-testid=chat]').getBoundingClientRect().height };
+    })()`);
+    expect(unfolding.during).toBeGreaterThan(0);
+    expect(unfolding.during).toBeLessThan(unfolding.total);
+    expect(unfolding.chat).toBeLessThan(unfolding.before);
+    await page.screenshot('tests/e2e/.artifacts/terminal-unfolding.png');
+    await page.evaluate(`(() => {
+      document.querySelector('[data-testid=terminal-drawer]').getAnimations().forEach(animation => animation.finish());
+      document.documentElement.style.removeProperty('--dur-3');
+      globalThis.__releaseTerminal();
+    })()`);
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("PS ")');
+    const frame = await page.evaluate<{ gap: number; chatBottom: number; terminalTop: number }>(`(() => {
+      const chat = document.querySelector('.thread-chat').getBoundingClientRect();
+      const terminal = document.querySelector('[data-testid=terminal-drawer] .surface').getBoundingClientRect();
+      return { gap: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--frame-gap')),
+        chatBottom: chat.bottom, terminalTop: terminal.top };
+    })()`);
+    expect(frame.terminalTop - frame.chatBottom).toBeCloseTo(frame.gap, 0);
     // xterm holds the focus: what is typed goes to the shell.
     await page.send("Input.insertText", { text: "git status" });
     await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows").textContent.includes("git status")');
@@ -44,7 +87,47 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     await settled(page);
     await page.screenshot("tests/e2e/.artifacts/terminal-phone.png");
     expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
+    // A stored desktop height still leaves room for the composer on a short phone viewport.
+    await page.send('Emulation.setDeviceMetricsOverride', { ...phone, height: 500 });
+    await settled(page);
+    expect(await page.evaluate(`(() => {
+      const drawer = document.querySelector('[data-testid=terminal-drawer]');
+      const composer = document.querySelector('[data-testid=composer-input]').getBoundingClientRect();
+      return drawer.getBoundingClientRect().height <= Math.max(120, Math.round(drawer.parentElement.clientHeight * .7)) + 1
+        && composer.top >= 0 && composer.bottom <= innerHeight;
+    })()`)).toBe(true);
     await page.send("Emulation.clearDeviceMetricsOverride", {});
+    await settled(page);
+
+    // Hiding preserves the shell and its command, and reversing the fold remains continuous.
+    await page.evaluate(`(() => {
+      document.documentElement.style.setProperty('--dur-2', '1s');
+      globalThis.__boiteTest.workspace.active.toggleTerminal();
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid=terminal-drawer]')?.getAnimations().some(a => a.transitionProperty === 'height')`);
+    const reversal = await page.evaluate<{ before: number; after: number }>(`(async () => {
+      const drawer = document.querySelector('[data-testid=terminal-drawer]');
+      const transition = drawer.getAnimations().find(a => a.transitionProperty === 'height');
+      transition.pause(); transition.currentTime = 150;
+      const before = drawer.getBoundingClientRect().height;
+      globalThis.__boiteTest.workspace.active.toggleTerminal();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const after = drawer.getBoundingClientRect().height;
+      document.documentElement.style.removeProperty('--dur-2');
+      return { before, after };
+    })()`);
+    expect(reversal.before).toBeGreaterThan(0);
+    expect(reversal.after).toBeGreaterThanOrEqual(reversal.before);
+    expect(reversal.after - reversal.before).toBeLessThan(100);
+    await settled(page);
+    expect(await page.evaluate(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows').textContent.includes('git status')`)).toBe(true);
+    await page.evaluate('document.documentElement.dataset.motion = "reduced"');
+    await page.click('[data-testid=terminal-hide]');
+    await page.waitFor('!document.querySelector("[data-testid=terminal-drawer]")');
+    await page.click('[data-testid=terminal-toggle]');
+    await page.waitFor('document.querySelector("[data-testid=terminal-drawer] .xterm-rows")?.textContent.includes("git status")');
+    expect(await page.evaluate(`parseFloat(getComputedStyle(document.querySelector('[data-testid=terminal-drawer]')).transitionDuration)`)).toBeLessThan(.01);
+    await page.evaluate('delete document.documentElement.dataset.motion');
 
     await page.click("[data-testid=nav-settings]");
     await page.waitFor('document.querySelector("[data-testid=settings-tab-accounts]")');

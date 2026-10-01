@@ -21,7 +21,7 @@ export function prefetchAllowed(link = (globalThis.navigator as (Navigator & { c
  * it, the terminal only for the owner, since a paired device cannot open one.
  */
 export function prefetchNames<Name extends string>(names: Name[], device: { tourSeen: boolean; owner: boolean }): Name[] {
-  return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !(name === 'TerminalDrawer' && !device.owner));
+  return names.filter((name) => !(name === 'Onboarding' && device.tourSeen) && !(name === 'TerminalView' && !device.owner));
 }
 
 /** Runs `task` once the page is idle, after the first paint. Safari has no requestIdleCallback. Returns the cancel. */

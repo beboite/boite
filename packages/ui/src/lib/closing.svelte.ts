@@ -68,8 +68,8 @@ export class Closing {
     };
   };
 
-  /** `onanimationend` on that same node: the exit is over, so unmount. */
-  end = (event: AnimationEvent): void => {
+  /** `onanimationend` or `ontransitionend` on that same node: unmount once the exit is over. */
+  end = (event: AnimationEvent | TransitionEvent): void => {
     if (event.target !== event.currentTarget) return;
     if (this.#raw === 'closing') this.#go('closed');
   };
