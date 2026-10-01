@@ -852,6 +852,7 @@ export const fr: Translation = {
     receivedFrom: 'Reçu de', sentTo: 'Votre agent a envoyé à', incoming: 'Entrant', outgoing: 'Sortant',
     userSentTo: 'Vous avez envoyé à', userMessageVia: 'Message utilisateur via',
     receivedStatus: 'Reçu',
+    machineNotConnected: 'Connectez cette machine dans les réglages pour ouvrir son fil.',
     noReceipt: "Remis signifie transmis à l'agent destinataire. Les protocoles des agents ne fournissent aucun accusé de lecture.",
     warning: 'Avertissement de coordination',
     status: {
