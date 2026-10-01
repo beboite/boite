@@ -219,6 +219,13 @@
             </button>
             <button
               class="ghost small icon project-actions"
+              data-testid="project-new-thread"
+              title={strings.sidebar.newThread}
+              aria-label={strings.sidebar.newThread}
+              onclick={() => workspace.select(owner, undefined, project.id)}><Plus size={15} /></button
+            >
+            <button
+              class="ghost small icon project-actions"
               data-testid="project-menu"
               title={strings.sidebar.projectMenu}
               aria-label={strings.sidebar.projectMenu}

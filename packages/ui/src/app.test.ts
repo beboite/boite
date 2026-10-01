@@ -342,9 +342,8 @@ test('the sidebar draft row hands the keyboard back to the composer', async () =
 test('a draft names its project in the heading and the dropdown moves it to another one', async () => {
   await mountOnFake();
 
-  // The one plus left says where it will open the draft, and a project row has none.
+  // The top plus says where it will open the draft.
   expect(query<HTMLButtonElement>('[data-testid=new-thread]').title).toBe('New thread in notes (Ctrl+N)');
-  expect(document.querySelector('[data-testid=project-new-thread]')).toBeNull();
 
   // The draft opens in the project of the thread that was open, `notes`.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
@@ -2241,7 +2240,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   // The phone's project menu: no Remove, and no transcript import behind it.
   query<HTMLButtonElement>('[data-testid=mobile-project-actions]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(menuValues()).toEqual(['copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
   expect(menuValues()).toEqual(['back', 'archive-project']);
@@ -2271,7 +2270,7 @@ test('the desktop still has every one of them', async () => {
 
   query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  expect(menuValues()).toEqual(['copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
   expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
@@ -2279,10 +2278,14 @@ test('the desktop still has every one of them', async () => {
   expect(preference.getAttribute('role')).toBe('menuitemcheckbox');
   expect(preference.getAttribute('aria-checked')).toBe('false');
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=back]').click();
-  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=new]') !== null);
-  expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
+  await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=copy]') !== null);
+  expect(menuValues()).toEqual(['copy', 'archived', 'manage']);
   press('Escape');
   await waitFor(() => document.querySelector('[data-testid=context-menu]') === null);
+  // New thread left the menu for the button beside it.
+  const row = query('[data-testid=project-row]');
+  query<HTMLButtonElement>(`[data-testid=project][data-project-id="${row.dataset.projectId}"] [data-testid=project-new-thread]`).click();
+  await waitFor(() => store.draft?.projectId === row.dataset.projectId);
 
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
