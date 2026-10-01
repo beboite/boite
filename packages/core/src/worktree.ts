@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { Project, ThreadId, WorktreeStorage } from '@boite/contracts';
+import { BRANCH_NAME_MAX, type Project, type ThreadId, type WorktreeStorage } from '@boite/contracts';
 import type { Core } from './core.ts';
 import { folderGone, messageOf, refused } from './errors.ts';
 import { newId } from './ids.ts';
@@ -91,6 +91,12 @@ export class Worktrees {
       throw refused(`"${wanted}" is not a branch name: no spaces, not empty`, { branch: wanted });
     }
 
+    if (wanted !== undefined && wanted.length > BRANCH_NAME_MAX) {
+      throw refused(`branch must be at most ${BRANCH_NAME_MAX} characters; received ${wanted.length}`, {
+        field: 'branch', expected: `at most ${BRANCH_NAME_MAX} characters`, maxLength: BRANCH_NAME_MAX, actualLength: wanted.length,
+      });
+    }
+
     const root = worktreeRoot(project.path, this.core.settings.get().worktreeStorage, project.id);
     const slug = wanted === undefined ? `wt-${newId('').slice(0, 8)}` : slugOf(wanted.startsWith(BRANCH_PREFIX) ? wanted.slice(BRANCH_PREFIX.length) : wanted);
     const tries = wanted === undefined ? SUFFIX_MAX : 1;
@@ -129,7 +135,9 @@ export class Worktrees {
     const published = await this.git(threadId, cwd, ['for-each-ref', '--format=%(refname)', `refs/remotes/*/${oldBranch}`]);
     if (published.code !== 0 || published.stdout.trim()) return null;
     for (let n = 1; n <= SUFFIX_MAX; n += 1) {
-      const branch = `${BRANCH_PREFIX}${slug}${n === 1 ? '' : `-${n}`}`;
+      const suffix = n === 1 ? '' : `-${n}`;
+      const bounded = slug.slice(0, BRANCH_NAME_MAX - BRANCH_PREFIX.length - suffix.length).replace(/-+$/, '');
+      const branch = `${BRANCH_PREFIX}${bounded}${suffix}`;
       if (await this.branchExists(threadId, cwd, branch)) continue;
       const renamed = await this.git(threadId, cwd, ['branch', '-m', oldBranch, branch]);
       if (renamed.code !== 0) throw refused(`cannot rename ${oldBranch} to ${branch}: ${renamed.stderr.trim()}`, { cwd, branch });

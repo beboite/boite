@@ -1,4 +1,4 @@
-import type { Thread, ThreadSummary } from '@boite/contracts';
+import { BRANCH_NAME_MAX, type Thread, type ThreadSummary } from '@boite/contracts';
 import { pathKey } from './checks';
 import { RETITLE_DELAY_MS } from './providers';
 import { refusal, toSummary } from './shared';
@@ -27,7 +27,11 @@ export async function writeTitle(ctx: FakeContext, thread: Thread, automatic = f
       if (thread.branchNamingPending && thread.branch) {
         const slug = words.slice(0, 5).join('-').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-+|-+$/g, '') || 'update';
         let branch = `boite/${slug}`;
-        for (let n = 2; ctx.worktrees.some(entry => entry.projectId === thread.projectId && entry.branch === branch); n += 1) branch = `boite/${slug}-${n}`;
+        for (let n = 2; ctx.worktrees.some(entry => entry.projectId === thread.projectId && entry.branch === branch); n += 1) {
+          const suffix = `-${n}`;
+          const bounded = slug.slice(0, BRANCH_NAME_MAX - 'boite/'.length - suffix.length).replace(/-+$/, '');
+          branch = `boite/${bounded}${suffix}`;
+        }
         const previous = thread.branch;
         for (const entry of ctx.worktrees) {
           if (pathKey(entry.path) === pathKey(thread.cwd) && entry.branch === previous) entry.branch = branch;

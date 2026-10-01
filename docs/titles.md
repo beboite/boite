@@ -104,3 +104,11 @@ branches already renamed in Git, and branches with an upstream or known remote
 ref are preserved. Collisions receive a numeric suffix. Invalid branch output
 leaves the temporary branch usable; explicit title regeneration can retry it.
 The pending naming flag survives a core restart.
+
+Boite-created branch names are at most 48 characters, including their prefix
+and collision suffix. Longer explicit names are refused before a thread or
+worktree is created. Generated names shorten their slug to leave room for the
+suffix. Existing Git branches remain usable, including recovery of a worktree
+whose directory disappeared. The header, Changes panel, sidebar and phone
+conversation list truncate long names in the available space and keep the full
+name in the tooltip.
