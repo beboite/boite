@@ -1,5 +1,5 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { supportsSideQuestions, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
@@ -12,6 +12,16 @@ import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
+
+const sideRequests = new WeakMap<FakeContext, Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>>();
+
+function cancelSide(ctx: FakeContext, threadId: string, requestId?: string): void {
+  const requests = sideRequests.get(ctx), pending = requests?.get(threadId);
+  if (!pending || (requestId !== undefined && pending.requestId !== requestId)) return;
+  clearTimeout(pending.timer);
+  requests!.delete(threadId);
+  ctx.emit('thread.btw', { threadId, requestId: pending.requestId, answer: null, error: 'side request cancelled' });
+}
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
@@ -50,6 +60,7 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  cancelSide(ctx, thread.id);
   // A waiting move goes with the thread, before its turn ends and would apply it.
   dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);
@@ -384,6 +395,31 @@ export function threadMethods(ctx: FakeContext) {
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
       if (key) ctx.turnRequests.set(key, { content, turn });
       return turn;
+    },
+    'threads.btw.cancel': async ({ threadId, requestId }) => {
+      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters' });
+      ctx.thread(threadId); cancelSide(ctx, threadId, requestId); return { ok: true };
+    },
+    'threads.btw': async ({ threadId, question, requestId }) => {
+      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.requestId: expected 8 to 128 URL-safe characters' });
+      if (typeof question !== 'string' || !question.trim() || question.length > 12_000) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.question: expected 1 to 12000 characters' });
+      }
+      const thread = ctx.thread(threadId);
+      requireFakeCwd(ctx, thread);
+      if (thread.archived) throw refusal('threads.btw.threadId: expected a thread that is not archived');
+      const provider = ctx.providers.find(entry => entry.id === thread.providerId)!;
+      checkRunnable(provider, ctx.accounts.find(entry => entry.id === thread.accountId)!);
+      if (!supportsSideQuestions(provider.protocol)) throw refusal(`threads.btw: ${provider.name} does not support tool-free side questions`);
+      let requests = sideRequests.get(ctx);
+      if (!requests) { requests = new Map(); sideRequests.set(ctx, requests); }
+      if (requests.has(threadId)) throw refusal('a side question is already being answered for this thread');
+      const timer = setTimeout(() => {
+        requests.delete(threadId);
+        ctx.emit('thread.btw', { threadId, requestId, answer: `Side answer: ${question.trim()}`, error: null });
+      }, 0);
+      requests.set(threadId, { requestId, timer });
+      return { requestId };
     },
     'threads.compact': async (params) => {
       const thread = ctx.thread(params.threadId);

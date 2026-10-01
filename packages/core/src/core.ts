@@ -341,6 +341,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.threads.sideQuestions.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();

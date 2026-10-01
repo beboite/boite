@@ -2642,6 +2642,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /** An ephemeral answer from a snapshot of the chat, without starting or steering its main turn. */
+  'threads.btw': { params: { threadId: ThreadId; question: string; requestId: string }; result: { requestId: string } };
+  'threads.btw.cancel': { params: { threadId: ThreadId; requestId: string }; result: { ok: true } };
   /**
    * Edit a sent message: `messageId`, a user message of the thread, and every
    * message and turn after it leave the conversation, and the next turn
@@ -2854,6 +2857,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
   /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.btw': { threadId: ThreadId; requestId: string; answer: string | null; error: string | null };
   'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
@@ -3046,3 +3050,8 @@ export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
 import type { SpeechModelTier } from './speech-models.ts';
+
+/** Protocols that can answer a side question with tools disabled. */
+export function supportsSideQuestions(protocol: Protocol): boolean {
+  return protocol === 'claude-sdk' || protocol === 'echo';
+}

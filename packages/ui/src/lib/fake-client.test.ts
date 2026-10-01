@@ -902,3 +902,25 @@ test('the fake core compacts by itself at the end of a turn once the threshold i
     expect(await count()).toBe(1);
   } finally { client.close(); }
 });
+
+test('fake /btw admission, duplicate refusal and cancellation match the core without changing history', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    const before = await client.call('threads.get', { threadId: 't-trace' });
+    vi.useFakeTimers();
+    const answers: Array<{ requestId: string; answer: string | null; error: string | null }> = [];
+    client.on('thread.btw', result => answers.push(result));
+    const input = { threadId: 't-trace', question: 'Which file?', requestId: 'side_fake1' };
+    expect(await client.call('threads.btw', input)).toEqual({ requestId: input.requestId });
+    await expect(client.call('threads.btw', { ...input, requestId: 'side_fake2' })).rejects.toThrow('already being answered');
+    await client.call('threads.btw.cancel', { threadId: input.threadId, requestId: 'side_wrong' });
+    expect(answers).toEqual([]);
+    await client.call('threads.btw.cancel', { threadId: input.threadId, requestId: input.requestId });
+    expect(answers).toEqual([expect.objectContaining({ requestId: input.requestId, answer: null, error: 'side request cancelled' })]);
+    await vi.runOnlyPendingTimersAsync();
+    expect(answers).toHaveLength(1);
+    expect(await client.call('threads.get', { threadId: 't-trace' })).toEqual(before);
+  } finally { client.close(); }
+});
