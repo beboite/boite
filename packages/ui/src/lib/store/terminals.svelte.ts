@@ -4,6 +4,8 @@ import type { StoreContext } from './context';
 
 /** The thread drawers and sign-in shells: which are shown, and the calls that drive them. */
 export class Terminals {
+  /** Close blocks delayed attachments on that client until an explicit drawer opening. */
+  private readonly closed = new WeakMap<NonNullable<StoreContext['client']>, Set<ThreadId>>();
   private readonly opening = new Map<ThreadId, { client: StoreContext['client']; result: Promise<TerminalState | null> }>();
   /** Threads whose terminal drawer shows. The shell lives in the core and outlasts a hidden drawer. */
   terminalThreads = $state<ThreadId[]>([]);
@@ -23,8 +25,9 @@ export class Terminals {
     if (!open || !s.owner) return;
     if (s.terminalShown(open.id)) s.hideTerminal(open.id);
     else {
-      this.terminalThreads = [...this.terminalThreads, open.id];
       const client = this.ctx.client;
+      if (client) this.closed.get(client)?.delete(open.id);
+      this.terminalThreads = [...this.terminalThreads, open.id];
       // Start the shell at the click, while the frame unfolds and xterm loads.
       // The view joins this request and fits the shell to its measured size.
       void s.openTerminal(open.id, 80, 24).then((state) => {
@@ -40,7 +43,7 @@ export class Terminals {
   /** The thread's shell, attached or started; null when the core refused, with the reason in the toast. */
   openTerminal(threadId: ThreadId, cols: number, rows: number): Promise<TerminalState | null> {
     const client = this.ctx.client;
-    if (!client) return Promise.resolve(null);
+    if (!client || this.closed.get(client)?.has(threadId)) return Promise.resolve(null);
     const pending = this.opening.get(threadId);
     if (pending?.client === client) return pending.result;
     // A lazy view can join after output has already arrived while the opening
@@ -52,6 +55,7 @@ export class Terminals {
     });
     const result = client.call('terminals.open', { threadId, cols, rows })
       .then((state) => {
+        if (this.closed.get(client)?.has(threadId)) return null;
         // An older core cannot identify snapshot overlap. Refresh its history
         // after the buffered events instead of dropping output the lazy view missed.
         if (state.sequence === undefined && output.length > 0) return client.call('terminals.open', { threadId, cols, rows });
@@ -105,11 +109,18 @@ export class Terminals {
   async closeTerminal(id: string): Promise<void> {
     const client = this.ctx.client;
     if (!client) return;
+    const threadId = id.startsWith('terminal:') ? id.slice('terminal:'.length) as ThreadId : null;
+    if (threadId !== null) {
+      const closed = this.closed.get(client) ?? new Set<ThreadId>();
+      closed.add(threadId);
+      this.closed.set(client, closed);
+    }
     try {
       await client.call('terminals.close', { id });
       // The display may still be loading and have no exit listener yet.
-      if (this.ctx.client === client && id.startsWith('terminal:')) this.hideTerminal(id.slice('terminal:'.length) as ThreadId);
+      if (this.ctx.client === client && threadId !== null) this.hideTerminal(threadId);
     } catch (error) {
+      if (threadId !== null) this.closed.get(client)?.delete(threadId);
       this.ctx.fail(error);
     }
   }

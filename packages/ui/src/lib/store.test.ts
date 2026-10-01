@@ -69,6 +69,39 @@ test('an older core keeps output arriving before the lazy terminal view attaches
   } finally { release(); stop(); spy.mockRestore(); client.close(); store.detach(); }
 });
 
+test('closing a thread shell invalidates a legacy refresh and delayed view attachment until reopening', async () => {
+  const { store, client } = await ready();
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'terminals.open') {
+      Reflect.deleteProperty(result as object, 'sequence');
+      await gate;
+    }
+    return result;
+  });
+  try {
+    store.toggleTerminal();
+    await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'early-output' });
+    const attaching = store.openTerminal(threadId, 100, 30);
+    await store.closeTerminal(`terminal:${threadId}`);
+    release();
+    expect(await attaching).toBeNull();
+    expect(await store.openTerminal(threadId, 100, 30)).toBeNull();
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
+    expect(store.terminalShown(threadId)).toBe(false);
+    // An explicit owner action can start a new shell after the previous one closed.
+    store.toggleTerminal();
+    expect((await store.openTerminal(threadId, 100, 30))?.id).toBe(`terminal:${threadId}`);
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(2);
+    expect(store.terminalShown(threadId)).toBe(true);
+  } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
+});
+
 test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async () => {
   const { store, client } = await ready();
   const call = vi.spyOn(client, 'call').mockRejectedValue(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'Remote terminal transport unavailable' }));
