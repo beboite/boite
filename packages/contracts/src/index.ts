@@ -2945,7 +2945,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
     url: string | null;
     exitCode: number | null;
   };
-  'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp; threadId?: ThreadId };
   'core.updateChanged': ServerUpdateStatus;
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };

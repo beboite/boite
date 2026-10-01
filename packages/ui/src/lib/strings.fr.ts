@@ -618,6 +618,7 @@ export const fr: Translation = {
   notify: {
     done: 'Terminé',
     failed: 'Échec',
+    openThread: 'Ouvrir la conversation',
     needsYou: 'Attend votre réponse'
   },
 

@@ -85,7 +85,14 @@ export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
   visible = true;
-  error = $state<string | null>(null);
+  #error = $state<string | null>(null);
+  errorThreadId = $state<string | null>(null);
+
+  get error(): string | null { return this.#error; }
+  set error(value: string | null) {
+    this.#error = value;
+    this.errorThreadId = null;
+  }
 
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
 
