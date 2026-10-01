@@ -26,6 +26,8 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     windowSize: { width: 1440, height: 900 },
   });
   try {
+    // Exercise normal motion independently of the host preference; reduced motion is checked below.
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
     await page.waitFor('document.querySelector("[data-testid=terminal-toggle]")');
     await settled(page);
     await page.evaluate(`(() => {
@@ -102,6 +104,7 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
     // Hiding preserves the shell and its command, and reversing the fold remains continuous.
     await page.evaluate(`(() => {
       document.documentElement.style.setProperty('--dur-2', '1s');
+      document.documentElement.style.setProperty('--dur-3', '1s');
       globalThis.__boiteTest.workspace.active.toggleTerminal();
     })()`);
     await page.waitFor(`document.querySelector('[data-testid=terminal-drawer]')?.getAnimations().some(a => a.transitionProperty === 'height')`);
@@ -112,13 +115,17 @@ test("Ctrl+J opens a shell under the thread, typing reaches it, and OpenCode sig
       const before = drawer.getBoundingClientRect().height;
       globalThis.__boiteTest.workspace.active.toggleTerminal();
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const reopening = drawer.getAnimations().find(a => a.transitionProperty === 'height');
+      if (!reopening) throw new Error('The frame did not reverse its fold');
+      reopening.pause(); reopening.currentTime = 0;
       const after = drawer.getBoundingClientRect().height;
+      reopening.play();
       document.documentElement.style.removeProperty('--dur-2');
+      document.documentElement.style.removeProperty('--dur-3');
       return { before, after };
     })()`);
     expect(reversal.before).toBeGreaterThan(0);
-    expect(reversal.after).toBeGreaterThanOrEqual(reversal.before);
-    expect(reversal.after - reversal.before).toBeLessThan(100);
+    expect(Math.abs(reversal.after - reversal.before)).toBeLessThan(1);
     await settled(page);
     expect(await page.evaluate(`document.querySelector('[data-testid=terminal-drawer] .xterm-rows').textContent.includes('git status')`)).toBe(true);
     await page.evaluate('document.documentElement.dataset.motion = "reduced"');
