@@ -169,12 +169,12 @@ const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command';
  * The timeline folds it under one sentence.
  */
 export async function toolBurst(ctx: FakeContext, thread: Thread, message: Message, record: { cancelled: boolean }): Promise<void> {
-  const calls: { name: string; input: unknown; output: string; status: 'done' | 'error' }[] = [
+  const calls: { name: string; input: unknown; output: string; status: 'done' | 'error'; exitCode?: number }[] = [
     { name: 'Bash', input: { command: `${PWSH} 'git status --short'`, description: 'Show the working tree' }, output: ' M packages/ui/src/app.css', status: 'done' },
     { name: 'Bash', input: { command: `${PWSH} 'Get-ChildItem packages/ui/src/components | Select-Object -First 5'` }, output: 'AppearancePage.svelte\nAssistantMessage.svelte', status: 'done' },
     { name: 'Read', input: { file_path: 'packages/ui/src/app.css' }, output: ':root { }', status: 'done' },
     { name: 'Grep', input: { pattern: 'font-family', path: 'packages/ui/src' }, output: 'packages/ui/src/app.css:8', status: 'done' },
-    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: 'error TS2304: Cannot find name', status: 'error' },
+    { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: 'error TS2304: Cannot find name', status: 'error', exitCode: 1 },
     { name: 'Bash', input: { command: `${PWSH} 'cd packages/ui; bun run check'` }, output: '0 errors', status: 'done' }
   ];
   for (const call of calls) {
@@ -187,7 +187,8 @@ export async function toolBurst(ctx: FakeContext, thread: Thread, message: Messa
     message.parts.push(running);
     ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(running) });
     await ctx.pause();
-    const done: MessagePart = { ...running, output: call.output, status: call.status, finishedAt: ctx.now() };
+    const done: MessagePart = { ...running, output: call.output, status: call.status, finishedAt: ctx.now(),
+      ...(call.exitCode !== undefined ? { exitCode: call.exitCode } : {}) };
     message.parts[partIndex] = done;
     ctx.emitToThread(thread.id, 'message.part', { threadId: thread.id, messageId: message.id, partIndex, part: structuredClone(done) });
   }

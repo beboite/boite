@@ -959,6 +959,8 @@ export type MessagePart =
       inputText?: string | null;
       output: string | null;
       status: ToolStatus;
+      /** A command's exit code when the provider reports it. Absent on older rows and other tools. */
+      exitCode?: number | null;
       /** Provider-reported child activity. These are not Boite thread IDs or team budget entries. */
       nativeAgents?: NativeAgentUpdate[];
       /** What the call produced or changed, under the input and the output. Absent on a journal row written before documents existed. */
