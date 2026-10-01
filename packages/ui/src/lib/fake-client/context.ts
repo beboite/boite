@@ -1,4 +1,5 @@
 /** The state one fake core keeps, and the plumbing every domain module shares. */
+import { observeProgress } from './progress';
 import {
   DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   PROTOCOL_VERSION,
@@ -319,6 +320,7 @@ export class FakeContext {
   }
 
   emitToThread<E extends RpcEventName>(threadId: ThreadId, event: E, payload: RpcEvents[E]): void {
+    observeProgress(this, threadId, event, payload);
     if (this.bus.subscribed.has(threadId)) this.emit(event, payload);
     if (event === 'message.part') {
       const { messageId, partIndex, part } = payload as RpcEvents['message.part'];

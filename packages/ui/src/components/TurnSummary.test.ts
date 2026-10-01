@@ -68,3 +68,38 @@ test('a running turn shows no finish time and no stop for its background work', 
   expect(text('turn-background')).toBe('1 shell still running');
   expect(document.querySelector('[data-testid=turn-background-stop]')).toBeNull();
 });
+
+test('a silent running phase shows the last real activity age and a usable trace action', () => {
+  const now = Date.now();
+  let traced = 0;
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', startedAt: now - 120_000, finishedAt: null, usage: null }),
+    progress: { turnId: 'turn-1', phase: 'retrying', detail: '2/5', at: now - 75_000 },
+    activeTool: true,
+    trace: () => { traced += 1; }
+  } });
+  flushSync();
+  expect(text('turn-progress')).toBe('Retrying request: 2/5');
+  expect(text('turn-last-activity')).toBe('No new activity for 1m 15s');
+  document.querySelector<HTMLButtonElement>('[data-testid=turn-activity-trace]')!.click();
+  expect(traced).toBe(1);
+});
+
+test.each(['old-turn', null])('an older turn or old core (%s) supplies no inferred activity', id => {
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn({ status: 'running', finishedAt: null }),
+    progress: id ? { turnId: id, phase: 'compacting', detail: 'old', at: STARTED } : undefined
+  } });
+  flushSync();
+  expect(document.querySelector('[data-testid=turn-progress]')).toBeNull();
+  expect(document.querySelector('[data-testid=turn-last-activity]')).toBeNull();
+});
+
+test('a finished turn ignores retained provider progress', () => {
+  running = mount(TurnSummary, { target: document.body, props: {
+    turn: turn(), progress: { turnId: 'turn-1', phase: 'tool', detail: 'Bash', at: STARTED }
+  } });
+  flushSync();
+  expect(document.querySelector('[data-testid=turn-progress]')).toBeNull();
+  expect(text('turn-elapsed')).toBe('Worked for 4m 41s');
+});

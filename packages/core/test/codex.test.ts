@@ -546,6 +546,20 @@ describe('codex driver', () => {
     }
   });
 
+  test('a retry reports live progress without failing the turn or accepting an older native turn', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const details: (string | null)[] = [];
+    client.on('thread.updated', thread => {
+      if (thread.id === threadId && thread.progress?.phase === 'retrying') details.push(thread.progress.detail);
+    });
+    await runTurn(client, threadId, 'Continue [retry-progress]');
+    expect(details).toEqual(['provider overloaded']);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.progress).toBeNull();
+    expect(thread.messages.flatMap(message => message.parts).some(part => part.type === 'error')).toBe(false);
+  });
+
   test('service tiers are model-specific, persisted and sent on the frozen turn', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);

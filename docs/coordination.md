@@ -2,7 +2,8 @@
 
 Ordinary conversations have communication on, including existing conversations
 without saved communication settings. Their agents can find, read and message
-other unarchived conversations across projects and linked machines, and a
+other unarchived conversations across projects and linked machines when the
+destination owner permits remote reading, and a
 message can wake an idle agent. There is no hourly budget on messages, wake
 turns or threads an agent starts.
 
@@ -35,9 +36,11 @@ connection can change permissions.
 
 ## Reaching another computer
 
-Connect both machines in Machines using owner connections. Give each core an
-HTTPS public address in Settings, Machines and devices, Phone app, reachable
-from the other core. The app then links every pair of owner machines it holds
+Connect both machines in Machines using owner connections. The app relays signed
+requests between these connections, including a desktop core without a public
+address. Both connections must remain open for this route. For communication
+while the app is closed, give each core an HTTPS public address in Settings,
+Machines and devices, Phone app, reachable from the other core. The app links every pair of owner machines it holds
 at the same time: Boite exchanges their public identities and checks the
 connection in both directions. A pair that fails shows why in the agent links
 section of Machines, and is tried again when one of them reconnects. A link
@@ -51,16 +54,27 @@ that conversation's project on the same core. A machine link never overrides
 a conversation's explicit restrictions or pause. Removing a link revokes that
 machine's access on the selected core.
 
+Links initially allow discovery and messages. In Machines, check which linked
+machines' agents may read conversations on each destination. The checkbox names
+both machines: granting a server access to a desktop does not grant the desktop
+access to the server. Clearing it immediately denies reading and removes chat
+excerpts from searches. Identity refreshes and reconnects preserve this choice;
+removing and recreating the link starts with reading denied. Existing links also
+require this explicit grant. Only owner connections can change it. Older cores
+show a disabled checkbox until upgraded.
+
 Each core signs requests and responses with its own Ed25519 key. Trusted public
 keys identify peers; owner tokens and provider credentials never cross this
 channel. Signatures cover destinations, timestamps, unique request nonces and
 content. The receiver checks replay, size, expiry and rate limits. HTTPS protects
 message privacy. Keep the core data directory private, including its signing key.
 
-Trusted peers can discover, search and read the conversations that allow
+Trusted peers can discover the conversations that allow
 remote coordination: title, project, branch, model, declared resources and the
-text the user and the agent wrote, with the names of the tools the agent
-called. Tool output, reasoning, attachments, files, tools and settings never
+agent's status. When the destination grants reading, searches also match chat
+and return excerpts, and reading returns the text the user and the agent wrote
+with the names of the tools the agent called. Tool output, reasoning,
+attachments, files, tools and settings never
 cross; neither do archived conversations or conversations with communication
 off or restricted to their project. The core authenticates the sending conversation locally. On a
 remote machine, its trusted core attests that conversation's identity.

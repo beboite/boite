@@ -654,6 +654,14 @@ export interface PromptCache {
   accountId: AccountId;
 }
 
+/** Latest observed execution event of the current turn, never a synthetic heartbeat. */
+export interface ThreadProgress {
+  turnId: TurnId;
+  phase: 'starting' | 'thinking' | 'compacting' | 'retrying' | 'tool' | 'working';
+  detail: string | null;
+  at: Timestamp;
+}
+
 export interface ThreadSummary {
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
@@ -691,6 +699,8 @@ export interface ThreadSummary {
    * missing on older cores.
    */
   runningSince?: Timestamp | null;
+  /** In memory only, cleared at turn end/restart. Missing on older cores. */
+  progress?: ThreadProgress | null;
   /**
    * What the agent still runs in the background, a monitor or a shell it left
    * going past its turn: the kind of each task and when the oldest started,
@@ -1930,7 +1940,18 @@ export interface AgentLetter {
   error: string | null;
 }
 /** Public contact card. No owner token or private signing key crosses a core. */
-export interface CoordinationPeer { coreId: string; name: string; url: string; publicKey: string }
+export interface CoordinationPeer {
+  coreId: string;
+  name: string;
+  url: string;
+  publicKey: string;
+  /** Local owner permission for agents on this peer to read this core's threads. Missing means denied. */
+  readThreads?: boolean;
+  /** Route through an owner app connected to both cores; never dial its loopback address on another host. */
+  viaClient?: boolean;
+}
+/** Signed coordination response carried unchanged through the owner's app. */
+export interface CoordinationBridgeResponse { status: number; body: string; signature: string }
 export interface CoordinationView {
   self: AgentAddress;
   config: CoordinationConfig;
@@ -2138,6 +2159,12 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'collaboration.check': { params: { coreId: string }; result: { ok: true } };
   'collaboration.trust': { params: { peer: CoordinationPeer }; result: CoordinationPeer };
   'collaboration.untrust': { params: { coreId: string }; result: { ok: true } };
+  /** Owner-only route over the app's existing authenticated connections. Agents cannot register routes. */
+  'collaboration.bridge.register': { params: { coreId: string; enabled: boolean }; result: { ok: true } };
+  /** The destination verifies the original core's signature and its local permissions. */
+  'collaboration.bridge.forward': { params: { coreId: string; body: string; signature: string }; result: CoordinationBridgeResponse };
+  /** Only the owner connection that received this request can complete it. */
+  'collaboration.bridge.reply': { params: { requestId: string; response: CoordinationBridgeResponse }; result: { ok: true } };
   'speech.status': { params: Record<string, never>; result: SpeechStatus };
   'speech.configure': { params: SpeechConfig & { groqKey?: string; openrouterKey?: string }; result: SpeechStatus };
   'speech.config': { params: Record<string, never>; result: SpeechConfig };
@@ -2726,6 +2753,8 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
   'collaboration.changed': { threadId: ThreadId };
+  /** Sent directly to the owner connection registered for the target core. */
+  'collaboration.bridge.request': { requestId: string; fromCoreId: string; toCoreId: string; body: string; signature: string };
   'thread.activity': { threadId: ThreadId; activity: ThreadActivity };
   /** Subscribed threads only: the agent asked for something in the panel. */
   'panel.requested': { threadId: ThreadId; surface: PanelSurface; at: Timestamp };

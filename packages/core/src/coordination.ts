@@ -2,8 +2,9 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultCoordinationConfig } from '@boite/contracts';
-import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
+import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, AgentTranscript, CoordinationBridgeResponse, CoordinationConfig, CoordinationPeer, CoordinationView, RpcParams } from '@boite/contracts';
 import { checkMatchExtras, checkTranscript, searchContacts, searchWords, transcript } from './coordination-lookup.ts';
+import { CoordinationBridge } from './coordination-bridge.ts';
 import type { Core } from './core.ts';
 import { invalidParams, messageOf, refused, RpcFailure, unavailable } from './errors.ts';
 
@@ -68,6 +69,7 @@ export function letterPrompt(letters: AgentLetter[]): string {
 }
 
 export class Coordination {
+  readonly bridge = new CoordinationBridge();
   private key: ReturnType<typeof createPrivateKey> | null = null;
   private publicKey = '';
   private coreId = '';
@@ -149,13 +151,18 @@ export class Coordination {
     const canonical = parsed.export({ type: 'spki', format: 'pem' }).toString();
     const coreId = createHash('sha256').update(canonical).digest('hex');
     if (coreId !== peer.coreId || coreId === this.self('').coreId) throw invalidParams('peer.coreId: expected the other machine public key fingerprint');
-    const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical };
+    for (const field of ['readThreads', 'viaClient'] as const) if (peer[field] !== undefined && typeof peer[field] !== 'boolean') throw invalidParams(`peer.${field}: expected a boolean`);
+    const previous = this.peers().find(p => p.coreId === coreId);
+    const checked = { coreId, name: text(peer.name, 'peer.name', 100), url: coordinationUrl(peer.url), publicKey: canonical,
+      readThreads: peer.readThreads ?? previous?.readThreads ?? false,
+      viaClient: peer.viaClient ?? previous?.viaClient ?? false };
     const peers = this.peers().filter(p => p.coreId !== coreId);
     if (peers.length >= 32) throw refused('at most 32 coordination peers');
     this.core.journal.setSetting('coordination:peers', [...peers, checked]);
     return checked;
   }
   untrust(coreId: string): { ok: true } {
+    this.bridge.revoke(coreId);
     this.core.journal.setSetting('coordination:peers', this.peers().filter(p => p.coreId !== coreId));
     const queued = this.rows("status = 'uncertain'").map(row => JSON.parse(row.data) as AgentLetter)
       .filter(letter => letter.error === 'Queued for provider delivery' && (letter.from.coreId === coreId || letter.to.coreId === coreId));
@@ -605,13 +612,21 @@ export class Coordination {
     this.identityKey();
     const nonce = randomUUID();
     const body = JSON.stringify({ from: this.coreId, to: peer.coreId, at: Date.now(), nonce, operation, payload } satisfies Envelope);
-    const response = await fetch(`${peer.url}${ROUTE}`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/json', 'x-boite-peer': this.coreId, 'x-boite-signature': sign(null, Buffer.from(body), this.key!).toString('base64') }, body });
-    const raw = await boundedBody(response.body);
-    if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(response.headers.get('x-boite-signature') ?? '', 'base64'))) throw new Error('invalid peer response signature');
+    const signature = sign(null, Buffer.from(body), this.key!).toString('base64');
+    let status: number, raw: string, responseSignature: string;
+    if (this.bridge.available(peer.coreId) || peer.viaClient) {
+      const response = await this.bridge.request(peer.coreId, { fromCoreId: this.coreId, toCoreId: peer.coreId, body, signature });
+      ({ status, body: raw, signature: responseSignature } = response);
+    } else {
+      const response = await fetch(`${peer.url}${ROUTE}`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { 'content-type': 'application/json', 'x-boite-peer': this.coreId, 'x-boite-signature': signature }, body });
+      status = response.status; raw = await boundedBody(response.body); responseSignature = response.headers.get('x-boite-signature') ?? '';
+    }
+    if (!responseSignature && status === 403) throw new Error('destination refused this core; reconnect the agent link in Machines');
+    if (!verify(null, Buffer.from(raw), peer.publicKey, Buffer.from(responseSignature, 'base64'))) throw new Error('invalid peer response signature');
     const reply = JSON.parse(raw) as { nonce: string; result?: unknown; error?: string };
     if (reply.nonce !== nonce) throw new Error('peer response nonce mismatch');
-    if (reply.error && response.status === 400) throw new PeerRefusal(reply.error);
-    if (!response.ok) throw new Error('peer request failed');
+    if (reply.error && status === 400) throw new PeerRefusal(reply.error);
+    if (status < 200 || status >= 300) throw new Error('peer request failed');
     return reply.result;
   }
   async http(request: Request): Promise<Response> {
@@ -644,13 +659,15 @@ export class Coordination {
       let status = 200;
       try {
         // A revoke while the body streamed wins before any data is read or changed.
-        if (!this.peers().some(p => p.coreId === peer.coreId)) throw refused('peer permission revoked');
+        const currentPeer = this.peers().find(p => p.coreId === peer.coreId);
+        if (!currentPeer) throw refused('peer permission revoked');
         if (envelope.operation === 'directory') result = this.localDirectory();
         else if (envelope.operation === 'deliver') result = this.receive(envelope.payload as AgentLetter, peer);
         else if (envelope.operation === 'search') {
           const words = searchWords(((envelope.payload as { words?: unknown })?.words as string[] | undefined)?.join?.(' '));
-          result = searchContacts(this.core.journal.db, this.localDirectory(), words);
+          result = searchContacts(this.core.journal.db, this.localDirectory(), words, currentPeer.readThreads === true);
         } else if (envelope.operation === 'read') {
+          if (!currentPeer.readThreads) throw refused('agents on this machine are not allowed to read conversations; enable their access in Machines on the destination');
           const payload = envelope.payload as { threadId?: unknown; limit?: unknown; before?: unknown };
           const threadId = text(payload?.threadId, 'read.threadId', 128);
           const limit = payload.limit === undefined ? 30 : payload.limit;
@@ -675,7 +692,17 @@ export class Coordination {
       return new Response(raw, { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-boite-signature': sign(null, Buffer.from(raw), this.key!).toString('base64') } });
     });
   }
+  /** The owner app forwards the original signed envelope, without changing any peer permission. */
+  async forward(params: RpcParams<'collaboration.bridge.forward'>): Promise<CoordinationBridgeResponse> {
+    const coreId = text(params.coreId, 'coreId', 100);
+    if (typeof params.body !== 'string' || Buffer.byteLength(params.body) > MAX_BODY) throw invalidParams('body: expected at most 262144 bytes');
+    if (typeof params.signature !== 'string' || params.signature.length > 1000) throw invalidParams('signature: expected at most 1000 characters');
+    const response = await this.http(new Request(`http://127.0.0.1${ROUTE}`, { method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-boite-peer': coreId, 'x-boite-signature': params.signature }, body: params.body }));
+    return { status: response.status, body: await boundedBody(response.body), signature: response.headers.get('x-boite-signature') ?? '' };
+  }
   beginClose(): void {
+    this.bridge.close();
     this.closed = true; clearInterval(this.timer); this.off();
     for (const set of [...this.waiters.values()]) for (const waiter of [...set]) waiter.done([]);
   }
@@ -696,4 +723,10 @@ export function registerCoordination(core: Core): void {
   core.router.register('collaboration.check', p => core.coordination.check(p.coreId));
   core.router.register('collaboration.trust', p => core.coordination.trust(p.peer));
   core.router.register('collaboration.untrust', p => core.coordination.untrust(p.coreId));
+  core.router.register('collaboration.bridge.register', (p, ctx) => {
+    if (!core.coordination.peers().some(peer => peer.coreId === p.coreId)) throw refused('coreId: expected a machine trusted for coordination');
+    return core.coordination.bridge.register(p.coreId, p.enabled, ctx.connection);
+  });
+  core.router.register('collaboration.bridge.forward', p => core.coordination.forward(p));
+  core.router.register('collaboration.bridge.reply', (p, ctx) => core.coordination.bridge.reply(p.requestId, p.response, ctx.connection));
 }

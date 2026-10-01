@@ -224,6 +224,10 @@ function commandItem(itemId: string, status: string, output: string | null): unk
 
 async function runTurn(turnId: string, text: string): Promise<void> {
   notify('turn/started', { threadId, turn: turnRecord(turnId, 'inProgress') });
+  if (text.includes('[retry-progress]')) {
+    notify('error', { threadId, turnId: 'previous-native-turn', error: { message: 'stale retry' }, willRetry: true });
+    notify('error', { threadId, turnId, error: { message: 'provider overloaded' }, willRetry: true });
+  }
   if (planEnabled && text.includes('[tasks]')) notify('turn/plan/updated', { threadId, turnId, plan: [{ step: 'Inspect source', status: 'completed' }, { step: 'Run checks', status: 'inProgress' }] });
   const directives = directivesOf(text);
   const say = (chunk: string): void => {

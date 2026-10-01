@@ -146,7 +146,11 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
     await client.call('delegation.configure', { threadId: 't-trace', config });
     const params = { threadId: 't-trace', profileId: 'echo', task: 'Review the boundary', requestId: 'spawn-1' };
     const first = await client.call('delegation.spawn', params);
-    expect(await client.call('delegation.spawn', params)).toEqual(first);
+    const repeated = await client.call('delegation.spawn', params);
+    // Execution can advance between idempotent reads; every durable field still agrees.
+    const { progress: _firstProgress, ...firstThread } = first.thread;
+    const { progress: _repeatedProgress, ...repeatedThread } = repeated.thread;
+    expect({ ...repeated, thread: repeatedThread }).toEqual({ ...first, thread: firstThread });
     expect(first.thread.parentThreadId).toBe('t-trace');
     await expect(client.call('delegation.spawn', { ...params, task: 'Different work' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 
@@ -368,10 +372,14 @@ test('coordination stays scoped to its core and paired devices can only inspect 
 
   const [a, b] = await Promise.all([first.call('collaboration.identity', {}), second.call('collaboration.identity', {})]);
   await Promise.all([first.call('collaboration.trust', { peer: b }), second.call('collaboration.trust', { peer: a })]);
-  expect(await first.call('collaboration.peers', {})).toEqual([b]);
+  expect(await first.call('collaboration.peers', {})).toEqual([{ ...b, readThreads: false, viaClient: false }]);
   await second.call('collaboration.configure', { threadId: 't-trace', config: { mode: 'brief', resources: 'Build VM', remote: true, paused: false } });
   await expect(first.call('collaboration.check', { coreId: b.coreId })).resolves.toEqual({ ok: true });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
+  await expect(first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).rejects.toThrow('not allowed to read');
+  await second.call('collaboration.trust', { peer: { ...a, readThreads: true } });
+  expect((await first.call('collaboration.read', { threadId: 't-trace', target: { coreId: b.coreId, threadId: 't-trace' } })).entries.length).toBeGreaterThan(0);
+  await expect(phone.call('collaboration.bridge.register', { coreId: a.coreId, enabled: true })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);

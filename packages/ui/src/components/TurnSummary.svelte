@@ -1,14 +1,16 @@
 <script lang="ts">
   import { Check, LoaderCircle, Square, CircleAlert } from '@lucide/svelte';
-  import type { BackgroundTask, Turn } from '@boite/contracts';
+  import type { BackgroundTask, ThreadProgress, Turn } from '@boite/contracts';
   import { clockTime, elapsed } from '../lib/format';
   import { formatTokens } from '../lib/tokens';
   import { fill, strings } from '../lib/strings';
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, waiting = false, activeTool = false, background = [], stop, actions }: {
+  let { turn, progress, trace, waiting = false, activeTool = false, background = [], stop, actions }: {
     turn: Turn;
+    progress?: ThreadProgress | null;
+    trace?: () => void;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
     activeTool?: boolean;
@@ -32,6 +34,9 @@
     fill(strings.chat.cacheTokens, { read: formatTokens(usage.cacheReadTokens), write: formatTokens(usage.cacheWriteTokens) }),
   ].join('\n'));
   const still = $derived(backgroundLabel(background.map((task) => task.kind)));
+  const observed = $derived(running && !waiting && progress?.turnId === turn.id ? progress : null);
+  const quiet = $derived(observed ? Math.max(0, now - observed.at) : 0);
+  const activityLabel = $derived(observed ? strings.chat.progress[observed.phase] : null);
 
   // The clock only ticks while the turn runs and the page is on screen.
   $effect(() => {
@@ -43,11 +48,18 @@
 </script>
 
 <svelte:document onvisibilitychange={() => hidden = document.hidden} />
-{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0)}
+{#if turn.status !== 'queued' && !(running && activeTool && !waiting && background.length === 0 && !observed)}
   <div class="summary" class:paused={hidden || waiting} data-testid="turn-summary" data-status={turn.status} role="status" aria-label={label} title={label}>
     {#if turn.status === 'done'}<Check size={14} />{:else if turn.status === 'error'}<CircleAlert size={14} />{:else if turn.status === 'stopped'}<Square size={12} />{:else}<LoaderCircle size={16} class="spinner" />{/if}
     {#if spent !== null}
       <span data-testid="turn-elapsed">{fill(running ? strings.chat.workingFor : strings.chat.workedFor, { time: elapsed(spent) })}</span>
+    {/if}
+    {#if observed}
+      <span class="dot" aria-hidden="true">·</span>
+      <span data-testid="turn-progress" title={observed.detail ?? undefined}>{activityLabel}{observed.detail ? `: ${observed.detail}` : ''}</span>
+      <span class="dot" aria-hidden="true">·</span>
+      <span class:quiet={quiet >= 60_000} data-testid="turn-last-activity">{fill(quiet >= 60_000 ? strings.chat.noActivity : strings.chat.lastActivity, { time: elapsed(quiet) })}</span>
+      {#if trace}<button type="button" class="activity-trace" data-testid="turn-activity-trace" onclick={trace}>{strings.chat.activityTrace}</button>{/if}
     {/if}
     {#if turn.finishedAt !== null}
       <span class="dot" aria-hidden="true">·</span>
@@ -77,6 +89,10 @@
   .summary[data-status='running'] { color: var(--color-accent); }
   .summary[data-status='error'] { color: var(--color-danger); }
   .dot { opacity: .6; }
+  [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
+  .quiet { color: var(--color-muted-foreground); }
+  .activity-trace { border: 0; padding: 2px 4px; border-radius: var(--radius-sm); background: transparent; color: var(--color-accent); font: inherit; cursor: pointer; }
+  .activity-trace:hover { text-decoration: underline; }
   .background { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); }
   .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--ease-out-quint) infinite; }
   .paused .pulse { animation-play-state: paused; }

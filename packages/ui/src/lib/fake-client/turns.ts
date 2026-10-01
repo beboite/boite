@@ -104,6 +104,7 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   });
 
   thread.status = 'running';
+  thread.progress = { turnId: turn.id, phase: 'starting', detail: null, at };
   thread.sessionId = thread.sessionId ?? `sess-${turn.id}`;
   ctx.touch(thread);
   ctx.emit('turn.started', structuredClone(turn));
@@ -276,6 +277,7 @@ async function stream(
 
   ctx.inFlight.delete(thread.id);
   thread.status = 'idle';
+  thread.progress = null;
   thread.unread = !ctx.bus.subscribed.has(thread.id);
   // The context meter grows with every turn, the way a real session's does.
   thread.context = {

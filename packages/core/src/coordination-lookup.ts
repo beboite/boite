@@ -47,11 +47,11 @@ const CHAT_TEXT = "j.value->>'type' = 'text' AND m.role IN ('user', 'assistant')
  * Contacts among `candidates` where every word appears in a field or in the
  * chat. Field matches rank first, then the most recently active.
  */
-export function searchContacts(db: Database, candidates: AgentContact[], words: string[]): AgentMatch[] {
+export function searchContacts(db: Database, candidates: AgentContact[], words: string[], readChat = true): AgentMatch[] {
   if (candidates.length === 0) return [];
   const ids = JSON.stringify(candidates.map(contact => contact.threadId));
   const inChat = new Map<string, Set<string>>();
-  for (const word of words) {
+  for (const word of readChat ? words : []) {
     const rows = db.query(`SELECT DISTINCT m.thread_id AS id FROM messages m, json_each(m.parts) j WHERE m.thread_id IN (SELECT value FROM json_each(?)) AND ${CHAT_TEXT} AND instr(lower(j.value->>'text'), ?) > 0`).all(ids, word) as { id: string }[];
     inChat.set(word, new Set(rows.map(row => row.id)));
   }

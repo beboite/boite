@@ -14,6 +14,9 @@
   let refreshVersion = 0;
   let machines = $derived(workspace.machines.filter(machine => machine.store.owner && machine.store.connection === 'ready'));
   let machineKey = $derived(machines.map(machine => machine.id).join('\0'));
+  function peerLabel(peer: CoordinationPeer): string {
+    return machines.find(machine => identities[machine.id]?.coreId === peer.coreId)?.label ?? peer.name;
+  }
   let pairs = $derived.by(() => {
     const result: { a: Machine; b: Machine; linkedA: boolean; linkedB: boolean }[] = [];
     for (let a = 0; a < machines.length; a += 1) for (let b = a + 1; b < machines.length; b += 1) {
@@ -95,6 +98,18 @@
       busy = '';
     }
   }
+  async function readAccess(machine: Machine, peer: CoordinationPeer, input: HTMLInputElement): Promise<void> {
+    const enabled = input.checked;
+    busy = `${machine.id}\0${peer.coreId}`;
+    error = null;
+    try {
+      await machine.store.trustCoordinationPeer({ ...peer, readThreads: enabled });
+      await refresh();
+    } catch (cause) {
+      input.checked = peer.readThreads === true;
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally { busy = ''; }
+  }
 </script>
 
 <section class="card remote" id="settings-agent-links" data-testid="agent-links">
@@ -122,9 +137,16 @@
   <div class="rows">
     {#each machines as machine (machine.id)}
       {#each peers[machine.id] ?? [] as peer (peer.coreId)}
-        <div class="row" data-testid="agent-peer">
-          <span><strong>{machine.label} → {peer.name}</strong><small>{peer.url}</small></span>
-          <button class="ghost icon-only" aria-label={strings.machines.unlinkAgent} title={strings.machines.unlinkAgent} disabled={Boolean(busy)} onclick={() => void unlink(machine, peer)}><Unlink size={14} /></button>
+        <div class="row peer" data-testid="agent-peer">
+          <div class="peer-main">
+            <span><strong>{machine.label} → {peerLabel(peer)}</strong><small>{peer.viaClient ? strings.machines.agentLinkViaApp : peer.url}</small></span>
+            <button class="ghost icon-only" aria-label={strings.machines.unlinkAgent} title={strings.machines.unlinkAgent} disabled={Boolean(busy)} onclick={() => void unlink(machine, peer)}><Unlink size={14} /></button>
+          </div>
+          <label class="read-access">
+            <input type="checkbox" data-testid="agent-peer-read" checked={peer.readThreads === true} disabled={Boolean(busy) || peer.readThreads === undefined} onchange={event => void readAccess(machine, peer, event.currentTarget)} />
+            <span>{fill(strings.machines.agentReadThreads, { source: peerLabel(peer), target: machine.label })}</span>
+          </label>
+          {#if peer.readThreads === undefined}<small class="hint">{strings.machines.agentReadUpgrade}</small>{/if}
         </div>
       {/each}
     {/each}
@@ -141,11 +163,17 @@
   h2 { font-size: var(--text-base); }
   h3 { margin-top: 4px; color: var(--color-muted-foreground); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
   .hint { margin-top: 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); line-height: 1.5; }
-  .rows { border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+  .rows { min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
   .rows:empty { display: none; }
   .row { min-height: var(--control-lg); display: flex; align-items: center; gap: 12px; padding: 8px 10px; }
   .row + .row { border-top: 1px solid var(--color-border); }
   .row > span { flex: 1; min-width: 0; }
+  .row.peer { align-items: stretch; flex-direction: column; gap: 8px; }
+  .peer-main { min-width: 0; display: flex; align-items: center; gap: 12px; }
+  .peer-main > span { flex: 1; min-width: 0; }
+  .read-access { min-width: 0; width: 100%; display: flex; align-items: flex-start; gap: 8px; font-size: var(--text-sm); line-height: 1.5; cursor: pointer; overflow-wrap: anywhere; }
+  .read-access input { flex: none; margin-top: 4px; accent-color: var(--color-accent); }
+  .read-access span { min-width: 0; flex: 1; white-space: normal; }
   .row strong, .row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row strong { font-size: var(--text-sm); font-weight: 500; }
   .row small { margin-top: 2px; color: var(--color-muted-foreground); font-size: var(--text-xs); }

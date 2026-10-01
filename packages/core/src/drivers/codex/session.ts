@@ -532,6 +532,7 @@ export class CodexSession {
     }
     const turn = this.current;
     if (turn === null) return;
+    if (typeof params['turnId'] === 'string' && turn.turnId !== null && params['turnId'] !== turn.turnId) return;
     switch (method) {
       case 'turn/started': {
         const record = params['turn'] as CodexTurnRecord | undefined;
@@ -590,6 +591,7 @@ export class CodexSession {
         // `turn/completed` says whether the turn survived it, so this is a line
         // in the log and never the turn's own outcome.
         turn.ctx.log('warn', `codex agent: ${text}${willRetry ? ' (retrying)' : ''}`);
+        if (willRetry) turn.ctx.reportProgress?.('retrying', text);
         break;
       }
       default:

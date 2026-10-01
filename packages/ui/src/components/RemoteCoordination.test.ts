@@ -95,7 +95,7 @@ test('a loopback contact uses the connected HTTPS origin when linking machines',
   expect((await second.coordinationPeers())[0]?.url).toBe('https://first.test');
 });
 
-test('an unpublished local machine is not dialled or trusted automatically and explains how to link', async () => {
+test('an unpublished local machine links through the owner app without requiring a public address', async () => {
   const first = await machine('first', 'First');
   const second = await machine('second', 'Second');
   const identity = await second.coordinationIdentity();
@@ -105,14 +105,32 @@ test('an unpublished local machine is not dialled or trusted automatically and e
   const a = { id: 'first', label: 'First', store: first }, b = { id: 'second', label: 'Second', store: second };
   workspace.machines = [a, b];
   await agentAutoLink.sweep();
-  expect(check).not.toHaveBeenCalled();
-  expect(await first.coordinationPeers()).toEqual([]);
-  expect(await second.coordinationPeers()).toEqual([]);
-  expect(agentAutoLink.failureOf(a, b)).toContain('Second');
-  expect(agentAutoLink.failureOf(a, b)).toContain('HTTPS');
+  expect(check).toHaveBeenCalled();
+  expect((await first.coordinationPeers())[0]).toMatchObject({ coreId: 'core-second', viaClient: true });
+  expect((await second.coordinationPeers())[0]?.coreId).toBe('core-first');
+  expect(agentAutoLink.failureOf(a, b)).toBeUndefined();
   component = mount(MachinesPage, { target: document.body, props: { mobile: true } });
   await settle();
-  expect(document.querySelector('[data-testid="agent-links"]')?.textContent).toContain(agentAutoLink.failureOf(a, b));
+  expect(document.querySelectorAll('[data-testid="agent-peer-read"]')).toHaveLength(2);
+});
+
+test('conversation access is an owner-controlled checkbox in the receiving machine, independent of the reverse grant', async () => {
+  const pc = await machine('pc', 'Client PC');
+  const server = await machine('server', 'Server');
+  const [cardPC, cardServer] = await Promise.all([pc.coordinationIdentity(), server.coordinationIdentity()]);
+  await pc.trustCoordinationPeer(cardServer); await server.trustCoordinationPeer(cardPC);
+  workspace.machines = [{ id: 'pc', label: 'Client PC', store: pc }, { id: 'server', label: 'Server', store: server }];
+  workspace.active = pc;
+  component = mount(RemoteCoordination, { target: document.body });
+  await settle();
+  const boxes = document.querySelectorAll<HTMLInputElement>('[data-testid="agent-peer-read"]');
+  expect(boxes).toHaveLength(2);
+  expect(boxes[0]?.checked).toBe(false); expect(boxes[1]?.checked).toBe(false);
+  boxes[0]!.click(); await settle();
+  expect((await pc.coordinationPeers())[0]?.readThreads).toBe(true);
+  expect((await server.coordinationPeers())[0]?.readThreads).toBe(false);
+  document.querySelector<HTMLInputElement>('[data-testid="agent-peer-read"]')!.click(); await settle();
+  expect((await pc.coordinationPeers())[0]?.readThreads).toBe(false);
 });
 
 test('owner machines link by themselves, a paired device never does, and a removed link stays removed', async () => {
@@ -150,4 +168,28 @@ test('owner machines link by themselves, a paired device never does, and a remov
     await vi.waitFor(async () => { expect((await first.coordinationPeers()).map(peer => peer.coreId)).toEqual(['core-second']); });
     expect(localStorage.getItem('boite.agent-links.unlinked')).toBe('[]');
   } finally { stop(); }
+});
+
+test('a failed permission update restores the checkbox and reports the destination error', async () => {
+  const pc = await machine('pc', 'Client PC'), server = await machine('server', 'Server');
+  await pc.trustCoordinationPeer(await server.coordinationIdentity());
+  workspace.machines = [{ id: 'pc', label: 'Client PC', store: pc }, { id: 'server', label: 'Server', store: server }];
+  component = mount(RemoteCoordination, { target: document.body });
+  await settle();
+  vi.spyOn(pc, 'trustCoordinationPeer').mockRejectedValue(new Error('destination disconnected'));
+  document.querySelector<HTMLInputElement>('[data-testid="agent-peer-read"]')!.click();
+  await settle();
+  expect(document.querySelector<HTMLInputElement>('[data-testid="agent-peer-read"]')!.checked).toBe(false);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('destination disconnected');
+  expect((await pc.coordinationPeers())[0]?.readThreads).toBe(false);
+});
+
+test('an older destination displays an unavailable permission without implying a grant', async () => {
+  const pc = await machine('pc', 'Client PC'), server = await machine('server', 'Server');
+  vi.spyOn(pc, 'coordinationPeers').mockResolvedValue([await server.coordinationIdentity()]);
+  workspace.machines = [{ id: 'pc', label: 'Client PC', store: pc }, { id: 'server', label: 'Server', store: server }];
+  component = mount(RemoteCoordination, { target: document.body });
+  await settle();
+  const box = document.querySelector<HTMLInputElement>('[data-testid="agent-peer-read"]')!;
+  expect(box.disabled).toBe(true); expect(box.checked).toBe(false);
 });

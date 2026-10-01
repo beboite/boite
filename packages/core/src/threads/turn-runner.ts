@@ -57,6 +57,7 @@ export class TurnRunner {
     let result: TurnResult;
     try {
       // Commit the running state before a driver can spawn or stream output.
+      this.threads.progress.begin(threadId, turnId);
       this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
         this.core.journal.append({ type: 'turn.started', threadId, version: 1, payload: running }, () => {
           this.core.journal.putTurn(running);
@@ -131,6 +132,7 @@ export class TurnRunner {
       ...(result.checkpoint ? { checkpoint: result.checkpoint } : {}),
     };
     const completion = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.threads.progress.end(threadId, turnId);
       this.core.journal.append({ type: 'turn.finished', threadId, version: 1, payload: finished }, () => {
         this.core.journal.putTurn(finished);
       });

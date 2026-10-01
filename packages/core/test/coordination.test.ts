@@ -394,7 +394,7 @@ test('a waiting agent takes its answer directly, and the recipient is not woken 
 test('two linked cores search and read each other\'s agents through signed requests', async () => {
   const one = await setup(); const two = await setup();
   const cardA = one.h.core.coordination.identity(), cardB = two.h.core.coordination.identity();
-  one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
+  one.h.core.coordination.trust(cardB); two.h.core.coordination.trust({ ...cardA, readThreads: true });
   say(two.h, two.b, 'user', 'the nightly backup to the NAS failed again');
   const found = await one.h.core.coordination.search(one.a, 'nas backup');
   expect(found.unavailable).toEqual([]);

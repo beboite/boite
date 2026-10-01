@@ -5,6 +5,15 @@ only true because one launcher owns every spawn and, on Windows, puts the child
 in a kernel object before its first instruction. This page is what the claim
 covers, and where it stops.
 
+While a turn runs, its chat footer shows the latest observed activity: starting,
+thinking, compacting, retrying, running a tool or working. Provider progress
+events can update this without a chat message. The timestamp advances only when
+an event arrives, not on a timer. After a minute of silence, the footer says how
+long no new activity has arrived and offers a Trace button. This describes the
+available evidence; it does not establish that the provider is stuck. Reopening
+the thread receives the current activity snapshot, and ending the turn clears
+it. Cores without these metadata keep the existing elapsed-time footer.
+
 ## Platform boundary
 
 The shared process registry calls `ProcessPlatform` in

@@ -74,6 +74,9 @@ export class TurnContexts {
     const env = this.core.accounts.accountEnv(account, provider);
     // When each tool card first showed up and when it stopped running, by slot.
     const toolTimes = new Map<string, { startedAt: number; finishedAt: number | null }>();
+    const partProgress = new Map<string, { phase: import('@boite/contracts').ThreadProgress['phase']; detail: string | null }>();
+    const progress = (phase: import('@boite/contracts').ThreadProgress['phase'], detail: string | null = null): void =>
+      this.threads.progress.report(threadId, turn.id, phase, detail);
     const stamp = (messageId: MessageId, partIndex: number, part: MessagePart): MessagePart => {
       if (part.type === 'question' && part.async === true && (part.answer ?? null) === null && this.threads.cards.questions.has(part.questionId)) {
         this.threads.cards.asyncCards.set(part.questionId, { threadId, messageId, partIndex, part });
@@ -104,12 +107,18 @@ export class TurnContexts {
         return message.id;
       },
       delta: (messageId: MessageId, partIndex: number, text: string): void => {
+        const last = partProgress.get(`${messageId}:${partIndex}`);
+        if (text.length) progress(last?.phase ?? 'working', last?.detail ?? null);
         this.core.journal.appendDelta(threadId, messageId, partIndex, text);
         this.core.bus.emit('message.delta', { threadId, messageId, partIndex, text });
       },
       part: (messageId: MessageId, partIndex: number, raw: MessagePart): void => {
         const boundary = raw.type === 'tool' && raw.status !== 'running' && toolTimes.get(`${messageId}:${partIndex}`)?.finishedAt == null;
         const part = stamp(messageId, partIndex, raw);
+        const phase = part.type === 'thinking' ? 'thinking' : part.type === 'tool' && part.status === 'running' ? 'tool' : 'working';
+        const detail = part.type === 'tool' && part.status === 'running' ? part.name : null;
+        partProgress.set(`${messageId}:${partIndex}`, { phase, detail });
+        progress(phase, detail);
         this.core.journal.append(
           { type: 'message.part', threadId, version: 1, payload: { messageId, partIndex, part } },
           () => {
@@ -173,6 +182,7 @@ export class TurnContexts {
       accountEnv: env,
       warmProcessMinutes: this.core.settings.get().warmProcessMinutes,
       emit,
+      reportProgress: progress,
       log: (level, message) => {
         this.core.log(level, message);
       },

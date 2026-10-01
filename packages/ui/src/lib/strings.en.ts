@@ -239,7 +239,10 @@ export const strings = {
     linkConfirm: 'Connect', linkCancel: 'Cancel',
     browserOrigins: 'Allowed browser origins',
     browserOriginsHint: 'For a browser or phone viewing several machines, add the origin that serves Boite on each remote machine. One exact http(s) origin per line. Desktop connections need no extra origin.',
-    agentLinks: 'Agent links', agentLinksHint: 'Owner machines connected here are linked automatically so their agents can find, read and message each other. Each core exchanges its public signing key and address. No owner token or private key is shared. A link you remove stays removed until you link it again.',
+    agentLinks: 'Agent links', agentLinksHint: 'Linked agents can find and message each other. Choose below which machines may read conversations. Removed links stay removed.',
+    agentReadThreads: 'Allow agents on {source} to read conversations on {target}',
+    agentReadUpgrade: 'Update this machine to control conversation access.',
+    agentLinkViaApp: 'Through this app while both owner connections are open',
     agentLinksRefresh: 'Refresh agent links', linkAgents: 'Link agents', linkedAgents: 'Linked agent cores', availableAgentLinks: 'Available connections',
     noAgentLinks: 'No other connected owner machine is available.', unlinkAgent: 'Revoke on this machine',
     syncFrom: 'Keep settings synchronized with {source}', syncing: 'Copying settings',
@@ -255,8 +258,8 @@ export const strings = {
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
     autoLinkFailed: 'Not linked automatically: {reason}',
-    agentLinkAddressRequired: 'Set a reachable HTTPS address for {machine} in General settings to link its agents with another machine.',
-    reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
+    agentLinkAddressRequired: 'Update both machines to relay through the app, or set a reachable HTTPS address for {machine} in General settings.',
+    reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'The app relays signed messages between owner connections. A public HTTPS address also lets agents communicate while this app is closed.',
   },
   app: {
     name: 'Boite',
@@ -716,6 +719,10 @@ export const strings = {
     /** The footer of a turn: `Working 12s`, then `Worked 4m 41s`. */
     workingFor: 'Working for {time}',
     workedFor: 'Worked for {time}',
+    progress: { starting: 'Starting agent', thinking: 'Thinking', compacting: 'Compacting context', retrying: 'Retrying request', tool: 'Running tool', working: 'Receiving activity' },
+    lastActivity: 'Last activity {time} ago',
+    noActivity: 'No new activity for {time}',
+    activityTrace: 'View trace',
     /** A finished answer's run of tool calls, folded into one line. */
     /** The jump button once something arrived below the reader. */
     newMessage: '1 new message',

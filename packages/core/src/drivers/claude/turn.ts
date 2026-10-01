@@ -17,6 +17,7 @@ import type { StreamEvent } from './mapping.ts';
 import { hookEndPart } from './hooks.ts';
 import { PROMPT_EFFORT } from './query.ts';
 import type { ClaudeSession } from './session.ts';
+import { claudeProgress } from './progress.ts';
 
 /** What the CLI answers a `resume` whose transcript is gone (CLI 2.1.282, probed offline). */
 const MISSING_SESSION = /^No conversation found with session ID: /;
@@ -131,6 +132,7 @@ export class ClaudeTurn {
   }
 
   handle(message: SDKMessage): void {
+    if (!this.settled) claudeProgress(this.ctx, message);
     const parent = subagentOf(message);
     if (parent !== null) {
       this.handleSubagent(message, parent);
