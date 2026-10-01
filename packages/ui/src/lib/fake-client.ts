@@ -21,6 +21,7 @@ import { coordinationMethods, registerCore, unregisterCore } from './fake-client
 import { delegationMethods, seedDelegationDemo } from './fake-client/delegation';
 import { pairingMethods } from './fake-client/pairing';
 import { projectMethods } from './fake-client/projects';
+import { pathKey } from './fake-client/checks';
 import { projectIconMethods } from './fake-client/project-icons';
 import { providerCatalogMethods } from './fake-client/provider-catalog';
 import { providerInstallMethods } from './fake-client/provider-installs';
@@ -107,6 +108,15 @@ export class FakeClient implements ObservableClient {
    */
   becomes(principal: Principal): void {
     this.#ctx.bus.principal = principal;
+  }
+
+  /**
+   * Takes a folder off the fake's disk, as a repository deleted outside the
+   * app: the project there reads `missing` on its next answer, and a thread
+   * in it or under it is refused a turn.
+   */
+  loseFolder(path: string): void {
+    this.#ctx.goneFolders.add(pathKey(path));
   }
 
   onState(handler: (state: ClientState) => void): () => void {

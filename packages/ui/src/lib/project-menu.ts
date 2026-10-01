@@ -10,6 +10,18 @@ import { fill, strings } from './strings';
 import { projectName } from './format';
 import { undo } from './undo.svelte';
 
+/** Asks before a project leaves Boite, then removes it. Its folder, when there is one left, stays. */
+export async function confirmRemoveProject(owner: Store, project: Project): Promise<void> {
+  const sure = await confirm.ask({
+    title: fill(strings.sidebar.removeProjectTitle, { project: projectName(project) }),
+    body: strings.sidebar.removeProjectBody,
+    confirmLabel: strings.sidebar.remove,
+    cancelLabel: strings.common.cancel,
+    danger: true
+  });
+  if (sure) await owner.removeProject(project.id);
+}
+
 export function projectMenu(event: MouseEvent, owner: Store, project: Project, reorder?: {
   up: boolean;
   down: boolean;
@@ -27,7 +39,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       ? [
           ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession, glyph: Import }] : []),
           ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktree-default', label: strings.sidebar.worktreeDefault, glyph: GitBranch, checked: project.worktreeDefault === true }, { id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
-          ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw }])
+          ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
     ...(owner.owner && project.kind !== 'drafts' ? [separator('archive-sep')] : []),
@@ -35,7 +47,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     ...(owner.owner ? [{ id: 'remove', label: strings.sidebar.removeProject, glyph: Trash2, danger: true }] : [])
   ];
   const main: MenuItem[] = [
-    { id: 'new', label: strings.sidebar.newThread, glyph: Plus },
+    // A thread cannot start in a folder that is gone; the core refuses it too.
+    { id: 'new', label: strings.sidebar.newThread, glyph: Plus, disabled: project.missing === true, ...(project.missing === true ? { title: strings.sidebar.projectMissing } : {}) },
     { id: 'copy', label: strings.sidebar.copyPath, title: project.path, glyph: Copy },
     { id: 'archived', label: strings.sidebar.viewArchivedThreads, glyph: History },
     ...(owner.owner || project.kind !== 'drafts' || reorder
@@ -72,17 +85,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
         await workspace.select(owner);
         await owner.openImports(project.id);
       }
-      if (
-        action === 'remove' &&
-        (await confirm.ask({
-          title: fill(strings.sidebar.removeProjectTitle, { project: projectName(project) }),
-          body: strings.sidebar.removeProjectBody,
-          confirmLabel: strings.sidebar.remove,
-          cancelLabel: strings.common.cancel,
-          danger: true
-        }))
-      )
-        await owner.removeProject(project.id);
+      if (action === 'remove') await confirmRemoveProject(owner, project);
     }
   );
 }

@@ -156,7 +156,7 @@ export class Projects {
       const fresh = new Map((await client.call('projects.list', {})).map((project) => [project.id, project]));
       // Another machine took this Store meanwhile: project ids can collide between machines.
       if (this.ctx.client !== client) return;
-      if (this.projects.every((project) => project.repository === fresh.get(project.id)?.repository)) return;
+      if (this.projects.every((project) => project.repository === fresh.get(project.id)?.repository && project.missing === fresh.get(project.id)?.missing)) return;
       this.projects = this.projects.map((project) => fresh.get(project.id) ?? project);
     } catch {
       /* the list the app holds stays */

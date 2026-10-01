@@ -6,7 +6,7 @@ import { FAKE_FILES, scoreFakeFile } from './files';
 import { IMPORT_LIST_MS } from './providers';
 import { FAKE_DRAFTS_PATH, toSummary } from './shared';
 import { putAway } from './threads';
-import { archiveProject, describedProject } from './project-archive';
+import { archiveProject, describedProject, requireFakeFolder } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
 
 export function projectMethods(ctx: FakeContext) {
@@ -18,6 +18,7 @@ export function projectMethods(ctx: FakeContext) {
       const project = ctx.projects.find(p => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
       if (typeof params.enabled !== 'boolean') throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setWorktreeDefault.enabled must be a boolean', data: { field: 'enabled', expected: 'true or false' } });
+      if (params.enabled) requireFakeFolder(ctx, project);
       if (params.enabled && (project.kind === 'drafts' || project.repository === false)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'projects.setWorktreeDefault.projectId must name a Git repository', data: { field: 'projectId', projectId: project.id, expected: 'a Git repository other than the drafts project' } });
       if ((project.worktreeDefault === true) !== params.enabled) {
         if (params.enabled) project.worktreeDefault = true;

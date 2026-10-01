@@ -7,6 +7,7 @@
 import { RpcErrorCode, type Project, type Thread, type ThreadId, type WorktreeEntry } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { pathKey } from './checks';
+import { folderGone } from './project-archive';
 import { T0 } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
@@ -80,7 +81,7 @@ function inside(root: string, target: string): boolean {
 export function requireFakeCwd(ctx: FakeContext, thread: Thread): void {
   if (thread.archived) return;
   const key = pathKey(thread.cwd);
-  if (![...ctx.removedWorktrees].some((removed) => inside(removed, key))) return;
+  if (![...ctx.removedWorktrees, ...ctx.goneFolders].some((removed) => inside(removed, key))) return;
   throw new RpcFailure({
     code: RpcErrorCode.Refused,
     message: `the folder ${thread.cwd} this thread works in does not exist any more: its worktree was removed or the folder moved`,
@@ -95,6 +96,7 @@ function refused(message: string, data: Record<string, unknown>): RpcFailure {
 function repository(ctx: FakeContext, projectId: string): Project {
   const project = ctx.projects.find((p) => p.id === projectId);
   if (!project) throw ctx.notFound('project', projectId);
+  if (ctx.goneFolders.has(pathKey(project.path))) throw folderGone(project.path, { field: 'projectId', projectId, project: project.name });
   if (project.repository === false) {
     throw refused(`${project.path} is not a git repository: it has no worktrees`, {
       projectId, path: project.path, field: 'projectId', expected: 'a project that is a git repository'

@@ -8,6 +8,7 @@
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
   import Composer from './Composer.svelte';
+  import FolderGoneNotice from './FolderGoneNotice.svelte';
   import AgentDock from './AgentDock.svelte';
   import Menu from './Menu.svelte';
   import MessageList from './MessageList.svelte';
@@ -119,6 +120,7 @@
 
     {#if thread}<AgentDock {store} threadId={thread.id} />{/if}
     {#if !thread?.agentSessionId}
+      {#if store.openProject?.missing === true}<FolderGoneNotice {store} project={store.openProject} />{/if}
       <Composer {store} centered={!thread} />
     {/if}
 

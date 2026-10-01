@@ -453,6 +453,10 @@ export const strings = {
     archivedThreadsMany: 'Archived conversations ({count})',
     restoreThread: 'Restore',
     removeProject: 'Remove from Boite',
+    /** On a project whose folder was deleted, moved or renamed outside Boite. */
+    projectMissing: 'Folder not found',
+    projectMissingBody: 'The folder {path} does not exist any more: it was deleted, moved or renamed. Put it back to keep working here, or remove the project from Boite.',
+    projectMissingCheck: 'Check again',
     removeProjectTitle: 'Remove {project} from Boite?',
     removeProjectBody: 'Its threads go with it. Files on disk stay where they are.',
     remove: 'Remove',

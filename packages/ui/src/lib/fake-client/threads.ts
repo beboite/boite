@@ -6,7 +6,7 @@ import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from '
 import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
-import { announceProject, archiveProject } from './project-archive';
+import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
 import { modelsOf, checkSpeed } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
@@ -126,6 +126,7 @@ export function threadMethods(ctx: FakeContext) {
     'threads.create': async (params) => {
       const project = ctx.projects.find((p) => p.id === params.projectId);
       if (!project) throw ctx.notFound('project', params.projectId);
+      requireFakeFolder(ctx, project);
       const provider = ctx.providers.find(entry => entry.id === params.providerId);
       if (!provider) throw ctx.notFound('provider', params.providerId);
       const account = ctx.accounts.find((entry) => entry.id === params.accountId);

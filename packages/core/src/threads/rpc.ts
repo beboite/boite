@@ -15,6 +15,8 @@ import { steerUser } from './user-steering.ts';
 async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
   const thread = core.threads.require(threadId);
   if (thread.archived) return;
+  // The project's own folder is asked too, beside this turn: gone or put back, every client hears it.
+  if (thread.projectId !== null) void core.projects.requireFolder(thread.projectId).catch(() => undefined);
   const present = await stat(thread.cwd).then((found) => found.isDirectory(), () => false);
   if (!present) {
     throw refused(`the folder ${thread.cwd} this thread works in does not exist any more: its worktree was removed or the folder moved`, {
@@ -33,9 +35,11 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.rewind', (params) => core.threads.rewind(params.threadId, params.messageId));
   core.router.register('threads.fork', (params) => core.threads.fork(params.threadId, params.messageId, params.worktree === true));
   core.router.register('threads.list', (params) => core.threads.list(params));
-  core.router.register('threads.create', (params) =>
-    params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params),
-  );
+  core.router.register('threads.create', async (params) => {
+    // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
+    if (typeof params.projectId === 'string' && core.journal.getProject(params.projectId) !== null) await core.projects.requireFolder(params.projectId);
+    return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
+  });
   core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
   core.router.register('messages.list', (params) => core.threads.messages(params));
   core.router.register('threads.update', (params) => core.threads.update(params));
