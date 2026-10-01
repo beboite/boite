@@ -203,12 +203,12 @@
     {#if meta}
     <div class="metadata">
       {#if showProject}<span class="project-name" data-testid="thread-project" title={project.path}><Folder size={12} /><span>{projectName(project)}</span></span>{/if}
-      <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
-      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
       {#if pullRequest}
         <a class="pr-link" data-testid="thread-pr" href={pullRequest.url} target="_blank" rel="noopener noreferrer"
           title={pullRequest.url} aria-label={`#${pullRequest.number}`}><GitPullRequest size={12} />#{pullRequest.number}</a>
       {/if}
+      <!-- Only on a card that already has a second line: a branch alone would double every worktree row. -->
+      {#if thread.branch}<span class="branch" data-testid="thread-branch" title={thread.branch}><GitBranch size={12} /><span>{thread.branch}</span></span>{/if}
     </div>
     {/if}
     <button
@@ -348,14 +348,12 @@
     flex: 1;
   }
   /* Beside a branch, the project keeps its length up to half the line and the branch takes the rest. */
-  .project-name:has(+ .branch) {
+  .project-name:has(~ .branch) {
     flex: 0 0 auto;
     max-width: 50%;
   }
   .metadata .branch {
     flex: 0 1 auto;
-  }
-  .pr-link {
     margin-left: auto;
   }
   .provider {
