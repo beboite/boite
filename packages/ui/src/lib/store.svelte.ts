@@ -92,6 +92,7 @@ export class Store {
   get client(): Client | null {
     return this.#ctx.client;
   }
+  get serverUpdater() { return this.#ctx.serverUpdater; }
 
   // -------------------------------------------------------------------------
   // Wiring
@@ -128,6 +129,7 @@ export class Store {
 
   detach(): void {
     const ctx = this.#ctx;
+    ctx.serverUpdater.reset();
     ctx.drafts.stop();
     ctx.workbench.resetMemory();
     ctx.delegation.coordinationEpoch++;

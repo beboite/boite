@@ -288,6 +288,27 @@ export const fr: Translation = {
     quitHoldHint: 'ou appuyez deux fois'
   },
 
+  serverUpdate: {
+    heading: 'Serveur',
+    updates: 'Mises à jour',
+    current: 'À jour',
+    waiting: 'En attente de la fin du travail',
+    installing: 'Redémarrage du serveur',
+    reconnecting: 'Reconnexion',
+    progress: 'Téléchargement de la mise à jour du serveur',
+    release: 'Nouveautés',
+    details: 'Détails',
+    timing: 'L’installation attend la fin des agents et des tâches en arrière-plan. Vous pouvez continuer à discuter ou annuler pendant l’attente.',
+    backup: 'Conversations et réglages sauvegardés. Si le démarrage échoue, la version précédente est restaurée.',
+    reconnect: 'Les appareils connectés se reconnectent automatiquement.',
+    confirmTitle: 'Mettre à jour {machine} ?',
+    confirmBody: 'La version {version} s’installera à la fin du travail. Vos conversations sont sauvegardées.',
+    manualTitle: 'Mise à jour manuelle',
+    docker: 'Après la fin des agents, exécutez ceci dans le dossier Compose :',
+    manual: 'Consultez le guide pour mettre à jour cette installation.',
+    legacy: 'Une première mise à jour manuelle est nécessaire pour activer ce bouton.',
+    guide: 'Guide de mise à jour'
+  },
   appUpdate: {
     released: 'Sortie {time}',
     changelog: 'Changelog sur GitHub',
@@ -309,7 +330,7 @@ export const fr: Translation = {
     downloading: 'Téléchargement de {received} sur {total}',
     downloaded: '{received} téléchargés',
     ready: 'La version {version} est prête à installer.',
-    waiting: 'En attente de la fin du travail sur cet ordinateur. Vous pouvez continuer à discuter ou annuler la mise à jour.',
+    waiting: 'En attente de la fin du travail',
     installing: "Démarrage du programme d'installation",
     current: 'Boite est à jour.',
     failed: 'La mise à jour a échoué.',
@@ -325,7 +346,7 @@ export const fr: Translation = {
     readyAction: 'Mise à jour',
     dismissNotice: 'Masquer cette notification de mise à jour',
     installTitle: 'Installer la mise à jour de Boite ?',
-    installBody: 'Boite attendra la fin des tours des agents et du travail en arrière-plan sur cet ordinateur, puis installera la mise à jour et redémarrera. Vous pouvez continuer à discuter et annuler la mise à jour pendant cette attente.',
+    installBody: 'Boite se mettra à jour et redémarrera à la fin du travail. Vous pouvez annuler pendant l’attente.',
     detailsNotice: 'Ouvrir les détails de la mise à jour'
   },
 
