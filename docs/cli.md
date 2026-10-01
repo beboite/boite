@@ -60,7 +60,9 @@ boite thread move <project>      move this thread to another project (name, id o
 boite thread new <project> <brief> [--worktree] [--title <title>]
                                  start a thread in a project; its first answer
                                  comes back as an agent message
-boite projects                   the projects the owner added
+boite projects                   the projects added to Boite
+boite projects add <folder> [--name <name>]
+                                 add an existing folder as a project
 boite attach <file>               publish a file snapshot in chat, at most 512 MB
 boite show <file>[:line]         open the file in the panel, at that line
 boite diff [file]                open the changes surface, or one file's diff
@@ -181,6 +183,20 @@ with the same `--request-id` returns the thread already started.
 thread)` on the caller's own, `no-git` on a folder `--worktree` cannot use and
 `drafts` on the drafts project. Archived projects are left out, although
 `thread new` and `thread move` still accept them by name.
+
+`projects add` registers an existing folder as a project, as the owner does
+from the sidebar, so `thread new` and `thread move` can name it. A relative
+folder is read from the agent's working directory; `--name` replaces the
+folder's name. The project appears in the sidebar at once, the calling
+thread's timeline gets a line naming it, and the owner removes it like any
+other. A folder that is already a project, an archived one included, is
+printed as it is with "Already a project; nothing changed." and costs nothing.
+Registering a folder gives the agent no file access its process lacked. It
+reaches outside the thread's project, so the Communication settings decide as
+they do for `thread new` elsewhere: Off, Pause and a thread restricted to its
+own project refuse it. There is no hourly limit. A thread an agent started
+adds none until the user has written in it, and delegated children, workflow steps and persistent agent
+sessions are refused.
 
 `attach` saves a snapshot referenced by an assistant message, so it remains downloadable from
 desktop and paired phones after the original changes or disappears. The thread

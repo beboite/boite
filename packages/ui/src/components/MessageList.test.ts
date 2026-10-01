@@ -175,7 +175,7 @@ test('a workflow the thread started is one card that opens its graph, and a step
     expect(cards[0]!.querySelectorAll('.phases i')).toHaveLength(4);
     cards[0]!.click();
     flushSync();
-    expect(owner.panel.active).toMatchObject({ kind: 'workflow', runId: run.id });
+    expect(owner.panel.active).toMatchObject({ kind: 'agents', runId: run.id });
     await unmount(running); running = null;
     const step = run.nodes.find(node => node.id === 'review')!.instances[1]!.threadId!;
     await owner.open(step);

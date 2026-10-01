@@ -292,12 +292,16 @@ readings. The schema exposes neither paid credit balances nor banked resets.
 Live Muse observations are kept in memory per account, not polled as fresh
 HTTP snapshots.
 
-The tray Usage window and Settings, Limits list only the providers with a
-signed-in account whose limits are monitored. Each tray row shows the lowest
-remaining limit across those accounts and the next reported reset; opening it
-shows each window's own bar and reset time, by account when there are several.
+The tray Usage window, sidebar glance and Settings, Limits show each monitored,
+signed-in account separately. Each row or card shows the chosen account label
+beside the provider's logo. Older accounts labelled `Default` show the provider
+name until renamed. Each compact row shows that account's lowest remaining limit
+and next reported reset; opening it shows its own windows, credits and reset times.
 Monitoring switches live under Tracked accounts on Settings, Limits: one per
 signed-in account with limits to read, the Antigravity CLI source included.
+Rename beside a tracked account edits its label, including default CLI accounts;
+Save commits it and Cancel or Escape keeps the previous name. The new label
+reaches open quota views immediately, even while an older usage reading is cached.
 Settings, Providers shows no usage, and the tray has no switch. With nothing
 signed in, both offer to connect a provider. The last reading stays on screen
 while the next one loads, from this browser's storage after a restart.

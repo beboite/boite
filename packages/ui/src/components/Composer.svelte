@@ -26,11 +26,7 @@
   import ThreadActivity from './ThreadActivity.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
-  /**
-   * `centered` is the draft's placement: the parent stacks the composer under
-   * the heading and centres the pair, so the wrapper drops the padding that
-   * holds it off the bottom of the column. Same component, same box.
-   */
+  /** A centred draft drops the bottom padding so its heading and input form one block. */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
   const MAX_LINES = 8;
@@ -38,6 +34,8 @@
 
   let key = $derived(store.openThread?.id ?? DRAFT_STASH_KEY);
   let composer = $derived(store.composerStates[key]);
+  let hasQueue = $derived(!!(composer?.queued.length || store.openThread?.pendingAnswers?.length));
+  let activityRoom = $state(0);
   let text = $derived(composer?.text ?? '');
   /** The attachments this prompt carries, the same array the strip above the box draws. */
   let attachments = $derived<Attachment[]>(composer?.attachments ?? []);
@@ -697,23 +695,25 @@
     event.preventDefault(); event.stopPropagation();
   }
 }}>
-  <ThreadActivity {store} />
-  {#if store.openThread?.pendingAnswers?.length}
-    <div data-testid="question-queued">
-      <ComposerQueue queued={store.openThread.pendingAnswers.map(text => ({ text, attachments: [] }))}
-        disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
-    </div>
-  {/if}
-  {#if composer && composer.queued.length > 0}
-    <ComposerQueue queued={composer.queued}
-      disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
-      paused={composer.paused}
-      {sendNow}
-      onrestore={restoreQueued}
-      onsendnow={sendQueuedNow} />
-  {/if}
+  <div class="queue-region" style:padding-bottom={hasQueue ? `${activityRoom}px` : undefined}>
+    {#if store.openThread?.pendingAnswers?.length}
+      <div data-testid="question-queued">
+        <ComposerQueue queued={store.openThread.pendingAnswers.map(text => ({ text, attachments: [] }))}
+          disabled={true} paused={false} sendNow={null} onrestore={() => {}} onsendnow={() => {}} />
+      </div>
+    {/if}
+    {#if composer && composer.queued.length > 0}
+      <ComposerQueue queued={composer.queued}
+        disabled={composer.sending || text.length > 0 || attachments.length > 0 || previewReferences.length > 0}
+        paused={composer.paused}
+        {sendNow}
+        onrestore={restoreQueued}
+        onsendnow={sendQueuedNow} />
+    {/if}
+  </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="composer" class:dictating data-testid="composer" {ondragover} {ondrop}>
+    <ThreadActivity {store} reserveInComposer={hasQueue} onroom={(height) => (activityRoom = height)} />
     {#if composer?.editing}
       <div class="editing" data-testid="composer-editing">
         <Pencil size={13} />

@@ -18,10 +18,20 @@
   const frame = new URLSearchParams(location.search).get('frame') === 'native' ? 'native' : undefined;
   let visible = true;
   let disposed = false;
+  let pendingAccounts: Map<string, Account | null> | null = null;
   async function refresh(force = false) {
-    if (reader.loading || !client || disposed) return;
+    if (reader.loading || pendingAccounts || !client || disposed) return;
+    const updates = new Map<string, Account | null>();
+    pendingAccounts = updates;
     try {
-      await Promise.all([reader.read(client, force), client.call('accounts.list', {}).then((list) => { accounts = list; })]);
+      await Promise.all([reader.read(client, force), client.call('accounts.list', {}).then((list) => {
+        // Events arriving after this request win over the older snapshot.
+        for (const [id, account] of updates) {
+          list = list.filter((entry) => entry.id !== id);
+          if (account) list.push(account);
+        }
+        accounts = list;
+      }).finally(() => { if (pendingAccounts === updates) pendingAccounts = null; })]);
       error = '';
     }
     catch (cause) { error = String(cause); }
@@ -51,6 +61,16 @@
       if (disposed) { client.close(); return; }
       await client.connect();
       off.push(client.on('quotas.updated', (value) => reader.accept(value)));
+      off.push(client.on('accounts.updated', (account) => {
+        pendingAccounts?.set(account.id, account);
+        accounts = accounts?.some((entry) => entry.id === account.id)
+          ? accounts.map((entry) => entry.id === account.id ? account : entry)
+          : [...(accounts ?? []), account];
+      }));
+      off.push(client.on('accounts.removed', ({ accountId }) => {
+        pendingAccounts?.set(accountId, null);
+        accounts = accounts?.filter((entry) => entry.id !== accountId);
+      }));
       if (window.__TAURI_INTERNALS__) {
         const { listen } = await import('@tauri-apps/api/event');
         const opened = await listen('tray://open', () => { visible = true; void refresh(); });

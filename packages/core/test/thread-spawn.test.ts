@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import type { AgentSpawn } from '@boite/contracts';
+import type { AgentProjectAdded, AgentSpawn } from '@boite/contracts';
 import { runCli } from '../src/cli.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
@@ -118,4 +118,63 @@ test('a started thread can get a worktree of its own, and a folder without git r
   expect(spawned.thread.cwd).not.toBe(repoPath);
   expect((await cli(['thread', 'new', 'Notes', 'Fix it', '--worktree'])).err).toContain('not a git repository');
   expect(h.core.threads.require(threadId).status).not.toBe('error');
+});
+
+test('an agent adds a folder as a project, once, and can then start a thread in it', async () => {
+  answering(); const { h, owner, threadId, notes, notesPath, cli } = await setup();
+  const added: string[] = [];
+  owner.on('project.added', (project) => { added.push(project.path); });
+  const sitePath = join(h.dataDir, 'site');
+  mkdirSync(sitePath, { recursive: true });
+
+  // A relative folder is read from the agent's working directory.
+  const first = await cli(['projects', 'add', 'site', '--name', 'Website', '--json']);
+  expect(first.err).toBe('');
+  const site = JSON.parse(first.out) as AgentProjectAdded;
+  expect(site).toMatchObject({ name: 'Website', path: sitePath, repository: false, current: false, added: true });
+  expect(added).toEqual([sitePath]);
+  expect((await owner.call('projects.list', {})).map(p => p.id)).toContain(site.id);
+  const line = h.core.journal.listMessages(threadId).find(m => m.role === 'system');
+  expect(line?.parts[0]).toMatchObject({ type: 'text', text: `The agent added the project Website (${sitePath}).` });
+
+  // A folder that is already a project is answered as it is: no event, no line, no budget spent.
+  const again = await cli(['projects', 'add', sitePath]);
+  expect(again.out).toContain(`project: ${site.id}`);
+  expect(again.out).toContain('Already a project; nothing changed.');
+  expect(JSON.parse((await cli(['projects', 'add', notesPath, '--json'])).out)).toMatchObject({ id: notes.id, name: 'Notes', added: false });
+  expect(added).toHaveLength(1);
+  expect(h.core.journal.listMessages(threadId).filter(m => m.role === 'system')).toHaveLength(1);
+
+  const spawned = JSON.parse((await cli(['thread', 'new', 'Website', 'Draft the landing page', '--json'])).out) as AgentSpawn;
+  expect(spawned.thread).toMatchObject({ projectId: site.id, cwd: sitePath });
+
+  const missing = await cli(['projects', 'add', join(h.dataDir, 'nowhere')]);
+  expect(missing.code).toBe(1);
+  expect(missing.err).toContain('a project path must be an existing directory');
+});
+
+test('adding a project stays within communication settings and one agent generation', async () => {
+  answering(); const { h, owner, threadId, notes, notesPath, cli } = await setup();
+  const folder = (name: string): string => { const path = join(h.dataDir, name); mkdirSync(path, { recursive: true }); return path; };
+  const config = h.core.coordination.config(threadId);
+  await owner.call('collaboration.configure', { threadId, config: { ...config, remote: false } });
+  expect((await cli(['projects', 'add', folder('a')])).err).toContain('may only reach its own project');
+  // What is already there is still answered: reading it opens nothing.
+  expect((await cli(['projects', 'add', notesPath])).out).toContain(`project: ${notes.id}`);
+  await owner.call('collaboration.configure', { threadId, config: { ...config, mode: 'off' } });
+  expect((await cli(['projects', 'add', folder('a')])).err).toContain('communication is off');
+  await owner.call('collaboration.configure', { threadId, config: { ...config, paused: true } });
+  expect((await cli(['projects', 'add', folder('a')])).err).toContain('communication is paused');
+  await owner.call('collaboration.configure', { threadId, config });
+  expect(h.core.journal.listProjects().map(p => p.path)).not.toContain(folder('a'));
+
+  expect((await cli(['projects', 'add', folder('a')])).code).toBe(0);
+
+  // A thread an agent started adds none until the user writes in it; a delegated child never does.
+  const child = (JSON.parse((await cli(['thread', 'new', notes.id, 'One', '--json'])).out) as AgentSpawn).thread.id;
+  await waitFor(() => h.core.threads.require(child).status === 'idle');
+  expect((await cli(['projects', 'add', folder('e')], child)).err).toContain('cannot add a project until the user writes in it');
+  const turn = await owner.call('turns.start', { threadId: child, prompt: 'Add the folder yourself' });
+  await waitFor(() => h.core.journal.getTurn(turn.id)?.finishedAt != null);
+  expect((await cli(['projects', 'add', folder('e')], child)).code).toBe(0);
 });

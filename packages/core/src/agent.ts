@@ -201,6 +201,7 @@ export function registerAgentMethods(core: Core): void {
   // The access check already held the call to the token's own thread.
   core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));
   core.router.register('agent.spawn', (params) => core.threads.spawns.spawn(params));
+  core.router.register('agent.addProject', (params) => core.threads.spawns.addProject(params));
   core.router.register('agent.projects', (params) => {
     const own = core.threads.require(params.threadId).projectId;
     return core.projects.list().filter((project) => project.archived !== true).map((project) => ({

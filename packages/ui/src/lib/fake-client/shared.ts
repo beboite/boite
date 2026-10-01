@@ -1,4 +1,5 @@
 import {
+  BRANCH_NAME_MAX,
   RpcErrorCode,
   TODO_TEXT_MAX,
   type AgentCommand,
@@ -55,6 +56,11 @@ export function fakeDraftFolder(root: string, title: string, at: Date, taken: Re
 
 /** Mirrors the core's per-project and shared storage for newly created worktrees. */
 export function fakeWorktree(projectPath: string, _title: string, branch?: string, storage?: WorktreeStorage, projectId?: string): { branch: string; path: string; namingPending: boolean } {
+  if (branch !== undefined && branch.length > BRANCH_NAME_MAX) {
+    throw refusal(`branch must be at most ${BRANCH_NAME_MAX} characters; received ${branch.length}`, {
+      field: 'branch', expected: `at most ${BRANCH_NAME_MAX} characters`, maxLength: BRANCH_NAME_MAX, actualLength: branch.length
+    });
+  }
   const slug = `wt-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const root = storage?.mode === 'shared' ? storage.directory : projectPath;
   const separator = root.includes('\\') ? '\\' : '/';
