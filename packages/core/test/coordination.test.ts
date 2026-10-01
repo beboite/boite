@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'node:crypto';
-import type { AgentAddress, CoordinationConfig } from '@boite/contracts';
+import { RpcErrorCode, type AgentAddress, type CoordinationConfig } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { coordinationUrl, LETTER_RETENTION_MS, letterPrompt, SWEEP_PROBES } from '../src/coordination.ts';
@@ -45,6 +45,10 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
     const letter = await agent.call('collaboration.send', { threadId: a, to: dest(h, b), text: 'Wait for my answer', requestId: 'one' });
     expect(letter.from.threadId).toBe(a);
     expect(letter.from.title).toBe('Maintenance');
+    const project = h.core.journal.getProject(h.core.threads.require(a).projectId!)!;
+    expect(directory.agents[0]?.project).toBe(project.name);
+    expect(letter.from.project).toBe(project.name);
+    expect(letter.toProject).toBe(project.name);
     expect(letter.status).toBe('received');
     mkdirSync(join(h.dataDir, 'elsewhere'));
     const other = await owner.call('projects.add', { path: join(h.dataDir, 'elsewhere'), name: 'Other' });
@@ -152,15 +156,35 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
   const directory = await one.h.core.coordination.directory(one.a);
   expect(directory.unavailable).toHaveLength(0);
-  expect(directory.agents.some(a => a.coreId === cardB.coreId && a.threadId === two.b)).toBe(true);
+  const remoteProject = two.h.core.journal.getProject(two.h.core.threads.require(two.b).projectId!)!.name;
+  expect(directory.agents.find(a => a.coreId === cardB.coreId && a.threadId === two.b)?.project).toBe(remoteProject);
   const letter = await send(one.h, one.a, dest(two.h, two.b));
   expect(letter.status).toBe('queued');
   await waitFor(() => one.h.core.coordination.get(one.a).messages[0]?.status === 'delivered', 12000);
+  expect(one.h.core.coordination.get(one.a).messages[0]?.toProject).toBe(remoteProject);
+  expect(one.h.core.coordination.get(one.a).messages[0]?.toMachine).toBe(cardB.name);
+  expect(two.h.core.coordination.get(two.b).messages[0]?.from.project).toBe(one.h.core.journal.getProject(one.h.core.threads.require(one.a).projectId!)!.name);
   const reply = await two.h.core.coordination.send({ threadId: two.b, to: dest(one.h, one.a), text: 'Ready now.', replyTo: letter.id, requestId: 'remote-reply' });
   await waitFor(() => one.h.core.coordination.get(one.a).messages.some(m => m.id === reply.id && m.status === 'delivered'), 10000);
   two.h.core.coordination.untrust(cardA.coreId);
   expect((await one.h.core.coordination.directory(one.a)).unavailable).toEqual([cardB.name]);
 }, 25000);
+
+test('an unreachable coordination check names the destination without broadcasting an internal error', async () => {
+  const one = await setup(); const two = await setup();
+  const peer = { ...two.h.core.coordination.identity(), name: 'Remote test machine', url: 'http://127.0.0.1:1' };
+  one.h.core.coordination.trust(peer);
+  const log = spyOn(one.h.core, 'log');
+  try {
+    await expect(one.owner.call('collaboration.check', { coreId: peer.coreId })).rejects.toMatchObject({
+      rpc: {
+        code: RpcErrorCode.Unavailable,
+        message: expect.stringContaining('Remote test machine at http://127.0.0.1:1'),
+      },
+    });
+    expect(log.mock.calls.some(([level]) => level === 'error')).toBe(false);
+  } finally { log.mockRestore(); }
+});
 
 test('signed peer errors expose validation messages but hide unexpected implementation details', async () => {
   const one = await setup(); const two = await setup();
@@ -390,3 +414,16 @@ test('two linked cores search and read each other\'s agents through signed reque
   two.h.core.coordination.configure(two.b, { ...brief, remote: false });
   await expect(one.h.core.coordination.read(one.a, { coreId: cardB.coreId, threadId: two.b })).rejects.toThrow('not a thread open to other machines');
 }, 25000);
+
+
+test('old local letters gain project names without requiring enabled contacts', async () => {
+  const { h, a, b } = await setup();
+  h.core.coordination.pause(b);
+  const letter = await send(h, a, dest(h, b));
+  h.core.journal.db.query("UPDATE coordination_letters SET data = json_remove(data, '$.from.project', '$.toProject') WHERE id = ?").run(letter.id);
+  h.core.coordination.configure(a, { ...brief, mode: 'off' });
+  const project = h.core.journal.getProject(h.core.threads.require(a).projectId!)!.name;
+  const old = h.core.coordination.get(b).messages[0]!;
+  expect(old.from.project).toBe(project);
+  expect(old.toProject).toBe(project);
+});

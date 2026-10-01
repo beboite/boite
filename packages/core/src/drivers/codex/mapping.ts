@@ -108,6 +108,7 @@ export function toolViewOf(item: CodexItem, completed = false): ToolView | null 
         input: { command: item.command ?? '', cwd: item.cwd ?? null },
         output: item.aggregatedOutput ?? null,
         status: itemStatus(item.status),
+        exitCode: item.exitCode ?? null,
       };
     case 'fileChange':
       return {

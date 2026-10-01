@@ -5,6 +5,7 @@
   import { fill, strings } from '../lib/strings';
   import { familyOf, liveLabel, runSummary, toolLine, type ToolPart } from '../lib/tool-groups';
   import { describeTool, fileName } from '../lib/tool-summary';
+  import { toolErrorPreview } from '../lib/tool-error';
   import { diffCounts, diffRows } from '../lib/diff';
   import DiffView from './DiffView.svelte';
   import DocumentView from './DocumentView.svelte';
@@ -22,6 +23,7 @@
     inputText = null,
     output,
     status,
+    exitCode = null,
     documents = [],
     startedAt = null,
     finishedAt = null,
@@ -33,6 +35,7 @@
     inputText?: string | null;
     output: string | null;
     status: ToolStatus;
+    exitCode?: number | null;
     documents?: ToolDocument[];
     /** When the card first showed up and when it stopped running, as the core stamped them. */
     startedAt?: number | null;
@@ -86,7 +89,9 @@
   let line = $derived(toolLine(part));
   let family = $derived(familyOf(part));
   let failed = $derived(status === 'error' || status === 'denied');
-  let errorPreview = $derived(failed ? output?.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '' : '');
+  let errorPreview = $derived(toolErrorPreview(part));
+  let exitLabel = $derived(family === 'command' && status === 'error' && exitCode !== null
+    ? fill(strings.chat.toolExitCode, { code: String(exitCode) }) : '');
   const ICONS = { command: SquareTerminal, read: FileText, edit: FilePen, write: FilePen, search: Search, fetch: Globe, web: Globe, agent: Bot, other: Wrench };
   let Glyph = $derived(ICONS[family]);
 
@@ -162,6 +167,9 @@
     {/if}
     {#if took}
       <span class="took" data-testid="tool-elapsed">{took}</span>
+    {/if}
+    {#if exitLabel}
+      <span class="took" data-testid="tool-exit-code">{exitLabel}</span>
     {/if}
     {#if status === 'running'}
       <span class="status" title={strings.chat.toolStatus.running}><span class="spinner"></span></span>

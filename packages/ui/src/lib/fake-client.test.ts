@@ -373,6 +373,10 @@ test('coordination stays scoped to its core and paired devices can only inspect 
   await expect(first.call('collaboration.check', { coreId: b.coreId })).resolves.toEqual({ ok: true });
   expect((await first.call('collaboration.directory', { threadId: 't-trace' })).agents).toContainEqual(expect.objectContaining({ coreId: b.coreId, threadId: 't-trace' }));
   const letter = await first.call('collaboration.send', { threadId: 't-trace', to: { coreId: b.coreId, threadId: 't-trace' }, text: 'Wait for the build', requestId: 'remote' });
+  const project = (await first.call('projects.list', {})).find(project => project.id === 'p-boite')!;
+  expect(letter.from.project).toBe(project.name);
+  expect(letter.toProject).toBe(project.name);
+  expect(letter.toMachine).toBe('Second');
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).messages).toEqual([letter]);
   expect((await second.call('collaboration.get', { threadId: 't-trace' })).sent).toBe(0);
   await first.call('collaboration.untrust', { coreId: b.coreId });
@@ -509,7 +513,7 @@ test('fake settings store a pasted address as its origin and refuse what the cor
   });
   expect(saved.publicUrl).toBe('https://boite.example.com');
   expect(saved.browserOrigins).toEqual(['http://192.168.1.20:8777']);
-  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
+  for (const patch of [{ publicUrl: 'https://boite.example.com/app' }, { warmProcessMinutes: -3 }, { threadDeletionRetentionDays: 0.5 }, { threadDeletionRetentionDays: 3651 }, { agentCpuCapPercent: 120 }, { focusGuard: 'yes' as unknown as boolean }]) {
     await expect(client.call('settings.set', patch)).rejects.toMatchObject({ code: RpcErrorCode.InvalidParams });
   }
   client.close();
@@ -788,5 +792,42 @@ test('fake hook counters move the way the core ledger moves them', async () => {
     expect(after.blocked - before.blocked).toBe(1);
     expect(after.skipped - before.skipped).toBe(1);
     expect(after.failed).toBe(before.failed);
+  } finally { client.close(); }
+});
+
+test('deleted fake conversations survive closing and reconnecting with their history and archive flags', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const history = (await client.call('threads.get', { threadId: 't-trace' })).messages;
+    await client.call('threads.archive', { threadId: 't-trace' });
+    await client.call('threads.remove', { threadId: 't-trace' });
+    const deletion = (await client.call('threads.deleted', {}))[0]!;
+    expect(deletion.deletedAt).toBe(Date.now());
+    client.close();
+    vi.setSystemTime(Date.now() + 5 * 86_400_000);
+    await client.connect();
+    expect((await client.call('threads.deleted', {}))[0]?.id).toBe('t-trace');
+    expect((await client.call('threads.restore', { threadId: 't-trace' })).archived).toBe(true);
+    expect((await client.call('threads.get', { threadId: 't-trace' })).messages).toEqual(history);
+  } finally { client.close(); }
+});
+
+test('fake retention keeps indefinite deletions and applies a shorter saved delay to existing deletions', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    await client.call('settings.set', { threadDeletionRetentionDays: 0 });
+    await client.call('threads.remove', { threadId: 't-trace' });
+    vi.setSystemTime(Date.now() + 40 * 86_400_000);
+    expect((await client.call('threads.deleted', {})).map(t => t.id)).toEqual(['t-trace']);
+    let notifications = 0;
+    client.on('thread.deletionsUpdated', () => { notifications++; });
+    await client.call('settings.set', { threadDeletionRetentionDays: 7 });
+    expect(await client.call('threads.deleted', {})).toEqual([]);
+    expect(notifications).toBe(1);
+    await expect(client.call('threads.restore', { threadId: 't-trace' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
   } finally { client.close(); }
 });

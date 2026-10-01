@@ -222,3 +222,50 @@ test('machine names and icons persist independently and survive an endpoint chan
   w.customize('local', '  ', 'cloud');
   expect(w.machines[0]?.label).toBe('Studio');
 });
+
+
+test('agent links resolve core identity despite identical thread ids and open both directions', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  const local = { coreId: (await a.coordinationIdentity()).coreId, threadId: id };
+  const remote = { coreId: (await b.coordinationIdentity()).coreId, threadId: id };
+  await b.rename(id, 'Remote sender');
+  await w.select(a, id);
+  await w.openAgentThread(a, local, remote);
+  expect(w.active).toBe(b);
+  expect(b.openThread?.title).toBe('Remote sender');
+  await w.openAgentThread(b, remote, local);
+  expect(w.active).toBe(a);
+  expect(a.openThread?.title).not.toBe('Remote sender');
+  await w.openAgentThread(a, { coreId: 'local', threadId: id }, { coreId: 'local', threadId: a.threads[1]!.id });
+  expect(w.active).toBe(a);
+  expect(a.openThread?.id).toBe(a.threads[1]!.id);
+});
+
+test('an unconnected core never opens a coincident local thread id', async () => {
+  const { w, a } = await setup();
+  const id = a.threads[0]!.id;
+  await w.select(a, id);
+  const open = vi.spyOn(a, 'open');
+  await w.openAgentThread(a, { coreId: (await a.coordinationIdentity()).coreId, threadId: id }, { coreId: 'not-connected', threadId: id });
+  expect(open).not.toHaveBeenCalled();
+  expect(w.active).toBe(a);
+  expect(a.error).toBe('Connect to this machine in Settings to open its thread.');
+});
+
+
+test('a paired phone can follow an agent link without owner-only identity RPC access', async () => {
+  const { w, a, b } = await setup();
+  const id = a.threads[0]!.id;
+  b.client?.close();
+  b.detach();
+  const device = new FakeClient({ delayMs: 0, principal: 'session', coreId: 'remote-phone' });
+  b.attach(device);
+  await b.connect();
+  await expect(b.coordinationIdentity()).rejects.toThrow('owner');
+  await w.select(a, id);
+  await w.openAgentThread(a, { coreId: (await a.coordinationIdentity()).coreId, threadId: id }, { coreId: 'remote-phone', threadId: id });
+  expect(w.active).toBe(b);
+  expect(b.openThread?.id).toBe(id);
+  expect(b.owner).toBe(false);
+});

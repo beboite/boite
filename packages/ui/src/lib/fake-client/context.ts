@@ -1,5 +1,6 @@
 /** The state one fake core keeps, and the plumbing every domain module shares. */
 import {
+  DEFAULT_THREAD_DELETION_RETENTION_DAYS,
   PROTOCOL_VERSION,
   RpcErrorCode,
   type Attachment,
@@ -123,7 +124,7 @@ export class FakeContext {
   readonly installBefore = new Map<string, ProviderInstallState>();
   accounts: Account[] = [];
   readonly threads = new Map<ThreadId, Thread>();
-  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[] }>();
+  readonly deletedThreads = new Map<ThreadId, { threads: Thread[]; archived: boolean[]; deletedAt: number }>();
   readonly coordination = new Map<ThreadId, CoordinationConfig>();
   readonly delegationConfigs = new Map<ThreadId, DelegationConfig>();
   readonly delegationAgents = new Map<ThreadId, { threadId: ThreadId; profileId: string; task: string }[]>();
@@ -243,6 +244,7 @@ export class FakeContext {
       publicKey: `fake-public-key-${coreId}`
     };
     this.settings = {
+      threadDeletionRetentionDays: DEFAULT_THREAD_DELETION_RETENTION_DAYS,
       warmProcessMinutes: 0,
       worktreeStorage: { mode: 'project', directory: null },
       listenOnLan: false,

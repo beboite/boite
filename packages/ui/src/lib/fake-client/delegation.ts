@@ -274,8 +274,8 @@ export function delegationMethods(ctx: FakeContext) {
       const letter: AgentLetter = {
         id: `letter-${++ctx.seq}`,
         origin: 'user',
-        from: { coreId: 'local', threadId: sender.id, title: sender.title, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
-        to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title,
+        from: { coreId: 'local', threadId: sender.id, title: sender.title, project: ctx.projects.find(project => project.id === sender.projectId)?.name, machine: 'Boite', resources: '', status: sender.status, mode: 'team' },
+        to: { coreId: 'local', threadId: recipient.id }, toTitle: recipient.title, toProject: ctx.projects.find(project => project.id === recipient.projectId)?.name, toMachine: 'Boite',
         text: body, replyTo: null, createdAt: ctx.now(), expiresAt: ctx.now() + 15 * 60_000,
         status: 'received', error: null
       };

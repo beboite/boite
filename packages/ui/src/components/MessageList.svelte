@@ -24,7 +24,8 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomGlide, PointerHold, scrollsFirst, typingKey } from '../lib/timeline-follow';
+  import { BottomGlide, PointerHold, typingKey, wheelsUp } from '../lib/timeline-follow';
+  import { workspace } from '../lib/workspace.svelte';
 
   let {
     store,
@@ -105,6 +106,15 @@
   function letterSelf(letter: AgentLetter): { coreId: string; threadId: string } | null {
     if (delegationLetterIds.has(letter.id)) return { coreId: 'local', threadId };
     return coordination?.self ?? null;
+  }
+
+  function letterProject(letter: AgentLetter): string | undefined {
+    const self = letterSelf(letter);
+    const address = letter.from.coreId === self?.coreId && letter.from.threadId === threadId ? letter.to : letter.from;
+    if (address.coreId !== self?.coreId) return undefined;
+    const thread = store.threads.find(thread => thread.id === address.threadId)
+      ?? delegation?.agents.find(agent => agent.thread.id === address.threadId)?.thread;
+    return store.projects.find(project => project.id === thread?.projectId)?.name;
   }
 
   /** How often the bottom message's height is allowed to speak to the pin. */
@@ -394,9 +404,8 @@
     measured += 1;
     if (box && shift !== 0 && !pinned) {
       box.scrollTop += shift;
-      // The window moves with it at once. Computed on the old position against the new heights, it
-      // mounted a message above for a frame and dropped it unmeasured, which moved the text by
-      // the gap between its height and its estimate with no scroll event to read the anchor again.
+      // The window moves with it at once: computed on the old position, it mounted a message above
+      // for a frame and dropped it unmeasured, moving the text with no scroll event to read the anchor.
       scrollTop = box.scrollTop;
       if (lifting) liftFrom += shift;
     }
@@ -501,9 +510,8 @@
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
-    // Read right after each event, once the window has rendered: that render can still move
-    // what is on screen. Read before it, or deferred to the next frame or to a timer, the anchor
-    // let a navigation that followed a scroll restore the wrong place (tests/e2e/mobile.test.ts).
+    // Read right after each event, once the window has rendered. Read before that render, or a frame or
+    // a timer later, a navigation that followed a scroll restored the wrong place (tests/e2e/mobile.test.ts).
     void tick().then(rememberAnchor);
     const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
     if (glide.active) {
@@ -525,10 +533,7 @@
   let leftBottom = false;
   function onwheel(event: WheelEvent) {
     releaseNavigation();
-    const box = viewport;
-    if (event.deltaY >= 0 || !box || box.scrollTop <= 0 || box.scrollHeight <= box.clientHeight + 1) return;
-    // A tool output or a code well that can still scroll up takes the wheel itself.
-    if (scrollsFirst(event.target, box)) return;
+    if (!viewport || !wheelsUp(event, viewport)) return;
     leftBottom = true;
     if (pinned) { pinned = false; behind = true; }
   }
@@ -771,7 +776,8 @@
           {:else if workflowRows.has(message.id)}
             <WorkflowActivity {store} run={workflowRows.get(message.id)!} />
           {:else if letter && letterSelf(letter)}
-            <ForwardedAgentMessage {letter} self={letterSelf(letter)!} />
+            {@const self = letterSelf(letter)!}
+            <ForwardedAgentMessage {letter} {self} projectName={letterProject(letter)} onopen={address => void workspace.openAgentThread(store, self, address)} />
           {:else if memoryRows.has(message.id)}
             <MemoryRow event={memoryRows.get(message.id)!} onconfigure={store.owner ? () => store.showSettings('resources', 'limits') : undefined} />
           {:else if movedBy(message)}

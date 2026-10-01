@@ -255,6 +255,7 @@ export const strings = {
     syncProviders: 'Still to sign in on this machine: {providers}. Sign-ins never leave the machine they were made on.',
     syncOpenProviders: 'Open its providers',
     autoLinkFailed: 'Not linked automatically: {reason}',
+    agentLinkAddressRequired: 'Set a reachable HTTPS address for {machine} in General settings to link its agents with another machine.',
     reciprocalLink: 'Mutual trust', oneSidedLink: 'Trusted on this machine only', publicIdentityHint: 'Set the public HTTPS address of each core in General settings before linking different PCs. Both cores must reach each other. Loopback HTTP works only on the same PC.',
   },
   app: {
@@ -470,7 +471,7 @@ export const strings = {
     archive: 'Archive',
     delete: 'Delete',
     deleteUnavailable: 'Update Boite on the machine hosting this conversation to delete it. The conversation has been kept.',
-    deletedToast: 'Deleted "{title}". You can undo until Boite stops.',
+    deletedToast: 'Deleted "{title}". You can restore it from Settings.',
     /** The toast after an archive, with its way back: the button and Ctrl+Z. */
     archivedToast: 'Archived "{title}"',
     undo: 'Undo',
@@ -773,6 +774,8 @@ export const strings = {
     diffAdded: '+{count}',
     diffRemoved: '-{count}',
     noOutput: 'No output',
+    toolExitCode: 'Exit code {code}',
+    toolCommandFailed: 'Command reported failure. Expand to read the full output.',
     /** Under an expanded tool input that opened cut to six lines. */
     showAll: 'Show all',
     toolStatus: {
@@ -897,6 +900,7 @@ export const strings = {
     receivedFrom: 'Received from', sentTo: 'Your agent sent to', incoming: 'Incoming', outgoing: 'Outgoing',
     userSentTo: 'You sent to', userMessageVia: 'User message via',
     receivedStatus: 'Received',
+    machineNotConnected: 'Connect to this machine in Settings to open its thread.',
     noReceipt: 'Delivered means submitted to the recipient agent. Agent protocols provide no read receipt.',
     warning: 'Coordination warning',
     status: {
@@ -1602,10 +1606,13 @@ export const strings = {
       open: 'Open'
     },
     deleted: {
-      heading: 'Deleted this session',
-      intro: 'Undo remains available until Boite fully stops on this machine, including while it runs in the background after closing its window.',
+      heading: 'Deleted conversations',
+      retentionLabel: 'Days before permanent deletion',
+      retentionHint: 'Counted from deletion. 0 keeps conversations indefinitely. Shortening the delay also applies to conversations already deleted.',
+      retentionError: 'Enter a whole number between 0 and 3650 days.',
+      purgesAt: 'Permanent deletion: {date}',
       show: 'Show deleted conversations',
-      empty: 'No deleted conversation to undo in this session.',
+      empty: 'No deleted conversation to restore on this machine.',
     },
     /** The worktrees a thread leaves on disk, and their removal by hand. */
     worktrees: {

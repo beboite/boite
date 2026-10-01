@@ -668,7 +668,7 @@ describe('codex driver', () => {
     ]);
   });
 
-  test('a command execution item arrives running, then done with its output', async () => {
+  test.each([['command', 'done', 0], ['command-failed', 'error', 128]] as const)('a %s item preserves its status and exit code in live and saved parts', async (directive, status, exitCode) => {
     const client = await startCore();
     const threadId = await codexThread(client);
 
@@ -678,14 +678,16 @@ describe('codex driver', () => {
     });
 
     const finished = client.next('turn.finished', (turn) => turn.threadId === threadId, 20000);
-    await client.call('turns.start', { threadId, prompt: '[command]' });
+    await client.call('turns.start', { threadId, prompt: `[${directive}]` });
     expect((await finished).status).toBe('done');
 
     const tools = parts.filter((part) => part.type === 'tool');
     expect(tools).toHaveLength(2);
     expect(tools[0]).toMatchObject({ name: 'Bash', status: 'running', output: null });
     expect(tools[0]).toMatchObject({ input: { command: 'echo hello' } });
-    expect(tools[1]).toMatchObject({ name: 'Bash', status: 'done', output: 'ok' });
+    expect(tools[1]).toMatchObject({ name: 'Bash', status, output: 'ok', exitCode });
+    const saved = (await client.call('threads.get', { threadId })).messages.flatMap(message => message.parts);
+    expect(saved.find(part => part.type === 'tool')).toMatchObject({ status, exitCode });
   });
 
   test.each([

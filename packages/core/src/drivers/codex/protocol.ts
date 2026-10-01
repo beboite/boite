@@ -195,6 +195,7 @@ export type Timer = ReturnType<typeof setTimeout>;
 
 /** What one Codex `ThreadItem` is drawn as, or null when the contract has no part for it. */
 export interface ToolView {
+  exitCode?: number | null;
   nativeAgents?: NativeAgentUpdate[];
   name: string;
   input: unknown;

@@ -7,6 +7,7 @@ import { turnProgressStats } from '../lib/turn-progress.svelte';
 import { FakeClient } from '../lib/fake-client';
 import { findHits } from '../lib/find';
 import { Store } from '../lib/store.svelte';
+import { workspace } from '../lib/workspace.svelte';
 
 /**
  * jsdom has no layout, so the three numbers the window is computed from are
@@ -256,6 +257,8 @@ test('delegation letters use local family identity when coordination has another
   };
   const coordinated = {
     ...store,
+    threads: [{ id: 't-child', projectId: 'p-team' }],
+    projects: [{ id: 'p-team', name: 'Review project' }],
     coordination: {
       self: { coreId: 'real-core-id', threadId: 't-short' },
       config: { mode: 'off', resources: '', remote: false, paused: false }, messages: [], sent: 0, sendLimit: 0, wakes: 0, wakeLimit: 0
@@ -271,6 +274,13 @@ test('delegation letters use local family identity when coordination has another
   const row = document.querySelector('[data-letter-id="delegation-user"]');
   expect(row?.getAttribute('data-direction')).toBe('outgoing');
   expect(row?.textContent).toContain('You sent to');
+  expect(row?.querySelector('[data-testid=agent-letter-project]')?.textContent).toBe('Review project');
+  expect(row?.querySelector('[data-testid=agent-letter-status] svg.lucide-check-check')).not.toBeNull();
+  const open = vi.spyOn(workspace, 'openAgentThread').mockResolvedValue();
+  try {
+    row?.querySelector<HTMLButtonElement>('[data-testid=agent-letter-open]')?.click();
+    expect(open).toHaveBeenCalledWith(coordinated, { coreId: 'local', threadId: 't-short' }, letter.to);
+  } finally { open.mockRestore(); }
 });
 
 /** A store whose thread still has older messages behind the window. */

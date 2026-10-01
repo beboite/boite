@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { connect } from '../src/client.ts';
+import { Core } from '../src/core.ts';
 import { threadTerminalId } from '../src/terminals.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
 
@@ -110,3 +112,57 @@ test('a paired device cannot delete conversations and agent sessions stay manage
   });
   expect(harness.core.journal.getThread(threadId)).not.toBeNull();
 });
+
+test('startup retains recoverable history with persisted zero days, then purges expired deletions with a saved delay', async () => {
+  const { threadId } = await echoThread(harness, client);
+  const { threadId: recentId } = await echoThread(harness, client, 'recent deletion');
+  for (const id of [threadId, recentId]) {
+    const turn = await client.call('turns.start', { threadId: id, prompt: 'Retain this conversation history' });
+    await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
+  }
+  await client.call('settings.set', { threadDeletionRetentionDays: 0 });
+  for (const id of [threadId, recentId]) await client.call('threads.remove', { threadId: id });
+  const history = harness.core.journal.listMessages(threadId);
+  harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 40 * 86_400_000, threadId);
+  const dir = mkdtempSync(join(tmpdir(), 'boite-retention-restart-'));
+  harness.core.journal.db.query('VACUUM INTO ?').run(join(dir, 'journal.db'));
+  let restarted = new Core({ dataDir: dir, token: harness.token });
+  try {
+    expect(restarted.settings.get().threadDeletionRetentionDays).toBe(0);
+    expect(restarted.journal.listDeletedThreads().map(t => t.id).sort()).toEqual([threadId, recentId].sort());
+    restarted.threads.restoreDeleted(threadId);
+    expect(restarted.journal.listMessages(threadId)).toEqual(history);
+    expect(restarted.procs.liveCount(threadId)).toBe(0);
+    await restarted.threads.remove(threadId);
+    restarted.settings.set({ threadDeletionRetentionDays: 1 });
+    restarted.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, threadId);
+    await restarted.close();
+    restarted = new Core({ dataDir: dir, token: harness.token });
+    expect(restarted.settings.get().threadDeletionRetentionDays).toBe(1);
+    expect(restarted.journal.listDeletedThreads().map(t => t.id)).toEqual([recentId]);
+    expect(restarted.journal.listMessages(threadId)).toEqual([]);
+    expect(() => restarted.threads.restoreDeleted(threadId)).toThrow('no recoverable deletion');
+    expect(restarted.journal.listMessages(recentId).length).toBeGreaterThan(0);
+  } finally {
+    await restarted.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test('resident retention purges expired deletions and notifies clients without a list request', async () => {
+  const { threadId } = await echoThread(harness, client);
+  const turn = await client.call('turns.start', { threadId, prompt: 'history' });
+  await waitFor(() => harness.core.journal.getTurn(turn.id)?.status === 'done');
+  expect(harness.core.journal.listMessages(threadId).length).toBeGreaterThan(0);
+  for (const value of [-1, 0.5, 3651, null, '7']) {
+    const error = await client.call('settings.set', { threadDeletionRetentionDays: value as number }).catch(error => error);
+    expect(error).toMatchObject({ rpc: { code: RpcErrorCode.InvalidParams, data: { field: 'threadDeletionRetentionDays' } } });
+  }
+  await client.call('settings.set', { threadDeletionRetentionDays: 1 });
+  await client.call('threads.remove', { threadId });
+  let notifications = 0;
+  client.on('thread.deletionsUpdated', () => { notifications++; });
+  harness.core.journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE root_id = ?').run(Date.now() - 2 * 86_400_000, threadId);
+  await waitFor(() => harness.core.journal.listDeletedThreads().length === 0 && notifications > 0, 70_000);
+  expect(harness.core.journal.listMessages(threadId)).toEqual([]);
+}, 75_000);

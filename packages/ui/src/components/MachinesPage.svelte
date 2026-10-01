@@ -199,7 +199,7 @@
   </div>
 
   <!-- Links join two machines this window owns: with one, the card has nothing to offer. -->
-  {#if !mobile && workspace.machines.filter(machine => machine.store.owner).length > 1}
+  {#if workspace.machines.filter(machine => machine.store.owner).length > 1}
     <RemoteCoordination />
   {/if}
 

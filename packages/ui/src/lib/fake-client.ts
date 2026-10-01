@@ -32,7 +32,7 @@ import { settingsMethods } from './fake-client/settings';
 import { DEVICE_METHODS, toSummary } from './fake-client/shared';
 import { speechMethods } from './fake-client/speech';
 import { terminalMethods } from './fake-client/terminals';
-import { threadMethods } from './fake-client/threads';
+import { purgeDeletedThreads, threadMethods } from './fake-client/threads';
 import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
@@ -117,6 +117,7 @@ export class FakeClient implements ObservableClient {
   }
 
   async connect(): Promise<CoreInfo> {
+    purgeDeletedThreads(this.#ctx);
     this.#ctx.agents.open();
     this.#ctx.bus.setState('connecting');
     await this.#ctx.tick();
@@ -125,7 +126,6 @@ export class FakeClient implements ObservableClient {
   }
 
   close(): void {
-    this.#ctx.deletedThreads.clear();
     const ctx = this.#ctx;
     ctx.agents.close();
     unregisterCore(ctx);

@@ -4,8 +4,13 @@
  * glide that takes it back down. `MessageList.svelte` owns the state these act on.
  */
 
+/** Whether this wheel turns the list itself up: it can scroll, and nothing under the pointer takes the wheel first. */
+export function wheelsUp(event: WheelEvent, box: HTMLElement): boolean {
+  return event.deltaY < 0 && box.scrollTop > 0 && box.scrollHeight > box.clientHeight + 1 && !scrollsFirst(event.target, box);
+}
+
 /** Whether something between the pointer and the list scrolls up before the list does: a tool output, a code well. */
-export function scrollsFirst(target: EventTarget | null, box: HTMLElement): boolean {
+function scrollsFirst(target: EventTarget | null, box: HTMLElement): boolean {
   for (let node = target instanceof Element ? target : null; node && node !== box; node = node.parentElement) {
     if (node.scrollTop <= 0 || node.scrollHeight <= node.clientHeight) continue;
     const overflow = getComputedStyle(node).overflowY;
