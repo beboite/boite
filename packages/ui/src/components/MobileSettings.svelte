@@ -40,7 +40,7 @@
     : page === 'resources' ? strings.settings.tabs.resources
     : page === 'experiments' ? strings.settings.tabs.experiments : strings.machines.heading);
   /** The page's own title and its info mark step aside for the bar, so the bar carries the mark. */
-  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}` : page === 'limits' ? strings.usage.limitsIntro
+  let info = $derived(page === 'usage' ? `${strings.usage.intro} ${strings.usage.note}`
     : page === 'experiments' ? strings.settings.experiments.intro : '');
   let detail = $derived(page !== 'home');
   $effect(() => { if (detail) return mobileOverlay(back); });
