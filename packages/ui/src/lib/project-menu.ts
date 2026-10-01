@@ -1,4 +1,4 @@
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, GitBranch, History, Import, Plus, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
+import { Archive, ArrowDown, ArrowLeft, ArrowUp, Copy, GitBranch, History, Import, RefreshCw, Settings, Trash2 } from '@lucide/svelte';
 import type { Project } from '@boite/contracts';
 import type { Store } from './store.svelte';
 import { workspace } from './workspace.svelte';
@@ -35,8 +35,7 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
     ...(owner.owner ? [{ id: 'remove', label: strings.sidebar.removeProject, glyph: Trash2, danger: true }] : [])
   ];
   const main: MenuItem[] = [
-    { id: 'new', label: strings.sidebar.newThread, glyph: Plus },
-    { id: 'copy', label: strings.sidebar.copyPath, title: project.path, glyph: Copy },
+    { id: 'copy', label: strings.sidebar.copyPath, glyph: Copy },
     { id: 'archived', label: strings.sidebar.viewArchivedThreads, glyph: History },
     ...(owner.owner || project.kind !== 'drafts' || reorder
       ? [separator(), { id: 'manage', label: strings.sidebar.manageProject, glyph: Settings, hint: '›' }]
@@ -49,7 +48,6 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'manage') return contextMenu.follow(management, pick);
       if (action === 'back') return contextMenu.follow(main, pick);
       if (action === 'move-up' || action === 'move-down') reorder?.move(action === 'move-up' ? -1 : 1);
-      if (action === 'new') await workspace.select(owner, undefined, project.id);
       if (action === 'copy') await owner.copy(project.path);
       if (action === 'archived') {
         if (workspace.active !== owner) await workspace.select(owner);
