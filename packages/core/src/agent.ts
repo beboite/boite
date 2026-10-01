@@ -197,6 +197,15 @@ export function setTasks(core: Core, params: RpcParams<'threads.tasks.set'>): Th
 export function registerAgentMethods(core: Core): void {
   core.router.register('artifacts.publish', (params) => publishArtifact(core, params));
   core.router.register('artifacts.read', (params) => readArtifact(core, params));
+  core.router.register('artifacts.preview', ({ threadId, path }) => {
+    const preview = core.artifactPreviews.open(threadId, path);
+    core.bus.emit('panel.requested', { threadId, surface: { kind: 'browser', url: preview.url, artifact: { path: preview.path, port: preview.port } }, at: Date.now() });
+    return { url: preview.url, shown: core.subscribers.hasSubscribers(threadId) };
+  });
+  core.router.register('artifacts.previewClose', ({ threadId, path }) => {
+    core.artifactPreviews.close(threadId, path);
+    return { ok: true };
+  });
   core.router.register('agent.where', (params) => whereOf(core, core.threads.require(params.threadId)));
   // The access check already held the call to the token's own thread.
   core.router.register('agent.move', (params) => core.threads.moves.request(params.threadId, params.project));

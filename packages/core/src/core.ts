@@ -28,6 +28,7 @@ import { SettingsStore } from './settings.ts';
 import { ThreadStore } from './threads.ts';
 import { scheduleThreadDeletionRetention } from './threads/deletion-retention.ts';
 import { scheduleArtifactRetention } from './artifact-retention.ts';
+import { ArtifactPreviews } from './artifact-preview.ts';
 import { QuotaStore } from './quotas.ts';
 import { PluginStore } from './plugins.ts';
 import { Worktrees } from './worktree.ts';
@@ -144,6 +145,7 @@ export class Core {
   readonly hooks: HookLedger;
   readonly terminals: TerminalStore;
   readonly stopArtifactRetention: () => Promise<void>;
+  readonly artifactPreviews = new ArtifactPreviews(this);
 
   /**
    * The server tells the core what it alone can know. The default answers no
@@ -344,6 +346,7 @@ export class Core {
   get stopping(): boolean { return this.#stopping; }
 
   async close(): Promise<void> {
+    this.artifactPreviews.stop();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();

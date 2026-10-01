@@ -135,6 +135,20 @@ test('fake artifacts refuse publication if the thread is archived during the med
   } finally { fetchMedia.mockRestore(); read.mockRestore(); client.close(); }
 });
 
+test('fake HTML artifacts open through the same RPC and owner events as real previews', async () => {
+  const client = new FakeClient({ delayMs: 0 }); await client.connect();
+  try {
+    await client.call('threads.subscribe', { threadId: 't-trace' });
+    await client.call('files.write', { threadId: 't-trace', path: 'demo.html', text: '<h1>Preview</h1>' });
+    const seen: unknown[] = []; client.on('panel.requested', value => seen.push(value));
+    const result = await client.call('artifacts.preview', { threadId: 't-trace', path: 'demo.html' });
+    expect(result.shown).toBe(true);
+    expect(seen).toContainEqual(expect.objectContaining({ threadId: 't-trace', surface: { kind: 'browser', url: result.url } }));
+    await expect(client.call('artifacts.preview', { threadId: 't-trace', path: '../outside.html' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    expect(await client.call('artifacts.previewClose', { threadId: 't-trace', path: 'demo.html' })).toEqual({ ok: true });
+  } finally { client.close(); }
+});
+
 test('fake delegation enforces family access and keeps request IDs idempotent', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();
