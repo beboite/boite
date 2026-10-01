@@ -1,6 +1,7 @@
 /** `agent.spawn`, as the core's `threads/spawn.ts` answers it: the same refusals, a real thread with the brief as its first message. */
-import { RpcErrorCode, type AgentSpawn, type Message, type ThreadLink } from '@boite/contracts';
+import { RpcErrorCode, type AgentProjectAdded, type AgentSpawn, type Message, type ThreadLink } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { missingFolder, pathKey } from './checks';
 import { coordinationConfig } from './coordination';
 import { toSummary } from './shared';
 import { resolveProject } from './thread-move';
@@ -17,10 +18,37 @@ function refuse(message: string, data: Record<string, unknown>): RpcFailure {
  * idempotent. The answer the core sends back when the first turn ends is not
  * simulated: the fake's turns finish on their own schedule.
  */
-export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.create']) {
+export function spawnMethods(ctx: FakeContext, create: FakeMethods['threads.create'], addProject: FakeMethods['projects.add']) {
   const ledgers = new Map<string, { requestId: string; at: number; answer: AgentSpawn }[]>();
   const origins = new Map<string, ThreadLink>();
   return {
+    'agent.addProject': async (params): Promise<AgentProjectAdded> => {
+      const method = 'agent.addProject';
+      const caller = ctx.thread(params.threadId);
+      if (caller.agentSessionId || caller.projectId === null) throw refuse('a persistent agent session takes its work through Agents and cannot add projects', { threadId: caller.id, field: 'threadId' });
+      if (caller.parentThreadId) throw refuse('a delegated agent or workflow step cannot add projects; ask its parent', { threadId: caller.id, field: 'threadId' });
+      const path = typeof params.path === 'string' ? params.path.trim() : '';
+      if (!path || !/^([A-Za-z]:[\\/]|[\\/])/.test(path)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: `${method}.path: expected an absolute folder, got ${path}` });
+      const answer = (p: { id: string; name: string; path: string; repository?: boolean; kind?: string }, added: boolean): AgentProjectAdded => (
+        { id: p.id, name: p.name, path: p.path, repository: p.repository === true, drafts: p.kind === 'drafts', current: p.id === caller.projectId, added });
+      const known = ctx.projects.find(p => pathKey(p.path) === pathKey(path));
+      if (known) return answer(known, false);
+      const config = coordinationConfig(ctx, caller.id);
+      if (config.mode === 'off') throw refuse(`${method}: communication is off for this thread; the owner turns it on in Communication settings`, { threadId: caller.id, field: 'coordination' });
+      if (config.paused) throw refuse(`${method}: communication is paused for this thread; only the owner resumes it`, { threadId: caller.id, field: 'coordination' });
+      if (!config.remote) throw refuse(`${method}: this thread may only reach its own project; the owner allows other projects in Communication settings`, { threadId: caller.id, field: 'coordination' });
+      if (origins.has(caller.id) && caller.messages.filter(m => m.role === 'user').length <= 1) throw refuse('a thread an agent started cannot add a project until the user writes in it', { threadId: caller.id, field: 'threadId' });
+      if (missingFolder(path)) throw refuse('a project path must be an existing directory', { path });
+      const project = await addProject({ path, ...(params.name === undefined ? {} : { name: params.name.trim() }) });
+      const line: Message = {
+        id: `m-${++ctx.seq}`, threadId: caller.id, turnId: caller.turns.at(-1)?.id ?? `turn-${++ctx.seq}`, role: 'system', state: 'complete', createdAt: ctx.now(),
+        parts: [{ type: 'text', text: `The agent added the project ${project.name} (${project.path}).` }],
+      };
+      caller.messages.push(line);
+      ctx.emitToThread(caller.id, 'message.started', structuredClone(line));
+      ctx.emitToThread(caller.id, 'message.completed', { threadId: caller.id, messageId: line.id, state: 'complete' });
+      return answer(project, true);
+    },
     'agent.spawn': async (params): Promise<AgentSpawn> => {
       const caller = ctx.thread(params.threadId);
       if (caller.agentSessionId || caller.projectId === null) throw refuse('a persistent agent session takes its work through Agents and cannot start threads', { threadId: caller.id, field: 'threadId' });

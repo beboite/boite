@@ -1633,6 +1633,12 @@ export interface AgentProject {
   current: boolean;
 }
 
+/** The answer of `agent.addProject`: the project, and whether this call registered it. */
+export interface AgentProjectAdded extends AgentProject {
+  /** False when the folder was already a project; nothing changed then. */
+  added: boolean;
+}
+
 /**
  * One end of `agent.spawn`. On the new thread's first prompt as `startedBy`
  * (the thread whose agent started it), and on a system line of the starting
@@ -2313,6 +2319,19 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * `current`: the names `delegation.spawn` and `agent.move` accept.
    */
   'agent.projects': { params: { threadId: ThreadId }; result: AgentProject[] };
+  /**
+   * The agent registers an existing folder as a project, as the owner does
+   * from the sidebar, so `agent.spawn` and `agent.move` can name it. `path` is
+   * absolute; `name` defaults to the folder's name. A folder that is already a
+   * project answers it with `added: false` and changes nothing, an archived
+   * one included. Refused under the same Communication settings as
+   * `agent.spawn` across projects (off, paused, restricted to its own
+   * project), for a
+   * delegated child or a persistent agent session, and for a thread an agent
+   * started until the user has written in it. The caller's timeline gets a
+   * system line naming the project.
+   */
+  'agent.addProject': { params: { threadId: ThreadId; path: string; name?: string }; result: AgentProjectAdded };
   /**
    * The agent starts a new top-level thread in a project the owner added
    * (id, name or absolute folder), on its own provider, account, model,
