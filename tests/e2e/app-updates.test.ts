@@ -74,6 +74,7 @@ afterAll(async () => { await server?.close(); }, 15_000);
 test('footer icons open a compact update popup with release details and an external changelog', async () => {
   await page.navigate(`${base}/?fake=1&open=recent&machines=1&appUpdate=ready&appUpdateChannel=nightly`);
   await page.waitFor(`document.querySelector('${id('nav-settings')}')`);
+  await page.waitFor(`document.querySelector('${id('nav-app-update')}')`);
   expect(await page.evaluate(`document.querySelector('.foot ${id('nav-app-update')}') !== null`)).toBe(true);
   expect((await page.text(id('add-project'))).trim()).toBe('');
   expect((await page.text(id('panel-toggle'))).trim()).toBe('');

@@ -777,9 +777,12 @@ trigger and the available viewport, so the sidebar and glass composer cannot
 cover them. Phone pickers share the bottom sheet; typing suggestions stay by
 the composer.
 
-The sidebar, right panel and terminal use the same short fade and vertical
-movement. The terminal and right panel stay mounted through their exit, and
-archive drawers use the shared grid fold. All durations honor reduced motion.
+The sidebar and right panel use a short fade and vertical movement. The thread
+terminal unfolds the frame below the chat, starting its shell at the click
+while the terminal renderer loads. Its fixed inner viewport avoids resizing
+the shell every animation frame. The terminal and right panel stay mounted
+through their exit, and archive drawers use the shared grid fold. All durations
+honor reduced motion.
 
 Unsent messages are saved in IndexedDB with strict transaction durability,
 separately for each core and data directory. A small synchronous text backup

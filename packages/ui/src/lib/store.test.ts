@@ -14,6 +14,94 @@ import { browserBridge } from './browser-bridge';
 import { rightPanel } from './right-panel.svelte';
 import { readStoredEndpoint, storeEndpoint } from './endpoint';
 
+test('opening the drawer starts its shell before a view mounts and shares an in-flight start', async () => {
+  const { store, client } = await ready();
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'terminals.open') await gate;
+    return result;
+  });
+  try {
+    store.toggleTerminal();
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
+    await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'early-output' });
+    const attaching = store.openTerminal(threadId, 100, 30);
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
+    release();
+    const state = await attaching;
+    expect(state?.id).toBe(`terminal:${threadId}`);
+    expect(state?.output.match(/early-output/g)).toHaveLength(1);
+    // Closing still hides a drawer whose lazy display never mounted.
+    await store.closeTerminal(`terminal:${threadId}`);
+    expect(store.terminalShown(threadId)).toBe(false);
+  } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
+});
+
+test('an older core keeps output arriving before the lazy terminal view attaches', async () => {
+  const { store, client } = await ready();
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const call = client.call.bind(client);
+  const stop = client.on('terminal.output', (event) => { Reflect.deleteProperty(event, 'sequence'); });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'terminals.open') {
+      // Older cores return snapshots without an output sequence.
+      Reflect.deleteProperty(result as object, 'sequence');
+      await gate;
+    }
+    return result;
+  });
+  try {
+    store.toggleTerminal();
+    await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'legacy-early-output' });
+    const attaching = store.openTerminal(threadId, 100, 30);
+    release();
+    const state = await attaching;
+    expect(state?.output.match(/legacy-early-output/g)).toHaveLength(1);
+  } finally { release(); stop(); spy.mockRestore(); client.close(); store.detach(); }
+});
+
+test('closing a thread shell invalidates a legacy refresh and delayed view attachment until reopening', async () => {
+  const { store, client } = await ready();
+  await store.open(store.threads[0]!.id);
+  const threadId = store.openThread!.id;
+  const call = client.call.bind(client);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const spy = vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await call(method, params);
+    if (method === 'terminals.open') {
+      Reflect.deleteProperty(result as object, 'sequence');
+      await gate;
+    }
+    return result;
+  });
+  try {
+    store.toggleTerminal();
+    await client.call('terminals.write', { id: `terminal:${threadId}`, data: 'early-output' });
+    const attaching = store.openTerminal(threadId, 100, 30);
+    await store.closeTerminal(`terminal:${threadId}`);
+    release();
+    expect(await attaching).toBeNull();
+    expect(await store.openTerminal(threadId, 100, 30)).toBeNull();
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(1);
+    expect(store.terminalShown(threadId)).toBe(false);
+    // An explicit owner action can start a new shell after the previous one closed.
+    store.toggleTerminal();
+    expect((await store.openTerminal(threadId, 100, 30))?.id).toBe(`terminal:${threadId}`);
+    expect(spy.mock.calls.filter(([method]) => method === 'terminals.open')).toHaveLength(2);
+    expect(store.terminalShown(threadId)).toBe(true);
+  } finally { release(); spy.mockRestore(); client.close(); store.detach(); }
+});
+
 test('a rejected terminal keystroke reports the failure instead of leaving a silent prompt', async () => {
   const { store, client } = await ready();
   const call = vi.spyOn(client, 'call').mockRejectedValue(new RpcFailure({ code: RpcErrorCode.Unavailable, message: 'Remote terminal transport unavailable' }));
