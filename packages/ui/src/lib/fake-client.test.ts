@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName } from '@boite/contracts';
+import { DEFAULT_DELEGATION_CONFIG, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName, type Turn } from '@boite/contracts';
+import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 
 afterEach(() => vi.useRealTimers());
 
@@ -837,5 +838,32 @@ test('fake retention keeps indefinite deletions and applies a shorter saved dela
     expect(await client.call('threads.deleted', {})).toEqual([]);
     expect(notifications).toBe(1);
     await expect(client.call('threads.restore', { threadId: 't-trace' })).rejects.toMatchObject({ code: RpcErrorCode.NotFound });
+  } finally { client.close(); }
+});
+
+test('the fake core compacts by itself at the end of a turn once the threshold is reached', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const threadId = 't-trace';
+    const finished = (operation?: string) => new Promise<Turn>(resolve => {
+      const off = client.on('turn.finished', turn => { if (turn.threadId === threadId && turn.execution?.operation === operation) { off(); resolve(turn); } });
+    });
+    await client.call('settings.set', { autoCompact: { tokens: 10_000_000, moments: ['turn-end'] } });
+    let done = finished();
+    await client.call('turns.start', { threadId, prompt: 'first' });
+    await done;
+    await new Promise(resolve => setTimeout(resolve, FAKE_AUTO_COMPACT_SETTLE_MS + 100));
+    expect((await client.call('threads.get', { threadId })).turns.some(turn => turn.execution?.operation === 'compact')).toBe(false);
+
+    await client.call('settings.set', { autoCompact: { tokens: 1_000, moments: ['turn-end'] } });
+    const compacted = finished('compact');
+    done = finished();
+    await client.call('turns.start', { threadId, prompt: 'second' });
+    await done;
+    expect((await compacted).execution?.automatic).toBe(true);
+    const thread = await client.call('threads.get', { threadId });
+    expect(thread.messages.findLast(message => message.role === 'system')?.parts[0]).toMatchObject({ displayText: 'Automatic compaction' });
+    expect(thread.messages.at(-1)?.parts.at(-1)).toMatchObject({ type: 'compaction', trigger: 'auto' });
   } finally { client.close(); }
 });

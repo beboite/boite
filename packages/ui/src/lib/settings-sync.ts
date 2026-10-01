@@ -31,7 +31,8 @@ export const PORTABLE_SETTINGS = [
   'focusGuard',
   'muteAgents',
   'reapOrphans',
-  'asyncQuestions'
+  'asyncQuestions',
+  'autoCompact'
 ] as const satisfies readonly (keyof Settings)[];
 
 /** One machine as the sync sees it: its connection and what its store last listed. */
