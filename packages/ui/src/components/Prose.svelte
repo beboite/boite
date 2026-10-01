@@ -7,6 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import ChatFile from './ChatFile.svelte';
   import { executableLink, localFileDirectory, openLocalFile } from '../lib/local-files';
+  import { glides } from '../lib/motion';
 
   let { text, live = false, store, threadId }: { text: string; live?: boolean; store?: Store; threadId?: string } = $props();
   let selected = $state<{ path: string; line?: number } | null>(null);
@@ -20,7 +21,7 @@
       if (href?.startsWith('#')) {
         try {
           const heading = host?.querySelector(`[id="${CSS.escape(decodeURIComponent(href.slice(1)))}"]`);
-          if (heading) { event.preventDefault(); heading.scrollIntoView({ block: 'nearest' }); }
+          if (heading) { event.preventDefault(); heading.scrollIntoView({ block: 'nearest', behavior: glides() ? 'smooth' : 'auto' }); }
         } catch { /* A malformed fragment is not a local file. */ }
       }
       return;
@@ -106,11 +107,14 @@
 <style>
   .prose {
     word-break: break-word;
-    line-height: 1.65;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
   }
 
+  /* `pretty` keeps a paragraph from ending on one stranded word. */
   .prose :global(p) {
     white-space: pre-wrap;
+    text-wrap: pretty;
     margin: 0 0 12px;
   }
 
@@ -118,27 +122,43 @@
     margin-bottom: 0;
   }
 
+  /* `#` to `####` arrive as h3 to h6 (lib/markdown.ts) and step down in size,
+     so a section reads above its subsections. A heading sits closer to what it
+     names than to what it follows. */
   .prose :global(h3),
   .prose :global(h4),
   .prose :global(h5),
   .prose :global(h6) {
-    font-size: var(--text-md);
-    margin: 12px 0 6px;
+    font-size: 1em;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
+    margin: 22px 0 8px;
   }
+
+  .prose :global(h3) { font-size: 1.3em; letter-spacing: -0.015em; }
+  .prose :global(h4) { font-size: 1.15em; letter-spacing: -0.01em; }
+  .prose :global(h6) { color: var(--color-muted-foreground); }
+
+  /* A heading alone in its block: its own bottom margin replaces the block gap under it. */
+  .paragraph > :global(:is(h3, h4, h5, h6):last-child) { margin-bottom: -4px; }
+  .paragraph:first-child > :global(:is(h3, h4, h5, h6):first-child) { margin-top: 0; }
 
   .prose :global(ul),
   .prose :global(ol) {
     margin: 0 0 12px;
-    padding-left: 22px;
+    padding-left: 24px;
   }
 
   .prose :global(li) {
-    margin: 2px 0;
+    text-wrap: pretty;
+    margin: 4px 0;
   }
+
+  .prose :global(li::marker) { color: var(--color-muted-foreground); }
 
   .prose :global(code) {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: 0.875em;
     padding: 1px 5px;
     border-radius: var(--radius-sm);
     background: var(--color-code-background);
@@ -148,7 +168,9 @@
 
   .prose :global(pre) {
     margin: 6px 0 10px;
-    padding: 10px 12px;
+    padding: 12px 14px;
+    font-size: var(--text-sm);
+    line-height: 1.6;
     border-radius: var(--radius-md);
     background: var(--color-code-background);
     color: var(--color-code-foreground);
@@ -176,6 +198,7 @@
   }
 
   .prose :global(pre code) {
+    font-size: inherit;
     padding: 0;
     border: none;
     background: transparent;
@@ -184,8 +207,13 @@
 
   .prose :global(a) {
     text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+    text-decoration-color: color-mix(in oklch, currentColor 45%, transparent);
+    text-underline-offset: 3px;
+    transition: text-decoration-color var(--dur-2) var(--ease-out-quint);
   }
+
+  .prose :global(a:hover) { text-decoration-color: currentColor; }
 
   .prose :global(ul ul),
   .prose :global(ol ol),
@@ -247,6 +275,7 @@
     border-radius: var(--radius-md);
     background: var(--color-surface-2);
     font-size: var(--text-sm);
+    line-height: 1.5;
   }
 
   .prose :global(th),

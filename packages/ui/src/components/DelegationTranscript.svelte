@@ -38,7 +38,7 @@
   .transcript-list { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
   article { min-width: 0; }
   article.user { align-self: flex-end; max-width: 82%; padding: 8px 11px; border-radius: var(--radius-lg); background: var(--color-surface-2); }
-  .user-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .user-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-reading); line-height: var(--leading-reading); }
   details { color: var(--color-muted-foreground); font-size: var(--text-sm); }
   details summary { cursor: pointer; }
   .thinking { margin: 6px 0 0; padding-left: 8px; border-left: 2px solid var(--color-border); white-space: pre-wrap; }

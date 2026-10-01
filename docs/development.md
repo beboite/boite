@@ -851,6 +851,16 @@ panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
 
+A conversation is read and written in one size, the `--text-reading` and
+`--leading-reading` tokens of `app.css`: 15 px on a 24 px line on the wide
+layout, 16 px on a phone, where a field already types at 16 px. Answers, sent
+prompts, the composer, plans and delegated transcripts use them; the chrome,
+tool cards, tables and code blocks keep `--text-base` and `--text-sm`. In an
+answer, `#` to `####` step down from 1.3 em to the body size, and a heading
+sits 22 px under what precedes it and 8 px above what it names. The same test
+checks that the answer, the sent prompt and the composer share one size at
+both widths. The composer's caret and its focus hairline wear the accent.
+
 An accepted prompt from this client glides to the top of the timeline. Reserved
 space below it shrinks as the answer grows; once the answer fills the viewport,
 the timeline follows its bottom. Wheel, touch, pointer and keyboard input release
