@@ -11,6 +11,7 @@
   import { fill, strings } from '../lib/strings';
   import { FIRST_MODELS, favoriteIds, firstModels, groupModels } from '../lib/model-list';
   import { pickerKeydown } from '../lib/model-picker-keys';
+  import { discoversModels } from '../lib/store/models.svelte';
   import type { Choice, PickPatch, Store } from '../lib/store.svelte';
 
   /**
@@ -39,6 +40,8 @@
 
   /** Long lists get prefix groups and a bounded first page. */
   const SEARCH_FROM = 12;
+  /** Enough placeholder rows to fill the column, as the answer usually does. */
+  const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
 
   const popover = new Closing();
   const legacy = new Closing();
@@ -62,8 +65,7 @@
     if (favoritePending) return;
     favoritePending = true;
     try {
-      const protocol = store.providerOf(entry.providerId)?.protocol;
-      if (protocol === 'claude-sdk' || protocol === 'acp' || protocol === 'codex-appserver' || protocol === 'muse' || protocol === 'pi' || protocol === 'agy') await store.probeModels(entry.providerId, entry.accountId);
+      if (discoversModels(store.providerOf(entry.providerId)?.protocol)) await store.probeModels(entry.providerId, entry.accountId);
       if (!store.modelsOf(entry.providerId, entry.accountId).some((m) => m.id === entry.model.id)) { store.error = strings.composer.favoriteUnavailable; return; }
       onpick({ providerId: entry.providerId, accountId: entry.accountId, model: entry.model.id });
       popover.hide();
@@ -92,10 +94,15 @@
     const install = store.installOf(shown.id);
     return install !== null && install.state !== 'installed';
   });
-  let shownModels = $derived(shown ? orderedModels(store.modelsOf(shown.id, shownAccountId)) : []);
+  let shownModels = $derived(shown ? orderedModels(store.listedModelsOf(shown.id, shownAccountId)) : []);
   let probing = $derived(shown ? store.isProbing(shown.id, shownAccountId) : false);
-  /** No answer yet for this instance: the descriptor's list would be replaced once it lands. */
+  /**
+   * No answer yet for this instance, live or cached: placeholders from the first
+   * frame, never the descriptor's list that the answer would replace. A refresh
+   * of a cached answer keeps it listed until the new one lands whole.
+   */
   let pending = $derived(shown ? store.modelsPending(shown.id, shownAccountId) : false);
+  let outdated = $derived(shown ? store.modelsOutdated(shown.id, shownAccountId) : false);
 
   async function refreshModels() {
     if (favoritesOpen) {
@@ -113,11 +120,12 @@
   // core reads it from one short-lived agent process. Reopening also refreshes
   // a catalog whose cached answer has expired.
   // Nothing is asked of a provider whose executable is not on the machine.
+  // Reading `pending` and `outdated` asks again when a reload or an account
+  // change outdates the shown answer while the picker is open.
   $effect(() => {
-    if (!popover.open || favoritesOpen || !shown || needsInstall) return;
-    if (shown.protocol !== 'claude-sdk' && shown.protocol !== 'acp' && shown.protocol !== 'codex-appserver' && shown.protocol !== 'muse' && shown.protocol !== 'pi' && shown.protocol !== 'agy') return;
+    if (!popover.open || favoritesOpen || !shown || needsInstall || !discoversModels(shown.protocol)) return;
     const accountId = shownAccountId;
-    if (accountId === null) return;
+    if (accountId === null || (probing && !pending && !outdated)) return;
     void store.probeModels(shown.id, accountId);
   });
 
@@ -383,17 +391,24 @@
               {strings.composer.installInSettings}
             </button>
           {/if}
-        {:else if pending}
-          <!-- The first answer is on its way: the descriptor's list would jump
-               to another one, so the column holds placeholders until it lands.
-               The reading line comes first, where a short phone column still shows it. -->
-          <p class="none subtle probing first" data-testid="picker-probing">{strings.composer.probing}</p>
-          <div class="skeletons" aria-hidden="true">
-            {#each [0, 1, 2] as index (index)}<span class="skeleton"></span>{/each}
-          </div>
         {:else}
           <ModelSearch bind:value={modelQuery} bind:input={searchBox} />
-          {#if grouped}
+          <!-- First, where a short phone column still shows it, on a first read and a refresh alike. -->
+          {#if probing}
+            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
+          {/if}
+          {#if pending}
+            <!-- The first answer is on its way: the descriptor's list would jump
+                 to another one, so the column holds rows shaped like the ones to come. -->
+            <div class="skeletons" aria-hidden="true">
+              {#each SKELETON_ROWS as index (index)}
+                <div class="model-entry">
+                  <span class="row model"><span class="mark"></span><span class="skeleton name-line"></span></span>
+                  <span class="favorite-button"><span class="skeleton star"></span></span>
+                </div>
+              {/each}
+            </div>
+          {:else if grouped}
             {#if pinnedModel}
               {@render modelRow(pinnedModel)}
             {/if}
@@ -413,11 +428,11 @@
               {@render modelRow(model)}
             {/each}
           {/if}
-          {#if !pinnedModel && filteredCurrent.length === 0 && modelQuery.trim() !== ''}
+          {#if !pending && !pinnedModel && filteredCurrent.length === 0 && modelQuery.trim() !== ''}
             <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
           {/if}
 
-          {#if filteredLegacy.length > 0}
+          {#if !pending && filteredLegacy.length > 0}
             <button
               type="button"
               class="row fold small"
@@ -432,9 +447,6 @@
           {/if}
           {#if shown && shownModels.length === 0 && !probing}
             <p class="none subtle">{strings.composer.noModels}</p>
-          {/if}
-          {#if probing}
-            <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>
           {/if}
         {/if}
         </div>
@@ -670,25 +682,28 @@
     font-size: var(--text-sm);
   }
 
-  /* The agent is being asked for its models; on a refresh the listed ones stay above. */
+  /* The agent is being asked for its models; on a refresh the listed ones stay below. */
   p.probing {
-    margin-top: 2px;
+    padding-top: 0;
     font-size: var(--text-sm);
   }
-  p.probing.first { margin: 0 0 4px; }
 
-  /* Placeholder rows while the first answer is read, the size of a model row. */
-  .skeletons { display: flex; flex-direction: column; gap: 1px; }
+  /* Placeholder rows built like a model row: its mark, its name, its star. */
+  .skeletons { pointer-events: none; }
   .skeleton {
     display: block;
-    min-height: var(--row);
-    margin: 0 8px;
     border-radius: var(--radius-sm);
-    background: var(--color-hover);
+    background: var(--color-edge);
     animation: skeleton-pulse calc(var(--dur-whip) * 3) var(--ease-out-quint) infinite alternate;
   }
-  .skeleton:nth-child(2) { margin-right: 25%; }
-  .skeleton:nth-child(3) { margin-right: 40%; }
+  .skeleton.name-line { flex: none; height: 10px; width: 62%; }
+  .model-entry:nth-child(2) .name-line { width: 48%; }
+  .model-entry:nth-child(3) .name-line { width: 72%; }
+  .model-entry:nth-child(4) .name-line { width: 54%; }
+  .model-entry:nth-child(5) .name-line { width: 40%; }
+  .model-entry:nth-child(6) .name-line { width: 66%; }
+  .favorite-button:has(.star) { display: grid; place-items: center; }
+  .skeleton.star { width: 14px; height: 14px; }
   @keyframes skeleton-pulse { to { opacity: 0.45; } }
   @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
   :global(html[data-motion='reduced']) .skeleton { animation: none; }

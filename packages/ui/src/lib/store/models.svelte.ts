@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderId, ProviderSummary } from '@boite/contracts';
+import type { ModelInfo, Protocol, ProviderId, ProviderSummary } from '@boite/contracts';
 import { DEFAULT_MODEL_NAMES, INITIAL_MODEL_DEFAULTS, writeModelDefaults, resolveModelDefault, type ModelDefaults } from '../model-defaults';
 import { FAVORITES_KEY, isNamedModel, readFavorites, type FavoriteModel } from '../model-order';
 import { defaultPrefs, writePrefs, type ComposerPrefs } from '../prefs';
@@ -13,6 +13,13 @@ export function probeKey(providerId: ProviderId, accountId: string): string {
 }
 
 const MODEL_CATALOG_MAX_AGE_MS = 5 * 60_000;
+
+/** The agents that list their own models: the descriptor's list is only a stand-in for theirs. */
+const DISCOVERING_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+
+export function discoversModels(protocol: Protocol | undefined): boolean {
+  return protocol !== undefined && DISCOVERING_PROTOCOLS.includes(protocol);
+}
 
 /**
  * What the composer runs on: the remembered choice, the per-provider model
@@ -31,6 +38,12 @@ export class Models {
    * time, and an account that changes drops its own key.
    */
   probedModels = $state<Record<string, ModelInfo[]>>({});
+  /**
+   * Answers a reload, an account change or a stale saved snapshot outdated.
+   * The picker keeps listing them while the next probe reads, then swaps in
+   * its answer whole. They are never offered: a pick probes first.
+   */
+  staleModels = $state<Record<string, ModelInfo[]>>({});
   probeAttempts = new Set<string>();
   probeTimes = new Map<string, number>();
   /** One per-model effort read per provider, account and model, see `probeModelEffort`. */
@@ -52,16 +65,21 @@ export class Models {
   #modelCacheKey(): string { return 'boite.models.v1:' + JSON.stringify([this.ctx.store.endpointUrl, this.ctx.store.core?.dataDir]); }
   saveModels(): void {
     const s = this.ctx.store;
-    try { localStorage.setItem(this.#modelCacheKey(), JSON.stringify({ providers: s.providers, accounts: s.accounts, models: this.probedModels })); }
+    try { localStorage.setItem(this.#modelCacheKey(), JSON.stringify({ providers: s.providers, accounts: s.accounts, models: this.probedModels, stale: this.staleModels })); }
     catch { /* Storage unavailable: keep the in-memory cache. */ }
   }
   restoreModels(): void {
     const s = this.ctx.store;
     try {
       const cached = JSON.parse(localStorage.getItem(this.#modelCacheKey()) ?? 'null');
-      if (!cached || JSON.stringify(cached.providers) !== JSON.stringify(s.providers) || JSON.stringify(cached.accounts) !== JSON.stringify(s.accounts)) return;
-      const entries = Object.entries(cached.models ?? {}).filter(([, models]) => Array.isArray(models) && models.every(m => typeof m?.id === 'string' && typeof m?.name === 'string'));
-      this.probedModels = { ...Object.fromEntries(entries) as Record<string, ModelInfo[]>, ...this.probedModels };
+      if (!cached) return;
+      const valid = (record: unknown): Record<string, ModelInfo[]> => Object.fromEntries(Object.entries(record ?? {})
+        .filter(([, models]) => Array.isArray(models) && models.every(m => typeof m?.id === 'string' && typeof m?.name === 'string')));
+      const current = JSON.stringify(cached.providers) === JSON.stringify(s.providers) && JSON.stringify(cached.accounts) === JSON.stringify(s.accounts);
+      // A snapshot taken under other descriptors or accounts still beats the
+      // descriptor's list on screen, until the agent answers again.
+      if (current) this.probedModels = { ...valid(cached.models), ...this.probedModels };
+      this.staleModels = { ...valid(cached.stale), ...(current ? {} : valid(cached.models)), ...this.staleModels };
     } catch { /* A missing or malformed cache is read again from the agent. */ }
   }
 
@@ -117,17 +135,52 @@ export class Models {
     }
   }
 
+  /** What the picker lists: the answer, else the outdated one while the next is read, else the descriptor's. */
+  listedModelsOf(providerId: ProviderId, accountId: string | null): ModelInfo[] {
+    const stale = accountId && !this.probedModels[probeKey(providerId, accountId)] ? this.staleModels[probeKey(providerId, accountId)] : undefined;
+    return stale ?? this.modelsOf(providerId, accountId);
+  }
+
+  /** An outdated answer is listed and the next probe should replace it. */
+  modelsOutdated(providerId: ProviderId, accountId: string | null): boolean {
+    return accountId !== null && !this.probedModels[probeKey(providerId, accountId)] && this.staleModels[probeKey(providerId, accountId)] !== undefined;
+  }
+
+  /** A fresh answer, or a failed read whose outdated list must not linger as if current. */
+  settleStale(key: string): void {
+    if (!(key in this.staleModels)) return;
+    const { [key]: _settled, ...rest } = this.staleModels;
+    this.staleModels = rest;
+  }
+
+  /** Every answer so far becomes outdated: listed until the next probe, offered no more. */
+  outdateProbes(keep: (key: string) => boolean = () => false): void {
+    const outdated = Object.entries(this.probedModels).filter(([key]) => !keep(key));
+    if (outdated.length === 0) return;
+    this.staleModels = { ...this.staleModels, ...Object.fromEntries(outdated) };
+    this.probedModels = Object.fromEntries(Object.entries(this.probedModels).filter(([key]) => keep(key)));
+  }
+
   isProbing(providerId: ProviderId, accountId: string | null): boolean {
     return accountId !== null && this.probingModels.includes(probeKey(providerId, accountId));
   }
 
   /**
-   * The first probe of this instance is running and nothing, live or cached,
-   * has answered yet: the picker shows it reading instead of the descriptor's
-   * list. A probe that fails or is never asked leaves that list standing.
+   * Nothing, live or cached, has answered for this instance yet, and its first
+   * probe is running or about to be asked: the picker shows placeholders
+   * instead of the descriptor's list, which would jump to another one. A probe
+   * that failed, or one that will not be asked, leaves that list standing.
    */
   modelsPending(providerId: ProviderId, accountId: string | null): boolean {
-    return accountId !== null && !this.probedModels[probeKey(providerId, accountId)] && this.isProbing(providerId, accountId);
+    if (accountId === null) return false;
+    const key = probeKey(providerId, accountId);
+    if (this.probedModels[key] || this.staleModels[key]) return false;
+    if (this.isProbing(providerId, accountId)) return true;
+    // The same guards as an automatic `probeModels`: what it would skip never pends.
+    const s = this.ctx.store;
+    if (!this.ctx.client || !s.owner || this.probeAttempts.has(key) || !discoversModels(s.providerOf(providerId)?.protocol)) return false;
+    const status = s.accountOf(accountId)?.status;
+    return status !== 'unauthenticated' && status !== 'error';
   }
 
   /**
@@ -159,13 +212,16 @@ export class Models {
         const { models } = await client.call('providers.probe', { providerId, accountId, ...(force ? { refresh: true } : {}) });
         if (client !== this.ctx.client || epoch !== this.probeEpoch) return;
         this.probedModels = { ...this.probedModels, [key]: models };
+        this.settleStale(key);
         this.saveModels();
       } catch (error) {
         if (client !== this.ctx.client) return;
         // The account or the descriptors changed while the agent answered: the
         // core refused a stale list, and the next look asks again.
-        if (epoch !== this.probeEpoch) this.probeAttempts.delete(key);
-        else if (pending.reportFailure) this.ctx.fail(error);
+        if (epoch !== this.probeEpoch) { this.probeAttempts.delete(key); return; }
+        // Nothing current answered: the descriptor's list stands, as before any probe.
+        this.settleStale(key);
+        if (pending.reportFailure) this.ctx.fail(error);
         // Discovery also runs when the composer mounts, before any user action.
         // An agent may still need a login even when its descriptor has no auth check.
         else console.warn('background model discovery failed', error);
@@ -305,12 +361,13 @@ export class Models {
     const models = s.modelsOf(choice.providerId, choice.accountId);
     if ((!models.some((model) => model.id === choice.model) ||
       (provider.protocol === 'claude-sdk' && !this.probedModels[probeKey(provider.id, choice.accountId)])) &&
-      ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol)) {
+      discoversModels(provider.protocol)) {
       const client = this.ctx.client;
       if (!client) return null;
       try {
         const result = await client.call('providers.probe', { providerId: choice.providerId, accountId: choice.accountId });
         this.probedModels = { ...this.probedModels, [probeKey(choice.providerId, choice.accountId)]: result.models };
+        this.settleStale(probeKey(choice.providerId, choice.accountId));
       } catch (error) { this.ctx.fail(error); return null; }
     }
     if (!s.modelsOf(provider.id, choice.accountId).some((model) => model.id === choice.model)) {
@@ -326,9 +383,8 @@ export class Models {
     for (const key of this.probeAttempts) if (key.endsWith(`::${accountId}`)) this.probeAttempts.delete(key);
     for (const key of this.probeTimes.keys()) if (key.endsWith(`::${accountId}`)) this.probeTimes.delete(key);
     const suffix = `::${accountId}`;
-    const kept = Object.entries(this.probedModels).filter(([key]) => !key.endsWith(suffix));
-    if (kept.length !== Object.keys(this.probedModels).length) {
-      this.probedModels = Object.fromEntries(kept);
+    if (Object.keys(this.probedModels).some((key) => key.endsWith(suffix))) {
+      this.outdateProbes((key) => !key.endsWith(suffix));
       this.saveModels();
     }
   }

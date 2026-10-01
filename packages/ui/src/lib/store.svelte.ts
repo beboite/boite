@@ -109,6 +109,7 @@ export class Store {
     this.loginTerminals = [];
     ctx.client = client;
     this.probedModels = {};
+    ctx.models.staleModels = {};
     ctx.models.probeEpoch++;
     ctx.models.probeAttempts.clear();
     ctx.models.probeTimes.clear();
@@ -316,6 +317,8 @@ export class Store {
   probeModelEffort(...args: Parameters<Models['probeModelEffort']>) { return this.#ctx.models.probeModelEffort(...args); }
   isProbing(...args: Parameters<Models['isProbing']>) { return this.#ctx.models.isProbing(...args); }
   modelsPending(...args: Parameters<Models['modelsPending']>) { return this.#ctx.models.modelsPending(...args); }
+  listedModelsOf(...args: Parameters<Models['listedModelsOf']>) { return this.#ctx.models.listedModelsOf(...args); }
+  modelsOutdated(...args: Parameters<Models['modelsOutdated']>) { return this.#ctx.models.modelsOutdated(...args); }
   probeModels(...args: Parameters<Models['probeModels']>) { return this.#ctx.models.probeModels(...args); }
   defaultModelOf(...args: Parameters<Models['defaultModelOf']>) { return this.#ctx.models.defaultModelOf(...args); }
   composerChoice(...args: Parameters<Models['composerChoice']>) { return this.#ctx.models.composerChoice(...args); }

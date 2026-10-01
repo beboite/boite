@@ -235,9 +235,9 @@ export function listen(ctx: StoreContext, client: Client): void {
     s.rejectedProviders = rejected;
     // A summary that just landed is newer than any progress this client kept.
     s.installStates = installStatesOf(loaded);
-    // The core drops its own probes on a reload; holding stale ones would
-    // offer a model it now refuses.
-    s.probedModels = {};
+    // The core drops its own probes on a reload; offering stale ones would
+    // pick a model it now refuses, so the picker only lists them until it reads again.
+    models.outdateProbes();
     models.probeEpoch++;
     models.probeAttempts.clear();
     models.probeTimes.clear();
@@ -246,6 +246,7 @@ export function listen(ctx: StoreContext, client: Client): void {
   });
   on('providers.probed', ({ providerId, accountId, models: probed }) => {
     s.probedModels = { ...s.probedModels, [probeKey(providerId, accountId)]: probed };
+    models.settleStale(probeKey(providerId, accountId));
     models.probeAttempts.add(probeKey(providerId, accountId));
     models.probeTimes.set(probeKey(providerId, accountId), Date.now());
     models.saveModels();

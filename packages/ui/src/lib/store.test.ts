@@ -911,11 +911,52 @@ describe('Store', () => {
     expect(Object.keys(store.probedModels)).toEqual(['opencode::a-opencode']);
   });
 
+  test('an outdated answer stays listed until the next one lands whole, and is never offered', async () => {
+    const { store, client } = await ready();
+    await store.probeModels('opencode', 'a-opencode');
+    const listed = store.modelsOf('opencode', 'a-opencode');
+    const original = client.call.bind(client);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+      if (method === 'providers.probe') await gate;
+      return original(method, params);
+    });
+    client.announceLogin('a-opencode');
+    expect(store.modelsOutdated('opencode', 'a-opencode')).toBe(true);
+    expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(listed);
+    // A pick checks against what the core accepts now, which is not the outdated list.
+    expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
+    // Something is listed, so the picker holds no placeholders while it reads again.
+    const request = store.probeModels('opencode', 'a-opencode');
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
+    expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(listed);
+    release(); await request;
+    expect(store.modelsOutdated('opencode', 'a-opencode')).toBe(false);
+    expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(store.modelsOf('opencode', 'a-opencode'));
+  });
+
+  test('a saved answer from other descriptors is listed at startup instead of the descriptor', async () => {
+    const first = await ready();
+    await first.store.probeModels('opencode', 'a-opencode');
+    const listed = first.store.modelsOf('opencode', 'a-opencode');
+    first.store.detach();
+    for (const key of Object.keys(localStorage).filter((name) => name.startsWith('boite.models.v1:'))) {
+      const saved = JSON.parse(localStorage.getItem(key) ?? '{}');
+      localStorage.setItem(key, JSON.stringify({ ...saved, providers: [] }));
+    }
+    const { store } = await ready();
+    expect(store.probedModels).toEqual({});
+    expect(store.listedModelsOf('opencode', 'a-opencode')).toEqual(listed);
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
+  });
+
   test('a probe elsewhere fills the models of that instance, the descriptor until then', async () => {
     const { store, client } = await ready();
     expect(store.modelsOf('opencode', 'a-opencode').map((m) => m.id)).toEqual(['default']);
     expect(store.probedModels).toEqual({});
-    expect(store.modelsPending('opencode', 'a-opencode')).toBe(false);
+    // Its first probe is still to be asked: the picker waits for it from the first frame.
+    expect(store.modelsPending('opencode', 'a-opencode')).toBe(true);
 
     // Straight through the client: what a second shell's probe looks like here.
     // This store's own first probe is pending until either answer lands.
