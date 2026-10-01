@@ -371,6 +371,7 @@ export function migrate(db: Database, file: string): void {
 
 /** Indexes made on every open, after the migration and outside its transaction. */
 export function ensureIndexes(db: Database): void {
+  db.exec('CREATE INDEX IF NOT EXISTS thread_deletions_by_date ON thread_deletions (deleted_at)');
   db.exec('CREATE INDEX IF NOT EXISTS processes_by_started ON processes (thread_id, started_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS turns_by_status ON turns (status)');
   db.exec('CREATE INDEX IF NOT EXISTS messages_by_turn ON messages (thread_id, turn_id)');

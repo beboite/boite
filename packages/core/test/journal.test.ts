@@ -114,7 +114,7 @@ describe('journal', () => {
     expect(mode.journal_mode).toBe('wal');
   });
 
-  test('session deletion restores archive state and history, and shutdown purges only unrestored threads', () => {
+  test('deletion survives shutdown and hard stops, retaining archive state and history until purge', () => {
     const thread = { id: 'thr_undo', projectId: 'prj', title: 'undo', titleSource: 'prompt', providerId: 'echo', accountId: 'acc', model: null, effort: null, speed: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: true, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
     for (const id of ['thr_undo', 'thr_gone']) {
       journal.putThread({ ...thread, id });
@@ -132,15 +132,44 @@ describe('journal', () => {
     journal = new Journal(file);
     expect(journal.getThread('thr_undo')).not.toBeNull();
     expect(journal.getThread('thr_gone')).toBeNull();
-    expect(journal.listMessages('thr_gone')).toEqual([]);
-    expect(journal.listDeletedThreads()).toEqual([]);
+    expect(journal.listMessages('thr_gone')).toHaveLength(1);
+    expect(journal.listDeletedThreads().map(t => t.id)).toEqual(['thr_gone']);
     // Simulate a hard stop: bypass Journal.close, leaving the pending rows on disk.
     journal.stageThreadDeletion('thr_undo', [journal.getThread('thr_undo')!]);
     journal.db.close();
     journal = new Journal(file);
     expect(journal.listThreads()).toEqual([]);
-    expect(journal.listMessages('thr_undo')).toEqual([]);
-    expect(journal.listDeletedThreads()).toEqual([]);
+    expect(journal.listMessages('thr_undo')).toHaveLength(1);
+    expect(journal.listDeletedThreads().map(t => t.id).sort()).toEqual(['thr_gone', 'thr_undo']);
+    journal.restoreDeletedThreads('thr_undo');
+    expect(journal.getThread('thr_undo')?.archived).toBe(true);
+    expect(journal.listMessages('thr_undo')).toHaveLength(1);
+  });
+
+  test('purge uses the root deletion date and erases its whole family only at the deadline', () => {
+    const root = { id: 'root', projectId: 'prj', title: 'old conversation', titleSource: 'user', providerId: 'echo', accountId: 'acc', model: null, effort: null, cwd: dir, branch: null, permissionMode: 'default', status: 'idle', unread: false, archived: false, pinned: false, sessionId: null, load: null, context: null, createdAt: 1, updatedAt: 1 } as const;
+    const child = { ...root, id: 'child', parentThreadId: root.id };
+    const kept = { ...root, id: 'kept' };
+    for (const thread of [root, child, kept]) {
+      journal.putThread(thread);
+      journal.putMessage({ ...sampleMessage(`msg_${thread.id}`), threadId: thread.id, state: 'complete' });
+      journal.setSetting(`activity:${thread.id}`, { tasks: [] });
+    }
+    journal.stageThreadDeletion(root.id, [root, child]);
+    journal.stageThreadDeletion(kept.id, [kept]);
+    const deletedAt = journal.listDeletedThreads().find(t => t.id === root.id)!.deletedAt;
+    // Child markers cannot split a family, and a freshly deleted old thread survives.
+    journal.db.query('UPDATE thread_deletions SET deleted_at = ? WHERE thread_id != ?').run(deletedAt + 1000, root.id);
+    expect(journal.purgeDeletedThreads(deletedAt - 1)).toBe(0);
+    expect(journal.purgeDeletedThreads(deletedAt)).toBe(2);
+    for (const id of [root.id, child.id]) {
+      expect(journal.listMessages(id)).toEqual([]);
+      expect(journal.getSetting(`activity:${id}`)).toBeUndefined();
+    }
+    expect(journal.listDeletedThreads().map(t => t.id)).toEqual([kept.id]);
+    expect(journal.listMessages(kept.id)).toHaveLength(1);
+    expect(journal.restoreDeletedThreads(kept.id)).toEqual([kept.id]);
+    expect(journal.getThread(kept.id)?.createdAt).toBe(1);
   });
 
   test('append writes the event and the projection in one call', () => {
