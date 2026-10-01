@@ -26,11 +26,7 @@
   import ThreadActivity from './ThreadActivity.svelte';
   import PreviewReferences from './PreviewReferences.svelte';
 
-  /**
-   * `centered` is the draft's placement: the parent stacks the composer under
-   * the heading and centres the pair, so the wrapper drops the padding that
-   * holds it off the bottom of the column. Same component, same box.
-   */
+  /** A centred draft drops the bottom padding so its heading and input form one block. */
   let { store, centered = false }: { store: Store; centered?: boolean } = $props();
 
   const MAX_LINES = 8;
