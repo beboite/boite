@@ -436,6 +436,9 @@ completion/blocker markers, including partial markers during streaming.
 Tasks come from ACP plans, Codex plan notifications or successful task tools
 such as Claude's TodoWrite and TaskCreate/TaskUpdate. An agent that reports no
 tasks gets no invented task list. Pi uses the same successful-tool observation.
+Task tracking is optional, including for goals. The agent guide and goal
+instructions suggest a task list only when laying out steps helps the agent
+and the user follow the work.
 
 Each connected provider's row in Settings, Providers stores a default model and
 effort for that provider on this device.
