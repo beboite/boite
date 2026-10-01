@@ -1735,6 +1735,9 @@ export interface GitStatus {
   changes: GitChange[];
 }
 
+/** Maximum full name of a Git branch created by Boite, including prefix and collision suffix. */
+export const BRANCH_NAME_MAX = 48;
+
 /**
  * One linked worktree of a project's repository, as `worktrees.list` reads it
  * from `git worktree list`: the core's own in its configured storage and any the
@@ -2564,6 +2567,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
        * the working directory stays fixed when the branch is renamed. The core
        * runs `git worktree add` and refuses by name when the project is not a
        * git repository, git is missing, or the named branch already exists.
+       * Explicit names must fit `BRANCH_NAME_MAX`, including any prefix.
        * Excludes `cwd`. Refused on the drafts project, which is not a repository.
        */
       worktree?: { branch?: string };
@@ -2669,6 +2673,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    * pending move is refused naming `threadId`.
    */
   'threads.moveCancel': { params: { threadId: ThreadId }; result: ThreadSummary };
+  /**
+   * Put a thread away, or bring it back with `archived: false`. Archiving
+   * stops its turn and its sub-threads' turns at once and answers; their
+   * processes end once those turns have settled. Restoring restarts nothing.
+   */
   'threads.archive': { params: { threadId: ThreadId; archived?: boolean }; result: ThreadSummary };
   /**
    * Hide a conversation and its sub-threads after stopping their work. The

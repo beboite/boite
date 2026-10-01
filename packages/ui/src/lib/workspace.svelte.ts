@@ -39,6 +39,11 @@ function profiles(): Record<string, { label: string; icon?: MachineIconName }> {
   try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? '{}') ?? {}; } catch { return {}; }
 }
 
+/** What a machine that has not answered yet is called: its address, never "This PC". */
+function hostOf(url: string | null): string | undefined {
+  try { return url === null ? undefined : new URL(url).host; } catch { return undefined; }
+}
+
 /** A connection's URL is also its identity in the workspace and saved list. */
 function endpointIdentity(endpoint: Endpoint): { id: string; host: string } | null {
   try {
@@ -67,7 +72,7 @@ export class Workspace {
   #primaryMachine(selected: Endpoint | null, remembered: StoredEnvironment[]): Machine {
     const machine: Machine = {
       id: store.endpointUrl ?? 'local',
-      label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname) ?? strings.machines.local,
+      label: remembered.find(e => e.url === selected?.url)?.label ?? (store.localCore ? strings.machines.local : store.core?.hostname ?? hostOf(store.endpointUrl)) ?? strings.machines.local,
       store
     };
     this.restoreProfile(machine);
@@ -166,10 +171,33 @@ export class Workspace {
     if (isThisPC(machine) && ['My computer', 'This computer'].includes(machine.label)) machine.label = strings.machines.local;
   }
 
+  /**
+   * Two machines under one name cannot be told apart in a list, and a link
+   * named after a machine already listed looked like it reached that one. The
+   * newcomer takes its address beside the name; the one already there keeps its own.
+   */
+  #distinct(machine: Machine): void {
+    const taken = new Set(this.machines.filter(m => m.store !== machine.store).map(m => m.label.trim().toLowerCase()));
+    if (!taken.has(machine.label.trim().toLowerCase())) return;
+    const base = `${machine.label.trim()} (${hostOf(machine.store.endpointUrl ?? machine.id) ?? machine.id})`;
+    let label = base;
+    for (let n = 2; taken.has(label.toLowerCase()); n++) label = `${base} ${n}`;
+    machine.label = label;
+  }
+
+  /** The machine a pairing link reaches, and the listed machine at that address if there is one. */
+  linkTarget(link: string): { host: string; machine: Machine | null } | null {
+    const parsed = parsePairingLink(link);
+    const identity = parsed && endpointIdentity({ url: parsed.url, token: '' });
+    if (!identity) return null;
+    return { host: identity.host, machine: this.machines.find(m => m.id === identity.id) ?? null };
+  }
+
   customize(id: string, label: string, icon?: MachineIconName): void {
     const machine = this.machines.find(m => m.id === id);
     if (!machine || !label.trim() || (icon && !machineIcons.includes(icon))) return;
     machine.label = label.trim();
+    this.#distinct(machine);
     machine.icon = icon;
     try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...profiles(), [profileKey(machine)]: { label: machine.label, icon } })); } catch { /* session only */ }
     const saved = readEnvironments().find(e => e.url === machine.id);
@@ -203,6 +231,7 @@ export class Workspace {
   #rememberConnected(machine: Machine, endpoint: Endpoint, label: string | undefined, host: string): void {
     machine.label = label?.trim() || machine.store.core?.hostname || host;
     this.restoreProfile(machine);
+    this.#distinct(machine);
     // Grant credentials are persisted by WsClient's onSession, never the grant itself.
     if (!endpoint.grant && !endpoint.local)
       upsertEnvironment({ url: machine.id, token: endpoint.token, paired: endpoint.paired ?? false, label: machine.label });
@@ -226,7 +255,10 @@ export class Workspace {
     }
     const { id, host } = identity;
     const existing = this.machines.find((m) => m.id === id);
-    if (existing && existing.store.connection !== 'closed') {
+    // Only a machine that answered is a duplicate. One still retrying holds a
+    // key its core refuses, and on a phone that machine is the page's own,
+    // which cannot be removed: the new link has to be able to replace the key.
+    if (existing && existing.store.connection === 'ready') {
       this.error = strings.machines.duplicate;
       return false;
     }
@@ -235,11 +267,19 @@ export class Workspace {
     target.detach();
     target.machineId = id;
     target.visible = this.active === target;
-    if (!existing) this.machines = [...this.machines, { id, label: label?.trim() || host, store: target }];
+    if (!existing) {
+      const fresh: Machine = { id, label: label?.trim() || host, store: target };
+      this.#distinct(fresh);
+      this.machines = [...this.machines, fresh];
+    }
     // Read back from the list: the name the core reports is written through the
     // reactive entry, or a card already drawn under the address keeps showing it.
     const machine = existing ?? this.machines.find((m) => m.store === target)!;
-    await target.connectEndpoint({ ...endpoint, url: id });
+    const connecting = target.connectEndpoint({ ...endpoint, url: id });
+    const client = target.client;
+    await connecting;
+    // A later add replaced this attempt's client: the outcome is that one's to report.
+    if (target.client !== client) return false;
     if (!this.#current(lifecycle) || !this.machines.some((m) => m.store === target)) {
       if (!this.machines.some((m) => m.store === target)) {
         target.client?.close();

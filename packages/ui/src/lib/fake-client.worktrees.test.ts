@@ -96,3 +96,31 @@ test('a thread started in a worktree adds it to the list, and both methods are f
   await expect(phone.call('worktrees.list', { projectId: 'p-boite' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
   await expect(phone.call('worktrees.remove', { projectId: 'p-boite', path: `${ROOT}\\fix-the-login` })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
 });
+
+test('explicit branch names use the core length limit before registering a worktree', async () => {
+  const client = await fake();
+  const base = { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' };
+  const before = await client.call('worktrees.list', { projectId: base.projectId });
+  const branch = 'feature/' + 'a'.repeat(41);
+  await expect(client.call('threads.create', { ...base, worktree: { branch } })).rejects.toMatchObject({
+    code: RpcErrorCode.Refused,
+    data: { field: 'branch', maxLength: 48, actualLength: 49, expected: 'at most 48 characters' }
+  });
+  expect(await client.call('worktrees.list', { projectId: base.projectId })).toEqual(before);
+  expect((await client.call('threads.create', { ...base, worktree: { branch: branch.slice(0, 48) } })).branch).toBe(branch.slice(0, 48));
+});
+
+test('automatic naming leaves room for double-digit collision suffixes', async () => {
+  const client = await fake();
+  const base = { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' };
+  const slug = 'a'.repeat(40);
+  for (let n = 1; n <= 9; n += 1) {
+    await client.call('threads.create', { ...base, worktree: { branch: `boite/${slug}${n === 1 ? '' : `-${n}`}` } });
+  }
+  const thread = await client.call('threads.create', { ...base, worktree: {} });
+  await client.call('turns.start', { threadId: thread.id, prompt: slug });
+  await client.settled();
+  await vi.waitFor(async () => {
+    expect((await client.call('threads.list', {})).find(t => t.id === thread.id)?.branch).toBe(`boite/${'a'.repeat(39)}-10`);
+  });
+});

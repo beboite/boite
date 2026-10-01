@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp';
 import { startUi } from './lib/ui';
 
-test('queued prompts sit below the latest reply without reserving an empty activity dock', async () => {
+test('queued prompts sit above the activity dock attached to the input', async () => {
   const port = await freePort();
   const server = await startUi(port);
   let page: BrowserPage | undefined;
@@ -36,13 +36,26 @@ test('queued prompts sit below the latest reply without reserving an empty activ
     await page.evaluate(`globalThis.__boiteTest.workspace.active.openThread.activity = { goal: null, loop: null, tasks: [{ id: 'work', text: 'Keep the latest answer visible', status: 'in_progress' }] }`);
     for (const width of [1300, 390]) {
       await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
-      await page.waitFor(`parseFloat(getComputedStyle(document.querySelector('[data-testid="timeline"]')).paddingBottom) >= document.querySelector('[data-testid="thread-activity"]').offsetHeight + 19`);
+      await page.waitFor(`(() => { const dock = document.querySelector('[data-testid="thread-activity"]'); return dock?.offsetHeight > 0 && parseFloat(document.querySelector('.queue-region').style.paddingBottom) === dock.offsetHeight; })()`);
       await page.evaluate(`(() => { const timeline = document.querySelector('[data-testid="timeline"]'); timeline.scrollTop = timeline.scrollHeight; })()`);
       await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
-      const gap = await page.evaluate<number>(`document.querySelector('[data-testid="thread-activity"]').getBoundingClientRect().top - [...document.querySelectorAll('[data-testid="message"]')].at(-1).getBoundingClientRect().bottom`);
+      const gap = await page.evaluate<number>(`document.querySelector('[data-testid="composer-queued"]').getBoundingClientRect().top - [...document.querySelectorAll('[data-testid="message"]')].at(-1).getBoundingClientRect().bottom`);
       expect(gap).toBeGreaterThanOrEqual(12);
       expect(gap).toBeLessThanOrEqual(40);
-      await page.screenshot(join(import.meta.dir, '.artifacts', `queued-spacing-dock-${width}.png`));
+      await page.screenshot(join(import.meta.dir, '.artifacts', `queued-spacing-dock-${process.env.BOITE_QUEUE_CAPTURE ?? 'after'}-${width}.png`));
+      const placement = await page.evaluate<{ gap: number; queueBottom: number; dockTop: number }>(`(() => {
+        const dock = document.querySelector('[data-testid="thread-activity"]').getBoundingClientRect();
+        const composer = document.querySelector('[data-testid="composer"]').getBoundingClientRect();
+        return { gap: composer.top - dock.bottom, queueBottom: document.querySelector('[data-testid="composer-queued"]').getBoundingClientRect().bottom, dockTop: dock.top };
+      })()`);
+      expect(placement.gap).toBeGreaterThanOrEqual(0);
+      expect(placement.gap).toBeLessThanOrEqual(4);
+      expect(placement.queueBottom).toBeLessThanOrEqual(placement.dockTop);
+      await page.click('[data-testid="activity-tasks-toggle"]');
+      await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
+      await page.waitFor(`document.querySelector('[data-testid="composer-queued"]').getBoundingClientRect().bottom <= document.querySelector('[data-testid="thread-activity"]').getBoundingClientRect().top`);
+      await page.click('[data-testid="activity-tasks-toggle"]');
+      await page.evaluate(`Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})))`);
     }
     // A short pinned history starts at zero, but a new dock can make it overflow.
     await page.evaluate(`(() => {

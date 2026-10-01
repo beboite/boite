@@ -243,6 +243,7 @@ export const fr: Translation = {
       missing: "Aucune caméra trouvée sur cet appareil. Collez le lien d'appairage à la place.",
       failed: "La caméra n'a pas pu démarrer. Collez le lien d'appairage à la place."
     },
+    linkReaches: 'Ce lien connecte à {host}.', linkReplaces: 'Ce lien connecte à {host}, listée ici sous le nom {machine}. Il remplace la clé enregistrée pour elle.', linkConnected: 'Ce lien vise {host}, déjà connectée ici sous le nom {machine}.',
     remove: 'Retirer la machine', removeTitle: 'Retirer {machine} ?',
     removeBody: "Boite oublie son adresse et sa clé d'accès sur cet appareil. Pour la reconnecter, il faudra un nouveau lien d'appairage créé sur cette machine.",
     open: 'Ouvrir la machine', invalidUrl: "L'URL d'une machine doit être une adresse HTTP ou HTTPS, sans identifiants, sans requête ni fragment.",
@@ -1864,6 +1865,7 @@ export const fr: Translation = {
     connect: 'Connexion au cœur impossible.',
     clipboard: 'Le presse-papiers a refusé le texte.',
     revoked: "Cet appareil a été révoqué depuis l'application de bureau. Ouvrez un nouveau lien d'appairage pour vous reconnecter.",
+    unpaired: "Cet appareil n'a pas de clé pour cette machine. Collez un lien d'appairage créé là-bas dans Ajouter une machine.",
     pairingLink: "Ce n'est pas un lien d'appairage. Collez le lien affiché par Nouveau lien d'appairage sur l'autre machine ; il commence par http et contient ?grant=."
   },
 

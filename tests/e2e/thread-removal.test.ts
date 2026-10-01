@@ -62,7 +62,7 @@ for (const width of [1280, 390]) {
   }, 60_000);
 
   test(`deleting conversations at ${width}px supports restoration and configurable retention`, async () => {
-    const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent`, windowSize: { width, height: 900 } });
+    const page = await BrowserPage.launch({ url: `http://127.0.0.1:${port}/?fake=1&open=recent&updates=1`, windowSize: { width, height: 900 } });
     try {
       await page.waitFor(`globalThis.__boiteTest?.workspace.active.openThread && document.querySelector('[data-testid=thread-header]')`);
       const id = await page.evaluate<string>('globalThis.__boiteTest.workspace.active.openThread.id');
@@ -89,6 +89,10 @@ for (const width of [1280, 390]) {
       await page.waitFor(`globalThis.__boiteTest.workspace.active.openThread?.id === ${JSON.stringify(id)}`);
       await openMenu(); await chooseDelete();
       await page.waitFor(`!globalThis.__boiteTest.workspace.active.threads.some(t => t.id === ${JSON.stringify(id)})`);
+      await page.waitFor(`document.querySelector('[data-testid=undo-toast]')`);
+      await page.waitFor(`!document.querySelector('[data-testid=undo-toast]')`, 12_000);
+      expect(await page.evaluate(`document.querySelectorAll('[data-testid=harness-update-notice]').length`)).toBe(2);
+      await page.screenshot(join(import.meta.dir, '.artifacts', `thread-delete-auto-dismiss-${width}.png`));
       expect(await page.evaluate(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
       if (width < 720) {
         await page.click('[data-testid=mobile-settings]');

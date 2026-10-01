@@ -234,6 +234,7 @@ export const strings = {
       missing: 'No camera was found on this device. Paste the pairing link instead.',
       failed: 'The camera could not start. Paste the pairing link instead.'
     },
+    linkReaches: 'This link connects to {host}.', linkReplaces: 'This link connects to {host}, listed here as {machine}. It replaces the key held for it.', linkConnected: 'This link is for {host}, already connected here as {machine}.',
     remove: 'Remove machine', removeTitle: 'Remove {machine}?',
     removeBody: 'Boite forgets its address and its access key on this device. Connecting it again needs a new pairing link made on that machine.',
     open: 'Open machine', invalidUrl: 'Machine URL must be an HTTP or HTTPS URL without credentials, query or fragment.',
@@ -1934,6 +1935,7 @@ export const strings = {
     connect: 'Could not connect to the core.',
     clipboard: 'The clipboard refused the text.',
     revoked: 'This device was revoked from the desktop app. Open a new pairing link to connect again.',
+    unpaired: 'This device holds no key for this machine. Paste a pairing link made there under Add a machine.',
     pairingLink: 'That is not a pairing link. Paste the link shown by New pairing link on the other machine; it starts with http and contains ?grant=.'
   },
 

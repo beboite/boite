@@ -92,7 +92,8 @@ test('a phone scans the pairing code of another machine, which arrives under its
     await page.waitFor(`document.querySelectorAll('${id('machine-card')}').length === 2 && !document.querySelector('${id('qr-scanner')}')`);
     // The card is drawn under its address while the grant is exchanged, then takes the name the core reports.
     await page.waitFor(`globalThis.__boiteTest.workspace.machines[1]?.store.connection === 'ready' && !document.querySelector('${id('machine-add')}').textContent.includes('Connecting')`);
-    await page.waitFor(`document.querySelectorAll('${id('machine-rename')}')[1]?.value === ${JSON.stringify(hostname())}`);
+    // Both cores run on this computer, so the newcomer keeps the shared name and adds its address to stay distinct.
+    await page.waitFor(`document.querySelectorAll('${id('machine-rename')}')[1]?.value.startsWith(${JSON.stringify(hostname() + ' (127.0.0.1:')})`);
     expect(await page.evaluate(`document.querySelector('${id('machine-add-card')} [role=alert]') === null`)).toBe(true);
     expect((await b.call('sessions.list', {})).length).toBe(1);
     await page.screenshot(join(import.meta.dir, '.artifacts', 'phone-machines-scanned.png'));

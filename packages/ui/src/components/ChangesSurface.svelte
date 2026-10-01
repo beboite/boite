@@ -85,9 +85,9 @@
 
 <div class="changes-surface" data-testid="changes-panel">
   <div class="panel-toolbar">
-    <span class="branch" title={status?.upstream ?? strings.changes.noBranch}>
+    <span class="branch" title={[status?.branch ?? strings.changes.noBranch, status?.upstream].filter(Boolean).join(' → ')}>
       <GitBranch size={13} strokeWidth={1.75} />
-      {status?.branch ?? strings.changes.noBranch}
+      <span class="branch-name">{status?.branch ?? strings.changes.noBranch}</span>
     </span>
     {#if status && status.ahead > 0}
       <span class="track" title={fill(strings.changes.ahead, { count: String(status.ahead) })}>
@@ -200,10 +200,9 @@
   .branch {
     flex: 0 1 auto;
     color: var(--color-foreground);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
+  .branch :global(svg) { flex: none; }
+  .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .spacer {
     flex: 1;
