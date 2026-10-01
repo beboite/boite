@@ -39,11 +39,11 @@ fn reserve(directory: &Path, name: &str) -> Result<(PathBuf, File), String> {
     Err("download file: no available name".into())
 }
 
-async fn download(directory: &Path, name: &str, url: reqwest::Url) -> Result<PathBuf, String> {
+async fn download(directory: &Path, name: &str, url: reqwest::Url, idle_timeout: Duration) -> Result<PathBuf, String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(600))
+        .connect_timeout(Duration::from_secs(15)).read_timeout(idle_timeout)
         .build().map_err(|e| e.without_url().to_string())?;
     let mut response = client.get(url).send().await.map_err(|e| e.without_url().to_string())?;
     if response.status() != reqwest::StatusCode::OK {
@@ -77,7 +77,7 @@ pub async fn save_attachment_url(webview: Webview, name: String, url: String, op
     crate::browser::only_main(&webview)?;
     let url = ticket_url(&url)?;
     let directory = webview.app_handle().path().download_dir().map_err(|e| format!("downloads folder: {e}"))?;
-    finish_save(download(&directory, &name, url).await?, open)
+    finish_save(download(&directory, &name, url, Duration::from_secs(60)).await?, open)
 }
 
 #[cfg(test)]
@@ -100,7 +100,7 @@ mod tests {
                 for _ in 0..if truncated { 1 } else { 768 } { stream.write_all(&[73; 8192]).unwrap(); }
             });
             let url = ticket_url(&format!("http://{address}/file/{}", "a".repeat(64))).unwrap();
-            let result = tauri::async_runtime::block_on(download(&dir, "clip.mp4", url));
+            let result = tauri::async_runtime::block_on(download(&dir, "clip.mp4", url, Duration::from_secs(60)));
             server.join().unwrap();
             if truncated {
                 assert!(result.is_err());
@@ -109,6 +109,52 @@ mod tests {
                 let path = result.unwrap();
                 assert_eq!(fs::metadata(&path).unwrap().len(), 6 * 1024 * 1024);
                 assert!(fs::read(&path).unwrap().iter().all(|&byte| byte == 73));
+                fs::remove_file(path).unwrap();
+            }
+        }
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn slow_active_downloads_finish_but_stalled_downloads_remove_partial_files() {
+        let dir = std::env::temp_dir().join(format!("boite-download-timeout-{}", std::process::id()));
+        let idle_timeout = Duration::from_secs(1);
+        for stalled in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (release, wait_for_client) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_nodelay(true).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0u8; 2048];
+                stream.read(&mut request).unwrap();
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\nx").unwrap();
+                if stalled {
+                    // Keep the socket open until the client times out, with a deadline if it never does.
+                    return wait_for_client.recv_timeout(Duration::from_secs(5)).is_ok();
+                }
+                for _ in 1..12 {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if stream.write_all(b"x").is_err() { return false; }
+                }
+                true
+            });
+            let url = ticket_url(&format!("http://{address}/file/{}", "a".repeat(64))).unwrap();
+            let started = std::time::Instant::now();
+            let result = tauri::async_runtime::block_on(download(&dir, "clip.mp4", url, idle_timeout));
+            let elapsed = started.elapsed();
+            let _ = release.send(());
+            let server_finished = server.join().unwrap();
+            if stalled {
+                assert!(result.is_err());
+                assert!(server_finished, "the client must time out before the server closes the socket");
+                assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+            } else {
+                let path = result.expect("regular progress must keep the download alive");
+                assert!(elapsed > idle_timeout);
+                assert!(server_finished);
+                assert_eq!(fs::read(&path).unwrap(), b"xxxxxxxxxxxx");
                 fs::remove_file(path).unwrap();
             }
         }
