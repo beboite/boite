@@ -45,6 +45,8 @@ export class Composer {
   }>>({});
 
   inputBoundaries = $state<Record<string, { turnId: string; boundary: string }>>({});
+  /** Only this client's accepted input asks the timeline to reveal a prompt. */
+  promptFocus = $state<{ threadId: string; turnId: string; after: string | null } | null>(null);
   private steerRequests = new Map<string, { content: string; id: string }>();
 
   previewUndo = new Map<string, { text: string; references: PreviewReference[] }[]>();
@@ -113,9 +115,13 @@ export class Composer {
     try {
       await this.ctx.connection.reloading?.promise;
       if (this.ctx.client !== client || s.connection !== 'ready') return null;
+      const after = s.openThread?.id === threadId ? s.openThread.messages.findLast(message => message.role === 'user')?.id ?? null : null;
       const result = await client.call('turns.steer', { threadId, turnId, prompt, attachments, previewReferences,
         clientRequestId: request.id, expectedSelectionVersion: selectionVersion });
-      if (this.ctx.client === client && result.accepted) this.steerRequests.delete(threadId);
+      if (this.ctx.client === client && result.accepted) {
+        this.steerRequests.delete(threadId);
+        this.promptFocus = { threadId, turnId, after };
+      }
       return result.accepted;
     } catch (error) {
       if (this.ctx.client !== client) return null;
@@ -342,13 +348,16 @@ export class Composer {
       const start = () => client.call('turns.start', { threadId, prompt, clientRequestId: sent.id, expectedSelectionVersion: selectionVersion,
         ...(attachments.length > 0 ? { attachments } : {}), ...(previewReferences.length > 0 ? { previewReferences } : {}) });
       // A socket lost under the call loses its answer, maybe not the turn: the same request id asks once more, and the core answers with the turn it took.
-      await start().catch(async (error: unknown) => {
+      const accepted = await start().catch(async (error: unknown) => {
         if (!wasDropped(error) || !(await readyAgain(client))) throw error;
         await connection.reloading?.promise;
         if (this.ctx.client !== client || this.pendingSends.get(threadId) !== sent) throw error;
         return start();
       });
-      if (this.ctx.client === client) this.pendingSends.delete(threadId);
+      if (this.ctx.client === client) {
+        this.pendingSends.delete(threadId);
+        this.promptFocus = { threadId, turnId: accepted.id, after: null };
+      }
       return true;
     } catch (error) {
       // A detached client's answer must not restore input or thread rows into its replacement.
