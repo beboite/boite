@@ -59,6 +59,33 @@ async function echoAccount(): Promise<string> {
 }
 
 describe('a thread in its own worktree', () => {
+  test('explicit branch names stop at 48 characters before creating a thread or worktree', async () => {
+    const project = await repoProject();
+    const base = { projectId: project.id, providerId: 'echo', accountId: await echoAccount() };
+    const branch = 'feature/' + 'a'.repeat(41);
+    const before = await client.call('threads.list', {});
+    await expect(client.call('threads.create', { ...base, worktree: { branch } })).rejects.toMatchObject({
+      rpc: { data: { field: 'branch', maxLength: 48, actualLength: 49, expected: 'at most 48 characters' } },
+    });
+    expect(await client.call('threads.list', {})).toEqual(before);
+    expect(git(project.path, 'branch', '--list', branch).trim()).toBe('');
+    expect(existsSync(worktreeRoot(project.path))).toBe(false);
+    const accepted = await client.call('threads.create', { ...base, worktree: { branch: branch.slice(0, 48) } });
+    expect(accepted.branch).toBe(branch.slice(0, 48));
+  });
+
+  test('generated branch collision suffixes fit within the full name limit', async () => {
+    const project = await repoProject();
+    const row = harness.core.projects.require(project.id);
+    const placed = await harness.core.worktrees.add('thr_name_limit', row);
+    const slug = 'a'.repeat(40);
+    for (let n = 1; n <= 9; n += 1) git(project.path, 'branch', `boite/${slug}${n === 1 ? '' : `-${n}`}`);
+    const branch = await harness.core.worktrees.nameBranch('thr_name_limit', placed.path, placed.branch, slug);
+    expect(branch).toBe(`boite/${'a'.repeat(39)}-10`);
+    expect(branch!.length).toBe(48);
+    expect(git(placed.path, 'branch', '--show-current').trim()).toBe(branch!);
+  });
+
   test('one title call names the temporary branch while the first turn runs without moving files or losing commits', async () => {
     let titleCalls = 0;
     const releaseTurn = Promise.withResolvers<void>();
@@ -157,15 +184,16 @@ describe('a thread in its own worktree', () => {
     expect(git(placed.path, 'branch', '--show-current').trim()).toBe(placed.branch);
   });
 
-  test('workspace recovery reattaches a surviving branch after its directory was removed', async () => {
+  test('workspace recovery reattaches a surviving legacy long branch after its directory was removed', async () => {
     const project = await repoProject();
     const row = harness.core.projects.require(project.id);
-    const branch = 'boite/recovered-directory';
-    const original = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    const branch = 'boite/' + 'recovered-directory-'.repeat(5);
+    const original = { path: join(worktreeRoot(project.path), 'legacy'), branch };
+    git(project.path, 'worktree', 'add', '-b', branch, original.path);
     git(original.path, 'commit', '-q', '--allow-empty', '-m', 'work to preserve');
     const head = git(original.path, 'rev-parse', 'HEAD');
     git(project.path, 'worktree', 'remove', original.path);
-    const recovered = await harness.core.worktrees.ensure('thr_recover', row, branch);
+    const recovered = await harness.core.worktrees.ensure('thr_recover', row, branch, original.path);
     expect(git(recovered.path, 'rev-parse', 'HEAD')).toBe(head);
   });
   test('workspace recovery adopts the registered directory through a parent alias', async () => {

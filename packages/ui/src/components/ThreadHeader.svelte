@@ -175,9 +175,9 @@
       {/if}
       {#if thread?.branch && work.shows('header.branch')}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <span class="chip path branch mono" title="{strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
+        <span class="chip path branch mono" title="{thread.branch}: {strings.thread.branchHint}: {thread.cwd}" data-testid="thread-branch" oncontextmenu={(event) => controlMenu(event, store, 'header.branch')}>
           <GitBranch size={13} strokeWidth={1.75} />
-          {thread.branch}
+          <span class="branch-name">{thread.branch}</span>
         </span>
       {/if}
       <!-- The shell is the owner's: a phone reaches it by this button, not by Ctrl+J. -->
@@ -262,11 +262,14 @@
   }
 
   .path {
-    max-width: 240px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(240px, 35%);
     font-size: var(--text-sm);
   }
+
+  .branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .branch :global(svg) { flex: none; }
 
   .trace {
     flex: none;
