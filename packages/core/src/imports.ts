@@ -144,7 +144,6 @@ export class ImportStore {
       const transcript = await readTranscript(file);
       if (transcript.turns.length === 0) throw refused('this transcript has no prompt to import', { file });
       const first = transcript.turns[0]!;
-      const known = transcript.model !== null && provider.models.some((model) => model.id === transcript.model);
       const summary = this.core.threads.createImported(
         {
           projectId: project.id,
@@ -152,10 +151,10 @@ export class ImportStore {
           accountId: account.id,
           title: transcript.agentTitle ?? titleFromPrompt(first.prompt),
           cwd: project.path,
-          ...(known ? { model: transcript.model! } : {}),
         },
         {
           sessionId: params.sessionId,
+          model: transcript.model,
           titleSource: transcript.agentTitle === null ? 'prompt' : 'agent',
           turns: transcript.turns,
         },

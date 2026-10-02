@@ -130,7 +130,7 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   expect(legacyFold()).not.toBeNull();
 
   // The account changed, so its answer is gone; this time the agent fails and
-  // the descriptor's list comes back instead of a column that reads forever.
+  // no descriptor placeholders appear after the reading state ends.
   document.querySelector<HTMLButtonElement>('[data-testid=composer-picker]')!.click();
   await waitFor(() => document.querySelector('[data-testid=composer-picker-menu]') === null);
   outcome = 'wait';
@@ -140,8 +140,20 @@ test('a first probe shows a reading column, never the descriptor list it is abou
   await waitFor(() => probing() !== null);
   expect(rows()).toBe(0);
   outcome = 'fail';
-  await waitFor(() => rows() > 0 && probing() === null);
-  expect(document.querySelector('[data-model="claude-fable-5-1"]')).not.toBeNull();
-  expect(legacyFold()).not.toBeNull();
+  await waitFor(() => document.querySelector('[data-testid=picker-no-models]') !== null && probing() === null);
+  expect(rows()).toBe(0);
+  expect(legacyFold()).toBeNull();
   expect(store.probedModels['claude::a-claude-main']).toBeUndefined();
+  const search = document.querySelector<HTMLInputElement>('[data-testid=picker-search]')!;
+  search.value = 'gpt';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  expect(document.querySelectorAll('[data-testid=picker-no-models]')).toHaveLength(1);
+  outcome = 'land';
+  document.querySelector<HTMLButtonElement>('[data-testid=picker-refresh]')!.click();
+  await waitFor(() => store.probedModels['claude::a-claude-main'] !== undefined && probing() === null);
+  search.value = '';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await waitFor(() => rows() > 0);
+
 });

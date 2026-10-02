@@ -286,6 +286,8 @@ export class ThreadStore {
     params: CreateParams,
     history: {
       sessionId: string;
+      /** The transcript's last model is historical state, independent of a fresh catalog. */
+      model: string | null;
       titleSource: ThreadSummary['titleSource'];
       turns: {
         prompt: string;
@@ -301,7 +303,7 @@ export class ThreadStore {
     const now = Date.now();
     const first = history.turns[0];
     const last = history.turns[history.turns.length - 1];
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    const model = history.model ?? checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const thread: ThreadSummary = {
       id: newId('thr_'),
       projectId: project.id,
