@@ -63,6 +63,10 @@ test('agents communicate by default, respect explicit restrictions and cannot ch
 test('default discovery excludes archived threads and persistent agent sessions', async () => {
   const { h, owner, a, b } = await setup();
   h.core.threads.archive(b, true);
+  const projectId = h.core.threads.require(b).projectId!;
+  h.core.projects.archive(projectId, true);
+  await expect(send(h, a, dest(h, b))).rejects.toThrow('unavailable');
+  expect(h.core.journal.getProject(projectId)?.archived).toBe(true);
   const resident = (await echoThread(h, owner, 'Persistent session')).threadId;
   h.core.journal.putThread({ ...h.core.threads.require(resident), projectId: null, agentSessionId: 'resident-test' });
   expect((await h.core.coordination.directory(a)).agents).toEqual([]);
@@ -70,6 +74,55 @@ test('default discovery excludes archived threads and persistent agent sessions'
   await expect(send(h, a, dest(h, resident))).rejects.toThrow('across projects');
   await expect(send(h, resident, dest(h, a))).rejects.toThrow('disabled');
 });
+
+test('contact activity distinguishes completed work from a recent title change and an archived project', async () => {
+  const { h, owner, a, b } = await setup();
+  expect((await h.core.coordination.directory(a)).agents[0]).toMatchObject({ lastCompletedAt: null, projectArchived: false, paused: false });
+  h.core.threads.startTurn(b, 'Finish this work');
+  await waitFor(() => h.core.threads.require(b).status === 'idle');
+  const turn = h.core.journal.listTurns(b)[0]!;
+  const completedAt = Date.now() - 3_600_000;
+  h.core.journal.putTurn({ ...turn, finishedAt: completedAt });
+  await owner.call('threads.update', { threadId: b, title: 'Renamed recipient' });
+  h.core.projects.archive(h.core.threads.require(b).projectId!, true);
+  const contact = (await h.core.coordination.directory(a)).agents.find(agent => agent.threadId === b)!;
+  expect(contact).toMatchObject({ status: 'idle', lastCompletedAt: completedAt, projectArchived: true, paused: false });
+  expect(contact.activeAt).toBeGreaterThan(completedAt);
+  expect((await h.core.coordination.search(a, 'Renamed')).matches[0]?.lastCompletedAt).toBe(completedAt);
+  expect((await h.core.coordination.read(a, dest(h, b))).contact.projectArchived).toBe(true);
+});
+
+test('a coordination wake restores only its archived project before work starts, while paused messages leave it archived', async () => {
+  const { h, owner, a, b } = await setup();
+  const path = join(h.dataDir, 'archived-project');
+  mkdirSync(path);
+  const project = await owner.call('projects.add', { path, name: 'Archived project' });
+  const recipient = await owner.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: h.core.threads.require(b).accountId, title: 'Archived project worker' });
+  h.core.coordination.configure(recipient.id, { ...brief, remote: true, paused: true });
+  h.core.projects.archive(project.id, true);
+  const senderProjectId = h.core.threads.require(a).projectId!;
+  h.core.projects.archive(senderProjectId, true);
+  const updates: boolean[] = [];
+  const archivedAtStart: boolean[] = [];
+  const off = h.core.bus.onAny((name, payload) => {
+    if (name === 'project.updated' && (payload as { id: string }).id === project.id) updates.push((payload as { archived?: boolean }).archived === true);
+    if (name === 'turn.started' && (payload as { threadId: string }).threadId === recipient.id) archivedAtStart.push(h.core.journal.getProject(project.id)?.archived === true);
+  });
+  try {
+    const letter = await send(h, a, dest(h, recipient.id));
+    expect(letter.status).toBe('received');
+    expect(h.core.journal.getProject(project.id)?.archived).toBe(true);
+    expect(h.core.journal.listTurns(recipient.id)).toHaveLength(0);
+    expect(updates).toEqual([]);
+    h.core.coordination.configure(recipient.id, { ...brief, remote: true });
+    await waitFor(() => h.core.coordination.get(recipient.id).messages[0]?.status === 'delivered', 8000);
+    expect(h.core.journal.getProject(project.id)?.archived).not.toBe(true);
+    expect(updates).toEqual([false]);
+    expect(archivedAtStart).toEqual([false]);
+    expect(h.core.threads.require(recipient.id).archived).toBe(false);
+    expect(h.core.journal.getProject(senderProjectId)?.archived).toBe(true);
+  } finally { off(); }
+}, 12000);
 
 test('delivery wakes the recipient once, preserves system provenance and does not count as user input', async () => {
   const { h, a, b } = await setup(); enable(h, a, b);
@@ -141,9 +194,12 @@ test('a running driver receives a steer once, and uncertain dispatch is never re
   } }));
   h.core.threads.startTurn(b, 'Deploy');
   await waitFor(() => h.core.threads.canSteer(b));
+  const projectId = h.core.threads.require(b).projectId!;
+  h.core.projects.archive(projectId, true);
   await send(h, a, dest(h, b));
   await waitFor(() => h.core.coordination.get(b).messages[0]?.error === 'lost acknowledgement', 5000);
   expect(calls).toBe(1);
+  expect(h.core.journal.getProject(projectId)?.archived).not.toBe(true);
   expect(h.core.coordination.get(b).messages[0]?.status).toBe('uncertain');
   expect(h.core.coordination.take(b, h.core.journal.listTurns(b)[0]!.id)).toBeNull();
 });
@@ -154,13 +210,17 @@ test('two real cores exchange signed directory, message, reply and receipt witho
   expect(JSON.stringify(cardA)).not.toContain(one.h.token);
   await expect(send(one.h, one.a, dest(two.h, two.b))).rejects.toThrow('not trusted');
   one.h.core.coordination.trust(cardB); two.h.core.coordination.trust(cardA);
+  const archivedProjectId = two.h.core.threads.require(two.b).projectId!;
+  two.h.core.projects.archive(archivedProjectId, true);
   const directory = await one.h.core.coordination.directory(one.a);
   expect(directory.unavailable).toHaveLength(0);
   const remoteProject = two.h.core.journal.getProject(two.h.core.threads.require(two.b).projectId!)!.name;
   expect(directory.agents.find(a => a.coreId === cardB.coreId && a.threadId === two.b)?.project).toBe(remoteProject);
+  expect(directory.agents.find(a => a.coreId === cardB.coreId && a.threadId === two.b)).toMatchObject({ projectArchived: true, lastCompletedAt: null, paused: false });
   const letter = await send(one.h, one.a, dest(two.h, two.b));
   expect(letter.status).toBe('queued');
   await waitFor(() => one.h.core.coordination.get(one.a).messages[0]?.status === 'delivered', 12000);
+  expect(two.h.core.journal.getProject(archivedProjectId)?.archived).not.toBe(true);
   expect(one.h.core.coordination.get(one.a).messages[0]?.toProject).toBe(remoteProject);
   expect(one.h.core.coordination.get(one.a).messages[0]?.toMachine).toBe(cardB.name);
   expect(two.h.core.coordination.get(two.b).messages[0]?.from.project).toBe(one.h.core.journal.getProject(one.h.core.threads.require(one.a).projectId!)!.name);
@@ -487,10 +547,13 @@ test('search finds a contact by words of its chat, fields or both, and reading r
 
 test('a waiting agent takes its answer directly, and the recipient is not woken for it', async () => {
   const { h, a, b } = await setup();
+  const projectId = h.core.threads.require(a).projectId!;
+  h.core.projects.archive(projectId, true);
   const waiting = h.core.coordination.wait(a, dest(h, b), 5000);
   const answer = await send(h, b, dest(h, a), 'Done, you can restart.');
   const { letters } = await waiting;
   expect(letters.map(l => [l.id, l.status])).toEqual([[answer.id, 'delivered']]);
+  expect(h.core.journal.getProject(projectId)?.archived).not.toBe(true);
   await new Promise(resolve => setTimeout(resolve, 300));
   // The answer reached the agent through its tool output only: no wake turn, no injected copy.
   expect(h.core.journal.listTurns(a)).toHaveLength(0);

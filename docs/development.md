@@ -525,6 +525,10 @@ the composer, plans and delegated transcripts share these tokens. Headings
 scale from 1.3 em to body size; code, tables and tool cards retain their
 own sizes. `tests/e2e/readability.test.ts` checks both viewport widths.
 
+Sending a prompt leaves 12% of the timeline height above it, bounded to
+48-96 px. The response replaces the reserved space below it; resizing updates
+both. `tests/e2e/chat-scroll.test.ts` checks desktop and phone.
+
 Tool cards retain full input/output on expansion. Consecutive calls fold into a
 count-based summary in first-seen kind order, including failures and denials with
 a muted count. Failed edits do not count as successful changes. Expanding a

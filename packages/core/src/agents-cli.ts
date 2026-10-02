@@ -5,6 +5,7 @@
  * prefix, resolved against the directory.
  */
 import type { AgentAddress, AgentContact, AgentLetter, AgentMatch, CoordinationView } from '@boite/contracts';
+import { COORDINATION_RECENT_COMPLETION_MS } from '@boite/contracts';
 import type { CoreClient } from './client.ts';
 
 /** The default wait stays under a two-minute tool timeout. */
@@ -26,10 +27,10 @@ export { AgentsUsage };
 function ago(at: number | undefined, now = Date.now()): string {
   if (at === undefined) return '';
   const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 60) return `active ${s}s ago`;
-  if (s < 3600) return `active ${Math.round(s / 60)}m ago`;
-  if (s < 86_400) return `active ${Math.round(s / 3600)}h ago`;
-  return `active ${Math.round(s / 86_400)}d ago`;
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86_400)}d ago`;
 }
 
 function clock(at: number): string {
@@ -41,11 +42,18 @@ export function shortAddress(contact: AgentContact, selfCore: string): string {
   return contact.coreId === selfCore ? contact.threadId : `${contact.machine.replace(/\s+/g, '-')}/${contact.threadId}`;
 }
 
-export function contactLine(contact: AgentContact, selfCore: string): string {
-  const facts = [contact.project, contact.coreId === selfCore ? 'this machine' : contact.machine, contact.status, contact.agent, contact.branch ?? undefined, ago(contact.activeAt)]
+export function contactLine(contact: AgentContact, selfCore: string, now = Date.now()): string {
+  const working = ['queued', 'running', 'waiting'].includes(contact.status);
+  const completed = contact.lastCompletedAt;
+  const recent = typeof completed === 'number' && completed <= now && now - completed <= COORDINATION_RECENT_COMPLETION_MS;
+  const completion = typeof completed === 'number' ? `last completed ${ago(completed, now)}` : completed === null ? 'no completed turn' : 'last completion unknown';
+  const facts = [contact.project, contact.coreId === selfCore ? 'this machine' : contact.machine, `${contact.status} (${working ? 'working' : 'not working'})`, contact.agent, contact.branch ?? undefined,
+    contact.activeAt === undefined ? undefined : `active ${ago(contact.activeAt, now)}`, completion,
+    contact.paused ? 'coordination paused' : undefined, contact.projectArchived ? 'project archived; delivery will restore it' : undefined]
     .filter((fact): fact is string => typeof fact === 'string' && fact.length > 0);
   const resources = contact.resources ? `\n    resources: ${contact.resources}` : '';
-  return `${shortAddress(contact, selfCore)}  ${JSON.stringify(contact.title)}  (${facts.join(', ')})${resources}`;
+  const warning = !working && (contact.status === 'error' || !recent) ? '\n    warning: contacting this inactive thread is allowed but discouraged unless it completed work in the last 15 minutes.' : '';
+  return `${shortAddress(contact, selfCore)}  ${JSON.stringify(contact.title)}  (${facts.join(', ')})${resources}${warning}`;
 }
 
 /**
@@ -86,9 +94,10 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
   const action = want(0, 'list, find, read, send, reply, log, wait or inbox');
   const view = (): Promise<CoordinationView> => client.call('collaboration.get', { threadId });
   const directory = () => client.call('collaboration.directory', { threadId });
-  const resolve = async (target: string): Promise<{ to: AgentAddress; self: AgentAddress }> => {
+  const resolve = async (target: string): Promise<{ to: AgentAddress; self: AgentAddress; contact?: AgentContact }> => {
     const [{ self }, { agents }] = await Promise.all([view(), /^[0-9a-f]{64}\//.test(target) ? Promise.resolve({ agents: [] as AgentContact[] }) : directory()]);
-    return { to: resolveAgent(target, agents, self.coreId), self };
+    const to = resolveAgent(target, agents, self.coreId);
+    return { to, self, contact: agents.find(agent => sameAddress(agent, to)) };
   };
   const timeoutMs = (): number => {
     const seconds = options.timeout ?? WAIT_DEFAULT_S;
@@ -132,15 +141,18 @@ export async function agentsCommand(client: CoreClient, threadId: string, rest: 
     if (!body) throw new AgentsUsage(`agents ${action} needs message text`);
     let to: AgentAddress;
     let self: AgentAddress;
+    let contact: AgentContact | undefined;
     if (action === 'reply') {
       const current = await view();
       self = current.self;
       const letter = current.messages.find(m => m.id === target && m.to.coreId === self.coreId && m.to.threadId === threadId);
       if (!letter) throw new AgentsUsage('reply needs an incoming message id from agents inbox');
       to = { coreId: letter.from.coreId, threadId: letter.from.threadId };
-    } else ({ to, self } = await resolve(target));
+      contact = (await directory()).agents.find(agent => sameAddress(agent, to));
+    } else ({ to, self, contact } = await resolve(target));
     const letter = await client.call('collaboration.send', { threadId, to, text: body, requestId: options.requestId ?? crypto.randomUUID(), ...(action === 'reply' ? { replyTo: target } : {}) });
-    const lines = [`id: ${letter.id}`, `status: ${letter.status}`, ...(letter.error ? [`error: ${letter.error}`] : [])];
+    const recipient = contact ? contactLine(contact, self.coreId) : 'warning: recipient activity is unknown; sending or replying may wake an inactive thread and restore its archived project. Check agents list or read before contacting it.';
+    const lines = [recipient, `id: ${letter.id}`, `status: ${letter.status}`, ...(letter.error ? [`error: ${letter.error}`] : [])];
     if (options.wait && letter.status !== 'rejected') lines.push(...await waitFor(to, self));
     else lines.push('Delivery is not consent. Wait for an explicit reply before a disruptive action.');
     print(lines, letter);

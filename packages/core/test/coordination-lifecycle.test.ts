@@ -218,11 +218,14 @@ test('pausing in settings cancels an already queued wake', async () => {
 
 test('a queued wake rechecks expiry before sending anything to the provider', async () => {
   const { h, to, letter, stopBlocker, releaseAdmission } = await setupQueued();
+  const projectId = h.core.threads.require(to).projectId!;
+  h.core.projects.archive(projectId, true);
   h.core.journal.db.query("UPDATE coordination_letters SET data = json_set(data, '$.expiresAt', ?) WHERE id = ?").run(Date.now() - 1, letter.id);
   stopBlocker();
   releaseAdmission();
   await waitFor(() => h.core.journal.listTurns(to)[0]?.status === 'stopped');
   expect(h.core.coordination.get(to).messages[0]?.status).toBe('received');
+  expect(h.core.journal.getProject(projectId)?.archived).toBe(true);
 }, 12000);
 
 test('a later successful wake never acknowledges a previous failed submission', async () => {

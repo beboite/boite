@@ -83,6 +83,8 @@ test('agents commands discover, send and reply using the calling thread identity
   const listed = await boite(['agents', 'list', '--json']);
   expect(listed.code).toBe(0);
   const contact = JSON.parse(listed.out).agents[0];
+  expect(contact).toMatchObject({ status: 'idle', lastCompletedAt: null, projectArchived: false, paused: false });
+  expect((await boite(['agents', 'list'])).out).toContain('contacting this inactive thread is allowed but discouraged');
   const sent = await boite(['agents', 'send', `${contact.coreId}/${other}`, 'Can I restart?', '--json']);
   expect(sent.code).toBe(0);
   const letter = JSON.parse(sent.out);
@@ -92,6 +94,13 @@ test('agents commands discover, send and reply using the calling thread identity
   expect(reply.code).toBe(0);
   expect(JSON.parse(reply.out).replyTo).toBe(incoming.id);
   expect((await boite(['agents', 'inbox'])).out).toContain(`<- from ${other}`);
+  harness.core.coordination.pause(other);
+  const warned = await boite(['agents', 'send', other, 'Another question']);
+  expect(warned.code).toBe(0);
+  expect(warned.out).toContain('coordination paused');
+  const direct = await boite(['agents', 'send', `${contact.coreId}/${other}`, 'Direct address']);
+  expect(direct.code).toBe(0);
+  expect(direct.out).toContain('recipient activity is unknown');
 });
 
 test('agents reach each other by a short address, find by chat, read and wait for an answer', async () => {
