@@ -2,6 +2,7 @@ import type { Thread, ThreadArchiveReason, ThreadId } from '@boite/contracts';
 import type { FakeContext } from './context';
 import { pathKey } from './checks';
 import { describedProject } from './project-archive';
+import { hasActiveSideQuestion, retainedFamilyIds } from './side-questions';
 
 /** Deterministic disk/GitHub evidence for offline tests; the fake never polls a network. */
 export interface MergedPrFixture {
@@ -37,13 +38,17 @@ function eligible(ctx: FakeContext, id: ThreadId): boolean {
   if (!project || project.archived || project.autoArchiveMergedPr === false || project.path === thread.cwd || ctx.bus.focusedThreadId === id || ctx.hasProtectedInput(id)) return false;
   if (ctx.removedWorktrees.has(pathKey(thread.cwd)) || ctx.goneFolders.has(pathKey(thread.cwd)) || ctx.goneFolders.has(pathKey(project.path)) || ctx.worktrees.some(checkout => pathKey(checkout.path) === pathKey(thread.cwd) && (checkout.dirty || checkout.missing))) return false;
   const all = [...ctx.threads.values(), ...[...ctx.deletedThreads.values()].flatMap(family => family.threads)];
-  if (!quiescent(ctx, thread) || [...ctx.threads.values()].some(child => child.parentThreadId === id && !quiescent(ctx, child, true))) return false;
+  if ([...retainedFamilyIds(ctx, id)].some(memberId => {
+    const member = ctx.threads.get(memberId);
+    return !member || !quiescent(ctx, member, memberId !== id);
+  })) return false;
   return all.filter(holder => !holder.parentThreadId && !holder.agentSessionId && holder.branch === thread.branch && (holder.projectId === thread.projectId || ctx.mergedPrFixtures.get(holder.id)?.repository === fixture.repository)).length === 1;
 }
 
 function quiescent(ctx: FakeContext, thread: Thread, child = false): boolean {
   const id = thread.id;
   if (thread.agentSessionId || thread.status !== 'idle' || thread.unread || thread.pinned || thread.pendingMove || thread.background?.length || ctx.workflows.active(id) || ctx.bus.focusedThreadId === id || ctx.hasProtectedInput(id)) return false;
+  if (hasActiveSideQuestion(ctx, id)) return false;
   if (ctx.inFlight.has(id) || ctx.heldAnswers.get(id)?.length || [...ctx.scheduler.running, ...ctx.scheduler.queued].some(entry => entry.threadId === id) || ctx.processes.some(process => (process.threadId === id || process.threadId === `terminal:${id}`) && process.exitedAt === null) || ctx.terminals.has(`terminal:${id}`)) return false;
   if ([...ctx.pendingPermissions.values(), ...ctx.pendingQuestions.values()].some(entry => entry.request.threadId === id)) return false;
   if ((thread.activity?.goal && thread.activity.goal.status !== 'complete') || (thread.activity?.loop && thread.activity.loop.status !== 'complete')) return false;

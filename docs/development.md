@@ -232,7 +232,8 @@ cancel; the core chooses the path. [CLI](cli.md) documents agent moves.
 
 [Context](context.md#pending-prompts-goals-and-loops) owns queued prompts,
 steering, durable drafts, goals and loops. [Model switching](model-switching.md)
-owns provider defaults, accepted execution targets and context transfer.
+owns provider defaults, on-demand model catalogs, accepted execution targets and
+context transfer.
 These rules apply across navigation and are covered by the composer, Store and
 context tests; live provider behavior stays opt-in.
 
@@ -249,6 +250,21 @@ profiles, so version checks, quotas and probes cannot use developer logins.
 Fixture harnesses set it. Only the host-agent opt-ins listed below enable
 installed agents; `BOITE_E2E_PREBUILT_UI` and `BOITE_E2E_SKIP_SHELL` only select
 browser fixtures and cannot enable host profiles or probes.
+
+The side-question path is covered by
+`bun test packages/core/test/side-questions.test.ts packages/core/test/claude.side-question.test.ts`
+and the composer suite. `bun test tests/e2e/side-questions.test.ts` uses a real
+temporary echo core to check desktop and paired-phone `/btw` answers during a
+waiting main turn, dismissal and unchanged history. Its captures land in
+`tests/e2e/.artifacts/btw-desktop.png` and `btw-phone.png`; no provider tokens
+are spent. See [context](context.md#side-questions) for provider support.
+
+Side questions run without tools against a conversation snapshot and stay
+temporary. Pending requests and retained answers protect the root and retained
+descendants from automatic merged-PR archive; completed answers expire after 10
+minutes and the core retains at most 64. Manual family archive cancels pending
+requests and ignores late results. Pending inference also blocks idle updater
+shutdown.
 
 ## Checks and tests
 
@@ -328,10 +344,15 @@ Bun's baseline runtime, with `core/main.js` and split chunks in the adjacent
 runtime archive's SHA-256 and executable signature and caches it under
 `node_modules/.cache` for the running Bun version.
 
-`jobs-worker.js`, `guard-worker.js` and both CLI shims accompany the core.
-Missing workers reduce Windows tracking or disable guards; the E2E fixture
-refuses stale or missing files. Run staging again after the shell build so
-its output has the complete adjacent runtime.
+`stage:core` places `jobs-worker.js`, `guard-worker.js` and
+`artifact-retention-worker.js` beside the core, with both CLI shims. The jobs
+worker supplies Windows process events; without it, tracing falls back to
+polling. The guard worker supplies the focus guard and audio mute. The retention
+worker scans artifact references in the background. Windows requires all three
+files, and the E2E fixture rejects stale or missing adjacent artifacts. Run
+staging after the shell build. On Windows the first staging downloads Bun's
+baseline runtime archive for the pinned Bun version and caches it under
+`node_modules/.cache` ([releasing](releasing.md)).
 
 ## Captures
 

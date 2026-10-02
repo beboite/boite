@@ -61,9 +61,13 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.activity.set',
   'threads.activity.control',
   'messages.list',
+  'artifacts.read', // Download only snapshots already published in a visible conversation, never host paths.
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.
+  'threads.btw.cancel', // Dismissal cancels only the named temporary request.
+  'threads.btw', // A phone asks the same temporary side questions as the owner's composer.
+  'threads.btw.fork', // Paired devices can turn their temporary answer into a conversation.
   // Editing a sent prompt and branching a conversation are the composer's own
   // moves. A fork in a worktree writes no more than `threads.create` with one,
   // which a device already reaches, and names no path either.
@@ -114,7 +118,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed', 'project.updated',
-  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
+  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
   'turn.started', 'turn.finished',
   'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',

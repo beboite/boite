@@ -75,6 +75,9 @@ executable, command line, timestamps, exit code, CPU time, peak memory and I/O.
 | `resources.killTree` | Stops the registered thread tree or groups; wait for live count zero before treating exits as observed |
 | `ThreadLoad` | Sampled process count, CPU percentage and memory on each thread summary |
 
+Manual archive also cancels temporary side questions throughout the retained
+family. Their retired requests cannot publish answers after restoration.
+
 Manual archive stops the thread's turns and those of its child threads, then
 ends their registered processes once the stopped turns settle. Exited
 processes remain in `trace.get`. An archived thread appears in `resources.list`

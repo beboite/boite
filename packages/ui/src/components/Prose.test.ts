@@ -51,7 +51,9 @@ test('a local file can still open when its preview cannot be read', async () => 
   running = mount(Prose, { target: document.body, props: { text: '[Manual](manual.pdf)', store, threadId: 'game' } });
   flushSync();
   query<HTMLAnchorElement>('a[data-file-path]').click();
-  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toBe('Preview could not be read'));
+  await vi.waitFor(() => expect(document.querySelector('[role=alert] p')?.textContent).toBe('Preview could not be read'));
+  query<HTMLButtonElement>('[role=alert] button').click();
+  await vi.waitFor(() => expect(store.readFile).toHaveBeenCalledTimes(2));
   expect(invoke).not.toHaveBeenCalled();
   expect(document.querySelector('[data-testid=artifact-download]')).toBeNull();
   query<HTMLButtonElement>('[data-testid=artifact-open]').click();
@@ -63,6 +65,39 @@ function query<T extends Element>(selector: string): T {
   if (!node) throw new Error(`no ${selector}`);
   return node;
 }
+
+test('the direct-link experiment opens a desktop shortcut and text outside the checkout only on a click', async () => {
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const store = { owner: true, localCore: true, threads: [{ id: 'local', cwd: 'E:/project' }], readFile: vi.fn() } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: {
+    text: '[Test](</C:/Users/Chris/Desktop/Boite - Test medias.lnk>) [Notes](file:///E:/reports/test%20result.txt)', store, threadId: 'local',
+  } });
+  flushSync();
+  expect(document.querySelector('a[data-file-path]')).toBeNull();
+  writeExperiments(['open-chat-links']); flushSync();
+  expect(invoke).not.toHaveBeenCalled();
+  const links = document.querySelectorAll<HTMLAnchorElement>('a[data-file-path]');
+  links[0]!.click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_chat_file', { directory: 'E:/project', path: 'C:/Users/Chris/Desktop/Boite - Test medias.lnk' }, undefined));
+  await tick(); links[1]!.click();
+  await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('open_chat_file', { directory: 'E:/project', path: 'E:/reports/test result.txt' }, undefined));
+  expect(store.readFile).not.toHaveBeenCalled();
+  writeExperiments([]); flushSync();
+  expect(document.querySelector('a[data-file-path]')).toBeNull();
+});
+
+test('a remote machine file is never opened by the desktop experiment', async () => {
+  writeExperiments(['open-chat-links']);
+  const invoke = vi.fn(async () => {});
+  window.__TAURI_INTERNALS__ = { invoke } as unknown as typeof window.__TAURI_INTERNALS__;
+  const readFile = vi.fn(async () => ({ ok: false, error: 'Remote file unavailable' }));
+  const store = { owner: true, localCore: false, threads: [{ id: 'remote', cwd: 'C:/project' }], readFile } as unknown as Store;
+  running = mount(Prose, { target: document.body, props: { text: '[Notes](report.txt)', store, threadId: 'remote' } });
+  flushSync(); query<HTMLAnchorElement>('a[data-file-path]').click();
+  await vi.waitFor(() => expect(readFile).toHaveBeenCalledWith('remote', 'report.txt'));
+  expect(invoke).not.toHaveBeenCalled();
+});
 
 test('a fenced block carries a copy button that writes the code to the clipboard', async () => {
   const writeText = vi.fn(async (_text: string) => {});

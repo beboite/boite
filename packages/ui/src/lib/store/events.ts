@@ -101,6 +101,13 @@ export function listen(ctx: StoreContext, client: Client): void {
   // thread, so it is written on that thread's panel even while another one is
   // on screen: opening the thread later shows what was asked for.
   on('panel.requested', ({ threadId, surface }) => {
+    if (surface.kind === 'browser' && surface.artifact && s.endpointUrl) {
+      // The owning machine may have been reached through a LAN name different from the core's own.
+      const url = new URL(surface.url);
+      url.hostname = new URL(s.endpointUrl).hostname;
+      url.port = String(surface.artifact.port);
+      surface = { ...surface, url: url.href };
+    }
     rightPanel.for(s.threadKey(threadId)).showSurface(surface);
   });
   // The project's whole list after any change, whoever moved a card.

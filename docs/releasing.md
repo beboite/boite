@@ -36,14 +36,16 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   as its own before-build command, so a shell build never ships a UI older than
   the sources.
 - `build:core` cleans and writes `packages/core/dist`: `main.js`, `jobs-worker.js`,
-  `guard-worker.js`, and hashed chunks for the main module and lazy drivers.
+  `guard-worker.js`, `artifact-retention-worker.js`, and hashed chunks for the main module and lazy drivers.
   Keep every emitted file together when distributing this bundle. Lazy imports
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
-  Bun's baseline runtime, which needs no AVX2. The two worker
-  files are not compiled into it: the core loads them by name from beside its own
-  executable, so they travel with it.
+  Bun's baseline runtime, which needs no AVX2. The jobs and guard workers remain
+  JavaScript files beside the core. `artifact-retention-worker.ts` is also a
+  compile entry point, so standalone signed server archives embed it and need
+  no separate retention worker file. Shell staging still ships all three
+  emitted worker files beside the sidecar.
 - On Windows the installed sidecar is not that executable. It is Bun's baseline
   runtime of the version the build ran under, copied as `boite-core.exe`, with every file of the bundle
   but the workers in a `core` directory beside it, and the shell starts it as
@@ -65,7 +67,7 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
-- `stage:core` puts the sidecar, both workers and the two `boite` shims
+- `stage:core` puts the sidecar, all three workers and the two `boite` shims
   (`packages/core/shims`, see [cli.md](cli.md)) where the two things that
   run them look. The bundler wants
   `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
@@ -73,7 +75,7 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   entries that land them beside the installed sidecar. The end to end suite wants
   the same files beside `apps/shell/src-tauri/target/release/boite-shell`, with
   `.exe` on Windows, so the script copies there whenever that executable exists.
-  The Windows shell refuses a sidecar missing either worker and names the missing file.
+  The Windows shell refuses a sidecar missing any worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer on Windows, Debian and AppImage packages on Linux, or an
   application bundle and DMG on macOS. Build on the target OS and architecture;
@@ -117,6 +119,22 @@ bun run --cwd apps/shell tauri build --no-bundle
 `tauri.bundle.conf.json` adds `bundle.externalBin` and the resource map for the
 core, Windows workers, CLI shims and built UI. The base can build before core
 compilation; distributable builds use the overlay.
+
+```json
+{
+  "bundle": {
+    "externalBin": ["binaries/boite-core"],
+    "resources": {
+      "binaries/jobs-worker.js": "jobs-worker.js",
+      "binaries/guard-worker.js": "guard-worker.js",
+      "binaries/artifact-retention-worker.js": "artifact-retention-worker.js",
+      "binaries/boite": "boite",
+      "binaries/boite.cmd": "boite.cmd",
+      "../../../packages/ui/dist": "ui"
+    }
+  }
+}
+```
 
 CLI `--config` paths resolve from `apps/shell`, while paths inside the configs
 resolve from `src-tauri`. A directory resource preserves its tree under the
@@ -225,6 +243,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `jobs-worker.js`, beside the core because that is where the core looks for it.
   Without it the trace reports `poll` instead of `events`.
 - `guard-worker.js`, the focus guard and the audio mute.
+- `artifact-retention-worker.js`, the background scan for unused deliverables.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
   invokes the adjacent core's CLI entry ([cli.md](cli.md)).
 - `ui/`, the same build a phone gets over the pairing link.

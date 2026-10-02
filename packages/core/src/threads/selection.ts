@@ -18,6 +18,18 @@ function modelsFor(provider: ProviderDescriptor, accountId: AccountId): ModelInf
   return [...probed, ...provider.models.filter((model) => !known.has(model.id))];
 }
 
+/** Read missing native metadata before validating a new choice, including ACP's per-model scale. */
+export function needsModelDiscovery(
+  provider: ProviderDescriptor, accountId: AccountId, model: string | null, effort: string | null, speed: string | null,
+): boolean {
+  if (model === null || !PROBED_PROTOCOLS.includes(provider.protocol)) return false;
+  const listed = modelsFor(provider, accountId).find(entry => entry.id === model);
+  const missingEffort = effort !== null && listed?.effort === undefined;
+  if (provider.protocol === 'acp' && missingEffort) return true;
+  return probedModelsOf(provider.protocol, provider.id, accountId) === null &&
+    (listed === undefined || missingEffort || (speed !== null && listed.speeds === undefined));
+}
+
 /**
  * Null is always allowed and means the provider's own default. Anything else
  * must be a model the descriptor lists or one the last probe read.
@@ -27,7 +39,7 @@ export function checkModel(provider: ProviderDescriptor, accountId: AccountId, m
   const models = modelsFor(provider, accountId);
   if (models.some((entry) => entry.id === model)) return model;
   throw refused(
-    PROBED_PROTOCOLS.includes(provider.protocol)
+    PROBED_PROTOCOLS.includes(provider.protocol) && probedModelsOf(provider.protocol, provider.id, accountId) === null
       ? 'the agent has not listed this model: open the model picker so Boite reads its models first'
       : 'the provider does not offer this model',
     { providerId: provider.id, accountId, model, expected: models.map((entry) => entry.id) },
@@ -84,4 +96,10 @@ export function checkSpeed(provider: ProviderDescriptor, accountId: string, mode
   const options = modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds ?? [];
   if (options.some(option => option.id === speed)) return speed;
   throw refused('the model does not offer this speed', { providerId: provider.id, model, speed, expected: options.map(option => option.id) });
+}
+
+/** Like stored effort, a validated speed survives the loss of the in-memory catalog. */
+export function checkStoredSpeed(provider: ProviderDescriptor, accountId: AccountId, model: string | null, speed: string | null): void {
+  if (speed === null || modelsFor(provider, accountId).find(entry => entry.id === model)?.speeds === undefined) return;
+  checkSpeed(provider, accountId, model, speed);
 }

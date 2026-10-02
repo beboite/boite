@@ -48,8 +48,9 @@ import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/op
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
+import { SideQuestions } from './threads/side-questions.ts';
 import { readMemoryEvents } from './threads/memory-read.ts';
-import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
+import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { ThreadFocus } from './threads/focus.ts';
@@ -91,6 +92,7 @@ export class ThreadStore {
   /** Commands, background tasks and context the agent reported. */
   readonly agentState: AgentState;
   readonly titles: ThreadTitles;
+  readonly sideQuestions: SideQuestions;
   /** `threads.rewind` and `threads.fork`. */
   readonly branching: ThreadBranching;
   readonly codeCheckpoints: CodeCheckpoints;
@@ -114,6 +116,7 @@ export class ThreadStore {
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
+    this.sideQuestions = new SideQuestions(core, this);
     this.branching = new ThreadBranching(core, this);
     this.codeCheckpoints = new CodeCheckpoints(core);
     this.moves = new ThreadMove(core, this);
@@ -435,9 +438,10 @@ export class ThreadStore {
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
     if (params.speed !== undefined) next.speed = params.speed;
-    next.speed = checkSpeed(provider, account.id, next.model, next.speed ?? null);
+    const changedModel = switched || next.model !== thread.model;
+    if (changedModel || next.speed !== thread.speed) next.speed = checkSpeed(provider, account.id, next.model, next.speed ?? null);
     // The model may have changed in the same call, so the scale is the new one's.
-    next.effort = checkEffort(provider, account.id, next.model, next.effort);
+    if (changedModel || next.effort !== thread.effort) next.effort = checkEffort(provider, account.id, next.model, next.effort);
     if (switched || next.model !== thread.model || next.effort !== thread.effort || next.speed !== thread.speed || next.permissionMode !== thread.permissionMode) {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
@@ -477,6 +481,11 @@ export class ThreadStore {
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
     this.require(threadId);
+    if (archived) {
+      // Temporary inference belongs to the visible family, including retained descendants.
+      const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
+      for (const member of family) this.sideQuestions.cancel(member.id);
+    }
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
@@ -685,7 +694,7 @@ export class ThreadStore {
       () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
-    checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
+    checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
     // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.

@@ -58,10 +58,10 @@ export function registerModules(core: Core): void {
   core.router.register('plugins.accountAction', (params) => core.plugins.accountAction(params));
   registerProjectMethods(core);
   registerProviderMethods(core);
-  registerProbeMethods(core);
+  const probe = registerProbeMethods(core);
   registerUpdateMethods(core);
   registerAccountMethods(core);
-  registerThreadMethods(core);
+  registerThreadMethods(core, probe);
   registerSchedulerMethods(core);
   registerTraceMethods(core);
   registerUsageMethods(core);

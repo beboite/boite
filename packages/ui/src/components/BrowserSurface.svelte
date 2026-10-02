@@ -1,10 +1,12 @@
 <script lang="ts">
   import { secureId } from '../lib/secure-id';
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2 } from '@lucide/svelte';
+  import { ArrowLeft, ArrowRight, ExternalLink, RotateCw, MousePointer2, PictureInPicture2 } from '@lucide/svelte';
+  import { rightPanel } from '../lib/right-panel.svelte';
   import { browserBridge, normalizeUrl } from '../lib/browser-bridge';
   import { linuxShell } from '../lib/shell-platform';
   import { watchBrowserBounds } from '../lib/browser-bounds';
+  import { browserPresentation } from '../lib/browser-presentation';
   import { openExternal } from '../lib/links';
   import { fill, strings } from '../lib/strings';
   import { focusComposer } from '../lib/focus';
@@ -21,12 +23,15 @@
   let notice = $state('');
   let loading = $state(false);
   let problem = $state('');
+  let viewport = $state<{ width: number; height: number } | null>(null);
   $effect(() => {
     const surfaceId = id;
+    viewport = browserBridge.viewport?.(surfaceId) ?? null;
     loading = untrack(() => !!url && !browserBridge.isReady(surfaceId));
     problem = '';
     return browserBridge.on(event => {
       if (event.id !== surfaceId) return;
+      if (event.type === 'viewport') viewport = event.size;
       if (event.type === 'loading') {
         loading = event.loading;
         if (loading) problem = '';
@@ -95,6 +100,7 @@
   });
 
   let slot = $state<HTMLDivElement | undefined>(undefined);
+  let preview = $state<string | null>(null);
   let field = $state<HTMLInputElement | undefined>(undefined);
   let root = $state<HTMLDivElement | undefined>(undefined);
   let draft = $state<string | null>(null);
@@ -121,7 +127,7 @@
       if (zoom !== ZOOM_DEFAULT) browserBridge.setZoom(surfaceId, zoom);
     });
 
-    return watchBrowserBounds(node, rect => browserBridge.setBounds(surfaceId, rect));
+    return watchBrowserBounds(node, browserPresentation(browserBridge, surfaceId, image => { preview = image; }));
   });
 
   function submit(event: Event): void {
@@ -239,6 +245,17 @@
         <ExternalLink size={13} strokeWidth={1.75} />
       </button>
     </form>
+    {#if browserBridge.paints && !rightPanel.floating}
+      <button type="button" class="ghost small icon" data-testid="browser-detach"
+        title={strings.browser.detach} aria-label={strings.browser.detach}
+        onclick={() => { rightPanel.floating = true; rightPanel.maximized = false; }}>
+        <PictureInPicture2 size={14} />
+      </button>
+    {/if}
+    {#if viewport}
+      <button type="button" class="ghost small zoom" title={strings.browser.resetViewport} aria-label={strings.browser.resetViewport}
+        onclick={() => void browserBridge.protocol?.(id, 'Emulation.clearDeviceMetricsOverride', {}).catch(error => { problem = String(error); })}>{viewport.width}×{viewport.height}</button>
+    {/if}
     {#if zoom !== ZOOM_DEFAULT}
       <button type="button" class="ghost small zoom" data-testid="browser-zoom"
         title={strings.browser.resetZoom} aria-label={strings.browser.resetZoom}
@@ -261,6 +278,7 @@
   {/if}
 
   <div class="slot" bind:this={slot} data-testid="browser-slot">
+    {#if preview}<img class="overlay-preview" data-testid="browser-overlay-preview" src={preview} alt="" />{/if}
     {#if !browserBridge.paints}
       <p class="muted note">{linuxShell() ? strings.browser.slotLinux : strings.browser.slotEmpty}</p>
     {/if}
@@ -329,6 +347,7 @@
   }
 
   .slot {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -338,6 +357,8 @@
     text-align: center;
     background: var(--color-background);
   }
+
+  .overlay-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 
   .note {
     font-size: var(--text-sm);

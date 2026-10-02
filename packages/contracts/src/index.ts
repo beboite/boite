@@ -1,5 +1,7 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
+import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+export * from './browser';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -981,11 +983,17 @@ export interface PendingMove {
   at: number;
 }
 
+/** Outgoing files live on disk above the inline attachment limit. */
+export const ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
+export interface ArtifactContent { url: string; bytes: number; mimeType: string; name: string; }
+
 export type MessagePart =
   | { type: 'text'; text: string; complete?: boolean; displayText?: string; previewReferences?: PreviewReference[]; activity?: { kind: 'goal' | 'loop'; iteration: number }; moved?: MoveNotice; startedBy?: ThreadLink; started?: ThreadLink }
   /** An image the user sent with the prompt, journalled with the message. */
   | { type: 'image'; mimeType: ImageMimeType; data: string; alt: string | null }
   | { type: 'file'; mimeType: string; data: string; name: string | null }
+  /** An immutable published file; resolve its bytes with artifacts.read, never as a disk path. */
+  | { type: 'artifact'; id: string; mimeType: string; bytes: number; name: string }
   /** The model's reasoning as the provider streams it, folded in the UI. */
   | { type: 'thinking'; text: string }
   | {
@@ -1712,7 +1720,7 @@ export type PanelSurface =
   | { kind: 'file'; path: string; line?: number }
   | { kind: 'files'; path?: string }
   | { kind: 'diff'; path?: string }
-  | { kind: 'browser'; url: string }
+  | { kind: 'browser'; url: string; artifact?: { path: string; port: number } }
   | { kind: 'trace' }
   | { kind: 'tasks' }
   | { kind: 'workflow'; runId?: string };
@@ -2270,7 +2278,7 @@ export function normalizeCoreLogText(text: string, secrets: readonly string[] = 
   return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
 }
 
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods {
   /** Owner-only project policy; absent policy defaults to enabled. */
   'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
   /** Owner-only, private bounded diagnostic history, including earlier runs. */
@@ -2449,6 +2457,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
   'panel.open': { params: { threadId: ThreadId; surface: PanelSurface }; result: { shown: boolean } };
   /** Explicitly publish a bounded file snapshot from this thread's working directory. */
   'artifacts.publish': { params: { threadId: ThreadId; path: string }; result: Message };
+  'artifacts.read': { params: { threadId: ThreadId; messageId: MessageId; artifactId: string; renew?: string }; result: ArtifactContent };
+  'artifacts.preview': { params: { threadId: ThreadId; path: string }; result: { url: string; shown: boolean } };
+  'artifacts.previewClose': { params: { threadId: ThreadId; path: string }; result: { ok: true } };
   /** The agent's task list, whole, as the tasks surface shows it. */
   'threads.tasks.set': { params: { threadId: ThreadId; tasks: AgentTask[] }; result: ThreadActivity };
   'threads.tasks.get': { params: { threadId: ThreadId }; result: AgentTask[] };
@@ -2741,6 +2752,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods {
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /** An ephemeral answer from a snapshot of the chat, without starting or steering its main turn. */
+  'threads.btw': { params: { threadId: ThreadId; question: string; requestId: string }; result: { requestId: string } };
+  'threads.btw.cancel': { params: { threadId: ThreadId; requestId: string }; result: { ok: true } };
+  /** Persist a completed side answer and its frozen context in a fresh conversation. */
+  'threads.btw.fork': { params: { threadId: ThreadId; requestId: string }; result: ThreadSummary };
   /**
    * Edit a sent message: `messageId`, a user message of the thread, and every
    * message and turn after it leave the conversation, and the next turn
@@ -2922,7 +2938,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents {
   'resources.memory': MemoryEvent;
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };
@@ -2954,6 +2970,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents {
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
   /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.btw': { threadId: ThreadId; requestId: string; answer: string | null; error: string | null };
   'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
@@ -3146,3 +3163,10 @@ export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
 import type { SpeechModelTier } from './speech-models.ts';
+
+/** Protocols that can answer a side question with tools disabled. */
+export function supportsSideQuestions(protocol: Protocol): boolean {
+  return protocol === 'claude-sdk' || protocol === 'echo';
+}
+
+export { sideQuestionSnapshot } from './side-question-snapshot.ts';

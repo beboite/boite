@@ -6,6 +6,7 @@ import { assertAllowed } from '../src/access.ts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
 import { MergedPrArchive } from '../src/merged-pr-archive.ts';
 import { archiveState } from '../src/merged-pr-archive-state.ts';
 import { githubRepository, parseMergedPrProof } from '../src/pull-requests.ts';
@@ -58,7 +59,7 @@ async function fixture() {
 }
 
 async function completedFamily() {
-  restoreDriver = setDriver('echo', { protocol: 'echo', startTurn(ctx) {
+  restoreDriver = setDriver('echo', { protocol: 'echo', sideQuestion: async () => 'Completed fixture question.', startTurn(ctx) {
     const message = ctx.emit.startMessage('assistant');
     ctx.emit.part(message, 0, { type: 'text', text: 'Completed fixture work.' });
     ctx.emit.complete(message, 'complete');
@@ -201,6 +202,7 @@ test('a completed delivered workflow and delegation family archives with histori
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
     expect(existsSync(join(f.checkout, '.git'))).toBe(true);
     await expect(f.client.call('turns.start', { threadId: childId, prompt: 'Late child work' })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
+    await expect(f.client.call('threads.btw', { threadId: childId, question: 'Late child question', requestId: 'side_archived_child' })).rejects.toMatchObject({ rpc: { code: RpcErrorCode.Refused } });
     await expect(stale.call('delegation.send', { threadId: childId, toThreadId: f.threadId, text: 'Late result', requestId: 'late-family-result' })).rejects.toThrow();
     harness.core.threads.deferred.wake(childId, 'Late background wake');
     expect(harness.core.journal.listTurns(childId)).toEqual(history);
@@ -239,6 +241,33 @@ test('retained child activity, unread results, protected input and undelivered f
   expect(await service.sweep()).toBe(0);
   harness.core.journal.putThread({ ...child, archived: true });
   expect(await service.sweep()).toBe(1);
+});
+
+test('pending and retained side answers on a root or retained descendant keep the merged family visible', async () => {
+  const f = await completedFamily();
+  const child = f.children[0]!;
+  const descendant = { ...harness.core.threads.require(child.id), id: 'thr_archive_descendant', parentThreadId: child.id };
+  harness.core.journal.putThread(descendant);
+  harness.core.journal.putTurn({ ...harness.core.journal.listTurns(child.id).at(-1)!, id: 'trn_archive_descendant', threadId: descendant.id });
+  restoreDriver?.();
+  let finish!: (answer: string) => void;
+  restoreDriver = setDriver('echo', { ...echoDriver, sideQuestion: () => new Promise(resolve => { finish = resolve; }) });
+  const root = harness.core.threads.require(f.threadId);
+  for (const threadId of [f.threadId, child.id, descendant.id]) {
+    const answered = f.client.next('thread.btw', event => event.requestId === 'side_archive');
+    await f.client.call('threads.subscribe', { threadId });
+    await f.client.call('threads.btw', { threadId, question: 'Keep this answer available', requestId: 'side_archive' });
+    expect(harness.core.threads.require(threadId).status).toBe('idle');
+    expect(harness.core.procs.liveCount(threadId)).toBe(0);
+    expect(await service.sweep()).toBe(0);
+    finish('A retained answer');
+    expect((await answered).answer).toBe('A retained answer');
+    expect(await service.sweep()).toBe(0);
+    await f.client.call('threads.btw.cancel', { threadId, requestId: 'side_archive' });
+    expect(service.eligible(root)).toBe(true);
+  }
+  expect(await service.sweep()).toBe(1);
+  expect(harness.core.threads.require(f.threadId).archived).toBe(true);
 });
 
 test('a child turn admitted during final Git validation keeps its merged parent visible', async () => {

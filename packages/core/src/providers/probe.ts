@@ -1,4 +1,4 @@
-import type { AccountId, ProviderId, RpcEvents, RpcResult, ThreadId } from '@boite/contracts';
+import type { AccountId, ProviderId, RpcEvents, RpcParams, RpcResult, ThreadId } from '@boite/contracts';
 import { mkdtempSync } from 'node:fs';
 import { removeDir } from '../fs-retry.ts';
 import { tmpdir } from 'node:os';
@@ -87,7 +87,9 @@ async function probeProvider(
   }
 }
 
-export function registerProbeMethods(core: Core): void {
+export type ProviderProbe = (params: RpcParams<'providers.probe'>) => Promise<RpcResult<'providers.probe'>>;
+
+export function registerProbeMethods(core: Core): ProviderProbe {
   /** Bumped when the descriptors are re-read, which outdates every probe. */
   let revision = 0;
   /** Bumped per account: another account signing in says nothing about this one's models. */
@@ -99,7 +101,7 @@ export function registerProbeMethods(core: Core): void {
   const pending = new Map<string, Promise<RpcResult<'providers.probe'>>>();
   /** The last probe of each provider and account, settled or not: the next one waits for it. */
   const lanes = new Map<string, Promise<void>>();
-  core.router.register('providers.probe', (params) => {
+  const probe: ProviderProbe = (params) => {
     if (params.model !== undefined && (typeof params.model !== 'string' || params.model.length === 0)) {
       throw invalidParams('model must be a non-empty string when given', { field: 'model', expected: 'a non-empty string' });
     }
@@ -125,7 +127,8 @@ export function registerProbeMethods(core: Core): void {
       if (lanes.get(lane) === settled) lanes.delete(lane);
     });
     return request;
-  });
+  };
+  core.router.register('providers.probe', probe);
 
   core.bus.onAny((name, payload) => {
     // The descriptors were re-read, so what an agent listed under the old ones
@@ -148,4 +151,5 @@ export function registerProbeMethods(core: Core): void {
       forgetProbes({ accountId });
     }
   });
+  return probe;
 }

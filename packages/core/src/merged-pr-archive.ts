@@ -48,7 +48,7 @@ export class MergedPrArchive {
     if (!this.quiescent(thread, busy)) return false;
     // Retained children remain history. Every visible or archived member must
     // have completed and acknowledged its work before the parent can disappear.
-    const children = core.journal.db.query('SELECT id FROM threads WHERE parent_thread_id = ? AND id NOT IN (SELECT thread_id FROM thread_deletions)').all(thread.id) as { id: string }[];
+    const children = core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT id FROM threads WHERE parent_thread_id = ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family WHERE id <> ? AND id NOT IN (SELECT thread_id FROM thread_deletions)').all(thread.id, thread.id) as { id: string }[];
     if (children.some(({ id }) => { const child = core.journal.getThread(id); return !child || !this.quiescent(child, busy, true); })) return false;
     const repository = repositoryOf(thread.cwd);
     const holders = core.journal.db.query('SELECT id, cwd, project_id FROM threads WHERE branch = ? AND parent_thread_id IS NULL AND agent_session_id IS NULL').all(thread.branch) as { id: string; cwd: string; project_id: string | null }[];
@@ -57,7 +57,7 @@ export class MergedPrArchive {
   private quiescent(thread: ThreadSummary, busy: ReadonlySet<string>, child = false): boolean {
     const core = this.core;
     if (core.threads.isRemoving(thread.id) || thread.agentSessionId || thread.status !== 'idle' || thread.pinned || thread.unread || Date.now() - thread.updatedAt < this.settleMs || core.threads.focus.viewed(thread.id) || core.threads.focus.hasProtectedInput(thread.id)) return false;
-    if (core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
+    if (core.threads.sideQuestions.active(thread.id) || core.threads.runner.handles.has(thread.id) || core.threads.runner.steering.has(thread.id) || core.threads.agentState.background.get(thread.id)?.length || core.threads.moves.pendingOf(thread.id)) return false;
     if (busy.has(thread.id)) return false;
     if (core.procs.liveCount(thread.id) || core.procs.liveCount(`terminal:${thread.id}`) || core.threads.cards.listPermissions(thread.id).length || [...core.threads.cards.questions.values()].some(entry => entry.request.threadId === thread.id) || [...core.threads.cards.asyncCards.values()].some(entry => entry.threadId === thread.id)) return false;
     if (core.threads.deferred.deferredAnswers.get(thread.id)?.length || core.threads.deferred.pendingWakes.has(thread.id)) return false;

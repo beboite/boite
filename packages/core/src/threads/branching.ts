@@ -175,6 +175,29 @@ export class ThreadBranching {
     // The transcript lives under the folder the agent ran in: a worktree is
     // another folder, so it starts fresh with the history instead.
     const plan = lastOfTurn && placed.cwd === source.cwd ? this.resumable(source, target.turnId, placed.cwd) : null;
+    return this.persistFork(source, messages, [...new Set(messages.map(message => message.turnId))].flatMap(id => {
+      const turn = this.core.journal.getTurn(id); return turn ? [turn] : [];
+    }), placed, plan, { threadId: source.id, messageId: target.id, rowid });
+  }
+
+  /** A side answer forks the bounded snapshot it actually saw, including an unfinished main turn. */
+  forkSnapshot(source: ThreadSummary, snapshot: Message[], turns: Turn[], question: string, answer: string): ThreadSummary {
+    if (source.agentSessionId || source.projectId === null) throw refused('threads.btw.fork.threadId: expected a conversation thread', { threadId: source.id });
+    this.core.projects.require(source.projectId);
+    this.core.providers.require(source.providerId);
+    this.core.accounts.require(source.accountId);
+    const now = Date.now(), turnId = newId('trn_');
+    const sideTurn: Turn = { id: turnId, threadId: source.id, status: 'done', queuedAt: now, startedAt: now, finishedAt: now, usage: null, error: null };
+    const exchange: Message[] = [
+      { id: newId('msg_'), threadId: source.id, turnId, role: 'user', parts: [{ type: 'text', text: question }], state: 'complete', createdAt: now },
+      { id: newId('msg_'), threadId: source.id, turnId, role: 'assistant', parts: [{ type: 'text', text: answer }], state: 'complete', createdAt: now },
+    ];
+    return this.persistFork(source, [...snapshot, ...exchange], [...turns.map(turn => ({ ...turn, checkpoint: null })), sideTurn], {
+      id: newId('thr_'), title: `${source.title}${FORK_TITLE_SUFFIX}`, cwd: source.cwd, branch: source.branch, branchNamingPending: false,
+    }, null, { threadId: source.id, sideQuestion: true });
+  }
+
+  private persistFork(source: ThreadSummary, messages: Message[], originals: Turn[], placed: { id: ThreadId; title: string; cwd: string; branch: string | null; branchNamingPending: boolean }, plan: SessionPlan | null, from: Record<string, unknown>): ThreadSummary {
     const now = Date.now();
     const thread: ThreadSummary = {
       id: placed.id,
@@ -205,17 +228,18 @@ export class ThreadBranching {
       createdAt: now,
       updatedAt: now,
     };
+    const originalsById = new Map(originals.map(turn => [turn.id, turn]));
     const turnIds = new Map<TurnId, TurnId>();
     const turns: Turn[] = [];
     for (const message of messages) {
       if (turnIds.has(message.turnId)) continue;
       const id = newId('trn_');
       turnIds.set(message.turnId, id);
-      const original = this.core.journal.getTurn(message.turnId);
-      if (original === null) continue;
+      const original = originalsById.get(message.turnId);
+      if (!original) continue;
       const inFlight = original.status === 'queued' || original.status === 'running';
       turns.push({
-        ...original,
+        ...structuredClone(original),
         id,
         threadId: thread.id,
         // Still running on the source: here it is over, and whatever it does
@@ -239,7 +263,7 @@ export class ThreadBranching {
         type: 'thread.forked',
         threadId: thread.id,
         version: 1,
-        payload: { thread, from: { threadId: source.id, messageId: target.id, rowid }, session: plan?.session ?? 'seeded', messages: copies.length },
+        payload: { thread, from, session: plan?.session ?? 'seeded', messages: copies.length },
       },
       () => {
         this.core.journal.putThread(thread);

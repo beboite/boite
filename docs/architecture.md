@@ -169,6 +169,15 @@ splits the assistant message at its arrival; earlier running tools finish in
 the earlier message. Claude background work can keep a session alive after its
 foreground turn and later open a background-completion turn.
 
+`/btw` asks a tool-free side question over a frozen transcript excerpt. It does
+not steer the main turn or append its answer to the journal. A pending request
+expires after 90 seconds; at most 64 completed answers stay available for ten
+minutes. Fork persists the frozen context, question and answer in a new thread.
+Cancellation releases only its current request; a late completion cannot replace
+another answer. Pending requests block idle updater shutdown. Pending requests
+and retained answers protect their conversation family from automatic archive;
+manual family archive cancels them. See [side questions](context.md#side-questions).
+
 ## Descriptors, tokens, managed installs
 
 Descriptors declare a supported protocol, executable candidates, OS profiles,

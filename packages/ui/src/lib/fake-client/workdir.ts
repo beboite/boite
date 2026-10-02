@@ -1,5 +1,5 @@
 /** A thread's working directory: files, git, the panel and published artifacts. */
-import { PANEL_SURFACE_KINDS, RpcErrorCode, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
+import { ARTIFACT_MAX_BYTES, ATTACHMENT_MAX_BYTES, PANEL_SURFACE_KINDS, RpcErrorCode, type ArtifactContent, type FileContent, type FileEntry, type GitDiff, type GitStatus, type Message, type PanelSurface } from '@boite/contracts';
 import { RpcFailure } from '../client';
 import { FAKE_CHANGES, FAKE_DIFFS, FAKE_MEDIA, FAKE_MEDIA_PATHS, fakeBytes, fakeLanguage } from './files';
 import { refusal, T0 } from './shared';
@@ -126,7 +126,28 @@ function checkSurface(ctx: FakeContext, cwd: string, surface: PanelSurface): Pan
 }
 
 export function workdirMethods(ctx: FakeContext) {
+  const snapshots = new Map<string, ArtifactContent>();
   return {
+    'artifacts.preview': async ({ threadId, path }) => {
+      const thread = ctx.thread(threadId);
+      if (thread.archived) throw refusal('artifacts.preview needs an active thread');
+      const relative = inside(ctx, thread.cwd, path, 'artifacts.preview path', 'file');
+      if (!/\.html?$/i.test(relative)) throw refusal('artifacts.preview path must be an HTML file');
+      const url = `http://preview.invalid/${encodeURIComponent(threadId)}/${encodeURIComponent(relative)}`;
+      ctx.emitToThread(threadId, 'panel.requested', { threadId, surface: { kind: 'browser', url }, at: ctx.now() });
+      return { url, shown: ctx.bus.subscribed.has(threadId) };
+    },
+    'artifacts.previewClose': async ({ threadId, path }) => {
+      const thread = ctx.thread(threadId);
+      inside(ctx, thread.cwd, path, 'artifacts.previewClose path');
+      return { ok: true as const };
+    },
+    'artifacts.read': async ({ threadId, messageId, artifactId }) => {
+      const message = ctx.thread(threadId).messages.find(m => m.id === messageId);
+      const value = snapshots.get(artifactId);
+      if (!value || !message?.parts.some(p => p.type === 'artifact' && p.id === artifactId)) throw refusal('artifacts.read needs an artifact from this message and thread');
+      return { ...value };
+    },
     'artifacts.publish': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (thread.archived) throw refusal('artifacts.publish needs an active thread');
@@ -135,8 +156,21 @@ export function workdirMethods(ctx: FakeContext) {
       const path = inside(ctx, thread.cwd, params.path, 'artifacts.publish path', 'file');
       const media = FAKE_MEDIA[path];
       const body = media ? new Uint8Array(await (await fetch(media.url())).arrayBuffer()) : new TextEncoder().encode(ctx.files.get(path) ?? '');
-      if (body.length > 5 * 1024 * 1024) throw refusal('artifacts.publish file must be at most 5 MB');
+      if (body.length > ARTIFACT_MAX_BYTES) throw refusal('artifacts.publish file must be at most 512 MB');
       if (thread.archived) throw refusal('artifacts.publish needs an active thread');
+      if (body.length > ATTACHMENT_MAX_BYTES) {
+        const id = `artifact-${++ctx.seq}`;
+        const name = path.split('/').at(-1) ?? path;
+        const mimeType = media?.mime ?? 'application/octet-stream';
+        const url = URL.createObjectURL(new Blob([body], { type: mimeType }));
+        ctx.artifactUrls.add(url);
+        snapshots.set(id, { name, mimeType, url, bytes: body.length });
+        const message: Message = { id: `m-${++ctx.seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: ctx.now(), parts: [{ type: 'artifact', id, name, mimeType, bytes: body.length }] };
+        thread.messages.push(message);
+        ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
+        ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
+        return structuredClone(message);
+      }
       let binary = '';
       for (const byte of body) binary += String.fromCharCode(byte);
       const message: Message = { id: `m-${++ctx.seq}`, threadId: thread.id, turnId: turn.id, role: 'assistant', state: 'complete', createdAt: ctx.now(), parts: [{ type: 'file', name: path.split('/').at(-1) ?? path, mimeType: media?.mime ?? 'application/octet-stream', data: btoa(binary) }] };

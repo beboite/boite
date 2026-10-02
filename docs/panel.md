@@ -7,13 +7,36 @@ starts with the panel closed, without changing the stored desktop layout.
 `lib/right-panel.svelte.ts` owns layout and `RightPanel.svelte` renders it;
 `lib/surface-labels.ts` defines labels and availability.
 
-Manual archive or project removal clears that thread's panel and destroys its
-browser views. A thread manually archived from another client stays open with
-tabs and unsaved edits until this client navigates away. Reconnecting prunes
-layouts absent from that machine's thread list, except the open thread and
-layouts with unsaved file drafts. Unconnected machines keep their layouts.
-[Automatic merged-PR archive](machines.md#merged-pr-conversations) preserves
-unsent composer input and unsaved file drafts for restoration.
+## Floating panel and browser overlays
+
+In the shell, the browser toolbar can detach the panel into a floating card
+inside the app. Drag its top bar, including tab labels, to move it; controls keep
+their actions. Resize from any edge or corner. The card stays within the app
+content area. Moving, resizing, maximizing and docking keep the same page
+mounted, preserving forms and history. The Dock panel control restores the side
+panel from any tab, including after the last browser closes or the conversation
+changes. Maximizing fills the app content area; restoring returns to the previous
+size. At phone width the floating panel fills the screen.
+
+In the shell, the native browser view paints above HTML menus. While a menu or
+dialog overlaps its page, the UI parks the view and displays a screenshot
+underneath the overlay. Closing it restores the same view without reloading the
+page.
+
+## Thread and tab lifetime
+
+Manual archive here or project removal clears the thread's panel and destroys
+its browser views. After the layout has been cleared, restoring the thread starts
+with a fresh panel. If another client archives the open thread, it stays on
+screen with its tabs and unsaved file edits, reconnects included, until this
+client opens another thread or a draft. Leaving a manually archived thread drops
+its layout.
+Automatic merged-PR archive preserves unsent composer input and unsaved file
+drafts for restoration. On reconnect, this machine's `threads.list` prunes
+layouts for threads it no longer lists, except the open thread and layouts with
+unsaved file drafts. A machine that has not connected keeps its own layouts.
+[Automatic merged-PR archive](machines.md#merged-pr-conversations) documents
+the archive conditions.
 
 A panel with no tab yet opens on the surface the device starts with, Files or
 Changes, or on its launcher. The tour's first question sets it and Settings,
@@ -47,8 +70,32 @@ other than 100% has a reset button.
 `lib/browser-bounds.ts` observes layout changes and follows finite layout
 animations, rather than measuring the page slot on every idle frame.
 
+### Local HTML artifacts
+
+`boite preview reports/index.html` opens a generated page in the integrated
+browser, including relative CSS, JavaScript, images and other public web assets
+under that HTML file's directory. `boite browse reports/index.html` does the
+same. The agent guide includes the command for every provider.
+
+Each entry point has its own HTTP origin and an unguessable URL. Preview scripts
+cannot read the core UI's storage or connect to its authenticated WebSocket.
+Paths outside the artifact directory, dotfiles, non-web file types and escaping
+symlinks are refused. Files are read live, so reload reflects edits.
+
+`boite preview-close reports/index.html` stops its server. Archiving or removing
+the thread and shutting down the core also close previews. Up to 16 can be open
+at once. Opening another evicts the least recently used preview; reopening a
+preview or fetching one of its assets updates its recency. Run `preview` again
+after eviction or a core restart to obtain a new URL. Remote
+desktop clients need a direct connection to the preview's additional HTTP port;
+a proxy that forwards only the core port does not forward artifact previews.
+
+### Editing files
+
 A text file is edited in place and saved with the Save button or the platform's
-save chord through `files.write`. An edit not saved yet stays with its tab
+save chord through `files.write`.
+
+An edit not saved yet stays with its tab
 while another tab, another thread or a hidden panel unmounts the editor, in
 memory only, and closing that tab asks first. An image opens fitted to the panel; the wheel zooms
 around the pointer, a drag pans, the bar has fit, 100% and the zoom steps, and
@@ -83,7 +130,7 @@ selected and never opened: a program an agent wrote is not run from here. A
 file outside the thread's directory shows without the open action, since
 `files.read` stays inside it.
 
-Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png)
+Captures: [changes](images/panel-changes-desktop.png) · [files](images/panel-files-desktop.png) · [editor](images/panel-file-text-desktop.png) · [picture, zoomed](images/panel-file-image-zoomed.png) · [video](images/panel-cli-video.png) · [tasks](images/panel-tasks-desktop.png) · [changes at phone width](images/panel-changes-phone.png) · [editor at phone width](images/panel-file-text-phone.png) · [floating panel](images/browser-floating-desktop.png) · [floating browser menu](images/browser-floating-menu.png) · [floating panel at phone width](images/browser-floating-phone.png)
 
 ## What the core provides
 

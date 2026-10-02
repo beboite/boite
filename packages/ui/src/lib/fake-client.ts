@@ -41,8 +41,10 @@ import { threadMoveMethods } from './fake-client/thread-move';
 import { spawnMethods } from './fake-client/spawn';
 import { todoMethods } from './fake-client/todos';
 import { workdirMethods } from './fake-client/workdir';
+import { browserMethods } from './fake-client/browser';
 import { worktreeMethods } from './fake-client/worktrees';
 import { serverUpdateMethods } from './fake-client/server-update';
+import { closeSideQuestions } from './fake-client/side-questions';
 
 export type { FakeClientOptions } from './fake-client/context';
 
@@ -55,6 +57,7 @@ export class FakeClient implements ObservableClient {
   readonly #ctx: FakeContext;
   readonly #methods: FakeMethods;
   #mergedPrSweep: Promise<number> | null = null;
+  #transportGeneration = 0;
 
   constructor(options: FakeClientOptions = {}) {
     const ctx = new FakeContext(options);
@@ -152,11 +155,14 @@ export class FakeClient implements ObservableClient {
 
   close(): void {
     const ctx = this.#ctx;
+    closeSideQuestions(ctx);
     ctx.agents.close();
     unregisterCore(ctx);
     for (const thread of ctx.threads.values()) pauseActivity(ctx, thread);
     ctx.plugins.close();
     ctx.workflows.close();
+    for (const url of ctx.artifactUrls) URL.revokeObjectURL(url);
+    ctx.artifactUrls.clear();
     ctx.bus.setState('closed');
     this.#dropPending('client closed');
   }
@@ -197,10 +203,14 @@ export class FakeClient implements ObservableClient {
 
   async call<M extends RpcMethodName>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
     const { bus } = this.#ctx;
+    const generation = this.#transportGeneration;
     if (bus.state !== 'ready' && method !== 'hello') {
       throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'not connected' });
     }
     await this.#ctx.tick();
+    if (generation !== this.#transportGeneration || (bus.state !== 'ready' && method !== 'hello')) {
+      throw new RpcFailure({ code: RpcErrorCode.Internal, message: 'connection changed before RPC dispatch' });
+    }
     if (bus.principal === 'agent' && (method === 'core.logs' || method === 'projects.setAutoArchiveMergedPr')) throw new RpcFailure({ code: RpcErrorCode.Refused, message: `${method} is not one of the agent's methods` });
     // The router's gate, word for word: deny by default, `hello` before it.
     if (bus.principal === 'session' && method !== 'hello' && !DEVICE_METHODS.has(method)) {
@@ -295,6 +305,7 @@ export class FakeClient implements ObservableClient {
   }
 
   #dropPending(message: string, dropped = false): void {
+    this.#transportGeneration += 1;
     this.#ctx.speechRequests.clear();
     this.#ctx.bus.dropPending(message, dropped);
   }
@@ -332,6 +343,7 @@ export class FakeClient implements ObservableClient {
       ...coordinationMethods(ctx),
       ...todoMethods(ctx),
       ...workdirMethods(ctx),
+      ...browserMethods(ctx),
       ...worktreeMethods(ctx),
     };
   }

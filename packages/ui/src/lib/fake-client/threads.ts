@@ -9,11 +9,43 @@ import { writeTitle } from './titles';
 import { DATA_DIR, fakeWorktree, fakeDraftFolder, refusal, toSummary } from './shared';
 import { closeTerminal } from './terminals';
 import { announceProject, archiveProject, requireFakeFolder } from './project-archive';
-import { modelsOf, checkSpeed } from './provider-catalog';
+import { modelsOf, checkSpeed, discoverSelection } from './provider-catalog';
 import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
+import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
+
+function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed: ReturnType<typeof fakeWorktree> | null = null) {
+  const title = `${source.title} (fork)`;
+  const now = ctx.now();
+  const id = `t-${++ctx.seq}`;
+  const turnIds = new Map<string, string>();
+  const messages: Message[] = kept.map((message) => {
+    if (!turnIds.has(message.turnId)) turnIds.set(message.turnId, `turn-${++ctx.seq}`);
+    return { ...structuredClone(message), id: `m-${++ctx.seq}`, threadId: id, turnId: turnIds.get(message.turnId) ?? message.turnId, state: message.state === 'streaming' ? 'complete' : message.state };
+  });
+  const turns: Turn[] = source.turns.filter((turn) => turnIds.has(turn.id)).map((turn) => ({
+    ...structuredClone(turn),
+    id: turnIds.get(turn.id) ?? turn.id,
+    threadId: id,
+    status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
+    startedAt: turn.startedAt ?? turn.queuedAt,
+    finishedAt: turn.finishedAt ?? now,
+    usage: null,
+  }));
+  const thread: Thread = {
+    id, projectId: source.projectId, title, titleSource: source.titleSource,
+    providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
+    cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
+    status: 'idle', unread: false, archived: false, pinned: false,
+    sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
+    createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
+  };
+  ctx.threads.set(id, thread);
+  ctx.emit('thread.created', structuredClone(toSummary(thread)));
+  return structuredClone(toSummary(thread));
+}
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
@@ -84,6 +116,7 @@ function pagingReply<T>(result: T): T {
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  cancelSide(ctx, thread.id);
   // A waiting move goes with the thread, before its turn ends and would apply it.
   dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);
@@ -131,24 +164,26 @@ function checkSelection(ctx: FakeContext, thread: Thread, params: RpcParams<'thr
   const provider = account && ctx.providers.find((entry) => entry.id === account.providerId);
   if (!account || !provider) return;
   const models = modelsOf(ctx, provider.id, account.id);
+  const catalogRead = ctx.modelCatalogs.has(provider.id + '::' + account.id);
   const switched = account.id !== thread.accountId;
   let model = thread.model;
   let effort = thread.effort;
   if (switched) {
-    model = checkModel(provider, account.id, models, params.model === undefined ? defaultModel(provider) : params.model);
+    model = checkModel(provider, account.id, models, params.model === undefined ? defaultModel(provider) : params.model, catalogRead);
     effort = null;
   }
   if (params.model !== undefined && (params.model !== thread.model || switched)) {
-    model = checkModel(provider, account.id, models, params.model);
+    model = checkModel(provider, account.id, models, params.model, catalogRead);
     effort = null;
   }
   if (params.effort !== undefined) effort = params.effort;
-  checkEffort(provider, models, model, effort);
+  if (switched || model !== thread.model || effort !== thread.effort) checkEffort(provider, models, model, effort);
 }
 
 export function threadMethods(ctx: FakeContext) {
   const removing = new Set<string>();
   return {
+    ...sideQuestionMethods(ctx, (source, messages) => writeFakeFork(ctx, source, messages)),
     'threads.pullRequest': async (params) => {
       const thread = ctx.threads.get(params.threadId);
       return thread?.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
@@ -170,8 +205,9 @@ export function threadMethods(ctx: FakeContext) {
       if (account.providerId !== provider.id) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider', data: { accountId: account.id, accountProviderId: account.providerId, providerId: provider.id } });
       }
+      await discoverSelection(ctx, provider.id, account.id, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
       const models = modelsOf(ctx, provider.id, account.id);
-      const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider));
+      const model = checkModel(provider, account.id, models, params.model ?? defaultModel(provider), ctx.modelCatalogs.has(provider.id + '::' + account.id));
       const effort = checkEffort(provider, models, model, params.effort ?? null);
       checkSpeed(ctx, params.providerId, params.accountId, model, params.speed ?? null);
       if (params.cwd !== undefined && params.cwd.length > 0 && params.worktree === undefined) checkCwd(project.path, params.cwd);
@@ -259,7 +295,17 @@ export function threadMethods(ctx: FakeContext) {
       const nextAccountId = params.accountId ?? thread.accountId;
       const nextProviderId = ctx.accounts.find(a => a.id === nextAccountId)?.providerId ?? thread.providerId;
       const changedModel = (params.model !== undefined && params.model !== thread.model) || nextAccountId !== thread.accountId;
-      checkSpeed(ctx, nextProviderId, nextAccountId, params.model !== undefined ? params.model : thread.model, params.speed !== undefined ? params.speed : changedModel ? null : thread.speed ?? null);
+      const provider = ctx.providers.find(p => p.id === nextProviderId);
+      const model = params.model === undefined ? nextAccountId !== thread.accountId && provider ? defaultModel(provider) : thread.model : params.model;
+      const effort = params.effort === undefined ? changedModel ? null : thread.effort : params.effort;
+      const speed = params.speed === undefined ? changedModel ? null : thread.speed ?? null : params.speed;
+      const version = thread.selectionVersion ?? 0;
+      if (changedModel || effort !== thread.effort || speed !== (thread.speed ?? null)) {
+        await discoverSelection(ctx, nextProviderId, nextAccountId, model, effort, speed);
+      }
+      if (ctx.threads.get(thread.id) !== thread) throw ctx.notFound('thread', thread.id);
+      if (version !== (thread.selectionVersion ?? 0)) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the model selection changed; review the selected model and send again' });
+      if (changedModel || speed !== (thread.speed ?? null)) checkSpeed(ctx, nextProviderId, nextAccountId, model, speed);
       checkSelection(ctx, thread, params);
       const before = [thread.accountId, thread.model, thread.effort, thread.speed, thread.permissionMode].join('\0');
       if (params.accountId !== undefined && params.accountId !== thread.accountId) {
@@ -299,6 +345,7 @@ export function threadMethods(ctx: FakeContext) {
       const was = thread.archived;
       thread.archived = params.archived ?? true;
       if (thread.archived) {
+        cancelFamilySideQuestions(ctx, thread.id);
         const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
         await Promise.all(family.map(member => putAway(ctx, member)));
         // A restore during the stops keeps processes; new child work keeps its own.
@@ -333,6 +380,7 @@ export function threadMethods(ctx: FakeContext) {
       const archived = family.map(t => t.archived);
       for (const thread of family) { removing.add(thread.id); thread.archived = true; }
       try {
+        cancelFamilySideQuestions(ctx, threadId);
         ctx.workflows.stopRoot(threadId, 'Conversation deleted');
         for (const thread of family) {
           await putAway(ctx, thread);
@@ -527,33 +575,7 @@ export function threadMethods(ctx: FakeContext) {
       const title = `${source.title} (fork)`;
       const placed = params.worktree === true ? fakeWorktree(project.path, title, undefined, ctx.settings.worktreeStorage, project.id) : null;
       if (placed) registerFakeWorktree(ctx, project.id, placed);
-      const now = ctx.now();
-      const id = `t-${++ctx.seq}`;
-      const turnIds = new Map<string, string>();
-      const messages: Message[] = source.messages.slice(0, at + 1).map((message) => {
-        if (!turnIds.has(message.turnId)) turnIds.set(message.turnId, `turn-${++ctx.seq}`);
-        return { ...structuredClone(message), id: `m-${++ctx.seq}`, threadId: id, turnId: turnIds.get(message.turnId) ?? message.turnId, state: message.state === 'streaming' ? 'complete' : message.state };
-      });
-      const turns: Turn[] = source.turns.filter((turn) => turnIds.has(turn.id)).map((turn) => ({
-        ...structuredClone(turn),
-        id: turnIds.get(turn.id) ?? turn.id,
-        threadId: id,
-        status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
-        startedAt: turn.startedAt ?? turn.queuedAt,
-        finishedAt: turn.finishedAt ?? now,
-        usage: null,
-      }));
-      const thread: Thread = {
-        id, projectId: source.projectId, title, titleSource: source.titleSource,
-        providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
-        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
-        status: 'idle', unread: false, archived: false, pinned: false,
-        sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
-        createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
-      };
-      ctx.threads.set(id, thread);
-      ctx.emit('thread.created', structuredClone(toSummary(thread)));
-      return structuredClone(toSummary(thread));
+      return writeFakeFork(ctx, source, source.messages.slice(0, at + 1), placed);
     },
     'turns.stop': async (params) => {
       const thread = ctx.thread(params.threadId);

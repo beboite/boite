@@ -13,6 +13,21 @@ afterEach(() => {
   listen.mockClear();
 });
 
+test('fixed viewport fits after panel resize and clearing it restores the whole slot', async () => {
+  invoke.mockResolvedValue({});
+  const bridge = new TauriBridge();
+  bridge.create('page', 'https://example.test');
+  bridge.setBounds('page', { x: 10, y: 80, width: 480, height: 600 });
+  await bridge.protocol('page', 'Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080 });
+  expect(invoke).toHaveBeenLastCalledWith('browser_protocol', { id: 'page', method: 'Emulation.setDeviceMetricsOverride', params: { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false, scale: .25 } });
+  bridge.setBounds('page', { x: 10, y: 80, width: 960, height: 600 });
+  await bridge.protocol('page', 'Runtime.evaluate', { expression: 'innerWidth' });
+  expect(invoke).toHaveBeenCalledWith('browser_set_bounds', { id: 'page', rect: { x: 10, y: 110, width: 960, height: 540 } });
+  await bridge.protocol('page', 'Emulation.clearDeviceMetricsOverride', {});
+  expect(invoke).toHaveBeenLastCalledWith('browser_set_bounds', { id: 'page', rect: { x: 10, y: 80, width: 960, height: 600 } });
+  expect(bridge.viewport('page')).toBeNull();
+});
+
 test('destroy and recreate of the same id wait for the earlier native commands', async () => {
   let finishCreate!: () => void;
   let finishDestroy!: () => void;

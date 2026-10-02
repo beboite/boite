@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
 mod attachments;
+mod attachment_download;
 mod browser;
+mod browser_control;
 mod channel;
 mod closing;
 mod failure;
@@ -131,7 +133,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             local_core::core_endpoint,
             local_files::open_local_file,
+            local_files::open_chat_file,
             attachments::save_attachment,
+            attachment_download::save_attachment_url,
             window::shell_ready,
             whip::whip_window,
             tray::quit_shell,
@@ -156,6 +160,7 @@ pub fn run() {
             browser::browser_annotate,
             browser::browser_highlight,
             browser::browser_destroy,
+            browser_control::browser_protocol,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

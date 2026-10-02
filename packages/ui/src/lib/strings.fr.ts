@@ -105,7 +105,7 @@ export const fr: Translation = {
   activityUnsupported: 'Les références ne sont pas disponibles avec /goal ou /loop. Envoyez un message ordinaire ou retirez les références.',
   stashUnsupported: 'Ce brouillon contient des références et ne peut pas être mis de côté. Envoyez-le ou retirez les références.'
 },
-  artifacts: { open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
+  artifacts: { loadImage: 'Charger', retry: 'Réessayer', mediaFailed: 'Impossible d’afficher ce média. Réessayez ou téléchargez le fichier pour l’ouvrir.', saving: 'Enregistrement', zoomIn: 'Agrandir', zoomOut: 'Réduire', fitImage: 'Ajuster l’image', open: 'Ouvrir', openLocal: 'Ouvrez ce fichier dans son application par défaut.', preview: 'Aperçu', download: 'Télécharger', close: 'Fermer l’aperçu', closeImage: 'Fermer l’image', enlarge: 'Voir en grand', saved: 'Enregistré dans Téléchargements', loading: 'Chargement du fichier', unavailable: 'Ce fichier ne peut pas être affiché ici. Téléchargez-le pour l’ouvrir.', failed: 'Impossible d’ouvrir ce fichier', ownerOnly: 'Les liens vers les fichiers locaux nécessitent une connexion propriétaire. Demandez à l’agent de joindre le fichier pour le partager avec cet appareil.' },
 
   brain: {
     heading: 'Brain', description: 'Les mêmes instructions et skills pour tous vos agents.',
@@ -565,6 +565,17 @@ export const fr: Translation = {
     imported: 'Importée',
     importing: 'Import en cours',
     close: 'Fermer'
+  },
+
+  btw: {
+    fork: 'Fork', forking: 'Création du fork',
+    title: 'Question de côté', description: "Poser une question de côté sans interrompre l'agent",
+    loading: 'Réponse à votre question en cours', close: 'Fermer la réponse de côté',
+    needsThread: 'Ouvrez une conversation avant de poser une question de côté.',
+    questionRequired: 'Écrivez une question après /btw.',
+    textOnly: 'Les questions de côté acceptent seulement du texte. Retirez les pièces jointes et les références de prévisualisation.',
+    editing: 'Terminez ou annulez la modification du message avant de poser une question de côté.',
+    offline: 'Reconnectez cette machine avant de poser une question de côté.'
   },
 
   slash: {
@@ -1145,6 +1156,12 @@ export const fr: Translation = {
   },
 
   browser: {
+    resetViewport: 'Adapter la page à la fenêtre',
+    enlarge: 'Agrandir le navigateur',
+    restore: 'Réduire le panneau',
+    detach: 'Afficher en popup dans l’application',
+    dock: 'Ramener dans le panneau',
+    move: 'Déplacer le panneau flottant',
     loading: 'Chargement de la page',
     failed: "La page n'a pas pu être ouverte. {reason}",
     invalidUrl: 'Saisissez une adresse HTTP ou HTTPS valide, ou une recherche.',
@@ -1623,6 +1640,7 @@ export const fr: Translation = {
   },
 
   experiments: {
+    openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {
       title: 'Fouet',
       hint: 'Un fouet animé suit le pointeur ou le doigt. Un geste vif le fait claquer, un clic ou un appui le lâche',
@@ -1630,6 +1648,7 @@ export const fr: Translation = {
       drop: 'Lâcher le fouet'
     },
     chatArtifacts: { title: 'Fichiers et aperçus dans le chat', hint: 'Ouvrir les liens de fichiers et afficher les fichiers envoyés par un agent dans la conversation' },
+    agentBrowserControl: { title: 'Contrôle du navigateur par les agents', hint: 'Sur ce bureau Windows, autoriser les agents à lire, capturer et manipuler les onglets de la conversation ouverte, y compris les sessions connectées et l’exécution de JavaScript. Désactiver retire cet accès, sans annuler les actions déjà effectuées.' },
     previewComments: { title: 'Commentaires sur les aperçus', hint: 'Sélectionner un élément dans le navigateur intégré et l’ajouter au brouillon de la conversation' },
     themeGrain: {
       title: 'Thème Grain',

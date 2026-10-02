@@ -181,6 +181,7 @@ export function echoTitle(prompt: string): string | null {
 
 /** Deterministic driver for tests and benches. It never reaches the network. */
 export const echoDriver: Driver = {
+  sideQuestion: async ctx => `Side answer: ${ctx.question}`,
   protocol: 'echo',
   startTurn(ctx: TurnContext): TurnHandle {
     const state: RunState = { stopped: false, ended: false, input: [], waiters: new Set() };

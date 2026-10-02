@@ -1,7 +1,9 @@
 import { stat } from 'node:fs/promises';
-import type { ThreadId } from '@boite/contracts';
+import type { AccountId, ProviderId, ThreadId } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { refused } from '../errors.ts';
+import { invalidParams, refused } from '../errors.ts';
+import type { ProviderProbe } from '../providers/probe.ts';
+import { defaultModel, needsModelDiscovery } from './selection.ts';
 import { steerUser } from './user-steering.ts';
 
 /**
@@ -24,7 +26,29 @@ async function requireCwd(core: Core, threadId: ThreadId): Promise<void> {
   }
 }
 
-export function registerThreadMethods(core: Core): void {
+export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
+  async function discover(providerId: ProviderId, accountId: AccountId, model: string | null, effort: string | null, speed: string | null): Promise<void> {
+    const provider = core.providers.require(providerId);
+    const account = core.accounts.require(accountId);
+    if (account.providerId !== provider.id) throw refused('the account belongs to another provider', { accountId, providerId, accountProviderId: account.providerId });
+    if (needsModelDiscovery(provider, accountId, model, effort, speed)) {
+      await probe({ providerId, accountId, ...(provider.protocol === 'acp' && model !== null && effort !== null ? { model } : {}) });
+    }
+  }
+  core.router.register('threads.btw', async params => {
+    await requireCwd(core, params.threadId);
+    return core.threads.sideQuestions.ask(params.threadId, params.question, params.requestId);
+  });
+  core.router.register('threads.btw.fork', async params => {
+    await requireCwd(core, params.threadId);
+    return core.threads.sideQuestions.fork(params.threadId, params.requestId);
+  });
+  core.router.register('threads.btw.cancel', params => {
+    if (typeof params.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(params.requestId)) throw invalidParams('threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters');
+    core.threads.require(params.threadId);
+    core.threads.sideQuestions.cancel(params.threadId, params.requestId);
+    return { ok: true };
+  });
   const pullRequests = core.pullRequests;
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', async (params) => {
@@ -36,12 +60,30 @@ export function registerThreadMethods(core: Core): void {
   core.router.register('threads.list', (params) => core.threads.list(params));
   core.router.register('threads.create', async (params) => {
     // A thread made in a folder that is gone could never run a turn: refused here, by the folder.
-    if (typeof params.projectId === 'string' && core.journal.getProject(params.projectId) !== null) await core.projects.requireFolder(params.projectId);
+    const project = core.projects.require(params.projectId);
+    await core.projects.requireFolder(project.id);
+    const provider = core.providers.require(params.providerId);
+    await discover(provider.id, params.accountId, params.model ?? defaultModel(provider), params.effort ?? null, params.speed ?? null);
     return params.worktree === undefined ? core.threads.create(params) : core.threads.createInWorktree(params);
   });
   core.router.register('threads.get', (params) => core.threads.get(params.threadId, params.after));
   core.router.register('messages.list', (params) => core.threads.messages(params));
-  core.router.register('threads.update', (params) => core.threads.update(params));
+  core.router.register('threads.update', async (params) => {
+    const thread = core.threads.require(params.threadId);
+    const version = thread.selectionVersion ?? 0;
+    if (params.expectedSelectionVersion !== undefined && params.expectedSelectionVersion !== version) return core.threads.update(params);
+    const account = core.accounts.require(params.accountId ?? thread.accountId);
+    const provider = core.providers.require(account.providerId);
+    const changedModel = account.id !== thread.accountId || (params.model !== undefined && params.model !== thread.model);
+    const model = params.model === undefined ? account.id !== thread.accountId ? defaultModel(provider) : thread.model : params.model;
+    const effort = params.effort === undefined ? changedModel ? null : thread.effort : params.effort;
+    const speed = params.speed === undefined ? changedModel ? null : thread.speed ?? null : params.speed;
+    if (changedModel || effort !== thread.effort || speed !== (thread.speed ?? null)) {
+      await discover(provider.id, account.id, model, effort, speed);
+    }
+    // Discovery can yield to another client's selection; never overwrite that choice with stale metadata.
+    return core.threads.update({ ...params, expectedSelectionVersion: params.expectedSelectionVersion ?? version });
+  });
   core.router.register('threads.retitle', (params) => core.threads.retitle(params.threadId));
   core.router.register('threads.archive', (params) =>
     core.threads.archive(params.threadId, params.archived !== false),

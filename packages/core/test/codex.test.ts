@@ -1296,39 +1296,75 @@ describe('codex driver', () => {
     expect(countLines('model/list')).toBe(1);
   });
 
-  test('a thread on a probed model sends that model and its effort on turn/start', async () => {
+  test('creating a thread discovers its model without opening the picker and sends its effort', async () => {
     const client = await startCore();
     const { projectId, accountId } = await codexAccount(client);
-
-    let failure = 'none';
-    try {
-      await client.call('threads.create', {
-        projectId,
-        providerId: 'codex-fake',
-        accountId,
-        title: 'too early',
-        model: 'fake-smart',
-      });
-    } catch (error) {
-      failure = (error as Error).message;
-    }
-    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
-
-    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
     const thread = await client.call('threads.create', {
       projectId,
       providerId: 'codex-fake',
       accountId,
-      title: 'after the probe',
+      title: 'without the picker',
       model: 'fake-smart',
       effort: 'high',
     });
     expect(thread.model).toBe('fake-smart');
     expect(thread.effort).toBe('high');
+    expect(countLines('model/list')).toBe(1);
+
+    let failure: unknown;
+    try {
+      await client.call('threads.create', { projectId, providerId: 'codex-fake', accountId, model: 'missing-model' });
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ rpc: { message: 'the provider does not offer this model', data: { model: 'missing-model' } } });
 
     await client.call('threads.subscribe', { threadId: thread.id });
     await runTurn(client, thread.id, 'first');
     expect(fakeLog()).toContain('turn/start model=fake-smart effort=high');
+  });
+
+  test('a stored model, effort and speed survive a lost catalog, and a new selection discovers it again', async () => {
+    const client = await startCore();
+    const { projectId, accountId } = await codexAccount(client);
+    await client.call('providers.probe', { providerId: 'codex-fake', accountId });
+    const thread = await client.call('threads.create', {
+      projectId, providerId: 'codex-fake', accountId, model: 'fake-smart', effort: 'high', speed: 'fast',
+    });
+    await client.call('threads.subscribe', { threadId: thread.id });
+    await keepTitle(client, thread.id);
+    // A restarted core retains the journal's selection but loses driver catalogs.
+    getDriver('codex-appserver').forgetProbes?.({});
+    const renamed = await client.call('threads.update', { threadId: thread.id, title: 'Resumed thread', permissionMode: 'plan' });
+    expect(renamed).toMatchObject({ model: 'fake-smart', effort: 'high', speed: 'fast', permissionMode: 'plan' });
+    expect(countLines('model/list')).toBe(1);
+    await runTurn(client, thread.id, 'resume');
+    expect(fakeLog()).toContain('turn/start model=fake-smart effort=high');
+    expect(fakeLog()).toContain('"serviceTier":"fast"');
+
+    const updated = await client.call('threads.update', { threadId: thread.id, model: 'fake-plain', effort: null, speed: null });
+    expect(updated).toMatchObject({ model: 'fake-plain', effort: null, speed: null });
+    expect(countLines('model/list')).toBe(2);
+  });
+
+  test('model discovery cannot overwrite a selection changed by another client while it waits', async () => {
+    const client = await startCore();
+    const threadId = await codexThread(client);
+    const driver = getDriver('codex-appserver');
+    const original = driver.probe!;
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const probe = spyOn(driver, 'probe').mockImplementation(async ctx => {
+      await blocked;
+      return original(ctx);
+    });
+    try {
+      // Handle the refusal as soon as it settles, including when the test fails.
+      const changing = client.call('threads.update', { threadId, model: 'fake-smart', effort: 'high' }).catch(error => error);
+      await waitFor(() => probe.mock.calls.length === 1);
+      await client.call('threads.update', { threadId, permissionMode: 'plan' });
+      release();
+      expect(await changing).toMatchObject({ message: 'the model selection changed; review the selected model and send again' });
+      expect(await client.call('threads.get', { threadId })).toMatchObject({ model: 'fake-codex', permissionMode: 'plan' });
+    } finally { release(); probe.mockRestore(); }
   });
 
   test('the model "default" means the agent keeps its own, so no model reaches the wire', async () => {

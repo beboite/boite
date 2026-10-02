@@ -30,6 +30,11 @@ starred models and shows their associated account. Favorites persist in the
 client's local storage, not across devices. Selecting a dynamic favorite checks
 the account's current model list; a removed model is refused explicitly.
 
+Account selection reads that account's catalog before applying its model.
+While the read is pending, model and account rows are disabled and the refresh
+icon spins. Closing the picker or changing its owning machine, connection or
+conversation invalidates the pending choice before it can update another view.
+
 The reasoning popover has one notch per level reported by the selected model.
 Dragging previews the level and saves on release. Arrow keys, Home, End and
 the dots select the same discrete values. The compact panel shows the model and
@@ -61,6 +66,11 @@ Before creating a thread with a named model, the composer awaits the owning
 core's catalog even when the client already has cached rows. A restarted remote
 core reads the agent's models first; a core with a catalog reuses it. The selected
 model, effort and speed are preserved, and a failed read leaves the draft unsent.
+The core also discovers missing native metadata before creating a thread or
+changing its model, effort or speed, so a client need not open the picker first.
+Renaming a stored thread or changing its permission mode preserves its already
+validated selection without discovery. Its next turn keeps the stored effort
+and speed when the core has not read their scales since restarting.
 The refresh button forces a new probe; concurrent requests share one
 operation. A failed read keeps the visible list and backs off for five minutes;
 the refresh button can retry immediately.

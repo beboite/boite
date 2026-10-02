@@ -138,6 +138,21 @@ export class Threads {
     }
   }
 
+  async forkSideQuestion(threadId: ThreadId, requestId: string): Promise<ThreadSummary | null> {
+    const client = this.ctx.client;
+    if (!client) return null;
+    try {
+      const summary = await client.call('threads.btw.fork', { threadId, requestId });
+      if (this.ctx.client !== client) return summary;
+      this.upsertThread(summary);
+      if (this.openThread?.id === threadId) await this.ctx.store.open(summary.id);
+      return summary;
+    } catch (error) {
+      if (this.ctx.client === client) this.ctx.fail(error);
+      return null;
+    }
+  }
+
   /** The thread as `threads.rewind` left it, over every copy this client holds. */
   applyRewound(thread: Thread): void {
     this.upsertThread(summaryOf(thread));

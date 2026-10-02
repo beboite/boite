@@ -166,12 +166,12 @@ enum Event {
 
 /// A slot's place in the window's content area, in logical pixels, which is
 /// what `getBoundingClientRect` gives the UI.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct SurfaceRect {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 /// `emit` reaches only the webviews that registered a listener for this event,
@@ -338,7 +338,7 @@ fn label_of(id: &str) -> Result<String, String> {
     Ok(format!("{LABEL_PREFIX}{id}"))
 }
 
-fn view_of(app: &AppHandle, id: &str) -> Result<Webview, String> {
+pub(crate) fn view_of(app: &AppHandle, id: &str) -> Result<Webview, String> {
     let label = label_of(id)?;
     app.get_webview(&label).ok_or_else(|| {
         format!("the browser surface {id:?} is not open in this shell: no webview {label:?}")

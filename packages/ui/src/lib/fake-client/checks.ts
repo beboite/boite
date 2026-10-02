@@ -69,11 +69,11 @@ export function checkAsk(params: { text: unknown; options?: unknown; multiple?: 
 const PROBED_PROTOCOLS = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
 
 /** The core's `checkModel`: null is the provider's default, anything else must be listed. */
-export function checkModel(provider: ProviderSummary, accountId: string, models: ModelInfo[], model: string | null): string | null {
+export function checkModel(provider: ProviderSummary, accountId: string, models: ModelInfo[], model: string | null, catalogRead = false): string | null {
   if (model === null) return null;
   if (models.some((entry) => entry.id === model)) return model;
   throw refused(
-    PROBED_PROTOCOLS.includes(provider.protocol)
+    PROBED_PROTOCOLS.includes(provider.protocol) && !catalogRead
       ? 'the agent has not listed this model: open the model picker so Boite reads its models first'
       : 'the provider does not offer this model',
     { providerId: provider.id, accountId, model, expected: models.map((entry) => entry.id) },

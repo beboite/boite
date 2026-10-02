@@ -657,25 +657,10 @@ describe('pi driver', () => {
     expect(trace.every((row) => row.exitedAt !== null)).toBe(true);
   });
 
-  test('a thread on a probed model launches pi with that model and its effort', async () => {
+  test('creating a pi thread discovers its model and launches with its effort', async () => {
     const client = await startCore();
     const { projectId, accountId } = await piAccount(client);
 
-    let failure = 'none';
-    try {
-      await client.call('threads.create', {
-        projectId,
-        providerId: 'pi-fake',
-        accountId,
-        title: 'too early',
-        model: 'fake-a/quick',
-      });
-    } catch (error) {
-      failure = (error as Error).message;
-    }
-    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
-
-    await client.call('providers.probe', { providerId: 'pi-fake', accountId });
     const thread = await client.call('threads.create', {
       projectId,
       providerId: 'pi-fake',

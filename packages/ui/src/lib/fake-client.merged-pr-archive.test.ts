@@ -1,7 +1,11 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { RpcErrorCode } from '@boite/contracts';
 import { FakeClient } from './fake-client';
-import type { MergedPrFixture } from './fake-client/merged-pr-archive';
+import { sweepMergedPrFixtures, type MergedPrFixture } from './fake-client/merged-pr-archive';
+import { FakeContext } from './fake-client/context';
+import { seed } from './fake-client/seed';
+import { threadMethods } from './fake-client/threads';
+import { closeSideQuestions } from './fake-client/side-questions';
 let client: FakeClient;
 afterEach(() => client?.close());
 async function fixture() {
@@ -26,6 +30,75 @@ async function completedWorkflow() {
   await client.call('threads.markRead', { threadId: f.thread.id });
   return { ...f, child };
 }
+
+/** Legacy retained depth is seeded in the domain, without adding a client fixture API. */
+async function retainedDescendants() {
+  const ctx = new FakeContext({ delayMs: 0 });
+  seed(ctx);
+  ctx.bus.setState('ready');
+  const methods = threadMethods(ctx);
+  const summary = await methods['threads.create']({ projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo',
+    worktree: { branch: 'retained-depth-fixture' }, title: 'Retained descendants' });
+  const root = ctx.thread(summary.id);
+  const now = ctx.now();
+  const child = { ...structuredClone(root), id: 't-retained-child', parentThreadId: root.id,
+    turns: [{ id: 'turn-retained-child', threadId: 't-retained-child', status: 'done' as const, queuedAt: now, startedAt: now, finishedAt: now, usage: null, error: null }] };
+  const descendant = { ...structuredClone(child), id: 't-retained-descendant', parentThreadId: child.id,
+    turns: [{ ...child.turns[0]!, id: 'turn-retained-descendant', threadId: 't-retained-descendant' }] };
+  ctx.threads.set(child.id, child);
+  ctx.threads.set(descendant.id, descendant);
+  ctx.mergedPrFixtures.set(root.id, { repository: 'github.com/example/repo', branch: root.branch!, tip: 'a'.repeat(40), clean: true,
+    candidates: [{ repository: 'github.com/example/repo', branch: root.branch!, sha: 'a'.repeat(40), number: 7,
+      url: 'https://github.com/example/repo/pull/7', mergedAt: '2026-10-01T12:00:00Z' }] });
+  return { ctx, methods, root, child, descendant };
+}
+
+test('fake deeper retained descendant quiescence protects the root after side state is dismissed', async () => {
+  const { ctx, methods, root, descendant } = await retainedDescendants();
+  vi.useFakeTimers();
+  try {
+    const requestId = 'side_deep_quiescence';
+    await methods['threads.btw']({ threadId: descendant.id, requestId, question: 'A retained answer' });
+    await vi.advanceTimersByTimeAsync(0);
+    await methods['threads.btw.cancel']({ threadId: descendant.id, requestId });
+    descendant.unread = true;
+    expect(await sweepMergedPrFixtures(ctx)).toBe(0);
+    expect(root.archived).toBe(false);
+    descendant.unread = false;
+    descendant.status = 'running';
+    expect(await sweepMergedPrFixtures(ctx)).toBe(0);
+    descendant.status = 'idle';
+    ctx.bus.protectedThreadIds.add(descendant.id);
+    expect(await sweepMergedPrFixtures(ctx)).toBe(0);
+    ctx.bus.protectedThreadIds.clear();
+    expect(await sweepMergedPrFixtures(ctx)).toBe(1);
+  } finally { closeSideQuestions(ctx); vi.useRealTimers(); }
+});
+
+test.each(['pending', 'completed'] as const)('fake removal releases %s side state throughout retained descendants without deleting their history', async state => {
+  const { ctx, methods, root, child, descendant } = await retainedDescendants();
+  const before = structuredClone(descendant);
+  const answers: unknown[] = [];
+  ctx.bus.on('thread.btw', answer => answers.push(answer));
+  vi.useFakeTimers();
+  try {
+    const requestId = 'side_deep_remove';
+    await methods['threads.btw']({ threadId: descendant.id, requestId, question: 'Pending during deletion' });
+    if (state === 'completed') await vi.advanceTimersByTimeAsync(0);
+    await methods['threads.remove']({ threadId: root.id });
+    const expected = state === 'pending'
+      ? { threadId: descendant.id, requestId, answer: null, error: 'side request cancelled' }
+      : { threadId: descendant.id, requestId, answer: 'Side answer: Pending during deletion', error: null };
+    expect(answers).toEqual([expected]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toEqual([expected]);
+    expect(ctx.deletedThreads.get(root.id)!.threads.map(thread => thread.id)).toEqual([root.id, child.id]);
+    expect(ctx.thread(descendant.id)).toEqual(before);
+    await methods['threads.restore']({ threadId: root.id });
+    await expect(methods['threads.btw.fork']({ threadId: descendant.id, requestId })).rejects.toThrow('available completed');
+    expect(ctx.thread(descendant.id)).toEqual(before);
+  } finally { closeSideQuestions(ctx); vi.useRealTimers(); }
+});
 
 test('fake archives a completed retained workflow family, preserving children and restore', async () => {
   const { thread, child } = await completedWorkflow();

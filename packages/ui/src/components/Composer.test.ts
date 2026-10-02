@@ -1454,3 +1454,106 @@ test('the mention menu never opens on the project the composer just left', async
   await waitFor(() => mentionRows().length === 1);
   expect(mentionRows()).toEqual(['p-notes/one.ts']);
 });
+
+
+test('/btw bypasses the queue while busy, leaves history alone and Escape only closes its answer', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  store.openThread!.status = 'running';
+  const before = JSON.parse(JSON.stringify(store.openThread!.messages));
+  const call = vi.spyOn(store.client!, 'call');
+  await type('/btw Which file?');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=btw-answer]')?.textContent?.includes('Side answer: Which file?') === true);
+  expect(call.mock.calls.some(([method]) => method === 'threads.btw')).toBe(true);
+  expect(call.mock.calls.some(([method]) => method === 'turns.start' || method === 'turns.steer')).toBe(false);
+  expect(store.composerStates['t-trace']?.queued).toEqual([]);
+  expect(store.openThread!.messages).toEqual(before);
+  expect(input().value).toBe('');
+  press('Escape');
+  await waitFor(() => !document.querySelector('[data-testid=btw-answer]'));
+  expect(store.busy).toBe(true);
+  expect(call.mock.calls.some(([method]) => method === 'turns.stop')).toBe(false);
+});
+
+test('a side answer arriving after navigation stays out of the newly opened conversation', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!, original = client.call.bind(client);
+  let resolve!: (value: { requestId: string }) => void;
+  vi.spyOn(client, 'call').mockImplementation((method, params) => method === 'threads.btw'
+    ? new Promise(done => { resolve = done; }) : original(method, params));
+  await type('/btw late question');
+  press('Enter');
+  await waitFor(() => !!resolve);
+  await store.open('t-descriptors');
+  resolve({ requestId: 'side_late' });
+  await new Promise(done => setTimeout(done, 30));
+  expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+  expect(document.body.textContent).not.toContain('late answer from another chat');
+});
+
+
+test('a delivered side answer survives a late admission failure', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!, original = client.call.bind(client);
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'threads.btw') {
+      await new Promise(done => setTimeout(done, 30));
+      throw new Error('admission acknowledgement lost');
+    }
+    return result;
+  });
+  await type('/btw already delivered');
+  press('Enter');
+  await waitFor(() => document.querySelector('[data-testid=btw-answer]')?.textContent?.includes('Side answer: already delivered') === true);
+  await new Promise(done => setTimeout(done, 60));
+  expect(document.querySelector('[data-testid=btw-answer]')?.textContent).not.toContain('admission acknowledgement lost');
+});
+
+test('the side answer fork button opens a fresh conversation holding the exchange', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const before = structuredClone(await store.client!.call('threads.get', { threadId: 't-trace' }));
+  await type('/btw Which file?');
+  press('Enter');
+  await waitFor(() => !!document.querySelector('[data-testid=btw-fork]'));
+  query<HTMLButtonElement>('[data-testid=btw-fork]').click();
+  await waitFor(() => store.openThread?.id !== 't-trace' && !!store.openThread);
+  expect(store.openThread!.messages.slice(-2).map(message => message.parts)).toEqual([
+    [{ type: 'text', text: 'Which file?' }], [{ type: 'text', text: 'Side answer: Which file?' }],
+  ]);
+  expect(store.openThread!.sessionId).toBeNull();
+  expect(store.openThread!.status).toBe('idle');
+  expect(await store.client!.call('threads.get', { threadId: 't-trace' })).toEqual(before);
+  expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+});
+
+test('a delayed side fork acknowledgement preserves navigation to another conversation', async () => {
+  await mountOnFake();
+  await store.open('t-trace');
+  await waitFor(() => !store.busy);
+  const client = store.client!, original = client.call.bind(client);
+  let release: (() => void) | undefined;
+  vi.spyOn(client, 'call').mockImplementation(async (method, params) => {
+    const result = await original(method, params);
+    if (method === 'threads.btw.fork') await new Promise<void>(resolve => { release = resolve; });
+    return result;
+  });
+  await type('/btw Which file?');
+  press('Enter');
+  await waitFor(() => !!document.querySelector('[data-testid=btw-fork]'));
+  query<HTMLButtonElement>('[data-testid=btw-fork]').click();
+  await waitFor(() => !!release);
+  await store.open('t-descriptors');
+  release!();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  expect(store.openThread!.id).toBe('t-descriptors');
+  expect(document.querySelector('[data-testid=btw-answer]')).toBeNull();
+});

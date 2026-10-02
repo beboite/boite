@@ -24,6 +24,7 @@ export interface SurfaceRect {
 }
 
 export type BrowserEvent =
+  | { type: 'viewport'; id: string; size: { width: number; height: number } | null }
   | { type: 'highlight-result'; id: string; requestId: string; error: string | null }
   | { type: 'selection'; id: string; requestId: string; selection: PreviewSelection | null }
   | { type: 'selection-failed'; id: string; requestId: string; reason: string }
@@ -37,6 +38,8 @@ export type BrowserEvent =
 export interface BrowserBridge {
   /** Whether this bridge paints anything at all. False keeps the slot's muted line. */
   readonly paints: boolean;
+  protocol?(id: string, method: string, params: Record<string, unknown>): Promise<unknown>;
+  viewport?(id: string): { width: number; height: number } | null;
   isReady(id: string): boolean;
   create(id: string, url: string): void;
   navigate(id: string, url: string): void;

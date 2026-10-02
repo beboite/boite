@@ -1,20 +1,46 @@
 import { expect, vi } from 'vitest';
 import { test } from '../test/fake-client';
 import type { FakeClient } from './fake-client';
-import { DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, TODO_TEXT_MAX, type RpcMethodName, type Turn } from '@boite/contracts';
+import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, TODO_TEXT_MAX, type RpcEvents, type RpcMethodName, type Turn } from '@boite/contracts';
 import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
+import { FakeContext } from './fake-client/context';
 
-test('the fake client directs an unlisted Claude model to native discovery', async ({ createClient }) => {
+test('fake Claude creation discovers its native catalog before refusing an unlisted model', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const account = (await client.call('accounts.list', {})).find(account => account.providerId === 'claude' && account.status === 'ok');
   expect(account).toBeDefined();
+  const before = await client.call('threads.list', {});
+  const discovered: RpcEvents['providers.probed'][] = [];
+  client.on('providers.probed', event => discovered.push(event));
   await expect(client.call('threads.create', {
     projectId: 'p-boite', providerId: 'claude', accountId: account!.id, model: 'unlisted-native-model',
   })).rejects.toMatchObject({
     code: RpcErrorCode.Refused,
-    message: 'the agent has not listed this model: open the model picker so Boite reads its models first',
-    data: { providerId: 'claude', accountId: account!.id, model: 'unlisted-native-model' },
+    message: 'the provider does not offer this model',
+    data: { providerId: 'claude', accountId: account!.id, model: 'unlisted-native-model', expected: expect.any(Array) },
   });
+  expect(discovered).toHaveLength(1);
+  expect(discovered[0]).toMatchObject({ providerId: 'claude', accountId: account!.id });
+  expect(discovered[0]!.models.length).toBeGreaterThan(0);
+  expect(discovered[0]!.models.some(model => model.id === 'unlisted-native-model')).toBe(false);
+  expect(await client.call('threads.list', {})).toEqual(before);
+});
+
+test('fake thread creation discovers a native model without a picker and still refuses an unlisted model', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: 'a-codex',
+    model: 'codex-demo', effort: 'high', speed: 'fast' });
+  expect(thread).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+  await expect(client.call('threads.update', { threadId: thread.id, model: 'missing-model' }))
+    .rejects.toMatchObject({ code: RpcErrorCode.Refused, message: 'the provider does not offer this model', data: { model: 'missing-model' } });
+  expect(await client.call('threads.get', { threadId: thread.id })).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+});
+
+test('fake thread updates discover native metadata for the selected account', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+  expect(await client.call('threads.update', { threadId: thread.id, accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' }))
+    .toMatchObject({ providerId: 'codex', accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' });
 });
 
 test('fake byte-bounded pages walk complete escaped UTF-8 messages and fall back from a large reconnect tail', async ({ createClient }) => {
@@ -224,6 +250,54 @@ test('fake artifacts refuse publication if the thread is archived during the med
   } finally { fetchMedia.mockRestore(); read.mockRestore(); }
 });
 
+test('fake HTML artifacts open through the same RPC and owner events as real previews', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('threads.subscribe', { threadId: 't-trace' });
+  await client.call('files.write', { threadId: 't-trace', path: 'demo.html', text: '<h1>Preview</h1>' });
+  const seen: unknown[] = [];
+  client.on('panel.requested', value => seen.push(value));
+  const result = await client.call('artifacts.preview', { threadId: 't-trace', path: 'demo.html' });
+  expect(result.shown).toBe(true);
+  expect(seen).toContainEqual(expect.objectContaining({ threadId: 't-trace', surface: { kind: 'browser', url: result.url } }));
+  await expect(client.call('artifacts.preview', { threadId: 't-trace', path: '../outside.html' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+  expect(await client.call('artifacts.previewClose', { threadId: 't-trace', path: 'demo.html' })).toEqual({ ok: true });
+});
+
+test('fake streamed artifacts keep immutable message-scoped snapshots and release their object URLs on close', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const OriginalURL = URL;
+  const createObjectURL = vi.fn((_object: Blob | MediaSource) => 'blob:fake-streamed-artifact');
+  const revokeObjectURL = vi.fn((_url: string) => {});
+  vi.stubGlobal('URL', class extends OriginalURL {
+    static createObjectURL = createObjectURL;
+    static revokeObjectURL = revokeObjectURL;
+  });
+  try {
+    const path = 'large-artifact.txt';
+    const bytes = ATTACHMENT_MAX_BYTES + 1;
+    await client.call('files.write', { threadId: 't-trace', path, text: 'x'.repeat(bytes) });
+    const message = await client.call('artifacts.publish', { threadId: 't-trace', path });
+    const artifact = message.parts[0]!;
+    expect(artifact).toMatchObject({ type: 'artifact', name: path, bytes });
+    if (artifact.type !== 'artifact') throw new Error('expected a streamed artifact above the attachment limit');
+    expect(artifact).not.toHaveProperty('data');
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(createObjectURL.mock.calls[0]![0]).toMatchObject({ size: bytes });
+    const params = { threadId: 't-trace', messageId: message.id, artifactId: artifact.id };
+    const original = await client.call('artifacts.read', params);
+    expect(original).toMatchObject({ name: path, bytes, url: 'blob:fake-streamed-artifact' });
+    await client.call('files.write', { threadId: 't-trace', path, text: 'replacement' });
+    expect(await client.call('artifacts.read', params)).toEqual(original);
+    await expect(client.call('artifacts.read', { ...params, threadId: 't-descriptors' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    await expect(client.call('artifacts.read', { ...params, messageId: 'missing-message' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+    client.close();
+    expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(original.url);
+  } finally {
+    client.close();
+    vi.stubGlobal('URL', OriginalURL);
+  }
+});
+
 test('fake delegation enforces family access and keeps request IDs idempotent', async ({ createClient }) => {
   const client = await createClient({ delayMs: 0 });
   const config = {
@@ -241,6 +315,7 @@ test('fake delegation enforces family access and keeps request IDs idempotent', 
   expect({ ...repeated, thread: repeatedThread }).toEqual({ ...first, thread: firstThread });
   expect(first.thread.parentThreadId).toBe('t-trace');
   await expect(client.call('delegation.spawn', { ...params, task: 'Different work' })).rejects.toMatchObject({ code: RpcErrorCode.Refused });
+
 
   const sent = await client.call('delegation.send', { threadId: 't-trace', toThreadId: first.thread.id, text: 'Report file names', requestId: 'send-1' });
   expect(sent.origin).toBe('user');
@@ -905,3 +980,172 @@ test('the fake core compacts by itself at the end of a turn once the threshold i
   await client.connect();
   expect(await count()).toBe(1);
 });
+
+test('fake /btw admission, duplicate refusal and cancellation match the core without changing history', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  await client.call('threads.subscribe', { threadId: 't-trace' });
+  const before = await client.call('threads.get', { threadId: 't-trace' });
+  vi.useFakeTimers();
+  const answers: Array<{ requestId: string; answer: string | null; error: string | null }> = [];
+  client.on('thread.btw', result => answers.push(result));
+  const input = { threadId: 't-trace', question: 'Which file?', requestId: 'side_fake1' };
+  expect(await client.call('threads.btw', input)).toEqual({ requestId: input.requestId });
+  await expect(client.call('threads.btw', { ...input, requestId: 'side_fake2' })).rejects.toThrow('already being answered');
+  await client.call('threads.btw.cancel', { threadId: input.threadId, requestId: 'side_wrong' });
+  expect(answers).toEqual([]);
+  await client.call('threads.btw.cancel', { threadId: input.threadId, requestId: input.requestId });
+  expect(answers).toEqual([expect.objectContaining({ requestId: input.requestId, answer: null, error: 'side request cancelled' })]);
+  await vi.runOnlyPendingTimersAsync();
+  expect(answers).toHaveLength(1);
+  expect(await client.call('threads.get', { threadId: 't-trace' })).toEqual(before);
+  expect(await client.call('threads.btw', { ...input, question: 'Replacement question' })).toEqual({ requestId: input.requestId });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(answers).toEqual([
+    expect.objectContaining({ requestId: input.requestId, answer: null, error: 'side request cancelled' }),
+    expect.objectContaining({ requestId: input.requestId, answer: 'Side answer: Replacement question', error: null }),
+  ]);
+  expect(await client.call('threads.get', { threadId: 't-trace' })).toEqual(before);
+});
+
+test('fake side forks consume only the matching completed result and expire dismissed answers', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-trace', requestId = 'side_fork1';
+  await client.call('threads.subscribe', { threadId });
+  const before = await client.call('threads.get', { threadId });
+  const answered = new Promise<void>(resolve => {
+    const off = client.on('thread.btw', result => { if (result.requestId === requestId) { off(); resolve(); } });
+  });
+  await client.call('threads.btw', { threadId, requestId, question: 'Which file?' });
+  await answered;
+  await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_wrong' })).rejects.toThrow('available completed');
+  const fork = await client.call('threads.btw.fork', { threadId, requestId });
+  const copied = await client.call('threads.get', { threadId: fork.id });
+  expect(copied.messages.slice(-2).map(message => message.parts)).toEqual([
+    [{ type: 'text', text: 'Which file?' }], [{ type: 'text', text: 'Side answer: Which file?' }],
+  ]);
+  expect(copied.turns.every(turn => !turn.usage && !turn.checkpoint)).toBe(true);
+  expect(await client.call('threads.get', { threadId })).toEqual(before);
+  await expect(client.call('threads.btw.fork', { threadId, requestId })).rejects.toThrow('available completed');
+  const dismissed = new Promise<void>(resolve => {
+    const off = client.on('thread.btw', result => { if (result.requestId === 'side_dismiss') { off(); resolve(); } });
+  });
+  await client.call('threads.btw', { threadId, requestId: 'side_dismiss', question: 'Discard this' });
+  await dismissed;
+  await client.call('threads.btw.cancel', { threadId, requestId: 'side_dismiss' });
+  await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_dismiss' })).rejects.toThrow('available completed');
+});
+
+test('fake close clears pending timers and retained side answers before reconnecting', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-trace', requestId = 'side_reconnect';
+  const before = await client.call('threads.get', { threadId });
+  const answers: RpcEvents['thread.btw'][] = [];
+  client.on('thread.btw', answer => answers.push(answer));
+  vi.useFakeTimers();
+  await client.call('threads.btw', { threadId, requestId, question: 'Retain this answer' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(answers).toEqual([{ threadId, requestId, answer: 'Side answer: Retain this answer', error: null }]);
+  client.close();
+  await client.connect();
+  await expect(client.call('threads.btw.fork', { threadId, requestId })).rejects.toThrow('available completed');
+  await client.call('threads.btw', { threadId, requestId, question: 'Pending at close' });
+  client.close();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(answers).toHaveLength(1);
+  await client.connect();
+  expect(await client.call('threads.btw', { threadId, requestId, question: 'Fresh after reconnect' })).toEqual({ requestId });
+  await client.call('threads.btw.cancel', { threadId, requestId });
+  expect(answers).toHaveLength(2);
+  expect(answers[1]).toEqual({ threadId, requestId, answer: null, error: 'side request cancelled' });
+  expect(await client.call('threads.get', { threadId })).toEqual(before);
+  const suspended = client.call('threads.btw', { threadId, requestId: 'side_close_race', question: 'Not admitted before close' });
+  const rejected = expect(suspended).rejects.toMatchObject({ code: RpcErrorCode.Internal });
+  client.close();
+  await rejected;
+  await vi.advanceTimersByTimeAsync(0);
+  await client.connect();
+  await expect(client.call('threads.btw.fork', { threadId, requestId: 'side_close_race' })).rejects.toThrow('available completed');
+  expect(answers).toHaveLength(2);
+  expect(await client.call('threads.get', { threadId })).toEqual(before);
+});
+
+test('fake close and reconnect fence calls waiting before dispatch even when the transport is ready again', async ({ createClient }) => {
+  const client = await createClient({ delayMs: 0 });
+  const threadId = 't-trace', requestId = 'side_close_aba';
+  const before = await client.call('threads.get', { threadId });
+  const answers: RpcEvents['thread.btw'][] = [];
+  client.on('thread.btw', answer => answers.push(answer));
+  vi.useFakeTimers();
+  let release!: () => void;
+  const tick = new Promise<void>(resolve => { release = resolve; });
+  const held = vi.spyOn(FakeContext.prototype, 'tick').mockImplementationOnce(() => tick);
+  try {
+    const suspended = client.call('threads.btw', { threadId, requestId, question: 'Old transport request' });
+    const rejected = expect(suspended).rejects.toMatchObject({ code: RpcErrorCode.Internal });
+    client.close();
+    await client.connect();
+    expect(client.state).toBe('ready');
+    release();
+    await rejected;
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(client.call('threads.btw.fork', { threadId, requestId })).rejects.toThrow('available completed');
+    expect(answers).toEqual([]);
+    expect(await client.call('threads.get', { threadId })).toEqual(before);
+  } finally { release(); held.mockRestore(); }
+});
+
+test.for([{ questionOn: 'parent', release: 'dismiss' }, { questionOn: 'child', release: 'expire' }] as const)(
+  'fake side questions protect a merged conversation family until the answer is released: %#',
+  async (scenario, { createClient }) => {
+    const client = await createClient({ delayMs: 0 });
+    const project = await client.call('projects.add', { path: '/workspace/side-archive-fixture' });
+    const root = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: 'a-echo',
+      worktree: { branch: 'side-archive-fixture' }, title: 'Side question archive fixture' });
+    const run = await client.call('workflows.start', { threadId: root.id, requestId: 'side_archive_family',
+      plan: { name: 'Completed family', steps: [{ id: 'review', task: 'Review the merged change.' }] } });
+    await vi.waitFor(async () => expect((await client.call('workflows.get', { threadId: root.id, runId: run.id })).status).toBe('done'));
+    const finished = await client.call('workflows.get', { threadId: root.id, runId: run.id });
+    const childId = finished.nodes[0]!.instances[0]!.threadId!;
+    await client.call('threads.markRead', { threadId: root.id });
+    await client.call('threads.markRead', { threadId: childId });
+    await client.call('threads.focus', { threadId: null, protectedThreadIds: [], protectAllThreads: false });
+    client.setMergedPrFixture(root.id, { repository: 'github.com/example/repo', branch: root.branch!, tip: 'a'.repeat(40), clean: true,
+      candidates: [{ repository: 'github.com/example/repo', branch: root.branch!, sha: 'a'.repeat(40), number: 7,
+        url: 'https://github.com/example/repo/pull/7', mergedAt: '2026-10-01T12:00:00Z' }] });
+    const threadId = scenario.questionOn === 'parent' ? root.id : childId;
+    const before = await client.call('threads.get', { threadId });
+    const answers: RpcEvents['thread.btw'][] = [];
+    client.on('thread.btw', answer => answers.push(answer));
+    vi.useFakeTimers();
+    const requestId = 'side_archive_question';
+    await client.call('threads.btw', { threadId, requestId, question: 'Which file?' });
+    expect(await client.sweepMergedPrArchives()).toBe(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toEqual([{ threadId, requestId, answer: 'Side answer: Which file?', error: null }]);
+    expect(await client.sweepMergedPrArchives()).toBe(0);
+    expect(await client.call('threads.get', { threadId })).toEqual(before);
+    await client.call('threads.btw.cancel', { threadId, requestId: 'side_wrong_question' });
+    expect(await client.sweepMergedPrArchives()).toBe(0);
+    if (scenario.release === 'dismiss') await client.call('threads.btw.cancel', { threadId, requestId });
+    else await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(await client.sweepMergedPrArchives()).toBe(1);
+    expect((await client.call('threads.get', { threadId: root.id })).archiveReason).toMatchObject({ type: 'pr-merged', number: 7 });
+    expect((await client.call('threads.get', { threadId: childId })).archived).toBe(false);
+    const parentRefusal = { code: RpcErrorCode.Refused, message: 'threads.btw.threadId: expected a conversation whose parent is not archived or being deleted' };
+    await expect(client.call('threads.btw', { threadId: childId, requestId: 'side_late_question', question: 'Late question' })).rejects.toMatchObject(parentRefusal);
+    await expect(client.call('threads.btw.fork', { threadId: childId, requestId })).rejects.toMatchObject(parentRefusal);
+    await client.call('threads.archive', { threadId: root.id, archived: false });
+    const history = (await client.call('threads.get', { threadId })).messages;
+    const answerCount = answers.length;
+    const manualRequestId = 'side_manual_archive';
+    await client.call('threads.btw', { threadId, requestId: manualRequestId, question: 'Pending during manual archive' });
+    await client.call('threads.archive', { threadId: root.id, archived: true });
+    const cancellation = { threadId, requestId: manualRequestId, answer: null, error: 'side request cancelled' };
+    expect(answers.slice(answerCount)).toEqual([cancellation]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers.slice(answerCount)).toEqual([cancellation]);
+    await client.call('threads.archive', { threadId: root.id, archived: false });
+    await expect(client.call('threads.btw.fork', { threadId, requestId: manualRequestId })).rejects.toThrow('available completed');
+    expect((await client.call('threads.get', { threadId })).messages).toEqual(history);
+  },
+);
