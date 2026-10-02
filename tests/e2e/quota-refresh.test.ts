@@ -333,13 +333,18 @@ test('the same popup shares priorities across the app, tray and phone through th
     // A constrained viewport still allows dragging from the bottom to the top while scrolling.
     await tray.send('Emulation.setDeviceMetricsOverride', { width: 380, height: 300, deviceScaleFactor: 1, mobile: false });
     await tray.waitFor(`document.querySelector('${panel} .body').clientHeight < 220`);
-    const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(() => {
+    // The settings event can update the order before the previous save enables the grips.
+    await tray.waitFor(`document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]')?.disabled === false`);
+    const scrollDrag = await tray.evaluate<{ from: { x: number; y: number }; to: { x: number; y: number } }>(`(async () => {
       const body = document.querySelector('${panel} .body');
       body.scrollTop = body.scrollHeight;
+      // Let the viewport resize and scroll reach paint before CDP hit-tests the pointer.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const grip = document.querySelector('[data-account-id="${accounts[4]!.id}"] [data-testid="quota-reorder"]').getBoundingClientRect();
       const box = body.getBoundingClientRect();
       return { from: { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, to: { x: grip.x + grip.width / 2, y: box.top + 12 } };
     })()`);
+    expect(await tray.evaluate(`document.elementFromPoint(${scrollDrag.from.x}, ${scrollDrag.from.y})?.closest('[data-testid="quota-reorder"]')?.closest('[data-account-id]')?.dataset.accountId === '${accounts[4]!.id}'`)).toBe(true);
     await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.from });
     await tray.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...scrollDrag.from, button: 'left', buttons: 1, clickCount: 1 });
     await tray.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...scrollDrag.to, buttons: 1 });
