@@ -48,7 +48,7 @@ import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
 import { SideQuestions } from './threads/side-questions.ts';
 import { readMemoryEvents } from './threads/memory-read.ts';
-import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
+import { checkEffort, checkModel, checkSpeed, checkStoredEffort, checkStoredSpeed, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
 import { TurnRunner } from './threads/turn-runner.ts';
 import { ThreadFocus } from './threads/focus.ts';
@@ -436,9 +436,10 @@ export class ThreadStore {
     if (params.permissionMode !== undefined) next.permissionMode = params.permissionMode;
     if (params.effort !== undefined) next.effort = params.effort;
     if (params.speed !== undefined) next.speed = params.speed;
-    next.speed = checkSpeed(provider, account.id, next.model, next.speed ?? null);
+    const changedModel = switched || next.model !== thread.model;
+    if (changedModel || next.speed !== thread.speed) next.speed = checkSpeed(provider, account.id, next.model, next.speed ?? null);
     // The model may have changed in the same call, so the scale is the new one's.
-    next.effort = checkEffort(provider, account.id, next.model, next.effort);
+    if (changedModel || next.effort !== thread.effort) next.effort = checkEffort(provider, account.id, next.model, next.effort);
     if (switched || next.model !== thread.model || next.effort !== thread.effort || next.speed !== thread.speed || next.permissionMode !== thread.permissionMode) {
       next.selectionVersion = (thread.selectionVersion ?? 0) + 1;
     }
@@ -663,7 +664,7 @@ export class ThreadStore {
       () => this.core.providers.launcherScriptOnly(thread.providerId),
     );
     checkStoredEffort(provider, thread.accountId, thread.model, thread.effort);
-    checkSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
+    checkStoredSpeed(provider, thread.accountId, thread.model, thread.speed ?? null);
     checkAttachments(attachments, provider);
 
     // A compaction with a label is the core's own (`threads/auto-compact.ts`): Boite speaks, not the user.

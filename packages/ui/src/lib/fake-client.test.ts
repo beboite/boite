@@ -5,6 +5,29 @@ import { FAKE_AUTO_COMPACT_SETTLE_MS } from './fake-client/turns';
 
 afterEach(() => vi.useRealTimers());
 
+test('fake thread creation discovers a native model without a picker and still refuses an unlisted model', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'codex', accountId: 'a-codex',
+      model: 'codex-demo', effort: 'high', speed: 'fast' });
+    expect(thread).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+    expect(await client.call('threads.update', { threadId: thread.id, model: 'missing-model' }).catch(error => error))
+      .toMatchObject({ message: 'the provider does not offer this model', data: { model: 'missing-model' } });
+    expect(await client.call('threads.get', { threadId: thread.id })).toMatchObject({ model: 'codex-demo', effort: 'high', speed: 'fast' });
+  } finally { client.close(); }
+});
+
+test('fake thread updates discover native metadata for the selected account', async () => {
+  const client = new FakeClient({ delayMs: 0 });
+  await client.connect();
+  try {
+    const thread = await client.call('threads.create', { projectId: 'p-boite', providerId: 'echo', accountId: 'a-echo' });
+    expect(await client.call('threads.update', { threadId: thread.id, accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' }))
+      .toMatchObject({ providerId: 'codex', accountId: 'a-codex', model: 'codex-demo', effort: 'high', speed: 'fast' });
+  } finally { client.close(); }
+});
+
 test('moving a fake thread drops PR metadata from its previous branch', async () => {
   const client = new FakeClient({ delayMs: 0 });
   await client.connect();

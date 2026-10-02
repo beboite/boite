@@ -1094,25 +1094,10 @@ describe('acp driver', () => {
     expect(initializeCount()).toBe(2);
   });
 
-  test('a model the agent listed is accepted, the same one before any probe is refused', async () => {
+  test('creating an ACP thread discovers the model and its selected effort scale', async () => {
     const client = await startCore();
     const { projectId, accountId } = await acpAccount(client);
 
-    let failure = 'none';
-    try {
-      await client.call('threads.create', {
-        projectId,
-        providerId: 'acp-fake',
-        accountId,
-        title: 'too early',
-        model: 'fake-smart',
-      });
-    } catch (error) {
-      failure = (error as Error).message;
-    }
-    expect(failure).toBe('the agent has not listed this model: open the model picker so Boite reads its models first');
-
-    await client.call('providers.probe', { providerId: 'acp-fake', accountId });
     const thread = await client.call('threads.create', {
       projectId,
       providerId: 'acp-fake',
@@ -1122,7 +1107,8 @@ describe('acp driver', () => {
     });
     expect(thread.model).toBe('fake-smart');
     expect(thread.effort).toBeNull();
-    await expect(client.call('threads.update', { threadId: thread.id, effort: 'high' })).rejects.toThrow(/does not offer this reasoning effort/);
+    expect((await client.call('threads.update', { threadId: thread.id, effort: 'high' })).effort).toBe('high');
+    await expect(client.call('threads.update', { threadId: thread.id, effort: 'unsupported' })).rejects.toThrow(/does not offer this reasoning effort/);
   });
 
   test('the thread permission mode becomes a session mode, and the one the agent is on sends nothing', async () => {
