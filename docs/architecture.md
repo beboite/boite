@@ -126,7 +126,8 @@ session is gone (Claude's `No conversation found with session ID`, Codex's
 `no rollout found for thread id`): the core drops the id and runs the same turn
 once more on a fresh session, with no error part. Any other resume failure
 keeps the id. Each accepted turn freezes its execution target,
-so a later picker change cannot redirect queued work.
+so a later picker change cannot redirect queued work. Permission modes follow
+the user's selection immediately, including on a running turn.
 
 ## The scheduler tracks independent turns
 
@@ -241,7 +242,8 @@ agent's own spelling out of a candidate list, because ACP standardises the call
 and never the ids. `codex-appserver` carries its own ndjson JSON-RPC peer, since
 OpenAI ships the protocol as generated TypeScript rather than a client, and its
 permission mode is part of the session key: Codex takes the approval policy and
-the sandbox when the thread opens and has no call that changes them later. Its
+the sandbox when the thread opens. Changing modes interrupts and resumes the
+native run inside the same Boite turn. Its
 Stop is `turn/interrupt`, like Claude's `interrupt()` given three seconds: an
 app-server that has not ended the turn by then loses its process, and the next
 turn resumes the Codex thread on a new one. A Stop that lands while the process

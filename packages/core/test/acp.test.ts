@@ -34,6 +34,20 @@ let harness: TestCore | null = null;
 let logFile = '';
 let restoreDriver: (() => void) | null = null;
 
+test('ACP changes the running session mode without another prompt', async () => {
+  const client = await startCore();
+  const threadId = await acpThread(client);
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow]' });
+  await waitFor(() => fakeLog().includes('waiting for cancel'));
+  await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+  await waitFor(() => setModeCount('yolo') === 1);
+  await client.call('threads.update', { threadId, permissionMode: 'default' });
+  await waitFor(() => setModeCount('default') === 1);
+  expect((await client.call('threads.get', { threadId })).turns[0]).toMatchObject({ id: turn.id, status: 'running' });
+  expect(fakeLog().split('session/prompt').length - 1).toBe(1);
+  await client.call('turns.stop', { threadId });
+});
+
 afterEach(async () => {
   const open = harness;
   harness = null;

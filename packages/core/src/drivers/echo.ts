@@ -188,6 +188,11 @@ export const echoDriver: Driver = {
     const done = run(ctx, state);
     return {
       done,
+      async setPermissionMode(mode) {
+        if (state.stopped || state.ended) return false;
+        ctx.thread.permissionMode = mode;
+        return true;
+      },
       async steer(text, attachments = []) {
         if (state.stopped || state.ended) return false;
         state.input.push({ text, attachments });

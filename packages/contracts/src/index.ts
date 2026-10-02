@@ -812,7 +812,7 @@ export interface UsageHistory {
 
 export type TurnStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
 
-/** Frozen when a prompt is accepted, including while it waits in the scheduler. */
+/** Execution target frozen at admission; permissionMode follows the user's live selection. */
 export type TurnExecution = Pick<ThreadSummary,
   'providerId' | 'accountId' | 'model' | 'effort' | 'speed' | 'permissionMode' | 'sessionId' | 'sessionResumeAt'
 > & {

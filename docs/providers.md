@@ -557,7 +557,8 @@ still reach Boite, without a permission card. Claude runs with
 `bypassPermissions` and `disableAllHooks: true`, disabling configured and plugin
 hooks while retaining Boite's SDK callbacks for tool reporting and incoming
 answers. Codex runs with approvals set to `never`, full filesystem access and
-`features.hooks=false`. Entering or leaving YOLO replaces their warm process,
+`features.hooks=false`. Claude applies the hook setting live; Codex replaces
+its process,
 so turning it off restores the user's hook configuration. No settings file is
 rewritten. ACP and Muse use their native unrestricted mode and Boite accepts
 remaining approval requests; ACP has no standard hook-disable call. Antigravity
@@ -577,8 +578,9 @@ answers; YOLO does not invent form values or complete a device sign-in.
 - Codex takes a pair when the thread opens, an approval policy and a sandbox:
   `default` and `acceptEdits` are on-request plus workspace-write, `plan` never
   plus read-only, `bypassPermissions` and `dontAsk` never plus danger-full-access.
-  No call changes that pair on a live thread, so the mode is part of the session
-  key: changing it drops the process and the next turn resumes with the new pair.
+  No call changes that pair on a running turn, so the mode is part of the session
+  key: changing it interrupts and resumes the active turn with the new pair,
+  keeping the same Boite turn and conversation.
   Under on-request, a command, a file change, a wider sandbox
   (`item/permissions/requestApproval`, granted for the turn) and an MCP tool
   call each draw a permission card. Codex asks for the MCP tool call through

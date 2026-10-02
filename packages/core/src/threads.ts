@@ -450,7 +450,9 @@ export class ThreadStore {
       this.agentState.commands.delete(thread.id);
       this.core.bus.emit('thread.commands', { threadId: thread.id, commands: [] });
     }
-    return this.save(next, 'thread.updated');
+    const saved = this.save(next, 'thread.updated');
+    if (next.permissionMode !== thread.permissionMode) this.runner.changePermissionMode(thread.id, next.permissionMode);
+    return saved;
   }
 
   private checkSelection(thread: ThreadSummary, expected?: number): void {

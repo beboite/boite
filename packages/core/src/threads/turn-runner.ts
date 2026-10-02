@@ -1,4 +1,4 @@
-import type { ThreadId, ThreadSummary, Turn, TurnId } from '@boite/contracts';
+import type { PermissionMode, ThreadId, ThreadSummary, Turn, TurnId, Usage } from '@boite/contracts';
 import type { Core } from '../core.ts';
 import { getDriver, releaseThread } from '../drivers/index.ts';
 import type { TurnHandle, TurnResult } from '../drivers/types.ts';
@@ -7,6 +7,8 @@ import { promptCacheOf } from '../prompt-cache.ts';
 import type { ThreadStore } from '../threads.ts';
 import { saveThread, setThreadStatus } from './records.ts';
 import type { CarriedInput } from './turn-context.ts';
+import { LivePermissions } from './live-permissions.ts';
+import { totalTokens } from '../usage.ts';
 
 /**
  * How long a stopped turn may take to settle. Past `ms` the core ends the
@@ -30,6 +32,7 @@ interface StopDeadline {
  */
 export class TurnRunner {
   readonly handles = new Map<ThreadId, TurnHandle>();
+  private readonly livePermissions = new Map<ThreadId, LivePermissions>();
   /** Per running turn: what settles it when its driver never answers a stop. */
   private readonly stopDeadlines = new Map<ThreadId, StopDeadline>();
   /** Threads whose running turn the user stopped: a lost session is not retried for them. */
@@ -44,6 +47,10 @@ export class TurnRunner {
 
   constructor(private readonly core: Core, private readonly threads: ThreadStore) {}
 
+  changePermissionMode(threadId: ThreadId, mode: PermissionMode): void {
+    this.livePermissions.get(threadId)?.change(mode);
+  }
+
   async runTurn(turnId: TurnId, threadId: ThreadId): Promise<void> {
     const queued = this.core.journal.getTurn(turnId);
     const selected = this.core.journal.getThread(threadId);
@@ -56,7 +63,19 @@ export class TurnRunner {
       this.threads.markQueuedStopped(turnId);
       return;
     }
-    let thread = { ...selected, ...queued.execution };
+    let thread = { ...selected, ...queued.execution, permissionMode: selected.permissionMode };
+    const permissions = new LivePermissions(thread.permissionMode, handle => {
+      this.threads.cards.clearPermissionsOf(threadId);
+      this.threads.cards.clearQuestionsOf(threadId);
+      handle.stop();
+      this.armStopDeadline(threadId, handle);
+    }, mode => {
+      thread.permissionMode = mode;
+      if (running.execution) running.execution = { ...running.execution, permissionMode: mode };
+      this.core.journal.putTurn(running);
+      this.threads.cards.applyPermissionMode(threadId, mode);
+    });
+    this.livePermissions.set(threadId, permissions);
 
     let running: Turn = { ...queued, status: 'running', startedAt: Date.now() };
     let result: TurnResult;
@@ -84,32 +103,64 @@ export class TurnRunner {
       } else {
         // Keep consumed input so a retry on a fresh session sends it too.
         const carried: CarriedInput = {};
-        const handle = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
-        this.handles.set(threadId, handle);
-        const forced = Promise.withResolvers<TurnResult>();
-        this.stopDeadlines.set(threadId, { handle, forced, timer: null });
-        if (!queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
-        // A `done` that settles after a forced stop is ignored.
-        result = await Promise.race([handle.done, forced.promise]);
-        const fresh = result.sessionLost === true ? this.dropLostSession(thread, result) : null;
-        if (fresh !== null && result.status === 'error' && this.stopRequested.has(threadId)) {
-          // The user stopped a turn whose resume the agent refused: the prompt
-          // never reached a model, and the stop stands.
-          result = { ...result, status: 'stopped', error: undefined };
-        } else if (fresh !== null && result.status === 'error') {
-          // Same turn, fresh session: the prompt now carries the journal's history.
-          thread = fresh;
-          running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
-          const retry = driver.startTurn(this.threads.contexts.makeContext(thread, provider, account, running, carried));
-          this.handles.set(threadId, retry);
-          this.stopDeadlines.set(threadId, { handle: retry, forced, timer: null });
-          result = await Promise.race([retry.done, forced.promise]);
+        let retriedLostSession = false;
+        let resumed = false;
+        let usage: Usage | null = null;
+        for (;;) {
+          thread.permissionMode = permissions.mode;
+          const context = this.threads.contexts.makeContext(thread, provider, account, running, carried);
+          if (resumed && thread.sessionId !== null) {
+            context.prompt = `Continue the current task from where it stopped. The user changed the permission mode to ${permissions.mode}. Do not repeat completed work. Retain subsequent instructions already in the conversation.\n\nRequest for reference:\n${context.prompt}`;
+            if (usage) context.sessionBefore = {
+              costUsd: (context.sessionBefore?.costUsd ?? 0) + (usage.costUsdEquivalent ?? 0),
+              tokens: (context.sessionBefore?.tokens ?? 0) + totalTokens(usage),
+            };
+          }
+          if (running.execution) running.execution = { ...running.execution, permissionMode: permissions.mode };
+          this.core.journal.putTurn(running);
+          const handle = driver.startTurn(context);
+          this.handles.set(threadId, handle);
+          permissions.attach(handle);
+          const forced = Promise.withResolvers<TurnResult>();
+          this.stopDeadlines.set(threadId, { handle, forced, timer: null });
+          if (!resumed && !retriedLostSession && !queued.execution?.operation) this.threads.titles.autoTitle(threadId, turnId);
+          result = await Promise.race([handle.done, forced.promise]);
+          permissions.detach();
+          await permissions.settled();
+          const deadline = this.stopDeadlines.get(threadId);
+          if (deadline?.timer) clearTimeout(deadline.timer);
+          const fresh = !retriedLostSession && result.sessionLost === true ? this.dropLostSession(thread, result) : null;
+          if (this.stopRequested.has(threadId)) {
+            result = { ...result, status: 'stopped', ...(fresh ? { error: undefined } : {}) };
+            break;
+          }
+          if (fresh !== null && result.status === 'error') {
+            thread = fresh;
+            retriedLostSession = true;
+            running = { ...running, ...(running.execution ? { execution: { ...running.execution, sessionId: null, sessionGeneration: fresh.sessionGeneration ?? 0 } } : {}) };
+            continue;
+          }
+          if (!permissions.restarting || result.status === 'done') break;
+          usage = sumUsage(usage, result.usage);
+          thread = { ...thread, sessionId: result.sessionId ?? thread.sessionId, sessionResumeAt: null };
+          const current = this.core.journal.getThread(threadId);
+          if (current && (current.sessionGeneration ?? 0) === (thread.sessionGeneration ?? 0)) {
+            saveThread(this.core, { ...current, sessionId: thread.sessionId, sessionResumeAt: null }, 'thread.updated');
+          }
+          this.threads.cards.clearPermissionsOf(threadId);
+          this.threads.cards.clearQuestionsOf(threadId);
+          setThreadStatus(this.core, threadId, 'running');
+          resumed = true;
         }
+        result = { ...result, usage: sumUsage(usage, result.usage) };
+        if (running.execution) running.execution = { ...running.execution, permissionMode: thread.permissionMode };
         if (running.execution?.operation === 'coordination' && result.status === 'done') this.core.coordination.submitted(threadId, turnId);
       }
     } catch (error) {
       result = { status: 'error', sessionId: thread.sessionId, usage: null, error: messageOf(error) };
     } finally {
+      permissions.detach();
+      this.livePermissions.delete(threadId);
       this.handles.delete(threadId);
       const deadline = this.stopDeadlines.get(threadId);
       if (deadline?.timer) clearTimeout(deadline.timer);
@@ -248,4 +299,17 @@ export class TurnRunner {
     }, STOP_DEADLINE.ms);
     deadline.timer.unref?.();
   }
+}
+
+/** Native attempts belong to one visible turn, including their reported usage. */
+function sumUsage(left: Usage | null, right: Usage | null): Usage | null {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    costUsdEquivalent: left.costUsdEquivalent === null && right.costUsdEquivalent === null ? null : (left.costUsdEquivalent ?? 0) + (right.costUsdEquivalent ?? 0),
+  };
 }
