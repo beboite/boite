@@ -5,6 +5,7 @@ import { resetPullRequestSupport } from '../pull-request';
 import { rightPanel } from '../right-panel.svelte';
 import { undo } from '../undo.svelte';
 import { lastIndexById } from '../thread-rows';
+import { strings } from '../strings';
 import { installStatesOf } from './accounts.svelte';
 import { observable } from './connection.svelte';
 import type { StoreContext } from './context';
@@ -264,6 +265,10 @@ export function listen(ctx: StoreContext, client: Client): void {
     void ctx.projects.dropProject(projectId);
   });
   on('core.log', (entry) => {
-    if (entry.level === 'error') s.error = entry.message;
+    if (entry.level !== 'error') return;
+    s.error = entry.threadId
+      ? s.threads.find(t => t.id === entry.threadId)?.title ?? strings.app.name
+      : entry.message;
+    s.errorThreadId = entry.threadId ?? null;
   });
 }

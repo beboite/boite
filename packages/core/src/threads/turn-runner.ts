@@ -144,7 +144,7 @@ export class TurnRunner {
       });
       this.core.bus.emit('turn.finished', finished);
       if (result.status === 'error') {
-        this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`);
+        this.core.log('error', `turn ${turnId} failed: ${result.error ?? 'unknown error'}`, threadId);
       }
       const current = this.core.journal.getThread(threadId);
       if (current === null) return null;

@@ -309,8 +309,8 @@ export class Core {
     };
   }
 
-  log(level: 'info' | 'warn' | 'error', message: string): void {
-    this.bus.emit('core.log', { level, message, at: Date.now() });
+  log(level: 'info' | 'warn' | 'error', message: string, threadId?: ThreadId): void {
+    this.bus.emit('core.log', { level, message, at: Date.now(), ...(threadId ? { threadId } : {}) });
   }
 
   /**
