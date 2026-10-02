@@ -1670,8 +1670,7 @@ export const fr: Translation = {
   },
 
   quotas: {
-    remoteMachine: 'Machine distante',
-    machineAccounts: 'Comptes sur {machine}',
+    machineAccounts: 'Limites des comptes de {machine}',
     bankedReset: '{count} reset en réserve',
     observed: 'Relevé du {time}',
     remainingUnder: 'Moins de {percent} % restants',

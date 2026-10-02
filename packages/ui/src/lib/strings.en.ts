@@ -1735,8 +1735,7 @@ export const strings = {
   },
 
   quotas: {
-    remoteMachine: 'Remote machine',
-    machineAccounts: 'Accounts on {machine}',
+    machineAccounts: 'Account limits for {machine}',
     bankedReset: '{count} banked reset',
     observed: 'Observed {time}',
     remainingUnder: 'Less than {percent}% left',

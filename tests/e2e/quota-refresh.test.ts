@@ -46,8 +46,7 @@ test('limits identify the owning machine in the desktop glance and desktop and p
       await page.click('[data-testid="settings-tab-limits"]');
     }
     await page.waitFor(`document.querySelector('${scope}')?.dataset.remote === 'true'`);
-    expect(await page.text(scope)).toContain('Remote machine');
-    expect(await page.text(scope)).toContain('Accounts on Builder');
+    expect((await page.text(scope)).trim()).toBe('Account limits for Builder');
     const refresh = width === 1280 ? 'limits-glance-refresh' : 'limits-refresh';
     await page.click(`[data-testid="${refresh}"]`);
     await page.waitFor(`document.querySelector('[data-testid="${refresh}"]')?.getAttribute('aria-busy') === 'false'`);
@@ -57,7 +56,7 @@ test('limits identify the owning machine in the desktop glance and desktop and p
       await page.click('[data-testid="limits-glance-page"]');
     }
     await page.waitFor(`document.querySelector('[data-testid="limits-page"] ${scope}')`);
-    expect(await page.text(`[data-testid="limits-page"] ${scope}`)).toContain('Accounts on Builder');
+    expect((await page.text(`[data-testid="limits-page"] ${scope}`)).trim()).toBe('Account limits for Builder');
     // A renamed machine remains identifiable even on a narrow phone.
     await page.evaluate(`globalThis.__boiteTest.workspace.customize('http://builder.test', 'Build server for shared development projects')`);
     await page.waitFor(`document.querySelector('${scope}')?.textContent.includes('Build server for shared development projects')`);
@@ -69,7 +68,6 @@ test('limits identify the owning machine in the desktop glance and desktop and p
       workspace.active.showSettings('limits');
     })()`);
     await page.waitFor(`document.querySelector('[data-testid="limits-page"] ${scope}')?.dataset.remote === 'false'`);
-    expect(await page.text(scope)).not.toContain('Remote machine');
     expect(await page.text(scope)).not.toContain('Build server');
     expect(page.errors()).toEqual([]);
     await page.evaluate(`localStorage.removeItem('boite.machine-profiles')`);
