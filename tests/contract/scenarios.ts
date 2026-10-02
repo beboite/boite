@@ -145,6 +145,14 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'banked resets require confirmation and reject missing or unsupported accounts': async env => {
+    const account = (await env.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    const invalid = await refusedWith(env.call('quotas.reset', { accountId: account.id, confirmed: false } as unknown as RpcParams<'quotas.reset'>), RpcErrorCode.InvalidParams, ['field', 'expected']);
+    same(invalid.field, 'confirmed', 'the confirmation field');
+    same(invalid.expected, true, 'the expected confirmation');
+    await refusedWith(env.call('quotas.reset', { accountId: account.id, confirmed: true }), RpcErrorCode.Refused);
+    await refusedWith(env.call('quotas.reset', { accountId: 'missing-reset-account', confirmed: true }), RpcErrorCode.NotFound, ['accountId']);
+  },
   'a live permission change releases pending approvals without answering business questions': async env => {
     const setup = await echo(env);
     const created = await thread(env, setup);

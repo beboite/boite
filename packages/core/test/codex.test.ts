@@ -7,6 +7,7 @@ import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
 import { readCodexQuota } from '../src/drivers/codex.ts';
 import { codexQuotaDetails } from '../src/quota-details.ts';
+import { consumeCodexReset } from '../src/drivers/codex/models.ts';
 import { memoryLimitOfJob, cpuRateOfGlobalJob } from '../src/platform/windows/jobs.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
@@ -14,7 +15,7 @@ import type { TestCore } from './harness.ts';
 /** The fake Codex app-server: a real ndjson JSON-RPC process over stdio, run by bun. */
 const FAKE_SERVER = fileURLToPath(new URL('./fixtures/codex-server.ts', import.meta.url));
 /** The fixture's environment switches a test may set; every one is cleared after it. */
-const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT'];
+const FAKE_SWITCHES = ['CODEX_FAKE_LOST', 'CODEX_FAKE_DEAF', 'CODEX_FAKE_SLOW_START', 'CODEX_FAKE_HOOKS', 'CODEX_FAKE_INIT_FAILURES', 'CODEX_FAKE_INIT_ERROR', 'CODEX_FAKE_CRASH_ERROR', 'CODEX_FAKE_INIT_RPC_ERROR', 'CODEX_FAKE_LOGIN_WAIT', 'CODEX_FAKE_RESET_CREDITS', 'CODEX_FAKE_RESET_ERROR'];
 
 test('native collaboration is journalled and appears in Team without using Boite delegation', async () => {
   const client = await startCore();
@@ -238,6 +239,74 @@ async function keepTitle(client: CoreClient, threadId: string): Promise<void> {
 }
 
 describe('codex driver', () => {
+  test('a reset selects the earliest available Codex credit and uses the supplied retry key without starting a turn', async () => {
+    const credit = { status: 'available', resetType: 'codexRateLimits' };
+    process.env['CODEX_FAKE_RESET_CREDITS'] = JSON.stringify({ availableCount: 3, credits: [
+      { ...credit, id: 'later', expiresAt: 2000000000 },
+      { ...credit, id: 'unending', expiresAt: null },
+      { ...credit, id: 'soon', expiresAt: 1900000000 },
+      { ...credit, id: 'expired', expiresAt: 1 },
+      { ...credit, id: 'already-used', status: 'redeemed', expiresAt: 1800000000 },
+      { ...credit, id: 'other-purpose', resetType: 'unknown', expiresAt: 1800000000 },
+    ] });
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota-reset:${accountId}`;
+    let selected: string | undefined;
+    const outcome = await consumeCodexReset({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { remember: id => { selected = id; } });
+    await core.procs.stopAndWait(threadId);
+    expect(outcome).toBe('reset');
+    expect(selected).toBe('soon');
+    expect(fakeLog().trim().split('\n')).toEqual(['initialize', 'initialized', 'account/rateLimits/read {}',
+      'account/rateLimitResetCredit/consume {"idempotencyKey":"fixture-retry-key","creditId":"soon"}']);
+  });
+  test.each([
+    { credits: null },
+    { credits: [{ id: 'partial', status: 'available', resetType: 'codexRateLimits', expiresAt: 1900000000 }] },
+  ])('a Codex reset refuses missing or partial details before consuming a credit (%j)', async ({ credits }) => {
+    process.env['CODEX_FAKE_RESET_CREDITS'] = JSON.stringify({ availableCount: 2, credits });
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota-reset:${accountId}`;
+    let selected = false;
+    await expect(consumeCodexReset({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { remember: () => { selected = true; } }))
+      .rejects.toThrow('reset details');
+    await core.procs.stopAndWait(threadId);
+    expect(selected).toBe(false);
+    expect(fakeLog().trim().split('\n')).toEqual(['initialize', 'initialized', 'account/rateLimits/read {}']);
+  });
+  test('a Codex retry sends its pinned credit even when the provider no longer lists it', async () => {
+    const client = await startCore();
+    const { dataDir, accountId } = await codexAccount(client);
+    const core = harness!.core;
+    const provider = core.providers.require('codex-fake');
+    const threadId = `quota-reset:${accountId}`;
+    const consume = () => consumeCodexReset({ provider, accountId, cwd: dataDir,
+      accountEnv: core.accounts.accountEnv(core.accounts.require(accountId), provider),
+      spawnChild: (cmd, args, opts) => core.procs.spawnChild(threadId, cmd, args, opts),
+      killTree: () => core.procs.killTree(threadId), log: () => undefined }, 'fixture-retry-key', { creditId: 'soon', remember: () => { throw new Error('must reuse the pinned credit'); } });
+    process.env['CODEX_FAKE_RESET_ERROR'] = 'private-credit-id and fixture-token in a provider error';
+    await expect(consume()).rejects.toThrow('Codex could not confirm the reset');
+    await core.procs.stopAndWait(threadId);
+    delete process.env['CODEX_FAKE_RESET_ERROR'];
+    const outcome = await consume();
+    await core.procs.stopAndWait(threadId);
+    expect(outcome).toBe('reset');
+    expect(fakeLog().trim().split('\n')).toEqual(['initialize', 'initialized',
+      'account/rateLimitResetCredit/consume {"idempotencyKey":"fixture-retry-key","creditId":"soon"}',
+      'initialize', 'initialized',
+      'account/rateLimitResetCredit/consume {"idempotencyKey":"fixture-retry-key","creditId":"soon"}']);
+  });
   test('quota reads preserve reset counts and balances without starting a turn or redeeming credits', async () => {
     const client = await startCore();
     const { dataDir, accountId } = await codexAccount(client);

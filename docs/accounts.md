@@ -295,10 +295,28 @@ its GET usage request with the user agent `claude-cli/<version>`, the installed
 CLI's version from the update check: Anthropic answers any other caller
 `eligible: false` with the reason `cli_version`, so no reset shows before that
 version is known. It counts eligible, usable, unpaused, unexpired grants
-only when the reported next grant is available. Codex uses the reported count
+and displays the earliest expiration. Codex uses the reported count
 of reset credits even when the optional details are absent. Only counts and
-expiration times reach the client. Boite never redeems a reset or changes paid
-usage settings.
+expiration times reach the client.
+
+On the Limits page, an owner can use a banked reset on a Claude or Codex
+account with a fresh reading. The button opens a confirmation that names the
+subscription and explains that it consumes the available reset closest to
+expiration and cannot be undone.
+Cancel has keyboard focus; Cancel, Escape and clicking outside send nothing.
+The action stays disabled while its request runs. Paired-device and agent
+connections cannot use this owner-only method.
+
+The core selects the usable credit closest to expiration before consuming it.
+Codex uses `account/rateLimitResetCredit/consume` with the selected credit ID.
+If Codex returns only a count or partial details, consumption is refused until
+a fresh reading includes all available credits. Claude posts the selected
+grant to the selected organization's `reset_rate_limits` route.
+Both use the account's isolated login. Concurrent requests for one login
+share an attempt, and an unanswered attempt retains its idempotency key and
+selected credit across a core restart. Limits refresh after a provider outcome.
+If the reset was applied but that refresh fails, the page says so and keeps the previous
+reading as stale. Paid usage settings are unaffected.
 
 Once any subscription window is exhausted, Claude's confirmed enabled, positive
 monthly spending budget appears beneath it as a percentage of its cap.

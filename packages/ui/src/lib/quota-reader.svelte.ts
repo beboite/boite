@@ -83,6 +83,16 @@ export class QuotaReader {
     remember(this.#key, rows);
   }
 
+  /** A mutation's fresh account wins over any list that began before it. */
+  acceptReset(quota: AccountQuota): void {
+    ++this.#latest;
+    this.loading = false;
+    const rows = this.rows ?? [];
+    this.accept(rows.some(row => row.accountId === quota.accountId)
+      ? rows.map(row => row.accountId === quota.accountId ? quota : row)
+      : [...rows, quota]);
+  }
+
   /** Only the newest read writes, so a slow first read never lands over a refresh asked meanwhile. */
   async read(client: Client, refresh = false): Promise<void> {
     const request = ++this.#latest;

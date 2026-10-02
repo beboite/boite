@@ -72,7 +72,7 @@ export type FakeMethods = { [M in Exclude<RpcMethodName, `plugins.${string}` | `
 export interface FakeClientOptions {
   /** Milliseconds between two streamed chunks. Tests pass 0. */
   delayMs?: number;
-  /** Exhausted quotas with read-only extras for visual checks. */
+  /** Exhausted quotas with banked resets and credits for visual checks. */
   quotaExtras?: boolean;
   /**
    * Characters per streamed delta, like the echo driver's 16, so a per-delta
@@ -172,6 +172,7 @@ export class FakeContext {
     errors: ['keybindings.json: "trace": "t" has no modifier: a chord needs mod, ctrl, alt or meta before its key']
   };
   readonly quotaEnabled: Record<string, boolean> = {};
+  readonly quotaResetsUsed: Record<string, number> = {};
   scheduler: SchedulerState;
   readonly core: CoreInfo;
   /** One phone already paired, so the devices list has a row to revoke. */

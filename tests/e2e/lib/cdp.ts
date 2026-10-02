@@ -133,6 +133,8 @@ export class BrowserPage {
   #pageErrors: string[] = [];
   /** Requests the page sent and has not finished loading, reported when a wait times out. */
   #requests = new Map<string, { url: string; at: number; answered: boolean }>();
+  /** Completed failures would otherwise disappear from the timeout's in-flight list. */
+  #networkFailures: string[] = [];
   errors(): string[] { return [...this.#pageErrors]; }
   /** The profile `launch` made for this page and removes on close; null when the caller owns it. */
   get profileDir(): string | null { return this.#userDataDir; }
@@ -329,7 +331,7 @@ export class BrowserPage {
       }
       if (Date.now() > deadline) {
         const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
-        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}`);
+        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
       }
       await Bun.sleep(POLL_MS);
     }
@@ -337,7 +339,10 @@ export class BrowserPage {
 
   async navigate(url: string): Promise<void> {
     const result = await this.send('Page.navigate', { url }) as { errorText?: string; loaderId?: string };
-    if (result.errorText) throw new Error(`navigation failed: ${result.errorText}`);
+    if (result.errorText) {
+      const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
+      throw new Error(`navigation failed: ${result.errorText}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
+    }
     if (result.loaderId) {
       const deadline = Date.now() + CONNECT_TIMEOUT_MS;
       for (;;) {
@@ -441,7 +446,7 @@ export class BrowserPage {
 
   #receive(raw: string): void {
     if (raw === '') return;
-    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string } }; result?: unknown; error?: { message?: string } };
+    let frame: { id?: unknown; method?: string; params?: { exceptionDetails?: { text?: string; exception?: { description?: string } }; requestId?: string; request?: { url?: string }; response?: { status?: number }; errorText?: string }; result?: unknown; error?: { message?: string } };
     try {
       frame = JSON.parse(raw) as typeof frame;
     } catch {
@@ -457,8 +462,14 @@ export class BrowserPage {
       if (id !== undefined) {
         const url = frame.params?.request?.url ?? '';
         if (frame.method === 'Network.requestWillBeSent' && !url.startsWith('data:')) this.#requests.set(id, { url, at: Date.now(), answered: false });
-        else if (frame.method === 'Network.responseReceived') { const request = this.#requests.get(id); if (request) request.answered = true; }
-        else if (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed') this.#requests.delete(id);
+        else if (frame.method === 'Network.responseReceived') {
+          const request = this.#requests.get(id);
+          if (request) request.answered = true;
+          if ((frame.params?.response?.status ?? 0) >= 400) this.#recordNetworkFailure(id, `HTTP ${frame.params?.response?.status}`);
+        } else if (frame.method === 'Network.loadingFinished' || frame.method === 'Network.loadingFailed') {
+          if (frame.method === 'Network.loadingFailed') this.#recordNetworkFailure(id, frame.params?.errorText ?? 'loading failed');
+          this.#requests.delete(id);
+        }
       }
       return;
     }
@@ -468,6 +479,14 @@ export class BrowserPage {
     clearTimeout(pending.timer);
     if (frame.error !== undefined) pending.reject(new Error(frame.error.message ?? 'devtools error'));
     else pending.resolve(frame.result);
+  }
+
+  #recordNetworkFailure(id: string, reason: string): void {
+    const request = this.#requests.get(id);
+    if (!request) return;
+    // Pairing and ticket query strings belong to the test, never to its failure log.
+    this.#networkFailures.push(`${request.url.split(/[?#]/, 1)[0]} ${reason}`);
+    if (this.#networkFailures.length > 10) this.#networkFailures.shift();
   }
 }
 

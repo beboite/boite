@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Clock3 } from '@lucide/svelte';
   import QuotaExtras from './QuotaExtras.svelte';
+  import QuotaReset from './QuotaReset.svelte';
+  import type { Store } from '../lib/store.svelte';
   import type { AccountQuota } from '@boite/contracts';
   import { fill, strings } from '../lib/strings';
   import { exactTime, quotaWindowName, tenth, weekdayTime } from '../lib/format';
@@ -12,7 +14,7 @@
    * logo. While a new reading loads, the old one stays desaturated until that
    * account answers.
    */
-  let { rows, loading = false, completed = [] }: { rows: AccountQuota[]; loading?: boolean; completed?: string[] } = $props();
+  let { rows, loading = false, completed = [], store }: { rows: AccountQuota[]; loading?: boolean; completed?: string[]; store?: Store } = $props();
 
   const remaining = (used: number) => Math.max(0, Math.round((100 - used) * 10) / 10);
 </script>
@@ -47,7 +49,7 @@
             {#if limit.resetsAt}<small class="reset"><Clock3 size={11} aria-hidden="true" />{fill(strings.quotas.resets, { time: weekdayTime(limit.resetsAt) })}</small>{/if}
           </div>
         {/each}
-        <QuotaExtras {row} />
+        {#if store?.owner}<QuotaReset {row} {store} disabled={pending} />{:else}<QuotaExtras {row} />{/if}
         {#if stale}<small data-testid="usage-limit-stale">{row.checkedAt === null ? strings.quotas.stale : `${strings.quotas.stale} · ${weekdayTime(row.checkedAt)}`}</small>{/if}
         {#if row.windows.length === 0 && !row.error}
           {#if pending}

@@ -372,7 +372,7 @@ export interface QuotaWindow {
   resetsAt: Timestamp | null;
 }
 
-/** A read-only count. No redeemable identifiers reach the client. */
+/** No redeemable identifiers reach the client. The core selects the next credit. */
 export interface QuotaResetCredits {
   availableCount: number;
   nextExpiresAt: Timestamp | null;
@@ -408,6 +408,14 @@ export interface AccountQuota extends QuotaReading {
   source?: 'observation';
   checkedAt: Timestamp | null;
   error: string | null;
+}
+
+export type QuotaResetOutcome = 'reset' | 'nothingToReset' | 'noCredit' | 'alreadyRedeemed';
+
+export interface QuotaResetResult {
+  outcome: QuotaResetOutcome;
+  /** The account reading after the provider answered, possibly stale if refresh failed. */
+  quota: AccountQuota;
 }
 
 // ---------------------------------------------------------------------------
@@ -2285,6 +2293,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   'threads.activity.control': { params: { threadId: ThreadId; kind: 'goal' | 'loop'; action: 'pause' | 'resume' | 'remove' | 'complete' }; result: ThreadActivity };
   'quotas.list': { params: { refresh?: boolean; requestId?: string }; result: AccountQuota[] };
   'quotas.configure': { params: { accountId: AccountId; enabled: boolean }; result: AccountQuota[] };
+  /** Owner-only: consumes a banked reset after an explicit client confirmation. */
+  'quotas.reset': { params: { accountId: AccountId; confirmed: true }; result: QuotaResetResult };
   /** The recommended plugins, then every one installed from a URL, rejected ones included. */
   'plugins.list': { params: Record<string, never>; result: PluginState[] };
   /**

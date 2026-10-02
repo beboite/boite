@@ -1,4 +1,4 @@
-import type { EffortLevel, ModelInfo, ProviderDescriptor } from '@boite/contracts';
+import type { EffortLevel, ModelInfo, ProviderDescriptor, QuotaResetOutcome } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
@@ -6,6 +6,8 @@ import type { ProbeContext } from '../types.ts';
 import type { CodexModel, CodexModelListResponse, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, PROBE_MAX_PAGES, PROBE_TIMEOUT_MS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
+import { QuotaResetError, quotaResetOutcome, type QuotaResetSelection } from '../../quota-resets.ts';
+import { codexNextResetCredit } from '../../quota-details.ts';
 
 // ---------------------------------------------------------------------------
 // The probe: the models the server itself lists
@@ -194,8 +196,8 @@ export function codexQuotaError(reason: string): Error {
   return new Error(`Codex could not read subscription quotas: ${reason.slice(0, 200)}`);
 }
 
-/** Reads subscription limits without creating a thread or submitting a prompt. */
-export async function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
+/** A bounded account request, with its traced process closed on every path. */
+async function accountRequest<T>(ctx: ProbeContext, action: (rpc: CodexRpc) => Promise<T>, reset = false): Promise<T> {
   const profile = profileFor(ctx.provider);
   const executable = profile ? resolveExecutable(profile) : null;
   if (!executable) throw new Error('Codex is not installed. Check Providers.');
@@ -211,24 +213,53 @@ export async function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
   let timer: Timer | undefined;
   try {
     const failure = new Promise<never>((_, reject) => {
-      child.once('exit', () => reject(new Error('Codex closed before reporting quotas. Check its login in Providers.')));
+      child.once('exit', () => reject(new Error(reset ? 'Codex closed before confirming the reset. Refresh the limits before trying again.' : 'Codex closed before reporting quotas. Check its login in Providers.')));
       child.once('error', () => reject(new Error('Codex could not start. Check Providers.')));
-      timer = setTimeout(() => reject(new Error('Codex did not report quotas within 20 seconds.')), PROBE_TIMEOUT_MS);
+      timer = setTimeout(() => reject(new Error(reset ? 'Codex did not confirm the reset within 20 seconds. Refresh the limits before trying again.' : 'Codex did not report quotas within 20 seconds.')), PROBE_TIMEOUT_MS);
     });
     const read = (async () => {
-      await rpc.request('initialize', { clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version }, capabilities: null });
+      await rpc.request('initialize', { clientInfo: { name: CLIENT_NAME, title: null, version: pkg.version }, capabilities: reset ? { experimentalApi: true } : null });
       rpc.notify('initialized', {});
-      try { return await rpc.request('account/rateLimits/read', {}); }
-      catch (error) {
-        ctx.log('warn', `account/rateLimits/read failed: ${messageOf(error)}`);
-        throw codexQuotaError(messageOf(error));
-      }
+      return action(rpc);
     })();
     return await Promise.race([read, failure]);
   } finally {
     clearTimeout(timer);
-    rpc.fail('the quota read is over');
+    rpc.fail('the account request is over');
     child.stdin.end();
     ctx.killTree();
   }
+}
+
+/** Reads subscription limits without creating a thread or submitting a prompt. */
+export function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
+  return accountRequest(ctx, async (rpc) => {
+    try { return await rpc.request('account/rateLimits/read', {}); }
+    catch (error) {
+      ctx.log('warn', `account/rateLimits/read failed: ${messageOf(error)}`);
+      throw codexQuotaError(messageOf(error));
+    }
+  });
+}
+
+/** Selects the earliest usable credit in this login; no turn is started. */
+export function consumeCodexReset(ctx: ProbeContext, idempotencyKey: string, selection: QuotaResetSelection): Promise<QuotaResetOutcome> {
+  return accountRequest(ctx, async (rpc) => {
+    let creditId = selection.creditId;
+    if (creditId === undefined) {
+      const raw = await rpc.request('account/rateLimits/read', {});
+      let credit;
+      try { credit = codexNextResetCredit(raw); }
+      catch (error) { throw new QuotaResetError(messageOf(error), true); }
+      if (!credit) return 'noCredit';
+      creditId = credit.id;
+      selection.remember(creditId);
+    }
+    const result = await rpc.request<{ outcome?: unknown }>('account/rateLimitResetCredit/consume', { idempotencyKey, creditId });
+    return quotaResetOutcome(result?.outcome);
+  }, true).catch((error: unknown) => {
+    if (error instanceof QuotaResetError) throw error;
+    // Native errors can include the private credit or backend response.
+    throw new QuotaResetError('Codex could not confirm the reset. Refresh the limits before trying again.');
+  });
 }

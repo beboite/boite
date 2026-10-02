@@ -346,8 +346,11 @@ describe('harness updates', () => {
       await gate;
       return '1.1.0';
     };
+    // Subscribe before each operation: a fast updater may finish before its RPC is awaited.
+    const checking = client.next('providers.updatesChanged', (list) => list[0]?.state === 'checking', 20000);
+    const changed = client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
     const checked = client.call('providers.updates', { refresh: true });
-    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'checking', 20000);
+    await checking;
     const started = client.call('providers.update', { providerId: 'update-fake' });
     await new Promise((done) => setTimeout(done, 50));
     release();
@@ -358,7 +361,7 @@ describe('harness updates', () => {
     await expect(client.call('turns.start', { threadId: thread.id, prompt: 'hello' })).rejects.toThrow(/is updating/);
     await checked;
     await expect(client.call('providers.update', { providerId: 'update-fake' })).rejects.toThrow(/already updating/);
-    await client.next('providers.updatesChanged', (list) => list[0]?.state === 'idle' && list[0]?.current === '1.2.0', 20000);
+    await changed;
     await waitFor(() => harness?.core.procs.liveCount('update:update-fake') === 0);
   });
 
