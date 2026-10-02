@@ -197,7 +197,8 @@
     liftFrame = 0;
     lifting = false;
   }
-  function releaseNavigation() {
+  function releaseNavigation(event?: KeyboardEvent) {
+    if (event && !typingKey(event)) pinned = false;
     releaseAnchor(); navigationTarget = null;
     if (promptTarget) pinned = false;
     promptTarget = null;
@@ -507,25 +508,29 @@
     return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   }
 
+  let scrolledHeight = 0;
   function onscroll() {
     const box = viewport;
     if (!box) return;
+    const height = box.scrollHeight;
+    const resized = height !== scrolledHeight;
+    scrolledHeight = height;
     // Pulled up by a finger or the scrollbar thumb, the list leaves the bottom as the wheel does.
     if (hold.held && box.scrollTop < scrollTop - 1) leftBottom = true;
     scrollTop = box.scrollTop;
     viewHeight = box.clientHeight;
     if (navigationTarget || promptTarget) return;
-    // Read right after each event, once the window has rendered. Read before that render, or a frame or
-    // a timer later, a navigation that followed a scroll restored the wrong place (tests/e2e/mobile.test.ts).
+    // Read the anchor after the render, before another navigation can restore it.
     void tick().then(rememberAnchor);
-    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    const distance = height - box.scrollTop - box.clientHeight;
     if (glide.active) {
       if (distance > 1) return;
       endGlide(false);
     }
     // Only the very bottom takes back a list the wheel took up.
     if (distance <= 1) leftBottom = false;
-    pinned = !leftBottom && atBottom(box);
+    // A card shrinking can clamp scrollTop before new output grows the list again.
+    pinned = !leftBottom && (atBottom(box) || (pinned && resized && !hold.held));
     if (restoringAnchor) pinned = false;
     // Away from the bottom, the way back shows, whether or not anything new came in.
     behind = !pinned;
@@ -625,11 +630,7 @@
 
   $effect(() => () => { glide.stop(); hold.release(); });
 
-  /**
-   * A message arriving, and the bottom one growing no more than ten times a
-   * second. Never the character count of what streams: reading that here ran
-   * this whole effect on every token of every answer.
-   */
+  /** Follow new messages and measured tail growth, never text deltas. */
   $effect(() => {
     void timeline.length;
     void tail;
@@ -643,7 +644,7 @@
     } else if (opened || pinned) {
       // Held by the reader or on its way down, the list is still at the bottom: it takes the new height once free.
       if (opened || untrack(following)) {
-        box.scrollTop = box.scrollHeight;
+        scrolledHeight = box.scrollHeight; box.scrollTop = scrolledHeight;
         scrollTop = box.scrollTop;
       }
       pinned = true;

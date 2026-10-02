@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setThreadStatus } from '../src/threads/records.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
@@ -167,4 +169,42 @@ test('a follow-up cuts the running answer, so what the agent writes next lands a
   const completed = owner.next('turn.finished', item => item.id === turn.id);
   finish(); await completed;
   expect(shape().map(row => row[1])).toEqual(['complete', 'complete', 'complete', 'complete']);
+});
+
+test('continued output follows published files while existing tools keep their original cards', async () => {
+  const { owner, threadId, turn, context, finish } = await running();
+  await owner.call('threads.subscribe', { threadId });
+  const emit = context().emit;
+  const reply = emit.startMessage('assistant');
+  emit.part(reply, 0, { type: 'text', text: 'Report prepared' });
+  emit.part(reply, 1, { type: 'tool', toolId: 'build', name: 'Bash', input: {}, output: null, status: 'running' });
+  writeFileSync(join(h.dataDir, 'report.txt'), 'Report');
+  const first = await owner.call('artifacts.publish', { threadId, path: 'report.txt' });
+  const second = await owner.call('artifacts.publish', { threadId, path: 'report.txt' });
+  await expect(owner.call('artifacts.publish', { threadId, path: 'missing.txt' })).rejects.toThrow('does not exist');
+  const started = owner.next('message.started', message => message.threadId === threadId && ![reply, first.id, second.id].includes(message.id));
+  emit.part(reply, 2, { type: 'text', text: '' });
+  emit.delta(reply, 2, 'Checking the next change');
+  const history = await owner.call('threads.get', { threadId });
+  expect(history.messages.map(message => message.id)).toEqual([
+    history.messages[0]!.id, reply, first.id, second.id, expect.any(String),
+  ]);
+  const continued = history.messages.at(-1)!;
+  expect((await started).id).toBe(continued.id);
+  expect(continued.createdAt).toBeGreaterThan(second.createdAt);
+  expect(continued).toMatchObject({ role: 'assistant', state: 'streaming', parts: [{ type: 'text', text: 'Checking the next change' }] });
+  expect(history.messages.find(message => message.id === reply)?.state).toBe('streaming');
+  const completed = owner.next('message.completed', message => message.messageId === reply);
+  emit.part(reply, 1, { type: 'tool', toolId: 'build', name: 'Bash', input: {}, output: 'ok', status: 'done' });
+  expect((await completed).state).toBe('complete');
+  const reconnected = await h.connect();
+  const reopened = await reconnected.call('threads.get', { threadId });
+  expect(reopened.messages.map(message => message.id)).toEqual(history.messages.map(message => message.id));
+  expect(reopened.messages.find(message => message.id === reply)?.parts[1]).toMatchObject({ type: 'tool', status: 'done', output: 'ok' });
+  expect(reopened.messages.at(-1)?.parts).toEqual(continued.parts);
+  expect(reopened.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  emit.complete(reply, 'complete');
+  const finished = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await finished;
+  expect((await owner.call('threads.get', { threadId })).messages.every(message => message.state === 'complete')).toBe(true);
 });

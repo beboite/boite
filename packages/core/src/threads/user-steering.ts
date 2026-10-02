@@ -59,7 +59,7 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
       });
       core.bus.emit('message.started', message);
       core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });
-      runner.userInputAt.set(turnId, message.createdAt);
+      runner.answerAfter.set(turnId, message.createdAt);
       saveThread(core, threads.require(threadId), 'thread.userInput');
     })());
     return { accepted: true };

@@ -90,10 +90,9 @@ export class TurnContexts {
       return { ...part, startedAt: seen.startedAt, finishedAt: seen.finishedAt };
     };
     /**
-     * A driver writes its whole answer under one message id. Input the user
-     * sends while the turn runs cuts that message: the next part the driver
-     * opens starts a new one, so the timeline shows the user's message where
-     * it arrived instead of under everything the turn wrote afterwards.
+     * A driver writes its whole answer under one message id. A user follow-up
+     * or published file cuts that message: the next part the driver opens
+     * starts a new one, preserving the timeline's arrival order.
      */
     interface Segment { from: number; id: MessageId; open: boolean }
     const answers = new Map<MessageId, { role: MessageRole; top: number; segments: Segment[] }>();
@@ -105,7 +104,7 @@ export class TurnContexts {
         role,
         parts: [],
         state: 'streaming',
-        // Strictly after the user's message, even within the same millisecond.
+        // Strictly after the standalone message, even within the same millisecond.
         createdAt: Math.max(Date.now(), after === undefined ? 0 : after + 1),
       };
       this.core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
@@ -134,11 +133,11 @@ export class TurnContexts {
       const segment = answers.get(messageId)?.segments.findLast(one => one.from <= partIndex) ?? null;
       return segment ? { segment, messageId: segment.id, partIndex: partIndex - segment.from } : { segment: null, messageId, partIndex };
     };
-    const userInputAt = this.threads.runner.userInputAt;
+    const answerAfter = this.threads.runner.answerAfter;
     const emit: EmitSink = {
       startMessage: (role: MessageRole): MessageId => {
-        const after = userInputAt.get(turn.id);
-        userInputAt.delete(turn.id);
+        const after = answerAfter.get(turn.id);
+        answerAfter.delete(turn.id);
         const id = open(role, after);
         answers.set(id, { role, top: -1, segments: [{ from: 0, id, open: true }] });
         return id;
@@ -153,10 +152,10 @@ export class TurnContexts {
       part: (driverId: MessageId, driverIndex: number, raw: MessagePart): void => {
         const answer = answers.get(driverId);
         if (answer && driverIndex > answer.top) {
-          const after = userInputAt.get(turn.id);
+          const after = answerAfter.get(turn.id);
           if (after !== undefined) {
-            userInputAt.delete(turn.id);
-            // Nothing written yet: the message is created after the input anyway, or holds nothing to cut.
+            answerAfter.delete(turn.id);
+            // Nothing written yet: the message holds nothing to cut.
             if (answer.top >= 0 && answer.role === 'assistant') {
               const previous = answer.segments.at(-1)!;
               answer.segments.push({ from: driverIndex, id: open(answer.role, after), open: true });
