@@ -2,11 +2,10 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { installerPrerequisites } from './installer-prerequisites.ts';
 
 const ROOT = resolve(import.meta.dir, '../..');
-const NSIS = join(process.env.LOCALAPPDATA ?? '', 'tauri', 'NSIS');
-const GENERATED = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, 'apps/shell/src-tauri/target'), 'release/nsis/x64');
-const ready = process.platform === 'win32' && existsSync(join(NSIS, 'makensis.exe')) && existsSync(join(GENERATED, 'utils.nsh'));
+const { nsis: NSIS, generated: GENERATED, ready } = installerPrerequisites({ root: ROOT });
 // Windows runners can expose TEMP through an 8.3 profile path. Shell links
 // store its expanded spelling, which the NSIS target comparison expects.
 const scratch = ready ? realpathSync.native(mkdtempSync(join(tmpdir(), 'boite-shortcuts-'))) : '';

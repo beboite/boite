@@ -6,6 +6,7 @@
       "binaries/jobs-worker.js": "jobs-worker.js",
       "binaries/guard-worker.js": "guard-worker.js",
       "binaries/artifact-retention-worker.js": "artifact-retention-worker.js",
+      "binaries/linux-tcp-worker.js": "linux-tcp-worker.js",
       "binaries/boite": "boite",
       "binaries/boite.cmd": "boite.cmd",
       "../../../packages/ui/dist": "ui"

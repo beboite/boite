@@ -4,9 +4,10 @@
   import InfoTip from './InfoTip.svelte';
   import DeletedThreads from './DeletedThreads.svelte';
   import { archivedThreads, restoreThread } from '../lib/archive';
+  import { SnapshotReads } from '../lib/store/snapshot-reads';
   import { canDeleteThread, deleteThread } from '../lib/thread-removal';
   import { ago, exactTime, projectName } from '../lib/format';
-  import { strings } from '../lib/strings';
+  import { fill, strings } from '../lib/strings';
   import type { Store } from '../lib/store.svelte';
   import { workspace } from '../lib/workspace.svelte';
 
@@ -21,21 +22,56 @@
   let threads = $state<ThreadSummary[] | null>(null);
   let loading = $state(false);
   let restoring = $state<ThreadId | null>(null);
-  /** Once per mount: a read that fails leaves the button, not a retry loop. */
+  /** One automatic ask per connection: a failed read leaves the button for another user ask. */
   let asked = false;
   const removed = new Set<ThreadId>();
+  const rows = new Set<ThreadId>();
+  const reads = new SnapshotReads<ThreadSummary>(thread => thread.projectId ?? '');
   $effect(() => {
+    void store.connection;
     const client = store.client;
+    const generation = store.clientGeneration;
+    const current = () => store.client === client && store.clientGeneration === generation;
+    threads = null;
+    loading = false;
+    restored = [];
+    restoring = null;
+    asked = false;
+    removed.clear();
+    rows.clear();
+    reads.clear();
     const offRemove = client?.on('thread.removed', ({ threadId }) => {
+      if (!current()) return;
       removed.add(threadId);
-      threads = threads?.filter(t => t.id !== threadId) ?? null;
+      reads.change(threadId, null);
+      if (rows.delete(threadId)) threads = threads?.filter(t => t.id !== threadId) ?? null;
+      restored = restored.filter(id => id !== threadId);
     });
     const offRestore = client?.on('thread.created', summary => {
-      if (!removed.delete(summary.id)) return;
-      if (summary.archived && !summary.parentThreadId && threads !== null) threads = [...threads, summary];
+      if (!current() || !removed.delete(summary.id)) return;
+      reconcile(summary);
     });
-    return () => { offRemove?.(); offRestore?.(); };
+    const offUpdate = client?.on('thread.updated', summary => { if (current()) reconcile(summary); });
+    return () => { offRemove?.(); offRestore?.(); offUpdate?.(); reads.clear(); };
   });
+
+  function reconcile(summary: ThreadSummary) {
+    const held = rows.has(summary.id);
+    const keep = !removed.has(summary.id) && !summary.parentThreadId &&
+      (summary.archived || (held && (restoring === summary.id || restored.includes(summary.id))));
+    reads.change(summary.id, keep ? summary : null);
+    if (threads === null) return;
+    // Load samples from unrelated active threads must not rebuild the archive.
+    if (!keep) {
+      if (!rows.delete(summary.id)) return;
+      threads = threads.filter(row => row.id !== summary.id);
+      restored = restored.filter(id => id !== summary.id);
+      return;
+    }
+    if (summary.archived) restored = restored.filter(id => id !== summary.id);
+    rows.add(summary.id);
+    threads = held ? threads.map(row => row.id === summary.id ? summary : row) : [summary, ...threads];
+  }
 
   $effect(() => {
     if (asked || (!eager && store.settingsSection?.id !== 'archived') || store.connection !== 'ready') return;
@@ -48,13 +84,22 @@
   }
 
   async function load() {
+    const client = store.client;
+    const generation = store.clientGeneration;
+    const read = reads.begin();
     loading = true;
     try {
-      threads = (await archivedThreads(store)).filter(t => !removed.has(t.id));
+      const answer = await archivedThreads(store);
+      if (store.client === client && store.clientGeneration === generation && read.active) {
+        threads = read.apply(answer, threads ?? []).filter(t => !removed.has(t.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+        rows.clear();
+        for (const thread of threads) rows.add(thread.id);
+      }
     } catch (error) {
-      fail(error);
+      if (store.client === client && store.clientGeneration === generation) fail(error);
     } finally {
-      loading = false;
+      read.cancel();
+      if (store.client === client && store.clientGeneration === generation) loading = false;
     }
   }
 
@@ -62,12 +107,16 @@
   let restored = $state<ThreadId[]>([]);
 
   async function restore(thread: ThreadSummary) {
+    const client = store.client;
+    const generation = store.clientGeneration;
     restoring = thread.id;
     try {
-      await restoreThread(store, thread.id);
+      const summary = await restoreThread(store, thread.id);
+      if (store.client !== client || store.clientGeneration !== generation) return;
+      threads = threads?.map(row => row.id === summary.id ? summary : row) ?? null;
       restored = [...restored, thread.id];
     } catch (error) {
-      fail(error);
+      if (store.client === client && store.clientGeneration === generation) fail(error);
     } finally {
       restoring = null;
     }
@@ -101,6 +150,12 @@
       {#each threads as thread (thread.id)}
         <li data-thread-id={thread.id}>
           <span class="title" title={thread.title}>{thread.title}</span>
+          {#if thread.archiveReason?.type === 'pr-merged'}
+            <span class="archive-reason" data-testid="archive-merged-reason">
+              <a href={thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(thread.archiveReason.number) })}</a>
+              <time datetime={new Date(thread.archiveReason.archivedAt).toISOString()} title={exactTime(thread.archiveReason.archivedAt)}>{ago(thread.archiveReason.archivedAt)}</time>
+            </span>
+          {/if}
           <span class="subtle meta" title={exactTime(thread.updatedAt)}>{projectOf(thread)} · {ago(thread.updatedAt)}</span>
           {#if restored.includes(thread.id)}
             <button type="button" class="small" data-testid="archived-open" onclick={() => void workspace.select(store, thread.id)}>
@@ -156,6 +211,17 @@
     overflow-wrap: anywhere;
     font-size: var(--text-sm);
   }
+  .archive-reason {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--text-sm);
+  }
+  .archive-reason a { color: inherit; text-underline-offset: 2px; }
+  .archive-reason time { color: var(--color-subtle); }
 
   .archived button {
     gap: 4px;

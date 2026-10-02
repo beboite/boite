@@ -1,18 +1,18 @@
 # Releasing
 
-From a clean tree to an installer. Every command below exists in the workspace
-`package.json` files and runs from the repository root.
+This guide owns release channels, artifact layout and signing. Run build
+commands from the repository root. [Development](development.md) owns local
+setup and test commands; [portability](portability.md) records platform limits.
 
 [CI and publication](ci.md) covers automated checks, draft releases, Docker
 images and the daily nightly schedule.
 
 ## The order
 
+Run the [development checks](development.md#checks-and-tests) and
+`bun run check:translations` before packaging. Then:
+
 ```bash
-bun run check
-bun run check:translations
-bun run test
-bun run test:shell
 bun run build:shell
 bun run apps/shell/scripts/stage-sidecar.ts
 bun run e2e
@@ -41,11 +41,11 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   keep the SDKs off the start path. `bun run core` and the shell both prefer this
   bundle over the sources when it is there.
 - `build:core:exe` compiles `packages/core/dist/boite-core`, with `.exe` on Windows. On x64 it embeds
-  Bun's baseline runtime, which needs no AVX2. The two worker
-  files are not compiled into it: the core loads them by name from beside its own
-  executable, so they travel with it. The artifact retention worker is also an
-  explicit compile entry point, embedded in the executable for Linux/macOS and
-  signed server archives; those installations need no additional worker file.
+  Bun's baseline runtime, which needs no AVX2. The jobs and guard workers remain
+  JavaScript files beside the core. `artifact-retention-worker.ts` is also a
+  compile entry point, so standalone signed server archives embed it and need
+  no separate retention worker file. Shell staging still ships all three
+  emitted worker files beside the sidecar.
 - On Windows the installed sidecar is not that executable. It is Bun's baseline
   runtime of the version the build ran under, copied as `boite-core.exe`, with every file of the bundle
   but the workers in a `core` directory beside it, and the shell starts it as
@@ -54,9 +54,10 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   downloads it once from the Bun release, checks the archive against the
   release's `SHASUMS256.txt` and keeps it under `node_modules/.cache`, so the
   first staging needs the network. The runtime carries its publisher's signature;
-  an unsigned compiled core costs about 650 ms more at every start on Windows 11
-  ([performance.md](performance.md)). The checksum comes from the same release,
-  so the signature is what vouches for the file: `stage-sidecar.ts` refuses a
+  the [2026-09-19 Windows comparison](../bench/results/2026-09-29-resources.md#runtime-and-bundle-measurements-2026-09-19-to-2026-09-29)
+  recorded about 650 ms of additional startup inspection for an unsigned core.
+  Because the checksum comes from the same release, staging also verifies the
+  signature: `stage-sidecar.ts` refuses a
   runtime whose signature is not valid or whose signer is not Bun's publisher
   (`O=Codeblog CORP`, `apps/shell/scripts/runtime-signature.ts`). It checks the
   cached copy again at every staging and downloads it again when that copy
@@ -66,7 +67,7 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   that is not shipped. `apps/shell/scripts/tauri.ts` adds
   `tauri.bundle.windows.conf.json`, which names the `core` directory as a
   resource, to any Windows build that passes the bundle overlay.
-- `stage:core` puts the sidecar, both workers and the two `boite` shims
+- `stage:core` puts the sidecar, all three workers and the two `boite` shims
   (`packages/core/shims`, see [cli.md](cli.md)) where the two things that
   run them look. The bundler wants
   `apps/shell/src-tauri/binaries/boite-core-<target triple>`, with `.exe` on Windows, for
@@ -74,11 +75,11 @@ and add separate server targets to `latest.json`. Docker images remain separate.
   entries that land them beside the installed sidecar. The end to end suite wants
   the same files beside `apps/shell/src-tauri/target/release/boite-shell`, with
   `.exe` on Windows, so the script copies there whenever that executable exists.
-  The Windows shell refuses a sidecar missing either worker and names the missing file.
+  The Windows shell refuses a sidecar missing any worker and names the missing file.
 - `build:shell` runs the Tauri build with the bundle overlay and produces the
   NSIS installer on Windows, Debian and AppImage packages on Linux, or an
   application bundle and DMG on macOS. Build on the target OS and architecture;
-staging supports Windows x64 and Linux/macOS x64 and ARM64.
+  staging supports Windows x64 and Linux/macOS x64 and ARM64.
 
 The shell passes Tauri's resource directory to the core through `BOITE_UI_DIR`,
 so the installed core can serve the phone UI from the macOS application bundle
@@ -96,22 +97,15 @@ Debian package, extracted AppImage and macOS application bundle. Signing, notari
 on older operating systems remain release prerequisites; a local unsigned
 bundle is not a notarized download. Native notifications and Windows process
 guards are not implemented on Linux or macOS.
-Normal shell quit leaves the resident core running. With `BOITE_CORE_RESIDENT=0`,
-the POSIX shell gives its owned core three seconds to handle `SIGTERM`, stop
-its direct children and close the journal before forcing exit. Resident cores
-append output to `core-output.log` in the data directory instead of a pipe
-owned by the shell; startup truncates that file once it exceeds 8 MiB.
+The [architecture](architecture.md#closing-and-restart) describes resident-core
+shutdown. Installed smoke tests use a temporary home, run outside the checkout
+without Bun on PATH, and verify an echo turn executing `boite where`.
+[Platform readiness](portability.md) separates that coverage from native webview,
+notification, provider-login and older-OS checks.
 
-The installed smoke test runs with a temporary home, outside the checkout and
-without Bun on PATH. Its echo turn executes `boite where` and checks the returned
-thread ID, covering the agent's PATH, executable permissions and the CLI's
-connection to the core. See [platform readiness](portability.md) for remaining
-Linux and macOS gaps.
-
-macOS requires 13.0 or newer. The bundle includes the JIT entitlements required
-by the [compiled Bun runtime](https://bun.sh/docs/bundler/executables).
-CI signs locally with an ad-hoc identity and starts that signed bundle. A public
-release still needs an Apple Developer ID and notarization credentials.
+macOS requires 13.0 or newer and includes the JIT entitlements needed by the
+[compiled Bun runtime](https://bun.sh/docs/bundler/executables). CI starts an
+ad-hoc signed bundle when Developer ID/notarization credentials are absent.
 
 A shell executable with no installer, for a quick look at the window:
 
@@ -121,9 +115,10 @@ bun run --cwd apps/shell tauri build --no-bundle
 
 ## The bundle overlay
 
-`apps/shell/src-tauri/tauri.conf.json` is the base config and names no sidecar.
-`apps/shell/src-tauri/tauri.bundle.conf.json` is the overlay that `build:shell`
-passes, and it is the only place `bundle.externalBin` and the resource map live:
+`apps/shell/src-tauri/tauri.conf.json` is the base config without a sidecar.
+`tauri.bundle.conf.json` adds `bundle.externalBin` and the resource map for the
+core, Windows workers, CLI shims and built UI. The base can build before core
+compilation; distributable builds use the overlay.
 
 ```json
 {
@@ -141,14 +136,10 @@ passes, and it is the only place `bundle.externalBin` and the resource map live:
 }
 ```
 
-Splitting it this way means the base config still builds for anyone who has not
-compiled the core. Two path rules bite here and are worth reading twice. A
-`--config` path is resolved against the directory the CLI was invoked from,
-`apps/shell`, while every path written inside a config is resolved against
-`src-tauri`: the two bases are not the same. And a `bundle.resources` entry whose
-key is a directory copies the whole tree under the target name, which is why the
-UI arrives as `ui/index.html` and needs no glob. A glob key would flatten the
-tree instead.
+CLI `--config` paths resolve from `apps/shell`, while paths inside the configs
+resolve from `src-tauri`. A directory resource preserves its tree under the
+mapped name, giving `ui/index.html`; a glob would flatten it. Windows adds a
+separate resource overlay for the split `core/` JavaScript bundle.
 
 ## Channels
 
@@ -170,7 +161,7 @@ bun run build:shell:nightly # nightly overlay; CI stamps the nightly version
 bun run build:shell:dev     # Boite Dev, com.boite.two.dev, boite2-dev
 ```
 
-The dev one passes a second overlay, `apps/shell/src-tauri/tauri.dev.conf.json`,
+The dev build passes a second overlay, `apps/shell/src-tauri/tauri.dev.conf.json`,
 after the bundle one. The Tauri CLI takes `--config` more than once and merges
 in the order given, so the dev overlay carries only what differs: the product
 name, the identifier and `bundle.icon` pointing at `icons/`, the black mark on
@@ -178,23 +169,11 @@ white. The release uses `icons-dev/`, the white mark on black. These asset
 directory names are historical. Two identifiers mean two NSIS product
 codes, so the second installer installs beside the first instead of over it.
 
-The separate data directory is not a nicety. The shell finds its core by reading
-`<dataDir>/core.json` and adopting whatever answers on the port it names: on one
-shared directory a dev shell would adopt the stable core, run the beta window on
-the stable journal and the stable accounts, and report nothing wrong. So the
-channel rides all the way down. The shell reads it once from
-`app.config().identifier` (a `.dev` suffix and nothing else decides it), uses it
-for its own data directory, and appends `--channel dev` to the core's argv; the
-core's `--channel` picks the same default directory and fills `CoreInfo.channel`,
-which is what puts the small "Dev" tag beside the title in the title bar. The
-mapping is pure on both sides and tested on both: `cargo test --lib` in
-`apps/shell/src-tauri` for the identifier, `packages/core/test/core.test.ts` for
-the flag and the directory name.
-
-On Windows the WebView2 profile needs nothing: with no `BOITE_DATA_DIR` set the
-shell leaves it to Tauri, which puts it under `%LOCALAPPDATA%\<identifier>`, so
-the regular install and Boite Dev already have one each. Stable and nightly
-share the regular WebView2 profile.
+The shell derives its channel from the identifier's `.dev` suffix and passes
+`--channel dev` to its core. Shell and core must select the same directory:
+otherwise a development shell can adopt a stable core and journal. Stable and
+nightly share the regular WebView2 profile; Boite Dev has its own. Core adoption
+and version/hash checks belong to the [architecture](architecture.md).
 
 ## Signed update artifacts
 
@@ -220,11 +199,19 @@ fails the runner when a payload or a signature is missing or when a file of
 another architecture is present. Publication gathers every artifact, and
 `scripts/ci/updater-manifest.ts` creates `latest.json` with the exact version,
 publication date, release notes, and one signature and immutable release
-download URL per updater target. It refuses a release missing any of the seven
-targets or holding a file it does not know. The DMGs are manual downloads that
-the updater never fetches. `SHA256SUMS.txt` covers every installer. Stable releases remain drafts until reviewed;
-nightlies publish automatically. Neither a draft nor an unsigned older release
-is offered by the desktop updater.
+download URL per updater target. It requires all nine targets: Windows x64,
+two macOS architectures, Linux .deb/AppImage on both architectures, and two
+standalone Linux server archives. Unknown release files are refused. DMGs are
+manual downloads. `SHA256SUMS.txt` covers desktop/server payloads; stable
+publication also includes tested-image provenance metadata. Stable releases
+remain drafts until reviewed; nightlies publish automatically. The desktop
+updater excludes drafts and unsigned older releases.
+
+Docker publication reuses the tested image digests. Version tags identify the
+release; the shared `sha-<full commit>` alias can change between stable and
+nightly builds of the same source. Use a version tag or digest to pin a build.
+Stable `latest` promotion runs separately under a repository-wide concurrency
+group and rechecks GitHub's current stable release before writing the alias.
 
 These are Tauri updater signatures, not Windows Authenticode signatures or
 Apple Developer ID signatures.
@@ -237,7 +224,8 @@ notarization, `APPLE_API_ISSUER`, `APPLE_API_KEY_ID` and
 `APPLE_API_PRIVATE_KEY` (the `.p8` contents). The CI then checks the stapled
 ticket and Gatekeeper's verdict on the bundle. Without all six, and on every
 pull request, the bundle is signed ad hoc and Gatekeeper asks once before the
-first start (README). Both need the Apple Developer Program. Linux
+first start (README). Developer ID signing and notarization need the Apple
+Developer Program. Linux
 packages are built on Ubuntu 22.04, whose glibc 2.35 is the oldest a user can
 run them on.
 
@@ -257,7 +245,7 @@ name is `Boite`. The install is per user and asks for no elevation.
 - `guard-worker.js`, the focus guard and the audio mute.
 - `artifact-retention-worker.js`, the background scan for unused deliverables.
 - `boite` and `boite.cmd`, the CLI shims the core puts on an agent's PATH; each
-  runs `boite-core cli` from beside itself ([cli.md](cli.md)).
+  invokes the adjacent core's CLI entry ([cli.md](cli.md)).
 - `ui/`, the same build a phone gets over the pairing link.
 
 The identifier is fresh, so Boite installs beside Boite Legacy rather than over
@@ -267,40 +255,12 @@ anything: it names every file and where it goes.
 
 ## How the shell finds a core
 
-Closing the window exits the shell by default, and the resident core keeps running. General settings
-can keep it in the notification area instead. The choice lives in
-`<dataDir>/shell-settings.json` and survives restart. The tray's Quit action always
-exits. Hovering or clicking the tray icon opens a compact quota window; its Show
-action restores the main window. Quota polling runs only while that popup is open.
-The popup is a second WebView2 page with its own socket, about 85 MB: 45 seconds
-after it hides, the shell destroys it, and the next hover builds it again.
-A window in the tray or minimized hides its page and its browser panels from
-WebView2 as well, which does not notice a hidden host by itself: the page stops
-painting and sees `document.hidden`, and the panels that were open come back
-with the window.
-One shell runs per data directory (`shell.lock`). Launching Boite again while it
-runs shows the running window, from the tray or behind other windows, through a
-loopback port and token the owner writes to `<dataDir>/shell-wake`. A shell
-started with `BOITE_SHELL_HIDDEN=1` never asks.
+[Architecture](architecture.md#the-core-is-the-host-the-shell-is-a-client)
+owns core adoption and residency; [portability](portability.md) records shutdown
+limits. [Desktop updates](updates.md#download-and-restart) owns installer
+admission, running-core replacement and shortcut preservation.
 
-A release shell has no console, so a shell that fails writes why to
-`<dataDir>/shell-error.log`: a setup error, such as a broken WebView2 install or
-a profile directory it cannot write, and any panic. A setup error also shows a
-message box naming the error and that file, except in a hidden test shell. A
-missing WebView2 runtime is Tauri's own message box. When the tray icon cannot
-be created, the shell runs without it and closing the window quits.
-
-The installed shell starts a core of its own or adopts one of its own version
-that already answers. That core is resident: it outlives the shell. Since a
-running core keeps `boite-core.exe` open, which once made an install fail on
-"error opening file for writing", the updater stops it before it launches the
-installer, and the installer's hooks (`windows/hooks.nsh`) close the shell,
-which would restart it, and then stop the core of that install before an
-install or an uninstall writes the file. With
-`BOITE_CORE_RESIDENT=0` (tests) the shell owns its core through a
-`KILL_ON_JOB_CLOSE` Job Object instead, so a shell killed hard takes it down.
-
-It looks for the core in this order:
+Core lookup order:
 
 1. `BOITE_CORE_COMMAND`, split on whitespace. This is the override the tests and
    the bench use.
@@ -312,18 +272,36 @@ It looks for the core in this order:
    above the executable. The development case with a built bundle.
 4. `packages/core/src/main.ts` through bun. The development case without one.
 
+## Installed-shell diagnostics
+
+Close exits the shell by default; General settings can keep it in the tray.
+`<dataDir>/shell-settings.json` stores that choice. Tray Quit always exits; Show
+restores the main window. Hover/click opens a quota popup that polls only while
+visible and is destroyed 45 seconds after hiding. Hidden/minimized Windows
+pages and browser panels stop painting and see `document.hidden`.
+
+`shell.lock` permits one shell per data directory. A second launch uses the
+loopback port/token in `shell-wake` to show the existing window. Hidden test
+shells never request it. Setup failures and panics go to `shell-error.log`;
+visible setup failures name that file in a dialog. Missing WebView2 uses Tauri's
+dialog. A tray-creation failure leaves a usable window that exits on Close.
+
+Resident cores append to `core-output.log`, truncated at startup above 8 MiB.
+`BOITE_CORE_RESIDENT=0` makes a Windows shell own its core through a
+`KILL_ON_JOB_CLOSE` Job Object. POSIX gives its owned core three seconds for
+SIGTERM before forcing exit. [Updates](updates.md) owns the installer hooks
+that close the shell before replacing its running core.
+
 ## Icons
 
-The app icon is one drawing, `packages/ui/public/icons/icon.svg`. The light shell
+The app icon source is `packages/ui/public/icons/icon.svg`. The light shell
 icon set and the two PWA pngs are rendered from it, the first through the Tauri CLI's
 own icon command from `apps/shell`. Nothing else draws the mark, and the UI's own
 copy of it is a Svelte component using `currentColor`.
 
-The release channel gets the same drawing inverted,
-`packages/ui/public/icons/icon-dev.svg`, so the two apps are told apart in the
-taskbar and the tray at a glance. Its set is rendered the same way, into a
-directory of its own, and the android and ios output the command also writes is
-deleted, as it is for the light set:
+The release uses the inverted `packages/ui/public/icons/icon-dev.svg`, rendered
+into its own directory. Remove the Android/iOS outputs of the icon command,
+as for the light set:
 
 ```bash
 bun run --cwd apps/shell tauri icon ../../packages/ui/public/icons/icon-dev.svg -o src-tauri/icons-dev
@@ -356,3 +334,24 @@ the notes, a person runs it with `BOITE_BENCH_HOST_AGENTS=1`, so the update
 check reads the providers installed on the machine as a user's core would, and
 says which providers those were. An agent never sets it: the check runs each
 agent's `--version`, and an agent's own updater can open a console window.
+
+## Release notes
+
+Release notes come from Git commits, including commits without a pull request.
+Each subject links to its commit, and a comparison link opens the complete diff.
+Merge commits are excluded because the commits they merge are already listed.
+Subjects starting with `feat`, `fix` and `perf` get their own sections; every
+other subject goes under "Other changes". A list with no typed subject has no
+headings.
+
+For a stable release, the range starts at the previous published stable release
+reachable from that commit. A prerelease may start at a previous prerelease.
+Nightlies compare with the previous published nightly. Drafts and releases from
+unrelated branches never become the baseline. The first release includes the
+repository's history.
+
+The manual release and nightly forms accept an optional `announcement`. It
+appears above the generated changelog. Leave it empty for fully automatic notes.
+You can also edit the release draft before publishing. Retrying an existing
+draft refreshes its artifacts and preserves manually edited notes; it refuses
+to replace a published release or a tag pointing at another commit.

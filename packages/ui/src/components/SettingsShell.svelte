@@ -4,7 +4,7 @@
   import MobileSettings from './MobileSettings.svelte';
   import AppUpdateNotice from './AppUpdateNotice.svelte';
   import BrainPage from './BrainPage.svelte';
-  import { ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Brain, ChevronRight, Coins, FlaskConical, Gauge, House, Keyboard, Mic, Monitor, Palette, Puzzle, Settings2, ShieldCheck, SlidersHorizontal, Users } from '@lucide/svelte';
   import KeyboardPage from './KeyboardPage.svelte';
   import LimitsPage from './LimitsPage.svelte';
   import PluginsPage from './PluginsPage.svelte';
@@ -20,6 +20,7 @@
   import GeneralSettings from './GeneralSettings.svelte';
   import MachinesPage from './MachinesPage.svelte';
   import ResourcesPage from './ResourcesPage.svelte';
+  import TaskManagerLoader from './TaskManagerLoader.svelte';
   import SettingsHome, { type SettingsEntry, type SettingsTile } from './SettingsHome.svelte';
   import UsagePage from './UsagePage.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
@@ -27,7 +28,7 @@
 import { workspace } from '../lib/workspace.svelte';
   import { showAppUpdateUi } from '../lib/app-update.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, onopenthread }: { store: Store; onopenthread?: () => void } = $props();
   const narrow = new MediaQuery('(max-width: 720px)');
   const inShell = window.__TAURI_INTERNALS__ !== undefined;
 
@@ -50,6 +51,7 @@ import { workspace } from '../lib/workspace.svelte';
     { id: 'brain', label: strings.brain.heading, icon: Brain, group: 1 },
     { id: 'usage', label: strings.settings.tabs.usage, icon: Coins, group: 2 },
     { id: 'limits', label: strings.usage.limits, icon: Gauge, group: 2 },
+    { id: 'task-manager', label: strings.taskManager.title, icon: Activity, group: 2 },
     { id: 'resources', label: strings.settings.tabs.resources, icon: ShieldCheck, group: 2 },
     { id: 'machines', label: strings.settings.tabs.machines, icon: Monitor, group: 3 },
     { id: 'advanced', label: strings.settings.tabs.advanced, icon: SlidersHorizontal, group: 3 },
@@ -230,7 +232,7 @@ import { workspace } from '../lib/workspace.svelte';
 </script>
 
 {#if narrow.current && !inShell}
-  <MobileSettings {store} />
+  <MobileSettings {store} {onopenthread} />
 {:else}
 <div class="settings" data-testid="settings">
   <nav aria-label={strings.settings.heading}>
@@ -303,6 +305,8 @@ import { workspace } from '../lib/workspace.svelte';
         <UsagePage {store} />
       {:else if tab === 'limits'}
         <LimitsPage {store} />
+      {:else if tab === 'task-manager'}
+        <TaskManagerLoader {store} {onopenthread} />
       {:else if tab === 'plugins'}
         <PluginsPage {store} />
       {:else if tab === 'experiments'}

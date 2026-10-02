@@ -18,7 +18,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -52,12 +52,22 @@ jobs:
       APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
     with:
       sign-updates: true
+      skip-server: true
+    permissions:
+      contents: read
+
+  image:
+    needs: version
+    uses: ./.github/workflows/server.yml
     permissions:
       contents: read
       packages: write
+    with:
+      publish: true
+      defer-manifest: true
 
   draft:
-    needs: [version, verify]
+    needs: [version, verify, image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -78,6 +88,11 @@ jobs:
           pattern: desktop-bundle-*
           merge-multiple: true
           path: artifacts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: server-digest-*
+          merge-multiple: true
+          path: digests
       - name: Prepare release for review
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,11 +103,14 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > released.json
           bun scripts/ci/changelog.ts released.json artifacts/release-notes.md
           bun scripts/ci/updater-manifest.ts artifacts
+          # Persist unsigned tested-digest provenance with the reviewed draft;
+          # publication also checks this exact run's completed jobs via the API.
+          bun scripts/ci/server-provenance.ts stage digests artifacts/server-images.json
           existing=$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty' released.json)
           cd artifacts
           # updater-manifest.ts refused any file outside this set.
           installers=(./*.exe ./*.deb ./*.AppImage ./*.dmg ./*.app.tar.gz ./boite-server_*.zip)
-          sha256sum "${installers[@]}" > SHA256SUMS.txt
+          sha256sum "${installers[@]}" server-images.json > SHA256SUMS.txt
           flags=()
           [[ "$RELEASE_TAG" == *-* ]] && flags+=(--prerelease)
           if [[ -n "$existing" ]]; then
@@ -102,11 +120,11 @@ jobs:
             else
               test "$(echo "$existing" | jq -r .target_commitish)" = "$GITHUB_SHA"
             fi
-            gh release upload "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt server-images.json --clobber
           else
             # A manual dispatch creates the version tag only after all checks.
             if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
               test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
             fi
-            gh release create "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt --target "$GITHUB_SHA" --draft --title "boite $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+            gh release create "$RELEASE_TAG" "${installers[@]}" ./*.sig latest.json SHA256SUMS.txt server-images.json --target "$GITHUB_SHA" --draft --title "boite $RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
           fi

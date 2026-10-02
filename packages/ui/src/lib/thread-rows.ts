@@ -1,4 +1,18 @@
-import type { MessageId, ProjectId, Thread, ThreadId, ThreadSummary } from '@boite/contracts';
+import type { MessageId, ProjectId, Thread, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+
+export function workingThread(status: ThreadStatus): boolean {
+  return status === 'running' || status === 'queued' || status === 'waiting';
+}
+
+/** Parents with a working child, shared by every row of this machine. */
+export function blockedMoveParents(threads: readonly ThreadSummary[]): Set<ThreadId> {
+  const blocked = new Set<ThreadId>();
+  for (const thread of threads) {
+    const parent = thread.parentThreadId;
+    if (parent && !thread.archived && workingThread(thread.status)) blocked.add(parent);
+  }
+  return blocked;
+}
 
 /** Same value: primitives by identity, the small objects of a summary (load, context, cache) by content. */
 function same(a: unknown, b: unknown): boolean {

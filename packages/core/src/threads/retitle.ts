@@ -121,7 +121,7 @@ export class ThreadTitles {
             attachments: writer.provider.capabilities.images ? attachments : [],
             model: writer.model,
             spawnChild: this.threads.contexts.leasedSpawnChild(thread.id, writer.provider),
-            log: (level, message) => this.core.log(level, message),
+            log: (level, message, context) => this.core.log(level, message, { ...context, source: writer.provider.id, event: 'provider.title', threadId: thread.id }),
           });
           generated = raw === null ? null : parseAgentTitle(raw);
           branchSlug = raw === null ? null : cleanAgentBranch(raw);

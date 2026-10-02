@@ -104,7 +104,7 @@ export const strings = {
   activityUnsupported: 'Element references cannot be used with /goal or /loop. Send a regular message or remove the references.',
   stashUnsupported: 'This draft contains element references and cannot be stashed. Send it or remove the references first.'
 },
-  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', saving: 'Saving…', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
+  artifacts: { loadImage: 'Load image', retry: 'Try again', mediaFailed: 'This media could not be previewed. Try again or download the file to open it.', saving: 'Saving', zoomIn: 'Zoom in', zoomOut: 'Zoom out', fitImage: 'Fit image', open: 'Open', openLocal: 'Open this file in its default application.', preview: 'Preview', download: 'Download', close: 'Close preview', closeImage: 'Close image', enlarge: 'View full size', saved: 'Saved in Downloads', loading: 'Loading file', unavailable: 'No inline preview for this file. Download it to open it.', failed: 'Could not open this file', ownerOnly: 'Local file links need an owner connection. Ask the agent to attach the file to share it with this device.' },
 
   brain: {
     heading: 'Brain', description: 'Your agents share the same instructions and skills.',
@@ -486,6 +486,7 @@ export const strings = {
     copyPath: 'Copy path',
     manageProject: 'Manage project',
     worktreeDefault: 'Worktree by default',
+    autoArchiveMergedPr: 'Archive merged PR conversations',
     backToProjectMenu: 'Back',
     viewArchivedThreads: 'View archived threads',
     importSession: 'Import a Claude Code session',
@@ -1078,6 +1079,9 @@ export const strings = {
     /** A refused send held the pending messages until the user sends again. */
     queuedPaused: 'Held after a refused send',
     sendNow: 'Send now',
+    queueWaitForEnd: 'Goals and loops wait for the current turn to finish. Your command remains queued.',
+    queueTurnNotReady: 'The running turn has not reached this client yet. Your message remains queued.',
+    queueNotAccepted: 'This turn did not accept the queued input. It remains queued and will be sent when the turn ends.',
     sendNowHint: 'Sends pending messages to the running agent without stopping it. Enter in the empty composer does the same.',
     retryQueuedHint: 'Sends all pending messages together again. Enter in the empty composer does the same.',
     picker: 'Provider and model',
@@ -1319,6 +1323,20 @@ export const strings = {
     limits: 'Resource limits',
     tasks: 'Task manager',
     windows: 'Focus, audio and resource limits apply on the Windows host.',
+  },
+  taskManager: {
+    title: 'Task manager', scope: 'Live processes on this machine, grouped by agent.',
+    agents: 'Agents', live: 'Updated every 2 seconds', paused: 'Updates paused', disconnected: 'Machine disconnected',
+    loading: 'Reading agent usage', unsupported: 'Update Boite on this machine to see agent usage.',
+    loadFailed: 'The task manager could not load. Try again.',
+    search: 'Find an agent', noMatches: 'No matching agents.', sortBy: 'Sort by usage',
+    sort: { memory: 'Most memory', cpu: 'Most CPU', disk: 'Most disk activity', network: 'Most network activity' },
+    disk: 'Disk', network: 'Network', read: 'Read', write: 'Write', download: 'Download', upload: 'Upload',
+    observed: 'Observed', unavailableHint: 'No measurement is available yet, or this counter is unsupported. A missing value does not mean zero usage.',
+    partialHint: 'This total includes only agents with available measurements.',
+    diskHint: 'Storage reads and writes observed while this view is open. Brief processes can be missed. This is activity, not folder size.',
+    tcpHint: 'TCP downloads and uploads observed while this view is open. Brief connections and UDP traffic can be missed.',
+    stop: 'Stop processes', stopConfirm: 'Stop every process in this conversation?', stopping: 'Stopping processes',
   },
   resources: {
     memory: 'Memory',
@@ -1644,6 +1662,7 @@ export const strings = {
     noCore: 'Not connected to a core.',
     archived: {
       heading: 'Archived threads',
+      mergedReason: 'Archived after PR #{number} merged',
       intro: 'The agent of an archived thread stops. It starts again with the first message after a restore.',
       show: 'Show archived threads',
       empty: 'No archived thread on this machine.',

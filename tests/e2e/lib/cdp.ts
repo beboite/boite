@@ -18,6 +18,7 @@ const CONNECT_TIMEOUT_MS = 30_000;
 const EXIT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
+const WAIT_DIAGNOSTIC_TIMEOUT_MS = 250;
 
 /**
  * Candidates in order; `BOITE_E2E_BROWSER` overrides all of them. Helium comes
@@ -288,14 +289,14 @@ export class BrowserPage {
   }
 
   /** Untyped expressions return a by-value JavaScript result; callers can name a narrower shape. */
-  evaluate(expression: string): Promise<string | number | boolean | object | null | undefined>;
-  evaluate<T>(expression: string): Promise<T>;
-  async evaluate<T>(expression: string): Promise<T> {
+  evaluate(expression: string, timeoutMs?: number): Promise<string | number | boolean | object | null | undefined>;
+  evaluate<T>(expression: string, timeoutMs?: number): Promise<T>;
+  async evaluate<T>(expression: string, timeoutMs = CALL_TIMEOUT_MS): Promise<T> {
     const raw = (await this.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
       awaitPromise: true,
-    })) as {
+    }, timeoutMs)) as {
       result?: { value?: unknown };
       exceptionDetails?: {
         text?: string;
@@ -321,26 +322,29 @@ export class BrowserPage {
   async waitFor(expression: string, timeoutMs = 15_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let last = '';
-    for (;;) {
+    while (Date.now() < deadline) {
+      if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
       try {
-        const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`);
+        const remaining = Math.max(1, deadline - Date.now());
+        const ok = await this.evaluate<boolean>(`(async () => !!(await (${expression})))()`, Math.min(CALL_TIMEOUT_MS, remaining));
         if (ok) return;
         last = 'it stayed false';
       } catch (error) {
+        if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw error;
         last = error instanceof Error ? error.message : String(error);
       }
-      if (Date.now() > deadline) {
-        const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
-        throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
-      }
-      await Bun.sleep(POLL_MS);
+      await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
     }
+    if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) throw new Error('the browser is closed');
+    // A separate, bounded grace preserves useful diagnostics after the condition consumes its budget.
+    const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
+    throw new Error(`waitFor timed out on ${expression}: ${last}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nIn flight: ${JSON.stringify(this.#inFlight())}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
   }
 
   async navigate(url: string): Promise<void> {
     const result = await this.send('Page.navigate', { url }) as { errorText?: string; loaderId?: string };
     if (result.errorText) {
-      const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`).catch(() => 'page unresponsive');
+      const state = await this.evaluate(`({ location: location.origin + location.pathname, ready: document.readyState, title: document.title, text: document.body?.innerText.slice(0, 500) })`, WAIT_DIAGNOSTIC_TIMEOUT_MS).catch(() => 'page diagnostic timed out');
       throw new Error(`navigation failed: ${result.errorText}\nPage: ${JSON.stringify(state)}\nErrors: ${JSON.stringify(this.#pageErrors)}\nFailed requests: ${JSON.stringify(this.#networkFailures)}`);
     }
     if (result.loaderId) {

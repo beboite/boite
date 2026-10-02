@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES } from '@boite/contracts';
 import type {
   Account,
   DeletedThreadSummary,
@@ -12,12 +13,13 @@ import type {
   Timestamp,
   Turn,
 } from '@boite/contracts';
-import { ensureIndexes, migrate } from './journal/schema.ts';
+import { migrate } from './journal/schema.ts';
 import { toAccount, toMessage, toProcess, toProject, toThread, toTurn, parseJson } from './journal/rows.ts';
 import type { AccountRow, MessageRow, ProcessRow, ProjectIconRow, ProjectRow, ThreadRow, TurnRow } from './journal/rows.ts';
 import type { DetectedIcon as StoredProjectIcon } from './project-icons.ts';
 import { messageOfError, StreamBuffer } from './journal/stream-buffer.ts';
 import { usageByBucket, usageByThread, type UsageSumRow, type UsageThreadRow } from './journal/usage-sums.ts';
+import { refused } from './errors.ts';
 
 export interface JournalOptions {
   /** Where a write that fails on a timer, with no caller to throw to, is reported. */
@@ -73,7 +75,6 @@ export class Journal {
       // A large transaction grows the WAL file; this lets it shrink back at the next checkpoint.
       this.db.exec('PRAGMA journal_size_limit = 33554432');
       this.db.transaction(() => migrate(this.db, file))();
-      ensureIndexes(this.db);
     } catch (error) {
       this.db.close(false);
       throw error;
@@ -173,6 +174,7 @@ export class Journal {
   }
 
   deleteProject(projectId: string): void {
+    this.deleteSetting(`project-auto-archive-merged-pr:${projectId}`);
     this.db.query('DELETE FROM projects WHERE id = ?').run(projectId);
     this.db.query('DELETE FROM project_icons WHERE project_id = ?').run(projectId);
   }
@@ -271,6 +273,16 @@ export class Journal {
     return rows.map(toThread);
   }
 
+  /** Keep full hydration's corruption errors before startup recovery writes. */
+  validateVisibleThreadJson(): void {
+    // SQLite's JSON depth and storage-type rules differ from the JavaScript row parser.
+    const candidates = this.db.query(`SELECT id FROM threads WHERE id NOT IN (SELECT thread_id FROM thread_deletions)
+      AND ((context IS NOT NULL AND (typeof(context) <> 'text' OR NOT json_valid(context)))
+        OR (prompt_cache IS NOT NULL AND (typeof(prompt_cache) <> 'text' OR NOT json_valid(prompt_cache)))
+        OR (title_state IS NOT NULL AND title_state <> '' AND (typeof(title_state) <> 'text' OR NOT json_valid(title_state)))) ORDER BY rowid`).all() as { id: string }[];
+    for (const thread of candidates) this.getThread(thread.id);
+  }
+
   deleteThreadsOfProject(projectId: string): string[] {
     const rows = this.db.query('SELECT id FROM threads WHERE project_id = ?').all(projectId) as { id: string }[];
     const ids = rows.map(row => row.id);
@@ -335,7 +347,7 @@ export class Journal {
         this.db.query('DELETE FROM workflow_steps WHERE thread_id = ? OR run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id, id);
         this.db.query('DELETE FROM workflow_requests WHERE run_id IN (SELECT id FROM workflow_runs WHERE root_id = ?)').run(id);
         this.db.query('DELETE FROM workflow_runs WHERE root_id = ?').run(id);
-        for (const prefix of ['linked-pull-requests:', 'activity:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
+        for (const prefix of ['merged-pr-archive:', 'linked-pull-requests:', 'activity:', 'move-note:', 'memory-notices:', 'coordination:', 'coordination-autopause:', 'delegation:', 'delegation-turns:', 'delegation-episode:']) this.deleteSetting(`${prefix}${id}`);
         this.db.query('DELETE FROM threads WHERE id = ?').run(id);
         this.db.query('DELETE FROM thread_deletions WHERE thread_id = ?').run(id);
       }
@@ -405,8 +417,8 @@ export class Journal {
     return this.db.query('SELECT fingerprint, turn_id FROM turn_requests WHERE thread_id = ? AND request_id = ?').get(threadId, requestId) as { fingerprint: string; turn_id: string } | null;
   }
 
-  putTurnRequest(threadId: string, requestId: string, fingerprint: string, turnId: string): void {
-    this.db.query('INSERT INTO turn_requests (thread_id, request_id, fingerprint, turn_id) VALUES (?, ?, ?, ?)').run(threadId, requestId, fingerprint, turnId);
+  putTurnRequest(threadId: string, requestId: string, fingerprint: string, turnId: string, messageId: string | null = null): void {
+    this.db.query('INSERT INTO turn_requests (thread_id, request_id, fingerprint, turn_id, message_id) VALUES (?, ?, ?, ?, ?)').run(threadId, requestId, fingerprint, turnId, messageId);
   }
 
   listTurns(threadId?: string): Turn[] {
@@ -561,7 +573,8 @@ export class Journal {
 
   /**
    * One page of a thread's messages, oldest first: the last `limit` of them, or
-   * the last `limit` written before `beforeRowid`. `before` names the oldest one
+   * the last `limit` written before `beforeRowid`, within the serialized byte
+   * budget except for one complete transportable message. `before` names the oldest one
    * returned while the thread still holds older ones, and is null once the page
    * reaches the first message.
    *
@@ -574,42 +587,71 @@ export class Journal {
     // those messages with an older projection while the next delta is streaming.
     this.flushDeltas();
     const limit = Math.max(1, Math.trunc(options.limit));
-    // One row past the page is what says whether anything is left behind it.
-    const rows =
-      options.beforeRowid === undefined
-        ? (this.db
-            .query('SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?')
-            .all(threadId, limit + 1) as MessageRow[])
-        : (this.db
-            .query('SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?')
-            .all(threadId, options.beforeRowid, limit + 1) as MessageRow[]);
-    const older = rows.length > limit;
-    const page = (older ? rows.slice(0, limit) : rows).reverse();
-    return {
-      messages: page.map((row) => this.currentMessage(row)),
-      before: older ? (page[0]?.id ?? null) : null,
-    };
+    const statement = this.db.prepare(options.beforeRowid === undefined
+      ? 'SELECT * FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?'
+      : 'SELECT * FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?');
+    const rows = options.beforeRowid === undefined
+      ? statement.iterate(threadId, limit + 1)
+      : statement.iterate(threadId, options.beforeRowid, limit + 1);
+    const messages: Message[] = [];
+    let bytes = 2, older = false;
+    try {
+      for (const row of rows) {
+        if (messages.length >= limit || bytes >= MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        const message = this.currentMessage(row as MessageRow);
+        const size = Buffer.byteLength(JSON.stringify(message));
+        const next = bytes + size + (messages.length ? 1 : 0);
+        if (messages.length && next > MESSAGE_PAGE_MAX_BYTES) { older = true; break; }
+        // One complete attachment-sized message can exceed the page budget.
+        // Never pretend a message too large for any RPC frame was sent.
+        if (size >= RPC_MAX_FRAME_BYTES) {
+          throw refused(`message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
+            { threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` });
+        }
+        messages.push(message);
+        bytes = next;
+      }
+    } finally { statement.finalize(); }
+    messages.reverse();
+    return { messages, before: older ? (messages[0]?.id ?? null) : null };
   }
 
-  /** That message and what was written after it, oldest first, or null when that is more than `limit`. */
+  /** The complete reconnect tail, or null when its count or serialized bytes exceed a page. */
   listMessagesFrom(threadId: string, fromRowid: number, limit: number): Message[] | null {
     this.flushDeltas();
-    const rows = this.db
-      .query('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?')
-      .all(threadId, fromRowid, limit + 1) as MessageRow[];
-    return rows.length > limit ? null : rows.map((row) => this.currentMessage(row));
+    const statement = this.db.prepare('SELECT * FROM messages WHERE thread_id = ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?');
+    const messages: Message[] = [];
+    let bytes = 2;
+    try {
+      for (const row of statement.iterate(threadId, fromRowid, limit + 1)) {
+        if (messages.length >= limit) return null;
+        const message = this.currentMessage(row as MessageRow);
+        bytes += Buffer.byteLength(JSON.stringify(message)) + (messages.length ? 1 : 0);
+        if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
+        messages.push(message);
+      }
+      return messages;
+    } finally { statement.finalize(); }
   }
 
   /**
    * Deletes the message at `fromRowid` and every later one of the thread, and
-   * the request keys of their turns, so a retried `clientRequestId` cannot
-   * hand back a turn that left the conversation. The turn rows stay: their
+   * the request keys bound to removed inputs. Kept inputs retain their retry
+   * receipts; unidentifiable legacy inputs retain replay protection without
+   * acknowledging delivery. The turn rows stay: their
    * usage was spent. Returns what went, oldest first. Run inside `append`.
    */
   truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
     const removed = this.messageIdsFrom(threadId, fromRowid);
+    this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
-    for (const turnId of removed.turnIds) this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ?').run(threadId, turnId);
+    for (const turnId of removed.turnIds) {
+      // An unknown accepted follow-up might be the removed input. Never acknowledge it again.
+      this.db.query("UPDATE turn_requests SET fingerprint = replace(fingerprint, 'steer:accepted:', 'steer:pending:') WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint LIKE 'steer:accepted:%'").run(threadId, turnId);
+      // Pending native submissions have no journaled message and remain unsafe to replay even after a full cut.
+      this.db.query("DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint NOT LIKE 'steer:%' AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ? AND turn_id = ? AND role IN ('user', 'system'))").run(threadId, turnId, threadId, turnId);
+      this.db.query("UPDATE turn_requests SET fingerprint = 'start:pending:' || fingerprint WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint NOT LIKE 'steer:%' AND fingerprint NOT LIKE 'start:pending:%'").run(threadId, turnId);
+    }
     return removed;
   }
 

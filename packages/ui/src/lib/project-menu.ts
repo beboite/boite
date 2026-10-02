@@ -27,6 +27,8 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
   down: boolean;
   move: (direction: -1 | 1) => void;
 }) {
+  const client = owner.client;
+  const clientGeneration = owner.clientGeneration;
   const management: MenuItem[] = [
     { id: 'back', label: strings.sidebar.backToProjectMenu, glyph: ArrowLeft },
     separator('back-sep'),
@@ -39,6 +41,11 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       ? [
           ...(experimentOn('session-import') ? [{ id: 'import', label: strings.sidebar.importSession, glyph: Import }] : []),
           ...(project.kind !== 'drafts' && project.repository !== false ? [{ id: 'worktree-default', label: strings.sidebar.worktreeDefault, glyph: GitBranch, checked: project.worktreeDefault === true }, { id: 'worktrees', label: strings.settings.worktrees.heading, glyph: GitBranch }] : []),
+          ...(project.kind !== 'drafts' && project.repository !== false && project.autoArchiveMergedPr !== undefined ? [{
+            id: 'auto-archive-merged-pr', label: strings.sidebar.autoArchiveMergedPr, glyph: Archive,
+            get checked() { return (owner.projects.find(current => current.id === project.id)?.autoArchiveMergedPr ?? project.autoArchiveMergedPr) === true; },
+            get disabled() { return owner.client !== client || owner.clientGeneration !== clientGeneration || !owner.owner || owner.connection !== 'ready' || owner.projectAutoArchiveMergedPrBusy(project.id); }
+          }] : []),
           ...(project.kind === 'drafts' ? [] : [{ id: 'refresh-icon', label: strings.sidebar.refreshIcon, glyph: RefreshCw, disabled: project.missing === true }])
         ]
       : []),
@@ -75,6 +82,12 @@ export function projectMenu(event: MouseEvent, owner: Store, project: Project, r
       if (action === 'worktree-default') {
         const current = owner.projects.find(p => p.id === project.id);
         if (current) await owner.setProjectWorktreeDefault(project.id, current.worktreeDefault !== true);
+      }
+      if (action === 'auto-archive-merged-pr') {
+        // A menu opened on another client cannot change this machine's colliding project id.
+        if (owner.client !== client || owner.clientGeneration !== clientGeneration) return;
+        const current = owner.projects.find(projectOnOwner => projectOnOwner.id === project.id);
+        if (current?.autoArchiveMergedPr !== undefined) await owner.setProjectAutoArchiveMergedPr(project.id, !current.autoArchiveMergedPr);
       }
       if (action === 'worktrees') {
         if (workspace.active !== owner) await workspace.select(owner);

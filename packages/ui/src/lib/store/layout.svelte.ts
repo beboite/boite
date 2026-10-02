@@ -57,10 +57,14 @@ export class Layout {
   }
 
   async copy(text: string): Promise<void> {
+    const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
+    const navigation = this.ctx.threads.openGeneration;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      this.ctx.store.error = strings.errors.clipboard;
+      if (this.ctx.client === client && this.ctx.clientGeneration === clientGeneration && this.ctx.threads.openGeneration === navigation)
+        this.ctx.store.error = strings.errors.clipboard;
     }
   }
 
@@ -69,6 +73,7 @@ export class Layout {
   // -------------------------------------------------------------------------
 
   showSettings(tab: SettingsTab = 'home', section: string | null = null): void {
+    this.ctx.threads.invalidateNavigation();
     this.settingsTab = tab;
     this.settingsSection = section === null
       ? null
@@ -78,12 +83,14 @@ export class Layout {
   }
 
   showChat(): void {
+    this.ctx.threads.invalidateNavigation();
     this.page = 'chat';
   }
 
   /** The Agents page is an experiment: with it off, nothing leads there. */
   showAgents(): void {
     if (!experimentOn('resident-agents')) return;
+    this.ctx.threads.invalidateNavigation();
     this.page = 'agents';
     this.sidebarOpen = false;
   }

@@ -17,6 +17,8 @@ import { Threads } from './threads.svelte';
 import { Workbench } from './workbench.svelte';
 import { Workflows } from './workflows.svelte';
 import { ServerUpdater } from './server-update.svelte';
+import type { Account, Project, ThreadSummary } from '@boite/contracts';
+import { SnapshotReads } from './snapshot-reads';
 
 /**
  * What the parts of one Store share and the Store keeps off its public
@@ -25,8 +27,19 @@ import { ServerUpdater } from './server-update.svelte';
  * the facade, so a spy set on the Store sees every call it saw before the split.
  */
 export class StoreContext {
-  client: Client | null = null;
+  #client: Client | null = null;
+  clientGeneration = 0;
   off: (() => void)[] = [];
+  readonly threadReads = new SnapshotReads<ThreadSummary>(row => row.id);
+  readonly projectReads = new SnapshotReads<Project>(row => row.id);
+  readonly accountReads = new SnapshotReads<Account>(row => row.id);
+  readonly metadataRevision = { providers: 0, settings: 0, scheduler: 0, keybindings: 0 };
+
+  get client(): Client | null { return this.#client; }
+  set client(client: Client | null) {
+    if (client !== this.#client) this.connection.invalidateReads();
+    this.#client = client;
+  }
 
   readonly connection: Connection;
   readonly pairing: Pairing;
@@ -82,5 +95,13 @@ export class StoreContext {
     if (error instanceof RpcFailure) console.error(`rpc ${error.code}: ${error.message}`, error);
     else console.error(error);
     this.store.error = this.reason(error);
+  }
+
+  currentNavigation(client: Client, generation: number): boolean {
+    return this.client === client && this.threads.openGeneration === generation;
+  }
+
+  currentClient(client: Client, generation: number): boolean {
+    return this.client === client && this.clientGeneration === generation;
   }
 }

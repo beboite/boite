@@ -386,6 +386,13 @@ export class ProjectStore {
     return this.announce(projectId);
   }
 
+  setAutoArchiveMergedPr(projectId: ProjectId, enabled: boolean): Project {
+    this.require(projectId);
+    if (typeof enabled !== 'boolean') throw refused('projects.setAutoArchiveMergedPr.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
+    this.core.journal.append({ type: 'project.autoArchiveMergedPrChanged', threadId: null, version: 1, payload: { projectId, enabled } }, () => this.core.journal.setSetting(`project-auto-archive-merged-pr:${projectId}`, enabled));
+    return this.announce(projectId);
+  }
+
   async setWorktreeDefault(projectId: ProjectId, enabled: boolean): Promise<Project> {
     const project = this.require(projectId);
     if (typeof enabled !== 'boolean') throw refused('projects.setWorktreeDefault.enabled must be a boolean', { field: 'enabled', expected: 'true or false' });
@@ -472,6 +479,7 @@ export class ProjectStore {
     const icon = iconOf(icons.get(project.id));
     return {
       ...project,
+      autoArchiveMergedPr: this.core.journal.getSetting(`project-auto-archive-merged-pr:${project.id}`) !== false,
       ...(archivedThreads > 0 ? { archivedThreads } : {}),
       ...(icon === undefined ? {} : { icon }),
       ...(flag?.value === undefined ? {} : { repository: flag.value }),
@@ -527,6 +535,7 @@ export function registerProjectMethods(core: Core): void {
   core.router.register('projects.drafts', () => core.projects.drafts());
   core.router.register('projects.icon', (params) => core.projects.iconImage(params.projectId));
   core.router.register('projects.refreshIcon', (params) => core.projects.refreshIcon(params.projectId));
+  core.router.register('projects.setAutoArchiveMergedPr', params => core.projects.setAutoArchiveMergedPr(params.projectId, params.enabled));
   core.router.register('projects.setWorktreeDefault', (params) => core.projects.setWorktreeDefault(params.projectId, params.enabled));
   core.router.register('projects.archive', (params) => core.projects.archive(params.projectId, params.archived ?? true));
   core.router.register('projects.remove', async (params) => {

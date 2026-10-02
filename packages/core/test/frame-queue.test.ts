@@ -44,6 +44,36 @@ test('asynchronous floods across connections keep the total active work bounded'
   } finally { gate.resolve(); queue.close(); }
 });
 
+test('long agent requests leave capacity for owner, paired client and authentication', async () => {
+  const agents = Array.from({ length: 10 }, () => ({ authenticated: true, identity: { principal: 'agent' }, close: () => undefined }) as unknown as ServerConnection);
+  const users = ['owner', 'session', 'agent'].map((principal, index) => ({ authenticated: index < 2, identity: { principal }, close: () => undefined }) as unknown as ServerConnection);
+  const gate = Promise.withResolvers<void>(), filled = Promise.withResolvers<void>();
+  let active = 0, maximum = 0, reads = 0;
+  const queue = new FrameQueue(async connection => {
+    if (users.includes(connection)) { reads++; return; }
+    active++; maximum = Math.max(maximum, active);
+    if (active === 48) filled.resolve();
+    await gate.promise;
+    active--;
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const pending = agents.flatMap(connection => Array.from({ length: 8 }, () => queue.enqueue(connection, 'wait')));
+    await filled.promise;
+    const requests = users.map(connection => queue.enqueue(connection, 'interact'));
+    const completed = await Promise.race([
+      Promise.all(requests).then(() => true),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 250); }),
+    ]);
+    expect(completed).toBe(true);
+    expect(reads).toBe(3);
+    expect(maximum).toBeLessThanOrEqual(48);
+    gate.resolve();
+    await Promise.all(pending);
+    expect(maximum).toBeLessThanOrEqual(48);
+  } finally { if (timer) clearTimeout(timer); gate.resolve(); queue.close(); }
+});
+
 test('an incoming flood closes its connection and never executes its abandoned requests', async () => {
   const closed: { code: number; reason?: string }[] = [];
   const connection = { close: (code: number, reason?: string) => closed.push({ code, reason }) } as unknown as ServerConnection;

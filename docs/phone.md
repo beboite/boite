@@ -1,9 +1,7 @@
 # The phone
 
-The core serves the same UI build the desktop shell bundles, so a phone on the
-same network opens Boite as a web app and drives the same threads. Nothing runs
-on the phone: it is a client of the core, over the same authenticated WebSocket
-the shell uses.
+A phone opens the UI served by the core and connects over authenticated
+WebSocket. Agents and the journal remain on the core machine.
 
 ## Settings on a phone
 
@@ -17,14 +15,12 @@ App & notifications, Appearance, and Machines. The back button or browser Back
 returns to that list. Theme and accent belong to the current device; the
 notification screen names the connected machine that will send its alerts.
 Machines lets the phone pair, switch, reconnect, or remove saved connections.
-Its "Scan a QR code" button opens the camera on the code another machine draws
-for its pairing link, and "Paste a pairing link" takes the link typed instead.
-Chrome decodes with `BarcodeDetector`; Safari has none, so frames go through
-jsQR, a chunk fetched on the first scan. A code that is not a pairing link is
-ignored and the camera stays open. The camera needs HTTPS: on plain HTTP the
-view says so and the link can still be pasted. Closing the view stops the stream.
-A machine added either way takes the name its core reports, the computer's
-hostname, and its card renames it; the form asks for no name.
+"Scan a QR code" reads a pairing link through the camera; "Paste a pairing
+link" accepts text. Chrome uses `BarcodeDetector` when available; the fallback
+loads jsQR on the first scan. Decoding stays on the device. Other QR content
+leaves the scanner open. The camera requires HTTPS and closing the view stops
+its tracks. A new machine takes the hostname reported by its core; its card
+can rename it.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
 Usage shows the connected core's tokens and API cost per day, provider and
@@ -51,22 +47,15 @@ binds `0.0.0.0` instead, and `--host` takes a specific address:
 bun packages/core/src/main.ts --lan
 ```
 
-The `listenOnLan` switch in Settings, Machines and devices is the same decision without a
-command line: the core reads it from the journal at start, before it binds, and
-`0.0.0.0` is what it binds when the switch is on. A `--host` or a `--lan` on the
-command line always wins over it, because the person who typed the flag meant it.
-The address is read once and a running core never rebinds, so a switch flipped
-while the core is up takes effect the next time it starts. That is what the line
-under the switch says, and one `core.log` line at start names the address and the
-setting that chose it.
+Settings, Machines and devices, Listen on LAN saves `listenOnLan`. The core
+reads it at startup; enabling it binds `0.0.0.0`. Explicit `--host` or `--lan`
+flags take precedence. A running core never rebinds, so changing the switch
+requires a restart. The startup log names the address and its source.
 
-The port stays the same across restarts. With no `--port`, a core asks for the
-port its previous run wrote to `core.json`, so a paired phone and an installed
-page keep their address after a reboot or an engine stop. When another program
-took that port meanwhile, the core picks a new one and says so in its log; the
-phone then needs a new pairing link. A `--port` is only ever that port, and a
-taken one stops the core with an error. When the core listens on every
-interface, a pairing link names this machine's LAN address, never `127.0.0.1`.
+Without `--port`, the core reuses the port in `core.json`. If it is taken, the
+core chooses another and logs it; a phone then needs a new link. An explicit
+`--port` fails when occupied. A listener on all interfaces puts the machine's
+LAN address in pairing links, rather than loopback.
 
 Two things guard the socket whatever it is bound to. The `Origin` header must be
 absent, one of the shell origins, or the core's own HTTP origin, and the first
@@ -87,9 +76,7 @@ http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 Close hides the link and QR code, and New pairing link creates another one.
 Closing leaves an already issued link valid until it is used or expires.
 
-Asking is the only way to get one. The core used to print a live grant on its
-ready line at every start, which put a working session key in every log file and
-every terminal scrollback that had seen the core boot.
+The owner must request a link. Startup logs contain no grant or session key.
 
 The grant inside it is not the core token. It is a one-time id the core
 remembers for ten minutes: the page that opens the link says `hello` with it,
@@ -116,31 +103,25 @@ card mints one, `boite-core pair --owner` mints one on a machine with no window
 ([server.md](server.md)), and the Connection card of the other computer takes it
 pasted. A role anything but those two is refused by name.
 
-Session keys are stored hashed in the journal, so a core restart keeps every
-pairing and a copy of the journal holds no credential. `sessions.list` shows
+Session keys are stored hashed in the journal, so pairings survive restart
+without storing the recoverable key there. `sessions.list` shows
 every paired device with the client it said it was, its role and when it was last seen;
 `sessions.revoke`, the Revoke button of the same card, closes its sockets and
 deletes the row, after which its key opens nothing.
 
 ## What a paired device may call
 
-`packages/contracts/src/access.ts` holds the whole boundary, as one list the
-router checks before any handler runs; the in-memory client applies the same
-list. Read it as the phone's screen: the sidebar, a
-thread, the composer, the cards an agent raises, and the settings it only
-displays. Nothing on that list writes outside a thread, names a path on the
-machine, starts a process of its own or changes what the core trusts.
+`packages/contracts/src/access.ts` defines the paired-device method/event
+allowlists; the real router and in-memory client enforce them before handlers.
+They cover conversation lists, prompts, agent cards and permitted read-only
+settings. Methods absent from the list remain owner-only, including newly
+added methods. A refusal names the method, such as
+`projects.add is for the owner only`.
 
-A method absent from the list is the owner's, and a method added tomorrow is
-refused to a device until someone puts it there on purpose. That is the point of
-the shape: the gate is deny by default, so the boundary cannot be widened by
-forgetting. A refusal names the method (`projects.add is for the owner only`).
-
-The owner is whoever holds the core token, which means the desktop shell and
-anything else that can read `core.json`, or a key paired with the `owner` role. Until this list existed, a paired phone
-could add a project pointing anywhere on the machine, start a thread with a
-working directory of its own, turn on `listenOnLan` and read files through a
-provider dry run: everything the owner could do except pairing another device.
+An owner holds the core token from `core.json` or an owner-paired session key.
+Only owners can choose arbitrary host paths, administer providers or change
+what the core trusts. [Machine routing](machines.md#isolation-and-tests) keeps
+each connection's IDs, Store and actions on their owning core.
 
 The link carries `?grant=` alone, with no `core=`, because the page it opens is
 the one the core is serving: an absent `core` parameter means the origin of this
@@ -204,14 +185,11 @@ memory, each limited to 2,000 messages and 4 MB of text/image data, to preserve
 reading positions across switches. The journal remains on the core. Settings
 loads on demand, separately from the chat's initial JavaScript and stylesheet.
 
-On returning from the background or regaining a network connection, the client
-replaces a socket that may have stopped responding and reloads messages and
-pending requests. It never replays outstanding RPC calls. An uncertain prompt
-retry keeps its `clientRequestId`: schema 11 records the accepted turn and
-content fingerprint atomically, so repeating the request returns that turn.
-Reusing the id with different content is refused. This applies to every driver.
-Changing the thread's model, effort or other selection before retrying creates
-a new request ID for that selection.
+[Reconnection and prompt retries](machines.md#connecting-a-machine) replace
+unresponsive sockets and reload messages/cards without replaying arbitrary RPCs.
+Uncertain prompt retries retain `clientRequestId`; schema 11 atomically records
+the accepted turn and content fingerprint. Different content is refused, and
+changing a selection before retry creates a new ID. This applies to every driver.
 
 ### Oldest browsers
 
@@ -223,9 +201,8 @@ a copying array method (`toSorted`, `toReversed`, `toSpliced`) in any chunk, and
 a parse error before Safari 16.4, and one in a startup chunk used to leave iOS 15
 with a blank page.
 
-Starting is not the whole layout. That check covers syntax and methods, not CSS
-or DOM features, and three of those arrive later. Every layout below works from
-Safari 17 and Chrome 114:
+The floor check covers syntax and methods. The CSS/DOM features below require
+Safari 17 and Chrome 114 for the complete layout:
 
 | Feature | Safari | Chrome | Without it |
 | --- | --- | --- | --- |
@@ -233,8 +210,8 @@ Safari 17 and Chrome 114:
 | Container queries | 16.0 | 105 | The narrow rules are ignored and the wide layout stays at phone width: the panel's Agents surface and the usage limits (`<= 520px`), the usage table's hidden columns (`<= 560px`, `<= 420px`), the plugin rows (`<= 560px`), the onboarding scenes (`<= 400px`). The changes list keeps the diff under it, which is its phone layout anyway. |
 | Popover API | 17.0 | 114 | `lib/floating.ts` calls `showPopover` only when it exists, so the phone menus and their backdrop are not moved to the top layer. A menu inside the composer is then placed against the composer's glass layer instead of the viewport, and can land off its anchor. |
 
-None of these was tried on a real Safari 15 or 16 device; the table comes from
-the features the built CSS and `lib/floating.ts` use.
+This table describes features in the built CSS and `lib/floating.ts`. It does
+not record real Safari 15/16 device testing.
 
 A browser under the floor fails to parse the app, so `main.ts` never runs. An
 inline script in `index.html` notices on `load` and writes one sentence in the
@@ -297,14 +274,10 @@ core behind it; both are skipped. A registration that fails is one
 
 ## What is cached, and what never is
 
-One cache per build, `boite-ui-v3-<build id>`. The build id is a hash of the
-file names under `dist/assets`, written into `dist/sw.js` before it is
-compressed (`packages/ui/vite.config.ts`). A core update therefore serves a
-different `sw.js`, the browser installs it, and activation deletes older
-`boite-ui-` caches, the previous build's hashed files with them. Other
-applications' caches are left alone. Before this, `sw.js` was the same file in
-every build, so no new worker ever installed and every update's chunks stayed
-in the one cache for good. A dev server serves the unstamped `boite-ui-v3`.
+Each build uses `boite-ui-v3-<build id>`, where the build ID hashes the asset
+filenames. Vite stamps it into `dist/sw.js` before compression. Activation
+removes older `boite-ui-` caches, including their hashed assets, and leaves
+other applications' caches alone. Development uses unstamped `boite-ui-v3`.
 
 | Request | Rule |
 |---|---|
@@ -316,10 +289,8 @@ in the one cache for good. A dev server serves the unstamped `boite-ui-v3`.
 | `/sw.js` | never cached |
 | `/manifest.webmanifest` | never cached |
 
-The socket is the only thing that carries live state, so caching the RPC path
-would mean showing a conversation that already moved. The worker and the manifest
-are never cached because those two decide what the next load stores, and a stale
-copy of either is a cache that can no longer be updated.
+Live conversation state stays on the socket. The worker and manifest must be
+revalidated so a new build can replace cached assets.
 
 The core serves the matching headers. `/assets/`, whose names are content
 hashes, is `public, max-age=31536000, immutable`. The shell, `index.html`,

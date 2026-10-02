@@ -16,10 +16,9 @@ machine's update card; see [server updates](server.md#updating-from-the-app).
 
 ## Boite and Boite Nightly
 
-Choose Boite for regular releases, including the current beta, or Boite Nightly
-for the daily build from `main`. A nightly publishes only when that commit has
-not already shipped and its CI checks pass. Nightlies may contain unfinished
-changes.
+Choose Boite for regular releases or Boite Nightly for checked daily builds
+from `main` ([CI schedule](ci.md#boite-de-nuit)). Nightlies may contain
+unfinished changes.
 
 Changing the channel immediately checks for its newest signed release and
 downloads it. Returning from nightly to Boite permits a lower version. Both
@@ -61,10 +60,9 @@ before handing those bytes to Tauri's installer.
 
 Installing requires a click and an in-app confirmation. Boite does not wait
 for the threads to finish. The shell sends the owner-authenticated
-`POST /shutdown-for-update` with the expected core PID, and the core starts a
-[restart handoff](restart-handoff.md): each running turn ends the tool call it
-is in, 30 seconds at most, then stops. Queued turns stay queued. The core that
-starts after the installation resumes those threads and runs the queued turns.
+`POST /shutdown-for-update` with the expected core PID. The [restart handoff](restart-handoff.md) gives
+active tool calls up to 30 seconds before stopping. The new core resumes those
+threads and queued turns.
 
 The request commits the installation: there is nothing to cancel once it is
 sent. The shell allows 60 seconds for the core to exit and never force-kills
@@ -104,8 +102,8 @@ ends any core of that install left after 15 seconds. Boite Dev's core runs
 another file and is left alone. The stop script opens no window.
 `scripts/ci/installer-hooks.test.ts` builds the
 hooks into the generated installer script and runs them over a shell that
-restarts its core; it needs a Windows `build:shell` first and is skipped
-without one.
+restarts its core; it needs a Windows `build:shell` first. Local runs skip without fixtures;
+desktop CI sets `BOITE_CI_INSTALLER_REQUIRED=1` and fails if they are missing.
 `scripts/ci/stop-core.test.ts` also runs the stop script directly, without a
 packaged shell, and checks that busy and legacy cores remain running.
 
@@ -139,9 +137,8 @@ appear in the card with a retry action. They do not display a system dialog or
 restart the application. A panic inside a check or a download ends the same
 way: an async Tauri command that panics never answers the window, so each one
 runs its work under `catch_unwind` and reports the panic as an error. Nightlies
-up to 2026-09-26 predate that guard and panic on every check while building
-the release client, so their card stays on "Checking for updates": replace
-them once with a manual install. A restart discards a previously downloaded cache and
+through 2026-09-26 predate that guard and can remain on Checking for updates
+after a release-client panic; they need one manual replacement. A restart discards a previously downloaded cache and
 checks again. Only the channel preference persists in `update-channel.json`.
 
 ## Scope

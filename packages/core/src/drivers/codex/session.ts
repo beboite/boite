@@ -1,3 +1,4 @@
+import { logMessageOf, withLogDiagnostic } from '../../log-errors.ts';
 import type { HookOutcome, QuestionAnswer } from '@boite/contracts';
 import pkg from '../../../package.json';
 import { messageOf, unavailable } from '../../errors.ts';
@@ -6,6 +7,7 @@ import { openAiCacheLife } from '../../prompt-cache.ts';
 import type { SpawnedChild } from '../../procs.ts';
 import { profileFor, resolveExecutable } from '../../providers/resolve.ts';
 import type { QuestionAsk, SessionContext, TurnContext } from '../types.ts';
+import { exitWithin } from '../exit.ts';
 import {
   answerTextOf,
   imageInputsOf,
@@ -256,8 +258,9 @@ export class CodexSession {
     } catch (error) {
       // A child that died takes the connection with it, and its exit says more
       // than "the request failed": give it a moment to be reported.
-      const code = await this.exitWithin(EXIT_GRACE_MS);
-      turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code));
+      const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+      if (turn.isStopped) turn.endStopped();
+      else turn.fail(code === undefined ? messageOf(error) : this.exitSentence(code), code === undefined ? logMessageOf(error) : this.exitSentence(code, true));
       this.current = null;
       this.endTurn(turn, true);
       return;
@@ -352,7 +355,7 @@ export class CodexSession {
         } catch (error) {
           await this.waitForStartupClose();
           if (this.closing || this.active?.isStopped || this.exitCode !== 1 || !this.sqliteInitFailed) throw error;
-          if (attempt >= SQLITE_INIT_ATTEMPTS) throw new Error(this.exitSentence(this.exitCode));
+          if (attempt >= SQLITE_INIT_ATTEMPTS) throw withLogDiagnostic(new Error(this.exitSentence(this.exitCode)), this.exitSentence(this.exitCode, true));
           const delay = SQLITE_INIT_BACKOFF_MS * attempt;
           ctx.log('warn', `codex: retrying SQLite initialization in ${delay} ms (attempt ${attempt + 1}/${SQLITE_INIT_ATTEMPTS})`);
           let timer: Timer | undefined;
@@ -388,10 +391,11 @@ export class CodexSession {
         if (this.child !== child) throw new Error('the codex process was replaced');
         return this.onRequest(ctx, method, params);
       },
-      log: (level, message) => {
+      log: (level, message, context) => {
         if (this.child !== child) return;
-        ctx.log(level, message);
+        ctx.log(level, message, context);
       },
+      fault: (reason) => { void this.transportFault(child, reason); },
     });
     this.rpc = rpc;
     this.watch(child, ctx, rpc);
@@ -413,7 +417,7 @@ export class CodexSession {
         const text = line.trim();
         if (text.length === 0) continue;
         this.lastStderr = text.slice(0, STDERR_MAX);
-        ctx.log('warn', `codex agent: ${this.lastStderr}`);
+        ctx.log('warn', `codex agent: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
       }
     });
     this.exited = new Promise<number | null>((resolve) => {
@@ -427,8 +431,8 @@ export class CodexSession {
         closed();
         if (this.child !== child) return;
         const sentence = this.exitSentence(this.exitCode);
-        rpc.fail(sentence);
-        this.current?.fail(sentence);
+        rpc.fail(sentence, this.exitSentence(this.exitCode, true));
+        this.failCurrent(sentence, this.exitSentence(this.exitCode, true));
         if (!this.closing && !this.initializing) this.drop();
       });
       child.once('error', (error) => {
@@ -437,10 +441,26 @@ export class CodexSession {
         if (this.child !== child) return;
         const sentence = `the codex agent did not start: ${messageOf(error)}`;
         rpc.fail(sentence);
-        this.current?.fail(sentence);
+        this.failCurrent(sentence, logMessageOf(error));
         if (!this.closing && !this.initializing) this.drop();
       });
     });
+  }
+
+  private async transportFault(child: SpawnedChild, reason: string): Promise<void> {
+    // initialize owns SQLite failures and can replace this child before a late close.
+    if (this.child !== child || this.initializing) return;
+    this.closing = true;
+    const code = await exitWithin(this.exited, EXIT_GRACE_MS, this.processClosed);
+    if (this.child !== child) return;
+    this.failCurrent(code === undefined ? reason : this.exitSentence(code), code === undefined ? reason : this.exitSentence(code, true));
+    this.drop();
+  }
+
+  private failCurrent(reason: string, diagnostic: string): void {
+    const turn = this.current;
+    if (turn?.isStopped) turn.endStopped();
+    else turn?.fail(reason, diagnostic);
   }
 
   /** An RPC error can arrive before the failed child exits and drains stderr. */
@@ -457,24 +477,9 @@ export class CodexSession {
     }
   }
 
-  private exitWithin(ms: number): Promise<number | null | undefined> {
-    const exited = this.exited;
-    if (exited === null) return Promise.resolve(undefined);
-    return new Promise<number | null | undefined>((resolve) => {
-      const timer = setTimeout(() => {
-        resolve(undefined);
-      }, ms);
-      timer.unref?.();
-      void exited.then((code) => {
-        clearTimeout(timer);
-        resolve(code);
-      });
-    });
-  }
-
-  private exitSentence(code: number | null): string {
+  private exitSentence(code: number | null, diagnostic = false): string {
     const head = `the codex agent exited with code ${code === null ? 'unknown' : code}`;
-    return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
   /** The one teardown: the pipes go, then the child, through the registry. */
@@ -540,61 +545,6 @@ export class CodexSession {
         if (record) { turn.turnId = record.id; if (turn.isStopped) this.interrupt(turn); }
         break;
       }
-      case 'item/agentMessage/delta':
-        if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
-        turn.writeText(textOf(params['delta']), typeof params['itemId'] === 'string' ? params['itemId'] : undefined);
-        break;
-      case 'item/commandExecution/outputDelta':
-        if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
-        break;
-      case 'turn/plan/updated': {
-        const plan = params['plan'];
-        if (Array.isArray(plan)) turn.ctx.tasks?.(plan.flatMap((entry, index) => {
-          if (!entry || typeof entry.step !== 'string') return [];
-          return [{ id: String(index), text: entry.step, status: entry.status === 'completed' ? 'completed' as const : entry.status === 'inProgress' || entry.status === 'in_progress' ? 'in_progress' as const : 'pending' as const }];
-        }));
-        break;
-      }
-      case 'item/reasoning/textDelta':
-        turn.ctx.reportProgress?.('thinking');
-        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:content:${String(params['contentIndex'] ?? 0)}`);
-        break;
-      case 'item/reasoning/summaryTextDelta':
-        turn.ctx.reportProgress?.('thinking');
-        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:summary:${String(params['summaryIndex'] ?? 0)}`);
-        break;
-      case 'item/started':
-      case 'item/completed': {
-        const item = params['item'] as CodexItem | undefined;
-        if (item === undefined || typeof item.id !== 'string') break;
-        if (item.type === 'reasoning') {
-          // Presence is activity even with summary=[]; encrypted content is never read.
-          turn.ctx.reportProgress?.('thinking');
-          break;
-        }
-        if (item.type === 'contextCompaction' && method === 'item/started') turn.ctx.reportProgress?.('compacting');
-        if (item.type === 'contextCompaction' && method === 'item/completed') {
-          turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
-          break;
-        }
-        if (item.type === 'agentMessage' && item.delivery === 'async') {
-          if (!this.asyncItems.has(item.id)) {
-            this.asyncItems.add(item.id);
-            for (const question of item.questions ?? []) this.askAsync(turn, question);
-          }
-          break;
-        }
-        if (item.type === 'agentMessage' && method === 'item/completed' && typeof item.text === 'string') {
-          turn.completeText(item.id, item.text);
-          break;
-        }
-        const view = toolViewOf(item, method === 'item/completed');
-        if (view !== null) {
-          turn.upsertTool(item.id, view);
-          if (method === 'item/completed' && view.status !== 'running') turn.ctx.reportProgress?.('waiting');
-        }
-        break;
-      }
       case 'turn/completed': {
         const record = params['turn'] as CodexTurnRecord | undefined;
         if (record !== undefined) turn.finish(record);
@@ -611,11 +561,78 @@ export class CodexSession {
         break;
       }
       default:
+        this.renderNotification(turn, method, params);
+        break;
+    }
+  }
+
+  /** Rendering receives only the filtered turn; lifecycle decisions stay in onNotification. */
+  private renderNotification(turn: CodexTurn, method: string, params: Record<string, unknown>): void {
+    switch (method) {
+      case 'item/agentMessage/delta':
+        if (typeof params['itemId'] === 'string' && this.asyncItems.has(params['itemId'])) break;
+        turn.writeText(textOf(params['delta']), typeof params['itemId'] === 'string' ? params['itemId'] : undefined);
+        break;
+      case 'item/commandExecution/outputDelta':
+        if (typeof params['itemId'] === 'string') turn.appendOutput(params['itemId'], textOf(params['delta']));
+        break;
+      case 'turn/plan/updated':
+        this.updatePlan(turn, params['plan']);
+        break;
+      case 'item/reasoning/textDelta':
+      case 'item/reasoning/summaryTextDelta': {
+        const summary = method === 'item/reasoning/summaryTextDelta';
+        turn.ctx.reportProgress?.('thinking');
+        turn.writeThinking(textOf(params['delta']), `${textOf(params['itemId'])}:${summary ? 'summary' : 'content'}:${String(params[summary ? 'summaryIndex' : 'contentIndex'] ?? 0)}`);
+        break;
+      }
+      case 'item/started':
+      case 'item/completed': {
+        const item = params['item'] as CodexItem | undefined;
+        if (item !== undefined && typeof item.id === 'string') this.renderItem(turn, item, method === 'item/completed');
+        break;
+      }
+      default:
         // turn/started, thread/started, item/*/outputDelta, item/plan/delta,
         // the mcpServer, account, project and realtime families: the contract
         // has no part for them, so they are dropped.
         break;
     }
+  }
+
+  /** A plan update replaces the turn's tasks, keeping the wire's two in-progress spellings. */
+  private updatePlan(turn: CodexTurn, plan: unknown): void {
+    if (!Array.isArray(plan)) return;
+    turn.ctx.tasks?.(plan.flatMap((entry, index) => {
+      if (!entry || typeof entry.step !== 'string') return [];
+      return [{ id: String(index), text: entry.step, status: entry.status === 'completed' ? 'completed' as const : entry.status === 'inProgress' || entry.status === 'in_progress' ? 'in_progress' as const : 'pending' as const }];
+    }));
+  }
+
+  /** Completed items replace their own parts; asynchronous questions are drawn once per item. */
+  private renderItem(turn: CodexTurn, item: CodexItem, completed: boolean): void {
+    switch (item.type) {
+      case 'reasoning':
+        // Presence is activity even with summary=[]; encrypted content is never read.
+        turn.ctx.reportProgress?.('thinking');
+        return;
+      case 'contextCompaction':
+        if (completed) {
+          turn.part(turn.takeIndex(), { type: 'compaction', trigger: turn.ctx.turn.execution?.operation === 'compact' ? 'manual' : 'auto', preTokens: turn.ctx.thread.context?.tokens ?? null, postTokens: null });
+        } else turn.ctx.reportProgress?.('compacting');
+        return;
+      case 'agentMessage':
+        if (item.delivery === 'async') {
+          if (this.asyncItems.has(item.id)) return;
+          this.asyncItems.add(item.id);
+          for (const question of item.questions ?? []) this.askAsync(turn, question);
+        } else if (completed && typeof item.text === 'string') turn.completeText(item.id, item.text);
+        return;
+    }
+    const view = toolViewOf(item, completed);
+    if (view === null) return;
+    turn.upsertTool(item.id, view);
+    if (completed && view.status !== 'running') turn.ctx.reportProgress?.('waiting');
   }
 
   /**

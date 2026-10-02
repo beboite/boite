@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { AGENT_ENV } from '../../packages/contracts/src/index.ts';
 import { connect } from '../../packages/core/src/client.ts';
 import { BrowserPage } from './lib/cdp.ts';
 import { pairingUrlOf, removeDirectory, startCore, type RunningCore } from './lib/core.ts';
@@ -42,9 +43,12 @@ function git(args: string[]): void {
 
 /** `boite <args>` as the owner of the thread, the way a person at a terminal runs it. */
 function boite(...args: string[]): { code: number; out: string; err: string } {
+  const env = { ...process.env };
+  for (const name of Object.values(AGENT_ENV)) delete env[name];
   const run = Bun.spawnSync({
     cmd: ['bun', 'run', MAIN, 'cli', ...args, '--thread', threadId, '--data-dir', core.dataDir],
     cwd: projectDir,
+    env,
     stdout: 'pipe',
     stderr: 'pipe',
     windowsHide: true,

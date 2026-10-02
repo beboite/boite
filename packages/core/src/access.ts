@@ -16,6 +16,10 @@
  * that went off, is worth. A method that is in neither is the owner's: a new
  * method added tomorrow is refused to both until someone decides otherwise,
  * on purpose.
+ * core.logs stays owner-only: diagnostic causes can describe other threads,
+ * local paths and account failures even after credential redaction.
+ * resources.usage permits paired reads of sanitized metrics; process traces,
+ * resource settings and tree termination remain owner-only.
  */
 
 import { AGENT_EVENTS, DEVICE_EVENTS, DEVICE_METHODS, type RpcEventName, type RpcMethodName } from '@boite/contracts';

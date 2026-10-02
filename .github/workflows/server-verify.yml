@@ -1,0 +1,39 @@
+name: server verification
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        default: stable
+      version:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: verify server (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/server-image
+        with:
+          arch: ${{ matrix.arch }}
+          channel: ${{ inputs.channel }}
+          version: ${{ inputs.version }}

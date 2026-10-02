@@ -1,8 +1,8 @@
 # Wire and startup, 2026-09-19
 
 Windows 11, Ryzen 7 9800X3D, Bun 1.4.2. "Before" is `main` at 21c1c06, built
-and run from its own checkout; "after" is this branch. Same seed for the
-conversation text in both runs.
+and run from its own checkout; "after" is this branch. Both runs use the same
+seed for conversation text.
 
 ## Bandwidth and latency behind a 150 ms round trip
 
@@ -11,9 +11,10 @@ bun run bench/bandwidth.ts --rtt 150 --sequence sequential --core <checkout of 2
 bun run bench/bandwidth.ts --rtt 150
 ```
 
-Sixty threads in the sidebar, one 40 turn conversation of 250 words a turn, a
-remote client. KB received by the client; static files fetched with
-`accept-encoding: gzip, deflate, br, zstd` over plain http, so gzip.
+The remote client has sixty threads in its sidebar and one 40 turn conversation
+with 250 words per turn. KB measures data received by the client. Static files
+were fetched with `accept-encoding: gzip, deflate, br, zstd` over plain HTTP,
+which used gzip.
 
 | scenario | before KB | after KB | before ms | after ms |
 | --- | ---: | ---: | ---: | ---: |
@@ -27,10 +28,11 @@ remote client. KB received by the client; static files fetched with
 | thirty seconds idle, connected | 0 | 0 | | |
 | reconnect: hello, boot and the open thread again | 202.0 | 6.1 | 1222 | 614 |
 
-"Reads" are receive callbacks of the relay, which TCP may split or join: they show the trend in frame count, not an exact one.
+"Reads" counts the relay's receive callbacks. TCP may split or combine them,
+so they indicate the trend in frame count rather than an exact count.
 
-The page load row does not move in time because the relay delays but does not
-cap throughput; on a link that does, the 426 KB less is the gain.
+Page load time stayed similar because the relay adds latency without limiting
+throughput. On a bandwidth-limited link, the client receives 426 KB less.
 
 ## Desktop startup
 
@@ -38,8 +40,9 @@ cap throughput; on a link that does, the 426 KB less is the gain.
 bun run bench/startup.ts --exe <boite-shell.exe> --runs 7
 ```
 
-Release shell with its compiled core beside it, hidden, fresh data directory
-and fresh WebView2 profile every run, medians of 7, ms after the spawn.
+Each run used a hidden release shell with its compiled core beside it, a fresh
+data directory and a fresh WebView2 profile. Values are medians of 7 runs,
+in ms after process spawn.
 
 | spawn to | before | after |
 | --- | ---: | ---: |
@@ -47,9 +50,9 @@ and fresh WebView2 profile every run, medians of 7, ms after the spawn.
 | first contentful paint | 594 | 621 |
 | UI holding its data | 1411 | 1049 |
 
-Of the 1024 ms left, 791 ms is the compiled core alone (spawned by hand, 7
-runs), and about 650 ms of that passes before the process runs its first line:
-see "The Windows sidecar is the signed runtime" in [docs/performance.md](../../docs/performance.md).
+The compiled core alone took 791 ms (spawned by hand, 7 runs) of the remaining
+1024 ms. About 650 ms passed before it ran its first line. See "The Windows
+sidecar is the signed runtime" in [docs/performance.md](../../docs/performance.md).
 
 ## UI bundle
 
@@ -58,6 +61,6 @@ the entry stylesheet 117.7 kB to 91.3 kB.
 
 ## Idle core
 
-`bun packages/core/src/main.ts` with no client, 30 s: 16 to 125 ms of CPU
-across runs on both branches, under 0.5 % of one core. Nothing was changed
-there.
+`bun packages/core/src/main.ts` with no client used 16 to 125 ms of CPU over
+30 s across runs on both branches, under 0.5 % of one core. This change did
+not affect the idle core.

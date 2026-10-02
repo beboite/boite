@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_DELEGATION_CONFIG } from '@boite/contracts';
-import type { DelegationConfig, WorkflowPlan, WorkflowRun } from '@boite/contracts';
+import type { DelegationConfig, Turn, WorkflowPlan, WorkflowRun } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { Core } from '../src/core.ts';
 import { setDriver } from '../src/drivers/index.ts';
@@ -157,6 +157,39 @@ test('a mismatched output is asked for once more, then the step fails and retry 
   expect(new Set(prompts.filter(p => p.prompt.includes('step scan')).map(p => p.threadId)).size).toBe(1);
 });
 
+test.each(['stop', 'pause', 'archive'] as const)('a pending output correction respects %s before its dispatch', async action => {
+  const { prompts, held } = scripted(ctx => ctx.prompt.includes('does not match')
+    ? '```json\n{"files": []}\n```'
+    : ctx.thread.parentThreadId ? { hold: true } : 'noted');
+  const { h, owner, threadId } = await setup();
+  const run = await owner.call('workflows.start', {
+    threadId, requestId: `correction-${action}`,
+    plan: { name: 'Correct output', steps: [{ id: 'scan', profile: 'fast', task: 'List.', output: { files: ['string'] } }] },
+  });
+  const childId = run.nodes[0]!.instances[0]!.threadId!;
+  await waitFor(() => held.has(childId));
+  let controlled = false;
+  const off = h.core.bus.onAny((name, payload) => {
+    if (name !== 'turn.finished' || (payload as { threadId: string }).threadId !== childId || controlled) return;
+    controlled = true;
+    if (action === 'archive') h.core.threads.archive(threadId, true);
+    else h.core.workflows.control({ threadId, runId: run.id, action }, 'owner');
+  });
+  try {
+    held.get(childId)!('missing structured result');
+    await waitFor(() => controlled);
+    await Bun.sleep(25);
+    expect(prompts.filter(prompt => prompt.threadId === childId)).toHaveLength(1);
+    expect(h.core.workflows.get(threadId, run.id).status).toBe(action === 'pause' ? 'paused' : 'stopped');
+    if (action === 'pause') {
+      await owner.call('workflows.control', { threadId, runId: run.id, action: 'resume' });
+      await settled(h, threadId, run.id, ['done']);
+      expect(prompts.filter(prompt => prompt.threadId === childId)).toHaveLength(2);
+      expect(h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.attempts).toBe(2);
+    }
+  } finally { off(); }
+});
+
 test('concurrency holds to the run limit, and stop ends running steps without waking the parent', async () => {
   const { prompts, held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId } = await setup();
@@ -251,11 +284,20 @@ test('a paused team pauses the run until an owner resumes it', async () => {
   } finally { agent.close(); }
 });
 
-test('a restarted core pauses running workflows instead of spending on its own, and a resume runs the interrupted step again', async () => {
+test.each(['running', 'correction'] as const)('a restarted core pauses %s workflows instead of spending on its own, and resume reuses the step', async phase => {
   const { prompts, held } = scripted(ctx => ctx.thread.parentThreadId ? { hold: true } : 'noted');
   const { h, owner, threadId } = await setup();
-  const run = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a' }] }, requestId: 'one' });
+  const run = await owner.call('workflows.start', { threadId, plan: { name: 'One', steps: [{ id: 'a', profile: 'fast', task: 'a', ...(phase === 'correction' ? { output: { files: ['string'] } } : {}) }] }, requestId: 'one' });
   await waitFor(() => held.size === 1);
+  const child = run.nodes[0]!.instances[0]!.threadId!;
+  if (phase === 'correction') {
+    const off = h.core.bus.onAny((name, payload) => {
+      if (name === 'turn.finished' && (payload as Turn).threadId === child) h.core.workflows.beginClose();
+    });
+    held.get(child)!('missing structured result');
+    await waitFor(() => h.core.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.outputCorrection !== undefined);
+    off();
+  }
   await h.core.close();
   const next = new Core({ dataDir: h.dataDir, token: h.token });
   try {
@@ -263,13 +305,17 @@ test('a restarted core pauses running workflows instead of spending on its own, 
     expect(record.status).toBe('paused');
     expect(record.error).toContain('restarted');
     const inst = record.nodes[0]!.instances[0]!;
-    expect([inst.status, inst.error]).toEqual(['waiting', 'Interrupted by a core restart']);
+    expect(inst.status).toBe('waiting');
+    if (phase === 'running') expect(inst.error).toBe('Interrupted by a core restart');
+    else { expect(inst.outputCorrection).toContain('does not match'); expect(inst.attempts).toBe(2); }
     expect(next.workflows.owns(inst.threadId!)).toBe(true);
+    await Bun.sleep(25);
+    expect(prompts.filter(prompt => prompt.threadId === child)).toHaveLength(1);
     next.workflows.control({ threadId, runId: run.id, action: 'resume' }, 'owner');
     await waitFor(() => held.size === 1);
     const again = prompts.filter(p => p.threadId === inst.threadId).at(-1)!.prompt;
-    expect(again).toContain('Interrupted by a core restart');
-    [...held.values()][0]!('A done');
+    expect(again).toContain(phase === 'running' ? 'Interrupted by a core restart' : 'does not match');
+    [...held.values()][0]!(phase === 'running' ? 'A done' : '```json\n{"files": []}\n```');
     await waitFor(() => next.workflows.get(threadId, run.id).status === 'done');
     // The same child thread ran it again.
     expect(next.workflows.get(threadId, run.id).nodes[0]!.instances[0]!.threadId).toBe(inst.threadId);

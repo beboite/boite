@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +14,7 @@ import { stderrLines } from '../src/drivers/lines.ts';
 import { getDriver, setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
+import { countLogLines, countProcesses, readScriptedLog, writeScriptedProvider } from './scripted-provider.ts';
 
 /** The fake ACP agent: a real ACP process over stdio, run by bun. */
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp-agent.ts', import.meta.url));
@@ -110,44 +110,31 @@ async function startCore(settings?: Partial<Settings>): Promise<CoreClient> {
 }
 
 function fakeLog(): string {
-  return existsSync(logFile) ? readFileSync(logFile, 'utf8') : '';
+  return readScriptedLog(logFile);
 }
 
 /** A user descriptor for the fake agent: `protocol: "acp"`, launched as `bun <fixture>`. */
 function writeDescriptor(dataDir: string): void {
-  const dir = join(dataDir, 'providers');
-  mkdirSync(dir, { recursive: true });
-  const profile = {
-    detect: {},
-    executable: [{ kind: 'path', value: 'bun' }],
-    launch: { args: [FAKE_AGENT] },
-    isolation: {},
-  };
-  writeFileSync(
-    join(dir, 'acp-fake.json'),
-    JSON.stringify({
-      id: 'acp-fake',
-      schemaVersion: 1,
-      name: 'Fake ACP agent',
-      shortName: 'AcpFake',
-      protocol: 'acp',
-      roots: ['{isolationDir}'],
-      profiles: { windows: profile, linux: profile, macos: profile },
-      auth: { kind: 'none' },
-      // One model, like OpenCode's shipped descriptor: the agent owns the list,
-      // and `providers.probe` is the only way to learn the rest.
-      models: [{ id: 'default', name: 'Agent default', default: true }],
-      capabilities: {
-        approvals: true,
-        hooks: false,
-        checkpoint: false,
-        images: true,
-        planMode: false,
-        resume: true,
-      },
-    }),
-    'utf8',
-  );
+  writeScriptedProvider(dataDir, FAKE_AGENT, {
+    id: 'acp-fake',
+    schemaVersion: 1,
+    name: 'Fake ACP agent',
+    shortName: 'AcpFake',
+    protocol: 'acp',
+    roots: ['{isolationDir}'],
+    auth: { kind: 'none' },
+    // One model, like OpenCode's shipped descriptor: the agent owns the list,
+    // and `providers.probe` is the only way to learn the rest.
+    models: [{ id: 'default', name: 'Agent default', default: true }],
+    capabilities: {
+      approvals: true,
+      hooks: false,
+      checkpoint: false,
+      images: true,
+      planMode: false,
+      resume: true,
+    },
+  });
 }
 
 async function acpAccount(client: CoreClient): Promise<{ dataDir: string; projectId: string; accountId: string }> {
@@ -198,16 +185,12 @@ function collectLogs(client: CoreClient): string[] {
 
 /** How many times the fake was told to switch to a given mode. */
 function setModeCount(modeId: string): number {
-  return fakeLog()
-    .split('\n')
-    .filter((line) => line === `set_mode ${modeId}`).length;
+  return countLogLines(fakeLog(), `set_mode ${modeId}`);
 }
 
 /** How many times a given `<configId> <value>` pair was set on the fake. */
 function configCount(pair: string): number {
-  return fakeLog()
-    .split('\n')
-    .filter((line) => line === `set_config_option ${pair}`).length;
+  return countLogLines(fakeLog(), `set_config_option ${pair}`);
 }
 
 describe('acp driver', () => {
@@ -1248,24 +1231,7 @@ describe('acp driver', () => {
 
   /** One `initialize` per agent process, which is what the probe cache saves. */
   function initializeCount(): number {
-    return fakeLog()
-      .split('\n')
-      .filter((line) => line === 'initialize').length;
-  }
-
-  function countProcesses(
-    client: CoreClient,
-    threadId: string,
-  ): { started: RpcEvents['process.started'][]; exited: RpcEvents['process.exited'][] } {
-    const started: RpcEvents['process.started'][] = [];
-    const exited: RpcEvents['process.exited'][] = [];
-    client.on('process.started', (record) => {
-      if (record.threadId === threadId) started.push(record);
-    });
-    client.on('process.exited', (record) => {
-      if (record.threadId === threadId) exited.push(record);
-    });
-    return { started, exited };
+    return countLogLines(fakeLog(), 'initialize');
   }
 
   async function runTurn(client: CoreClient, threadId: string, prompt: string): Promise<void> {

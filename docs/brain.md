@@ -58,8 +58,8 @@ unnecessary. The core keeps its last scan and, before each turn, stats every
 path that scan looked at: the entry files, each catalog folder and each skill
 or plugin file, present or absent. Any difference in time or size means a new
 scan. A path changed within two seconds of a scan is not trusted, so an edit on
-a file system with coarse times is not missed. On a 26-entry brain this took a
-turn from 32 ms of scanning to about 6 ms of stats (2026-09-25).
+a file system with coarse times is not missed. The scan result remains bounded by the
+inventory limits above.
 Missing folders or unreadable instruction files fail the turn instead of silently
 dropping their content. The combined prefix is limited to 128 KiB.
 
@@ -71,8 +71,7 @@ The guide covers the CLI, panel, attachments, tasks and project todos. It lives
 in `packages/core/src/agent-guide.ts`; no instruction file is created. A resumed
 session keeps the guide; a replacement session receives it again. The brain's
 own instructions still go every normal turn while sharing is enabled.
-The base guide is 839 bytes, or 994 with asynchronous questions. Coordination
-and delegation add only the instructions for enabled features; the full command
+Coordination and delegation add compact feature instructions. Full command
 formats stay behind `boite help` and `boite workflow help`.
 The Boite guide switch retains its saved preference independently of sharing.
 With the guide on, the separate `boite ask` note is not added, and with
@@ -89,8 +88,11 @@ but keeps Boite's environment guide enabled unless its switch is off.
 Instructions already in a session's history remain there; start a new thread
 when previous instructions must leave the context.
 
-Coordination and delegation add compact instructions only when enabled for
-the thread, independently of the brain. These name authorized contacts and
+Communication and delegation defaults come from the thread policy, independently
+of a connected brain. Ordinary conversations enable both; saved owner restrictions
+remain authoritative. Compact feature instructions follow that policy and the
+request, with named delegation profiles making them available on each turn. These name
+authorized contacts and
 profiles, messaging commands, shared-checkout rules and current limits.
 Delegation also teaches dynamic workflows: `after`, `forEach`, `when` and
 `boite workflow extend`, with `boite workflow help` for the full format.

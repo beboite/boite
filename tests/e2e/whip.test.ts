@@ -1,5 +1,5 @@
 import { mobileAction } from './lib/mobile.ts';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
 import { startUi } from './lib/ui.ts';
@@ -51,12 +51,15 @@ const crack = () => `(async () => {
     const root = document.getElementById('app');
     const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
     document.querySelector('${button}').click();
-    for (let i = 0; i < 30; i++) await frame();
+    const thrownAt = performance.now();
+    while (performance.now() - thrownAt < 500) await frame();
     if (root.getAnimations().length) return undefined;
     // A phone is too narrow for a sideways flick to reach crack speed.
     const tall = window.innerHeight > window.innerWidth;
-    for (let i = 0; i < 600 && !root.getAnimations().length; i++) {
-      const swing = Math.sin(i / 1.5) * 200;
+    const flickAt = performance.now();
+    // Keep the pointer speed independent of the runner's rendering frame rate.
+    while (performance.now() - flickAt < 8000 && !root.getAnimations().length) {
+      const swing = Math.sin((performance.now() - flickAt) / 25) * 200;
       window.dispatchEvent(new PointerEvent('pointermove', {
         clientX: window.innerWidth / 2 + (tall ? 0 : swing), clientY: window.innerHeight / 2 + (tall ? swing : 0)
       }));
@@ -144,14 +147,19 @@ beforeAll(async () => {
   const port = await freePort();
   server = await startUi(port);
   url = `http://127.0.0.1:${port}/?fake=1&open=recent`;
+}, 60_000);
+
+beforeEach(async () => {
+  button = '[data-testid="whip-button"]';
   page = await BrowserPage.launch({ url });
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.waitFor('document.querySelector("[data-testid=nav-settings]")');
 }, 60_000);
 
-afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
+afterEach(async () => { await page?.close(); }, 15_000);
+afterAll(async () => { await server?.close(); }, 15_000);
 
-test('the Whip experiment uses desktop footer and phone menu controls, animates a rope and turns off immediately', async () => {
+async function enableWhip() {
   expect(await page.evaluate(`document.querySelector('${button}') === null`)).toBe(true);
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-experiments]');
@@ -161,6 +169,10 @@ test('the Whip experiment uses desktop footer and phone menu controls, animates 
   await page.click('[data-testid=settings-back]');
   await page.waitFor(`document.querySelector('${button}')`);
   await settled();
+}
+
+test('Whip desktop controls animate, release and respect reduced motion', async () => {
+  await enableWhip();
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-desktop.png'));
   expect(await page.evaluate(`document.querySelector('${button}').closest('.foot') !== null`)).toBe(true);
   await menuAboveWhip('whip-menu-desktop.png');
@@ -182,6 +194,10 @@ test('the Whip experiment uses desktop footer and phone menu controls, animates 
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await page.evaluate(`globalThis.__boiteTest.setTheme('light')`);
   expect(await page.evaluate(`getComputedStyle(document.getElementById('app')).transform`)).toBe('none');
+}, 45_000);
+
+test('Whip phone controls stay reachable with agents and disable mid-hit', async () => {
+  await enableWhip();
   await page.navigate(url);
   await page.waitFor(`document.querySelector('${button}')`);
   button = '[data-testid=whip-button-mobile]';

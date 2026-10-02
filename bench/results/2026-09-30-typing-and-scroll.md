@@ -2,10 +2,10 @@
 
 `bench/ui-frames.ts` on the fake client, headless Chrome with software
 compositing, in a 16-thread Linux container that other jobs shared (load
-average 6 to 21 during the runs). "Main" is `525be8f`, built with `--ui` from a
-checkout of it; "branch" is this branch at `abe858d`. Two runs of each,
-alternated. The typing scenarios press a key every 40 ms; a key's latency runs
-from its keydown to the task after the next frame.
+average 6 to 21 during the runs). "Main" is `525be8f`, built with `--ui` from
+its own checkout; "branch" is this branch at `abe858d`. Each had two runs,
+alternating between them. Typing scenarios press a key every 40 ms. Key latency
+runs from keydown to the task after the next frame.
 
 ```sh
 bun bench/ui-frames.ts --build <main dir> --ui <main checkout>/packages/ui
@@ -16,8 +16,8 @@ bun bench/ui-frames.ts --bundle <dir> --cpu 4 --only "<scenarios>"
 
 ## Layouts in a 3 s window, CPU x1
 
-Counted from the trace, so they hold whatever else the machine ran. In
-brackets, the layouts a script forced.
+Counts come from traces, regardless of other work on the machine. Parentheses
+show layouts forced by a script.
 
 | Scenario | Main, run 1 / run 2 | Branch, run 1 / run 2 |
 |---|---|---|
@@ -31,13 +31,13 @@ brackets, the layouts a script forced.
 | Phone, wheel up the 400-message thread | 248 (232) / 230 (215) | 106 (24) / 91 (16) |
 | An answer streaming, nothing else | 72 (3) / 73 (5) | 72 (5) / 72 (8) |
 
-Three layouts per key became one: two came from the composer measuring its
-own height inside the input event, now `field-sizing: content`. On the
-400-message thread main ran 333 layouts in about 180 frames: the outline rail
-eased its active bar's width, which dirtied layout before every scroll event,
-and the event's first read forced it. Easing a transform instead took the
-count to 153 with nothing else changed. The picture draft keeps two layouts
-per key, from the paint layer drawn over its text.
+Plain typing went from three layouts per key to one. Two came from the composer
+measuring its height inside the input event; it now uses `field-sizing: content`.
+On the 400-message thread, main ran 333 layouts in about 180 frames. The outline
+rail animated its active bar's width, invalidating layout before each scroll
+event. The event's first read then forced layout. Animating a transform instead
+reduced the count to 153 with nothing else changed. Picture drafts still use
+two layouts per key because of the paint layer over their text.
 
 ## Key latency, median / p95 in ms
 
@@ -51,44 +51,44 @@ per key, from the paint layer drawn over its text.
 | While an answer streams | x4 | 33.5 / 46.8, 33.1 / 47.2 | 25.8 / 37.6, 25.6 / 38.4 |
 | Phone | x4 | 21.4 / 31.2, 22.7 / 30.1 | 17.9 / 22.2, 16.9 / 22.1 |
 
-With the picture at CPU x4, main handled 41 of the keys sent in the window
-and the branch 57: every key had cloned the picture into IndexedDB
-(`SerializedScriptValueFactory::create`, 83 ms of the x1 window), and the
-durable journal now waits for a pause in typing. Main thread per second at
-x4 went from 438 / 429 to 375 / 361 ms for plain typing and from 597 / 598 to
+With the picture at CPU x4, main handled 41 keys in the window and the branch
+handled 57. Main had cloned the picture into IndexedDB on every key
+(`SerializedScriptValueFactory::create`, 83 ms of the x1 window). The durable
+journal now waits for a pause in typing. Main thread time per second at x4 fell
+from 438 / 429 to 375 / 361 ms for plain typing and from 597 / 598 to
 400 / 404 ms with the picture.
 
 ## Scrolling at CPU x4
 
 A wheel up the 400-message thread drew 29.3 / 27.3 fps on main and 30.7 /
 28.8 on the branch, the phone 21.9 / 23.5 and 24.0 / 22.9. Both keep the main
-thread busy about 1,000 ms a second there, mounting the messages the window
-reaches and rasterizing them in software: fewer layouts do not show as frames.
+thread busy about 1,000 ms a second, mounting newly visible messages and
+rasterizing them in software. Frame rate changed little despite fewer layouts.
 
-What a mount costs, from CPU profiles of the same wheel at x1 on unminified
-builds of an earlier head of this branch: a user message 139 to 71 ms, its
-action row 93 to 41 ms, icons 64 to 31 ms, all script 911 to 775 ms.
+CPU profiles of the same wheel at x1 used unminified builds of an earlier head
+of this branch. Mount time fell from 139 to 71 ms for a user message, 93 to
+41 ms for its action row, 64 to 31 ms for icons, and 911 to 775 ms for all script.
 
 ## Following an answer
 
 `tests/e2e/chat-scroll.test.ts` reads the distance to the bottom after each
-layout while an answer streams at the bottom. Main painted a new paragraph up
-to 36 px below the fold before catching up, ten times a second at most; the
-branch paints none (1 px or less).
+layout while an answer streams at the bottom. Main painted new paragraphs up
+to 36 px below the fold before catching up, at most ten times a second. The
+branch painted them at most 1 px below the fold.
 
 ## The streaming scenarios before this run
 
-Until this run the streaming scenarios sent their prompt to the fake's most
-recent thread, which already runs a turn, so the prompt waited in its queue;
-and they measured 600 ms after sending, while the fake agent was still
-reasoning over the prompt, folded. The streaming rows of
+Earlier streaming scenarios sent their prompt to the fake client's most recent
+thread, which already had a running turn, leaving the prompt queued. Measurement
+started 600 ms after sending, while the fake agent was still reasoning and its
+reasoning was folded. The streaming rows of
 [2026-09-30-ui-frames.md](2026-09-30-ui-frames.md) measured no streamed text.
 They now open an idle thread and start once two paragraphs are on screen.
 
-## What this does not show
+## Limits
 
-- A GPU. WebView2 with acceleration rasterizes on the GPU; these are its
-  worst case.
-- A phone. The phone rows are Chrome's mobile emulation on this CPU.
-- Pointer-driven behavior: the hold under a finger or the scrollbar thumb is
-  covered by reading the code, not by a test.
+- These runs use software rasterization, the worst case compared with
+  GPU-accelerated WebView2.
+- Phone rows use Chrome's mobile emulation on this CPU, without a physical phone.
+- Holding under a finger or dragging the scrollbar thumb was checked by reading
+  the code, without a behavioral test.

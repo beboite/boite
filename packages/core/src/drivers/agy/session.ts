@@ -164,7 +164,7 @@ export class AgySession {
     }
     const child = this.child;
     if (child === null || this.ended) {
-      turn.fail(this.exitCode === null ? 'the Antigravity CLI session went away before the turn' : this.exitSentence(this.exitCode));
+      turn.fail(this.exitCode === null ? 'the Antigravity CLI session went away before the turn' : this.exitSentence(this.exitCode), this.exitCode === null ? undefined : this.exitSentence(this.exitCode, true));
       this.endTurn(turn, true);
       return;
     }
@@ -244,7 +244,7 @@ export class AgySession {
       try {
         event = rowOf(JSON.parse(line));
       } catch {
-        ctx.log('warn', `agy: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
+        ctx.log('warn', `agy: a line that is not json: ${line.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
         return;
       }
       this.onEvent(event);
@@ -261,7 +261,7 @@ export class AgySession {
     child.stdin.on('error', () => undefined);
     stderrLines(child.stderr, (text) => {
       this.lastStderr = text.slice(0, STDERR_MAX);
-      ctx.log('info', `agy: ${this.lastStderr}`);
+      ctx.log('info', `agy: ${this.lastStderr}`, { kind: 'provider-output', event: 'provider.output' });
     });
     this.exited = new Promise<number | null>((resolve) => {
       child.once('exit', (code) => {
@@ -271,7 +271,7 @@ export class AgySession {
       // `close` and not `exit`: stderr is flushed by then, so a failed turn
       // carries the line agy printed on its way out.
       child.once('close', () => {
-        this.onGone(this.exitSentence(this.exitCode));
+        this.onGone(this.exitSentence(this.exitCode), this.exitSentence(this.exitCode, true));
       });
       child.once('error', (error) => {
         resolve(null);
@@ -280,11 +280,11 @@ export class AgySession {
     });
   }
 
-  private onGone(sentence: string): void {
+  private onGone(sentence: string, diagnostic?: string): void {
     const turn = this.current;
     if (turn !== null) {
       if (turn.isStopped) turn.settleRun();
-      else turn.fail(sentence);
+      else turn.fail(sentence, diagnostic);
     }
     if (!this.closing) this.drop(false);
   }
@@ -302,9 +302,9 @@ export class AgySession {
     else if (kind === 'result') turn.finish(rowOf(event['result']));
   }
 
-  private exitSentence(code: number | null): string {
+  private exitSentence(code: number | null, diagnostic = false): string {
     const head = `the Antigravity CLI exited with code ${code === null ? 'unknown' : code}`;
-    return this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
+    return diagnostic || this.lastStderr.length === 0 ? head : `${head}: ${this.lastStderr}`;
   }
 
   /** The whole tree the thread launched, through the registry, and the child itself if the registry lost it. */

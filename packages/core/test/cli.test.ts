@@ -192,6 +192,17 @@ describe('usage', () => {
     const missing = await boite(['where', '--request-id', '--json']);
     expect(missing.code).toBe(2);
     expect(missing.err).toContain('--request-id needs a value');
+    for (const command of ['unknown', 'constructor', 'toString', '__proto__']) {
+      const unknown = await boite([command]);
+      expect(unknown.code).toBe(2);
+      expect(unknown.err).toContain(`unknown command ${command}`);
+      expect(unknown.out).toBe('');
+    }
+    for (const flag of ['--timeout', '--last', '--before']) {
+      const invalid = await boite(['where', flag, '-1']);
+      expect(invalid.code).toBe(2);
+      expect(invalid.err).toContain(`${flag} needs a number, got -1`);
+    }
     const help = await boite(['help']);
     expect(help.code).toBe(0);
     expect(help.err).toContain('usage: boite');
@@ -220,7 +231,42 @@ describe('where', () => {
     const run = await boite(['where', '--json']);
     expect(run.code).toBe(0);
     expect(JSON.parse(run.out)).toMatchObject({ threadId, cwd });
+    const flags = await boite(['where', '--json', '--multiple', '--worktree', '--wait', '--timeout', '12', '--last', '4', '--before', '3']);
+    expect(flags.code).toBe(0);
+    expect(JSON.parse(flags.out)).toMatchObject({ threadId, cwd });
   });
+});
+
+test('projects add names a relative folder, respects agent permissions and retries without a duplicate', async () => {
+  const folder = join(cwd, 'CLI folder');
+  mkdirSync(folder);
+  harness.core.coordination.configure(threadId, { mode: 'off', resources: 'CLI integration', remote: false, paused: false });
+  const refused = await boite(['projects', 'add', 'CLI', 'folder', '--name', 'CLI project', '--json']);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain('communication is off');
+  expect(harness.core.projects.registered(folder)).toBeNull();
+
+  harness.core.coordination.configure(threadId, { mode: 'brief', resources: 'CLI integration', remote: true, paused: false });
+  const added = await boite(['projects', 'add', 'CLI', 'folder', '--name', 'CLI project', '--json']);
+  expect(added.code).toBe(0);
+  expect(added.err).toBe('');
+  const project = JSON.parse(added.out);
+  expect(project).toMatchObject({ name: 'CLI project', path: folder, added: true, current: false });
+  const listed = await boite(['projects', '--json']);
+  expect(listed.code).toBe(0);
+  expect(JSON.parse(listed.out).filter((row: { id: string }) => row.id === project.id)).toHaveLength(1);
+
+  harness.core.coordination.configure(threadId, { mode: 'off', resources: 'CLI integration', remote: false, paused: false });
+  const again = await boite(['projects', 'add', 'CLI folder', '--name', 'A different name']);
+  expect(again.code).toBe(0);
+  expect(again.out).toContain('Already a project; nothing changed.');
+  expect(harness.core.projects.registered(folder)).toMatchObject({ id: project.id, name: 'CLI project' });
+  for (const args of [['projects', 'remove'], ['projects', 'add'], ['projects', 'add', 'CLI folder', '--name', '--json']]) {
+    expect((await boite(args)).code).toBe(2);
+  }
+  const help = await boite(['help']);
+  expect(help.err).toContain('projects add <folder>');
+  expect(help.err).toContain('--name <name>');
 });
 
 describe('panel', () => {

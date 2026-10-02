@@ -57,7 +57,7 @@ function sizeOf(path: string, missing: string): number {
 }
 
 /** The Worker files the compiled core loads by name from beside its executable. */
-const WORKERS = ['jobs-worker.js', 'guard-worker.js', 'artifact-retention-worker.js'];
+const WORKERS = ['jobs-worker.js', 'guard-worker.js', 'artifact-retention-worker.js', 'linux-tcp-worker.js'];
 /** The `boite` shims a thread's PATH reaches: each runs `boite-core cli` from beside itself. */
 const SHIMS = ['boite', 'boite.cmd'];
 const shims = join(repo, 'packages', 'core', 'shims');

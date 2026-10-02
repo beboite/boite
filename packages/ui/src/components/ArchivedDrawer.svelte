@@ -19,26 +19,39 @@
   let count = $derived(project.archivedThreads ?? 0);
 
   $effect(() => {
+    void store.connection;
+    void store.client;
+    threads = null;
+    restoring = null;
+  });
+
+  $effect(() => {
     if (!open || store.connection !== 'ready') return;
     void count;
     void load();
   });
 
   async function load() {
+    const client = store.client;
+    const generation = store.clientGeneration;
     try {
-      threads = await archivedThreads(store, project.id);
+      const answer = await archivedThreads(store, project.id);
+      if (store.client === client && store.clientGeneration === generation) threads = answer;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      if (store.client === client && store.clientGeneration === generation) store.error = error instanceof Error ? error.message : String(error);
     }
   }
 
   async function restore(thread: ThreadSummary) {
+    const client = store.client;
+    const generation = store.clientGeneration;
     restoring = thread.id;
     try {
       await restoreThread(store, thread.id);
+      if (store.client !== client || store.clientGeneration !== generation) return;
       threads = threads?.filter((t) => t.id !== thread.id) ?? null;
     } catch (error) {
-      store.error = error instanceof Error ? error.message : String(error);
+      if (store.client === client && store.clientGeneration === generation) store.error = error instanceof Error ? error.message : String(error);
     } finally {
       restoring = null;
     }
@@ -66,6 +79,12 @@
         {#each threads as thread (thread.id)}
           <li data-thread-id={thread.id}>
             <span class="title" title={thread.title}>{thread.title}</span>
+            {#if thread.archiveReason?.type === 'pr-merged'}
+              <span class="archive-reason" data-testid="archive-merged-reason">
+                <a href={thread.archiveReason.url} target="_blank" rel="noopener noreferrer">{fill(strings.settings.archived.mergedReason, { number: String(thread.archiveReason.number) })}</a>
+                <time datetime={new Date(thread.archiveReason.archivedAt).toISOString()} title={exactTime(thread.archiveReason.archivedAt)}>{ago(thread.archiveReason.archivedAt)}</time>
+              </span>
+            {/if}
             <span class="when" title={exactTime(thread.updatedAt)}>{ago(thread.updatedAt)}</span>
             <button
               class="ghost small"
@@ -132,6 +151,17 @@
     color: var(--color-subtle);
     font-size: var(--text-xs);
   }
+  .archive-reason {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: var(--text-xs);
+  }
+  .archive-reason a { color: inherit; text-underline-offset: 2px; }
+  .archive-reason time { color: var(--color-subtle); }
   li button {
     gap: 4px;
     padding-inline: 4px;

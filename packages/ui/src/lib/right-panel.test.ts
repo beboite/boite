@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { browserBridge } from './browser-bridge';
 import { work } from './work-prefs.svelte';
 import {
@@ -20,6 +20,7 @@ function panel(threadId = 't-1') {
 }
 
 describe('the right panel', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -69,7 +70,8 @@ describe('the right panel', () => {
     } finally { work.load(); }
   });
 
-  test('trace is a singleton, a browser tab is one per id', () => {
+  test('trace is a singleton, HTTP browser tabs get distinct native-compatible ids', () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
     const { bound } = panel();
 
     bound.open('trace');
@@ -79,7 +81,8 @@ describe('the right panel', () => {
 
     expect(bound.surfaces.map((surface) => surface.kind)).toEqual(['trace', 'browser', 'browser']);
     expect(first.id).not.toBe(second.id);
-    expect(first.id.startsWith('browser:')).toBe(true);
+    expect(first.id).toMatch(/^browser:[a-f0-9]{32}$/);
+    expect(second.id).toMatch(/^browser:[a-f0-9]{32}$/);
   });
 
   test('closing the active surface activates the one on its left', () => {

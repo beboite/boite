@@ -1,11 +1,14 @@
-import { expect, test, vi } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import type { Client } from './client';
 import { SpeechPreview } from './speech-preview';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const tick = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const snapshot = () => Promise.resolve(new Uint8Array([1, 2]));
 
 test('slow previews skip ticks, preserve the recording revision and publish only current text', async () => {
+  vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
   let resolve!: (result: { text: string }) => void;
   const call = vi.fn(() => new Promise<{ text: string }>(done => { resolve = done; }));
   const ontext = vi.fn(), onerror = vi.fn();

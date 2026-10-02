@@ -1,3 +1,4 @@
+import type { CoreLogContext } from '@boite/contracts';
 /**
  * The client half of Muse Code's session protocol (MSP): `muse serve` over the
  * agent's own stdio, JSON-RPC 2.0 framed as ndjson. Shaped like `codex.ts`,
@@ -22,9 +23,9 @@
  */
 import pkg from '../../../package.json';
 import type { SpawnedChild } from '../../procs.ts';
-import { LineSplitter } from '../lines.ts';
+import { isRecord, isRpcEnvelope, StdioTransport, type StdioRequestOptions } from '../stdio.ts';
 import type { InitializeResult } from './protocol.ts';
-import { CLIENT_NAME, CLIENT_TITLE, SCHEMA_VERSION, STDERR_MAX } from './protocol.ts';
+import { CLIENT_NAME, CLIENT_TITLE, SCHEMA_VERSION } from './protocol.ts';
 
 // ---------------------------------------------------------------------------
 // Ids
@@ -78,96 +79,50 @@ export class MspError extends Error {
   }
 }
 
-interface Pending {
-  method: string;
-  onAccepted?(): void;
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-}
-
 interface RpcHandlers {
   notification(method: string, params: Record<string, unknown>): void;
-  log(level: 'info' | 'warn' | 'error', message: string): void;
+  log(level: 'info' | 'warn' | 'error', message: string, context?: CoreLogContext): void;
+  fault?(reason: string): void;
 }
 
 export class MuseRpc {
   private nextId = 1;
-  private readonly pending = new Map<number, Pending>();
-  private readonly lines = new LineSplitter((line) => {
-    this.onLine(line);
-  });
-  private closed = false;
+  private readonly transport: StdioTransport<number>;
 
   constructor(
-    private readonly child: SpawnedChild,
+    child: SpawnedChild,
     private readonly handlers: RpcHandlers,
   ) {
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      this.lines.feed(chunk);
-    });
-    child.stdin.on('error', () => undefined);
+    this.transport = new StdioTransport(child, 'muse host', { message: message => this.dispatch(message), log: handlers.log, fault: handlers.fault });
   }
 
-  request<T>(method: string, params: unknown, onAccepted?: () => void): Promise<T> {
-    const id = this.nextId;
-    this.nextId += 1;
-    return new Promise<T>((resolve, reject) => {
-      if (this.closed) {
-        reject(new Error(`the muse host is gone, ${method} was not sent`));
-        return;
-      }
-      this.pending.set(id, { method, onAccepted, resolve: resolve as (value: unknown) => void, reject });
-      this.write({ jsonrpc: '2.0', id, method, params });
-    });
+  request<T>(method: string, params: unknown, options?: StdioRequestOptions): Promise<T> {
+    const id = this.nextId++;
+    return this.transport.request(id, method, { jsonrpc: '2.0', id, method, params }, options);
   }
 
   /** A command: a request whose params carry a fresh `commandId`. */
   command<T>(method: string, params: Record<string, unknown>, onAccepted?: () => void): Promise<T> {
-    return this.request<T>(method, { commandId: mintUuidV7(), ...params }, onAccepted);
+    return this.request<T>(method, { commandId: mintUuidV7(), ...params }, { onAccepted });
   }
 
   notify(method: string, params: unknown): void {
-    this.write({ jsonrpc: '2.0', method, params });
+    this.transport.write({ jsonrpc: '2.0', method, params });
   }
 
   /** The child is gone: every request still waiting is answered, loudly. */
-  fail(reason: string): void {
-    if (this.closed) return;
-    this.closed = true;
-    const waiting = [...this.pending.values()];
-    this.pending.clear();
-    for (const entry of waiting) entry.reject(new Error(reason));
-  }
-
-  private write(payload: unknown): void {
-    if (this.closed) return;
-    try {
-      this.child.stdin.write(`${JSON.stringify(payload)}\n`);
-    } catch {
-      // the pipe is already gone; the exit path says what happened
-    }
-  }
-
-  private onLine(raw: string): void {
-    const line = raw.trim();
-    let message: Record<string, unknown>;
-    try {
-      message = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      this.handlers.log('warn', `muse host: a line that is not json: ${line.slice(0, STDERR_MAX)}`);
-      return;
-    }
-    this.dispatch(message);
+  fail(reason: string, diagnostic?: string): void {
+    this.transport.fail(reason, diagnostic);
   }
 
   private dispatch(message: Record<string, unknown>): void {
     const method = message['method'];
     const id = message['id'];
+    if (!isRpcEnvelope(message)) return this.transport.invalid();
     if (typeof method === 'string' && id !== undefined && id !== null) {
       // `approval/request` and `userInput/request`: Boite decides both through
       // their notification and a command, so the request form is declined.
-      this.write({
+      this.transport.write({
         jsonrpc: '2.0',
         id,
         error: { code: -32601, message: `boite answers ${method} through its notification, not as a request` },
@@ -178,14 +133,13 @@ export class MuseRpc {
       const params = message['params'];
       this.handlers.notification(
         method,
-        params !== null && typeof params === 'object' ? (params as Record<string, unknown>) : {},
+        isRecord(params) ? params : {},
       );
       return;
     }
     if (typeof id !== 'number') return;
-    const entry = this.pending.get(id);
+    const entry = this.transport.take(id);
     if (entry === undefined) return;
-    this.pending.delete(id);
     const error = message['error'];
     if (error !== undefined && error !== null) {
       entry.reject(mspErrorOf(entry.method, error));

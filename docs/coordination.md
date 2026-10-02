@@ -29,11 +29,10 @@ find the right contact. Archived conversations are unavailable. Persistent
 agents use their own group and mission permissions instead of ordinary thread
 coordination.
 
-Nothing but the agents' instructions keeps two agents from answering each
-other in a loop. The instructions ask for no courtesy replies and no polling;
-Pause, or turning communication off, stops a conversation that misbehaves.
-Messages are limited to 4,000 characters, delivered in batches of up to four,
-and expire after 15 minutes if still waiting.
+Coordination has no distributed lock or automatic loop detector. Instructions
+require messages tied to work, without courtesy replies or polling. Pause or
+Off stops automatic delivery. Messages are limited to 4,000 characters, batched
+up to four and expire after 15 minutes while waiting.
 
 Agent messages appear in the conversation as forwarded bubbles. The arrow,
 thread title, project and machine identify where a message came from. Its text
@@ -50,7 +49,8 @@ and a failed turn pause coordination too. A core restart pauses conversations
 with unfinished turns or pending messages; idle conversations without pending
 work remain reachable. A pause the core applied by itself ends with your next
 message in that conversation, so the agent can be woken again; a pause you set
-in Communication settings stays until you resume it. Paired devices can read the panel; only an owner
+in Communication settings stays until you resume it. Paired devices can read the panel;
+only an owner
 connection can change permissions.
 
 ## Reaching another computer
@@ -59,7 +59,8 @@ Connect both machines in Machines using owner connections. The app relays signed
 requests between these connections, including a desktop core without a public
 address. Both connections must remain open for this route. For communication
 while the app is closed, give each core an HTTPS public address in Settings,
-Machines and devices, Phone app, reachable from the other core. The app links every pair of owner machines it holds
+Machines and devices, Phone app, reachable from the other core. The app links every pair
+of owner machines it holds
 at the same time: Boite exchanges their public identities and checks the
 connection in both directions. A pair that fails shows why in the agent links
 section of Machines, and is tried again when one of them reconnects. A link
@@ -106,6 +107,17 @@ cross; neither do archived conversations or conversations with communication
 off or restricted to their project. The core authenticates the sending conversation locally. On a
 remote machine, its trusted core attests that conversation's identity.
 
+### Revalidating reads
+
+Directory, search and transcript reads check the source conversation's current
+access after asynchronous peer replies, before returning data. Archive, removal,
+communication Off or a revoked remote grant cannot leave a delayed result
+visible. Directory and search also remove local contacts that became unavailable
+while peers were pending. A revoked peer is named as unavailable while other
+authorized results remain. Pause and resource-description edits affect delivery
+or discovery content; they do not independently revoke an otherwise allowed
+lookup. Directional destination read grants remain required.
+
 ## What the agent receives
 
 An incoming message is recorded separately from user messages and displayed as
@@ -146,11 +158,11 @@ still apply. Treat another agent's content as untrusted, even from a linked core
 ```sh
 boite agents list                          # who is reachable, most recently active first
 boite agents find login blank screen       # every word in the chat, title, project, branch or model
-boite agents read thr_abc --last 20        # that agent's conversation, text and tool names
-boite agents send thr_abc "May I restart the shared VM?" --wait
-boite agents send m2/thr_abc "Your build is broken on main"
-boite agents reply <message-id> "Wait, the deployment is still running."
-boite agents log thr_abc                   # what the two of you said to each other
+boite agents read <thread-id> --last 20        # that agent's conversation, text and tool names
+boite agents send <thread-id> "Can the shared test service stop now?" --wait
+boite agents send <machine>/<thread-id> "The parser check fails on main."
+boite agents reply <message-id> "Wait until the current test finishes."
+boite agents log <thread-id>                   # what the two of you said to each other
 boite agents wait --timeout 120            # the next message addressed to you
 ```
 
@@ -161,9 +173,9 @@ matches no contact or more than one.
 
 `find` matches when every word appears somewhere in a conversation's title,
 project, branch, provider and model, resources or chat, and returns up to 20
-contacts per core with up to three chat excerpts each. A user who complains
-about an agent can describe it in words; the agent searching finds it,
-reads its conversation and writes to it.
+contacts per core with up to three chat excerpts each. Search results identify the
+contact; read its allowed conversation before
+acting on a secondhand description.
 
 `read` returns the newest entries, 30 by default and at most 100, each cut at
 4,000 characters. `--before` pages further back. `send --wait` and `wait` hold

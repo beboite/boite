@@ -8,6 +8,7 @@ export * from './browser-remote';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
+export * from './thread-focus';
 
 /**
  * Boite 2 wire contract: the JSON-RPC methods and events between the core
@@ -546,6 +547,8 @@ export interface Project {
   createdAt: Timestamp;
   /** Precheck Worktree in new drafts. An absent value means off; existing drafts keep their choice. */
   worktreeDefault?: boolean;
+  /** Automatically hide a quiescent worktree conversation after its exact PR merges. Missing means enabled. */
+  autoArchiveMergedPr?: boolean;
   /**
    * The folder holds a `.git`, read on every answer rather than stored: the
    * test `threads.create.worktree` applies. Absent from a core older than this
@@ -687,7 +690,16 @@ export interface ThreadProgress {
   providerAt?: Timestamp | null;
 }
 
+export interface ThreadArchiveReason {
+  type: 'pr-merged';
+  number: number;
+  url: string;
+  archivedAt: Timestamp;
+}
+
 export interface ThreadSummary {
+  /** Durable explanation for an automatic archive; absent for manual archives and restored conversations. */
+  archiveReason?: ThreadArchiveReason;
   /** Core-owned delegation relationship. Absent on ordinary conversations. */
   parentThreadId?: ThreadId | null;
   /** Last accepted user message, independent of assistant activity and renames. */
@@ -1065,6 +1077,13 @@ export const INITIAL_MESSAGE_PAGE = 40;
 export { previewToolOutputs, TOOL_OUTPUT_INLINE_CHARS, TOOL_OUTPUT_PREVIEW_CHARS } from './message-preview';
 /** The most `messages.list` will ever hand back in one call, whatever `limit` says. */
 export const MESSAGE_PAGE_MAX = 200;
+/**
+ * Serialized UTF-8 bytes of a page's message array, including its brackets and
+ * commas. One complete message may exceed this budget to advance pagination,
+ * provided the full RPC response still fits `RPC_MAX_FRAME_BYTES`. A reconnect
+ * tail must fit this budget in full; otherwise `threads.get` returns a page.
+ */
+export const MESSAGE_PAGE_MAX_BYTES = 12 * 1024 * 1024;
 
 /**
  * A command the agent of a thread takes at the start of a prompt, sent as the
@@ -1109,10 +1128,11 @@ export interface Thread extends ThreadSummary {
   /**
    * Set when `threads.get` answered an `after`: `messages` starts at this
    * message, `turns` are theirs, and `messagesBefore` says nothing. The caller
-   * keeps every message it held before this one.
+   * keeps every message it held before this one. Set only for a complete tail
+   * within the message count and serialized byte limits.
    */
   messagesFrom?: MessageId;
-  /** A bounded tail of the thread, oldest first. Older messages come from `messages.list`. */
+  /** A bounded tail within the serialized page budget, oldest first. Older messages come from `messages.list`. */
   messages: Message[];
   /**
    * What the agent of this thread last said it takes as `/name`. Empty until a
@@ -1248,6 +1268,43 @@ export interface ThreadResources {
   live: ProcessRecord[];
   /** The latest sample of the whole tree, the same one `ThreadSummary.load` carries. */
   load: ThreadLoad;
+}
+
+/** Read and write mean storage reads/writes for disk, download/upload for network. */
+export interface ResourceByteUsage {
+  /** Observed deltas since `since`, never an unobserved conversation lifetime. */
+  readBytes: number | null;
+  writeBytes: number | null;
+  /** Null until two readings of the same live counter establish an interval. */
+  readBytesPerSecond: number | null;
+  writeBytesPerSecond: number | null;
+  sampledAt: Timestamp | null;
+  since: Timestamp | null;
+  coverage: 'partial' | 'unavailable';
+  source: 'linux-proc-io' | 'linux-tcp-info' | 'macos-rusage' | 'unavailable';
+  /** Short collector explanation; clients translate known sources and coverage. */
+  note: string;
+}
+
+/** Sanitized resource row suitable for a paired phone; no paths or process arguments. */
+export interface AgentResourceUsage {
+  threadId: ThreadId;
+  title: string;
+  providerId: ProviderId;
+  model: string | null;
+  status: ThreadStatus;
+  projectId: ProjectId | null;
+  parentThreadId: ThreadId | null;
+  load: ThreadLoad;
+  /** Missing on an older core; false distinguishes unavailable readings from a measured zero. */
+  loadAvailable?: { cpu: boolean; memory: boolean };
+  disk: ResourceByteUsage;
+  network: ResourceByteUsage;
+}
+
+export interface AgentResourceSnapshot {
+  sampledAt: Timestamp;
+  agents: AgentResourceUsage[];
 }
 
 /** What the trace can and cannot promise on this OS. */
@@ -2225,7 +2282,81 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
+export type CoreLogLevel = 'info' | 'warn' | 'error';
+
+/** Raw provider output reaches only owner live observers; diagnostic history retains a placeholder. */
+export interface CoreLogContext {
+  source?: string;
+  event?: string;
+  threadId?: ThreadId;
+  turnId?: TurnId;
+  requestId?: string;
+  kind?: 'provider-output';
+}
+
+/** A bounded diagnostic, with no transcript, RPC payload or process arguments. */
+export interface CoreLogRecord {
+  id: string;
+  runId: string;
+  at: Timestamp;
+  level: CoreLogLevel;
+  source: string;
+  event: string;
+  message: string;
+  threadId?: ThreadId;
+  turnId?: TurnId;
+  requestId?: string;
+}
+
+export interface CoreLogsQuery {
+  /** Defaults to 100; an integer from 1 to 200. Results are newest first. */
+  limit?: number;
+  threadId?: ThreadId;
+  level?: CoreLogLevel;
+}
+
+/** Real and in-memory cores share the same strict diagnostic query boundary. */
+export function validateCoreLogsQuery(raw: unknown): CoreLogsQuery & { limit: number } {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('core.logs params: expected an object');
+  const query = raw as Record<string, unknown>;
+  for (const key of Object.keys(query)) if (!['limit', 'threadId', 'level'].includes(key)) throw new Error(`core.logs ${key}: expected limit, threadId or level`);
+  const limit = query.limit === undefined ? 100 : query.limit;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('core.logs limit: expected an integer from 1 to 200');
+  if (query.threadId !== undefined && (typeof query.threadId !== 'string' || query.threadId.length < 1 || query.threadId.length > 200 || /[\x00-\x1f\x7f]/.test(query.threadId))) throw new Error('core.logs threadId: expected 1 to 200 characters without control characters');
+  if (query.level !== undefined && !['info', 'warn', 'error'].includes(query.level as string)) throw new Error('core.logs level: expected info, warn or error');
+  return { limit, ...(query.threadId === undefined ? {} : { threadId: query.threadId as string }), ...(query.level === undefined ? {} : { level: query.level as CoreLogLevel }) };
+}
+
+/** Owner-only live provider output keeps sign-in URLs usable. Never persist this text. */
+export function normalizeCoreLogOutput(text: string, secrets: readonly string[] = []): string {
+  let value = text;
+  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join('[redacted]');
+  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
+}
+
+/** Redact before bounding: cutting an Authorization value first could leave a secret prefix. */
+export function normalizeCoreLogText(text: string, secrets: readonly string[] = []): string {
+  const REDACTED = '[redacted]';
+  let value = text;
+  for (const secret of secrets) if (secret.length > 0) value = value.split(secret).join(REDACTED);
+  value = value
+    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompts?|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)[\[{](?!redacted\])[\s\S]*/gi, `$1${REDACTED}`)
+    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Bearer|Basic)\s+[^\s,;"'<>]+/gi, REDACTED)
+    .replace(/\bAuthorization\s*[:=]\s*[^\r\n]+/gi, `Authorization: ${REDACTED}`)
+    .replace(/((?:^|[^\w-])["']?[\w-]*(?:token|grant|secret|password|api[_-]?key|prompt|attachments?|commandLine|arguments|params|content|messages|text|input|output)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi, `$1${REDACTED}`)
+    .replace(/\b(?:sk-[a-zA-Z0-9_-]{8,}|(?:ghp|github_pat)_[a-zA-Z0-9_]{8,})/g, REDACTED)
+    .replace(/(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/[^\s<>"']+)/gi, (_match, prefix: string, raw: string) => prefix + raw
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`)
+      // All query values and fragments are untrusted, including unfamiliar keys.
+      .replace(/[?#].*$/, `?${REDACTED}`));
+  return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, 4096);
+}
+
 export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods {
+  /** Owner-only project policy; absent policy defaults to enabled. */
+  'projects.setAutoArchiveMergedPr': { params: { projectId: ProjectId; enabled: boolean }; result: Project };
+  /** Owner-only, private bounded diagnostic history, including earlier runs. */
+  'core.logs': { params: CoreLogsQuery; result: CoreLogRecord[] };
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
@@ -2655,13 +2786,17 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    * rather than the whole page, and says so in `messagesFrom`. The client names
    * the first message it cannot vouch for, the oldest one of a turn it has not
    * seen finish, or its last one. An `after` the thread does not hold, or one
-   * with more than a page behind it, is answered with the full page.
+   * with more than a page's count or serialized byte budget behind it, is
+   * answered with the full page, without `messagesFrom`.
    */
   'threads.get': { params: { threadId: ThreadId; after?: MessageId; limit?: number; compactTools?: boolean }; result: Thread };
   /**
    * One page of older messages, oldest first inside the page: what was written
    * before `before`, at most `limit` (`MESSAGE_PAGE` by default, `MESSAGE_PAGE_MAX`
-   * whatever is asked). The result's own `before` is the next cursor, null once
+   * whatever is asked), within `MESSAGE_PAGE_MAX_BYTES`. One complete message
+   * can exceed the page byte budget for progress; a message or full response
+   * exceeding `RPC_MAX_FRAME_BYTES` is refused by name, never truncated.
+   * The result's own `before` is the next cursor, null once
    * the first message of the thread is in hand. An unknown thread is a not-found;
    * a `before` that is not a message of that thread is refused by name.
    */
@@ -2776,8 +2911,9 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
   /** Only subscribed threads stream message events to this connection. */
   'threads.subscribe': { params: { threadId: ThreadId }; result: { ok: true } };
   'threads.unsubscribe': { params: { threadId: ThreadId }; result: { ok: true } };
-  /** The conversation visible on this connection; null releases its prepared agent. No turn is started. */
-  'threads.focus': { params: { threadId: ThreadId | null }; result: { ok: true } };
+  /** The visible conversation and unsent input leases. Omitted leases remain; an empty list clears them.
+   * A focus caller without an input report blocks automatic archive until it reports leases or disconnects. */
+  'threads.focus': { params: { threadId: ThreadId | null; protectedThreadIds?: ThreadId[]; protectAllThreads?: boolean }; result: { ok: true } };
 
   /** `attachments` are journalled with the prompt. Files become host paths; images use native provider payloads. */
   'turns.start': { params: { threadId: ThreadId; prompt: string; attachments?: Attachment[]; previewReferences?: PreviewReference[]; expectedSelectionVersion?: number; clientRequestId?: string }; result: Turn };
@@ -2829,6 +2965,8 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
 
   'trace.get': { params: { threadId: ThreadId; limit?: number }; result: ProcessRecord[] };
   'resources.list': { params: Record<string, never>; result: ThreadResources[] };
+  /** Visible clients renew a six-second detail lease; false releases only this connection. */
+  'resources.usage': { params: { watch?: boolean }; result: AgentResourceSnapshot };
   /** Owner-only machine memory reading and the limits actually applied by the governor. */
   'resources.memoryStatus': { params: Record<string, never>; result: MemoryStatus };
   'resources.killTree': { params: { threadId: ThreadId }; result: { killed: number } };
@@ -3008,7 +3146,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
     url: string | null;
     exitCode: number | null;
   };
-  'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp; threadId?: ThreadId };
+  'core.log': { level: CoreLogLevel; message: string; at: Timestamp } & CoreLogContext;
   'core.updateChanged': ServerUpdateStatus;
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };

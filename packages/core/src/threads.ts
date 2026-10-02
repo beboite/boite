@@ -1,6 +1,6 @@
-import type { AgentProfile } from '@boite/contracts';
-import { createHash } from 'node:crypto';
-import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS } from '@boite/contracts';
+import { archiveState, archiveStateKey } from './merged-pr-archive-state.ts';
+import { repositoryOf, type MergedPrProof } from './pull-requests.ts';
+import { previewToolOutputs, previewReferencesError, previewPrompt, MESSAGE_PAGE, MESSAGE_PAGE_MAX, DEFAULT_THREAD_DELETION_RETENTION_DAYS, type AgentProfile } from '@boite/contracts';
 import type {
   Account,
   AccountId,
@@ -40,7 +40,7 @@ import { AUTO_COMPACT_LABEL, AutoCompaction } from './threads/auto-compact.ts';
 import { DeferredInput } from './threads/deferred.ts';
 import { MOVE_NOTE_PREFIX, pendingMove, ThreadMove } from './threads/move.ts';
 import { ThreadSpawns } from './threads/spawn.ts';
-import { checkAttachmentArray, checkAttachments, checkCwd, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
+import { checkAttachmentArray, checkAttachments, checkCwd, checkTurnRequest, draftFolderName, makeDraftFolder, titleOf } from './threads/inputs.ts';
 import { RestartHandoff } from './threads/handoff.ts';
 import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/operations.ts';
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
@@ -198,15 +198,6 @@ export class ThreadStore {
     const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
     const page = this.core.journal.listMessagePage(params.threadId, { beforeRowid: rowid, limit });
     return { ...page, messages: params.compactTools ? previewToolOutputs(page.messages) : page.messages, turns: this.core.journal.listTurnsFor(params.threadId, page.messages.map((message) => message.turnId)) };
-  }
-
-  toolOutput(params: RpcParams<'messages.toolOutput'>): { output: string | null } {
-    this.require(params.threadId);
-    const message = this.core.journal.getMessage(params.messageId);
-    if (!message || message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
-    const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
-    if (!part || part.type !== 'tool') throw notFound(`tool ${params.toolId} is not a tool of message ${params.messageId}`, params);
-    return { output: part.output };
   }
 
   // -- writes ---------------------------------------------------------------
@@ -474,9 +465,30 @@ export class ThreadStore {
     }
   }
 
+  isRemoving(threadId: ThreadId): boolean { return this.removing.has(threadId); }
+
+  /** A quiescent automatic archive changes visibility only, retaining the checkout and execution state. */
+  archiveMergedPr(expected: ThreadSummary, proof: MergedPrProof, generation: number): ThreadSummary | null {
+    const thread = this.core.journal.getThread(expected.id);
+    const state = archiveState(this.core.journal, expected.id);
+    const project = thread?.projectId ? this.core.journal.getProject(thread.projectId) : null;
+    if (!thread || !project || repositoryOf(thread.cwd) !== proof.checkoutRepository || repositoryOf(project.path) !== proof.checkoutRepository) return null;
+    if (!thread || thread.updatedAt !== expected.updatedAt || thread.cwd !== expected.cwd || thread.branch !== proof.branch || thread.projectId !== expected.projectId || state.generation !== generation || state.dismissed?.includes(proof.url) || !this.core.mergedPrArchive.eligible(thread)) return null;
+    return this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      this.core.journal.setSetting(archiveStateKey(thread.id), { ...state, binding: proof, reason: { type: 'pr-merged', number: proof.number, url: proof.url, archivedAt: Date.now() } });
+      const saved = this.save({ ...thread, archived: true }, 'thread.archived');
+      if (thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      return saved;
+    })());
+  }
+
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
-    if (archived) this.sideQuestions.cancel(threadId);
     this.require(threadId);
+    if (archived) {
+      // Temporary inference belongs to the visible family, including retained descendants.
+      const family = this.core.journal.db.query('WITH RECURSIVE family(id) AS (SELECT ? UNION SELECT child.id FROM threads child JOIN family ON child.parent_thread_id = family.id) SELECT id FROM family').all(threadId) as { id: ThreadId }[];
+      for (const member of family) this.sideQuestions.cancel(member.id);
+    }
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     // An archived thread is not coming back this minute: its warm process goes
     // now, and the commands that process listed go with it.
@@ -494,9 +506,16 @@ export class ThreadStore {
       void this.core.terminals.close(threadTerminalId(threadId));
     }
     const thread = this.require(threadId);
-    const saved = this.save({ ...thread, archived }, 'thread.archived');
-    // The sidebar counts a project's archived threads; a sub-thread is not one of them.
-    if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+    const saved = this.core.bus.afterCommit(() => this.core.journal.db.transaction(() => {
+      if (!archived) {
+        const state = archiveState(this.core.journal, threadId);
+        const dismissed = [...new Set([...(state.dismissed ?? []), ...(state.binding ? [state.binding.url] : [])])];
+        this.core.journal.setSetting(archiveStateKey(threadId), { ...state, reason: undefined, generation: state.generation + 1, dismissed, restoredCheckout: { projectId: thread.projectId, cwd: thread.cwd, branch: thread.branch } });
+      }
+      const saved = this.save({ ...thread, archived }, 'thread.archived');
+      if (thread.archived !== archived && !thread.parentThreadId && thread.projectId !== null) this.core.projects.announce(thread.projectId);
+      return saved;
+    })());
     // A removal waits for the same stops itself before it hides the family.
     if (archived && !this.removing.has(threadId)) void this.endArchivedWork(threadId);
     return saved;
@@ -650,17 +669,8 @@ export class ThreadStore {
     const referenceError = previewReferencesError(previewReferences, prompt);
     if (referenceError) throw refused(referenceError);
     previewReferences = structuredClone(previewReferences);
-    let fingerprint = '';
-    if (clientRequestId !== undefined) {
-      if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
-      fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
-      const existing = this.core.journal.turnRequest(threadId, clientRequestId);
-      if (existing) {
-        if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
-        const accepted = this.core.journal.getTurn(existing.turn_id);
-        if (accepted) return accepted;
-      }
-    }
+    const { fingerprint, turn: accepted } = checkTurnRequest(this.core.journal, threadId, prompt, attachments, previewReferences, clientRequestId);
+    if (accepted) return accepted;
     this.checkSelection(thread, expectedSelectionVersion);
     if (thread.archived) throw refused('cannot start a turn on an archived thread', { threadId });
     if (['queued', 'running', 'waiting'].includes(thread.status) || this.runner.handles.has(threadId)) {
@@ -734,7 +744,7 @@ export class ThreadStore {
           if (!operation && !nativeCommandPrompt(prompt)) this.deferred.recordHeldBeforePrompt(threadId, turn.id, now);
           this.core.journal.putMessage(message);
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
-          if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
+          if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
         });
         const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId) : undefined;
         this.core.bus.emit('message.started', message);

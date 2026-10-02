@@ -2,15 +2,15 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { DEFAULT_DELEGATION_CONFIG, PROTOCOL_VERSION, RPC_PATH, RpcCloseCode, RpcErrorCode, type Turn } from '@boite/contracts';
-import { connect } from '../src/client.ts';
-import type { RpcFailure } from '../src/errors.ts';
+import { ATTACHMENT_MAX_BYTES, DEFAULT_DELEGATION_CONFIG, PROTOCOL_VERSION, RPC_MAX_FRAME_BYTES, RPC_PATH, RpcCloseCode, RpcErrorCode, type Thread, type Turn } from '@boite/contracts';
+import { connect, type CoreClient } from '../src/client.ts';
+import { refused, type RpcFailure } from '../src/errors.ts';
 import { Core } from '../src/core.ts';
 import { newToken } from '../src/ids.ts';
 import { pair, readPreviousRun } from '../src/main.ts';
 import { isAllowedOrigin, PLACEHOLDER_HTML, preauthPeer, preauthRefusal, ServerConnection, startServer, startServerOnStickyPort, UI_DIST } from '../src/server.ts';
 import { lanAddress } from '../src/server/lan.ts';
-import { echoThread, removeDir, startTestCore } from './harness.ts';
+import { echoThread, removeDir, startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
 const HELLO_TIMEOUT_MS = 200;
@@ -39,13 +39,17 @@ function closeCode(socket: WebSocket, timeoutMs = 3000): Promise<number> {
   });
 }
 
-function firstFrame(socket: WebSocket, timeoutMs = 3000): Promise<Record<string, unknown>> {
+function firstFrame(socket: WebSocket, timeoutMs = 3000, matches?: (frame: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('no frame arrived')), timeoutMs);
-    socket.addEventListener('message', (event: MessageEvent) => {
+    const received = (event: MessageEvent): void => {
+      const frame = JSON.parse(String(event.data)) as Record<string, unknown>;
+      if (matches && !matches(frame)) return;
       clearTimeout(timer);
-      resolve(JSON.parse(String(event.data)) as Record<string, unknown>);
-    });
+      socket.removeEventListener('message', received);
+      resolve(frame);
+    };
+    const timer = setTimeout(() => { socket.removeEventListener('message', received); reject(new Error('no frame arrived')); }, timeoutMs);
+    socket.addEventListener('message', received);
   });
 }
 
@@ -57,6 +61,99 @@ function opened(socket: WebSocket): Promise<void> {
 }
 
 describe('server', () => {
+  test('complete RPC response budgets include envelopes and metadata while legal attachment pages keep progressing', async () => {
+    const setup = await harness.connect();
+    const { threadId } = await echoThread(harness, setup);
+    const baseline = harness.core.threads.get(threadId);
+    const message = { id: 'msg_response_budget', threadId, turnId: 'trn_response_budget', role: 'user' as const, state: 'complete' as const, createdAt: 1, parts: [{ type: 'text' as const, text: '' }] };
+    let reply: Thread = { ...baseline, messages: [message], turns: [], memoryEvents: [] };
+    let serialized = 0, oversizedError = false;
+    harness.core.router.register('threads.get', () => {
+      if (oversizedError) throw refused('Synthetic oversized error', { details: 'x'.repeat(RPC_MAX_FRAME_BYTES) });
+      return { toJSON() { serialized++; return reply; } } as unknown as Thread;
+    });
+    const frameSizes: number[] = [];
+    const { WsClient } = await import(new URL('../../ui/src/lib/client.ts', import.meta.url).href);
+    const ownerWsClient: Pick<CoreClient, 'call' | 'close'> & { connect(): Promise<unknown>; readonly state: string } = new WsClient({ url: harness.url, token: harness.token, reconnect: false, socketFactory(url: string) {
+      const socket = new WebSocket(url);
+      socket.addEventListener('message', event => frameSizes.push(Buffer.byteLength(String(event.data))));
+      return socket;
+    } });
+    const responseFailure = async (): Promise<unknown> => {
+      let settled = false, failure: unknown;
+      void ownerWsClient.call('threads.get', { threadId }).then(() => { settled = true; }, error => { failure = error; settled = true; });
+      await waitFor(() => settled, 2000);
+      return failure;
+    };
+    try {
+      await ownerWsClient.connect();
+      const attachment = Buffer.alloc(ATTACHMENT_MAX_BYTES).toString('base64');
+      reply = { ...baseline, turns: [], messages: [{ ...message, parts: [
+        { type: 'file', mimeType: 'application/octet-stream', data: attachment, name: 'one.bin' },
+        { type: 'file', mimeType: 'application/octet-stream', data: attachment, name: 'two.bin' },
+      ] }] };
+      const legal = await ownerWsClient.call('threads.get', { threadId });
+      expect(legal.messages).toHaveLength(1);
+      expect(legal.messages[0]!.parts.map(part => part.type === 'file' ? part.data.length : 0)).toEqual([attachment.length, attachment.length]);
+      expect(serialized).toBe(1);
+
+      // The result fits by itself; only the final JSON-RPC envelope pushes it over.
+      reply = { ...baseline, messages: [message], turns: [], memoryEvents: [] };
+      const overhead = Buffer.byteLength(JSON.stringify(reply));
+      reply.messages[0] = { ...message, parts: [{ type: 'text', text: 'x'.repeat(RPC_MAX_FRAME_BYTES - overhead - 24) }] };
+      expect(Buffer.byteLength(JSON.stringify(reply))).toBe(RPC_MAX_FRAME_BYTES - 24);
+      expect(await responseFailure()).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'response', max: RPC_MAX_FRAME_BYTES } });
+      expect(serialized).toBe(2);
+      expect(ownerWsClient.state).toBe('ready');
+      expect(await ownerWsClient.call('projects.list', {})).toBeInstanceOf(Array);
+
+      // UTF-8 turn and memory metadata exceed the frame despite legal message bytes.
+      reply = { ...baseline, messages: [message], memoryEvents: [{ kind: 'pressure', threadId, state: 'critical', at: 1, exe: 'é'.repeat(1024) }],
+        turns: [{ id: message.turnId, threadId, status: 'done', queuedAt: 1, startedAt: 1, finishedAt: 1, usage: null, error: 'é'.repeat(1024) }] };
+      reply.messages[0] = { ...message, parts: [{ type: 'text', text: 'x'.repeat(RPC_MAX_FRAME_BYTES - JSON.stringify(reply).length - 1000) }] };
+      expect(JSON.stringify(reply).length).toBeLessThan(RPC_MAX_FRAME_BYTES);
+      expect(Buffer.byteLength(JSON.stringify(reply.messages))).toBeLessThan(RPC_MAX_FRAME_BYTES);
+      const failure = await responseFailure();
+      expect(failure).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'response', max: RPC_MAX_FRAME_BYTES } });
+      expect((failure as { data: { bytes: number } }).data.bytes).toBeGreaterThan(RPC_MAX_FRAME_BYTES);
+      expect(serialized).toBe(3);
+
+      oversizedError = true;
+      expect(await responseFailure()).toMatchObject({ code: RpcErrorCode.Refused, data: { field: 'response', max: RPC_MAX_FRAME_BYTES } });
+      expect(frameSizes.every(bytes => bytes <= RPC_MAX_FRAME_BYTES)).toBe(true);
+      expect(await ownerWsClient.call('projects.list', {})).toBeInstanceOf(Array);
+      expect(ownerWsClient.state).toBe('ready');
+    } finally { ownerWsClient.close(); }
+  });
+
+  test('large caller IDs retain matched bounded RPC refusals or a finite close fallback', async () => {
+    const socket = rawSocket();
+    await opened(socket);
+    try {
+      const hello = firstFrame(socket);
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { token: harness.token, protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '0' } } }));
+      expect((await hello).result).toBeDefined();
+      harness.core.router.register('settings.get', () => ({ payload: 'x'.repeat(1024) }) as never);
+      const id = 'x'.repeat(RPC_MAX_FRAME_BYTES - 200);
+      const answer = firstFrame(socket, 3000, frame => frame.id === id);
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'settings.get', params: {} }));
+      const frame = await answer;
+      expect(frame.id === id).toBe(true);
+      expect(frame.error).toMatchObject({ code: RpcErrorCode.Refused });
+      expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(RPC_MAX_FRAME_BYTES);
+      const next = firstFrame(socket, 3000, frame => frame.id === 'small');
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'small', method: 'projects.list', params: {} }));
+      expect((await next).id).toBe('small');
+
+      const request = { jsonrpc: '2.0', id: '', method: 'settings.get', params: {} };
+      request.id = 'x'.repeat(RPC_MAX_FRAME_BYTES - Buffer.byteLength(JSON.stringify(request)));
+      expect(Buffer.byteLength(JSON.stringify(request))).toBe(RPC_MAX_FRAME_BYTES);
+      const closed = closeCode(socket);
+      socket.send(JSON.stringify(request));
+      expect(await closed).toBe(1009);
+    } finally { socket.close(); }
+  });
+
   test('a rolled-back prompt sends no message or status notifications', async () => {
     const client = await harness.connect();
     const { threadId } = await echoThread(harness, client);

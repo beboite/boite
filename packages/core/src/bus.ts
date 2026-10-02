@@ -31,6 +31,8 @@ export class Bus {
    * process.
    */
   onError: (message: string) => void = (message) => console.error(message);
+  /** Core diagnostics are normalized before either internal or committed observers see them. */
+  normalizeLog?: (payload: RpcEvents['core.log']) => RpcEvents['core.log'];
 
   onAny(listener: BusListener): () => void {
     this.listeners.add(listener);
@@ -69,6 +71,7 @@ export class Bus {
   }
 
   emit<E extends RpcEventName>(name: E, payload: RpcEvents[E]): void {
+    if (name === 'core.log' && this.normalizeLog) payload = this.normalizeLog(payload as RpcEvents['core.log']) as RpcEvents[E];
     if (name === 'message.delta') {
       this.queue(payload as RpcEvents['message.delta']);
       return;

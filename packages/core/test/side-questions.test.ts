@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { sideQuestionSnapshot, type Message } from '@boite/contracts';
+import { sideQuestionSnapshot, type Message, type RpcEvents } from '@boite/contracts';
 import { echoDriver } from '../src/drivers/echo.ts';
 import { setDriver } from '../src/drivers/index.ts';
 import { echoThread, startTestCore, waitFor, type TestCore } from './harness.ts';
@@ -115,4 +115,82 @@ test('duplicate side requests are refused and archive cancels only the side requ
   expect((await pending).error).toBe('side request cancelled');
   await expect(client.call('threads.btw', { threadId, question: ' ', requestId: 'side_0003' })).rejects.toThrow('question');
   await expect(client.call('threads.btw', { threadId, question: 'Question', requestId: 'side_0004' })).rejects.toThrow('not archived');
+});
+
+test('a cancelled side request cannot publish over its replacement when the request id is reused', async () => {
+  let shutdownRequested = false;
+  harness = await startTestCore({ onShutdown: () => { shutdownRequested = true; } });
+  const client = await harness.connect();
+  const { threadId } = await echoThread(harness, client);
+  const requests: { finish(answer: string): void; signal: AbortSignal }[] = [];
+  restore = setDriver('echo', { ...echoDriver, sideQuestion: ctx => new Promise(resolve => {
+    requests.push({ finish: resolve, signal: ctx.signal });
+  }) });
+  const events: RpcEvents['thread.btw'][] = [];
+  const off = harness.core.bus.onAny((name, payload) => {
+    if (name === 'thread.btw') events.push(payload as RpcEvents['thread.btw']);
+  });
+  try {
+    await client.call('threads.btw', { threadId, question: 'First request', requestId: 'side_reused' });
+    expect(harness.core.threads.require(threadId).status).toBe('idle');
+    expect(harness.core.procs.liveThreads()).toEqual([]);
+    expect(harness.core.router.activeRequests).toBe(0);
+    expect(harness.core.requestIdleShutdown()).toBe('busy');
+    expect(shutdownRequested).toBe(false);
+    await client.call('threads.btw.cancel', { threadId, requestId: 'side_reused' });
+    expect(requests[0]!.signal.aborted).toBe(true);
+    expect(events).toEqual([{ threadId, requestId: 'side_reused', answer: null, error: 'side request cancelled' }]);
+    await client.call('threads.btw', { threadId, question: 'Replacement request', requestId: 'side_reused' });
+    requests[0]!.finish('Obsolete answer');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(events).toHaveLength(1);
+    await expect(client.call('threads.btw', { threadId, question: 'A third request', requestId: 'side_third' })).rejects.toThrow('already being answered');
+    requests[1]!.finish('Replacement answer');
+    await waitFor(() => events.length === 2);
+    expect(events[1]).toEqual({ threadId, requestId: 'side_reused', answer: 'Replacement answer', error: null });
+    const fork = await client.call('threads.btw.fork', { threadId, requestId: 'side_reused' });
+    expect((await client.call('threads.get', { threadId: fork.id })).messages.map(message => message.parts)).toEqual([
+      [{ type: 'text', text: 'Replacement request' }], [{ type: 'text', text: 'Replacement answer' }],
+    ]);
+  } finally { off(); }
+});
+
+test('archiving a parent cancels retained descendant side requests and fences their completion after restore', async () => {
+  harness = await startTestCore();
+  const client = await harness.connect();
+  const { threadId, accountId } = await echoThread(harness, client);
+  const parent = harness.core.threads.require(threadId);
+  const child = harness.core.threads.create({ projectId: parent.projectId!, providerId: 'echo', accountId }, { id: 'thr_side_child', branch: null, parentThreadId: threadId });
+  const descendant = harness.core.threads.create({ projectId: parent.projectId!, providerId: 'echo', accountId }, { id: 'thr_side_descendant', branch: null, parentThreadId: child.id });
+  const originalChild = harness.core.threads.require(child.id), originalDescendant = harness.core.threads.require(descendant.id);
+  const requests: { finish(answer: string): void; signal: AbortSignal }[] = [];
+  restore = setDriver('echo', { ...echoDriver, sideQuestion: ctx => new Promise(resolve => {
+    requests.push({ finish: resolve, signal: ctx.signal });
+  }) });
+  const events: RpcEvents['thread.btw'][] = [];
+  const off = harness.core.bus.onAny((name, payload) => {
+    if (name === 'thread.btw') events.push(payload as RpcEvents['thread.btw']);
+  });
+  try {
+    await client.call('threads.btw', { threadId: descendant.id, question: 'Before archive', requestId: 'side_family_old' });
+    await client.call('threads.archive', { threadId });
+    expect(requests[0]!.signal.aborted).toBe(true);
+    expect(events).toEqual([{ threadId: descendant.id, requestId: 'side_family_old', answer: null, error: 'side request cancelled' }]);
+    await expect(client.call('threads.btw', { threadId: descendant.id, question: 'While archived', requestId: 'side_family_hidden' })).rejects.toThrow('parent');
+    await client.call('threads.archive', { threadId, archived: false });
+    await client.call('threads.btw', { threadId: descendant.id, question: 'After restore', requestId: 'side_family_new' });
+    requests[0]!.finish('Late archived answer');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(events).toHaveLength(1);
+    requests[1]!.finish('Current restored answer');
+    await waitFor(() => events.length === 2);
+    expect(events[1]).toMatchObject({ requestId: 'side_family_new', answer: 'Current restored answer', error: null });
+    expect(harness.core.threads.require(child.id)).toEqual(originalChild);
+    expect(harness.core.threads.require(descendant.id)).toEqual(originalDescendant);
+    expect((await client.call('threads.get', { threadId: descendant.id })).messages).toEqual([]);
+    const fork = await client.call('threads.btw.fork', { threadId: descendant.id, requestId: 'side_family_new' });
+    expect((await client.call('threads.get', { threadId: fork.id })).messages.map(message => message.parts)).toEqual([
+      [{ type: 'text', text: 'After restore' }], [{ type: 'text', text: 'Current restored answer' }],
+    ]);
+  } finally { off(); }
 });

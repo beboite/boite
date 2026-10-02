@@ -1,5 +1,16 @@
-import type { ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
+import { archiveState } from '../merged-pr-archive-state.ts';
+import type { RpcParams, ThreadId, ThreadStatus, ThreadSummary } from '@boite/contracts';
 import type { Core } from '../core.ts';
+import { notFound } from '../errors.ts';
+
+export function readToolOutput(core: Core, params: RpcParams<'messages.toolOutput'>): { output: string | null } {
+  core.threads.require(params.threadId);
+  const message = core.journal.getMessage(params.messageId);
+  if (!message || message.threadId !== params.threadId) throw notFound(`message ${params.messageId} is not a message of thread ${params.threadId}`, params);
+  const part = message.parts.find(part => part.type === 'tool' && part.toolId === params.toolId);
+  if (!part || part.type !== 'tool') throw notFound(`tool ${params.toolId} is not a tool of message ${params.messageId}`, params);
+  return { output: part.output };
+}
 
 // The thread row as every part of the store writes it: one event, the row, and the clients told.
 
@@ -25,6 +36,7 @@ export function withLoad(core: Core, thread: ThreadSummary): ThreadSummary {
   const tasks = core.threads?.agentState.background.get(thread.id) ?? [];
   return {
     ...thread,
+    archiveReason: thread.archived ? archiveState(core.journal, thread.id).reason : undefined,
     load: core.procs.loadOf(thread.id),
     runningSince: busy ? core.journal.runningSince(thread.id) : null,
     progress: busy ? core.threads?.progress?.get(thread.id) ?? null : null,

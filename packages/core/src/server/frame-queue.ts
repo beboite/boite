@@ -6,7 +6,13 @@ const MAX_PENDING_BYTES = 64 * 1024 * 1024;
 const MAX_CONNECTION_FRAMES = 1024;
 const MAX_CONNECTION_BYTES = 32 * 1024 * 1024;
 const MAX_ACTIVE = 64;
+/** Long agent waits must leave 16 slots for the UI, paired devices and new hellos. */
+const MAX_AGENT_ACTIVE = MAX_ACTIVE - 16;
 const MAX_ACTIVE_PER_CONNECTION = 8;
+
+function fromAgent(connection: ServerConnection): boolean {
+  return connection.authenticated && connection.identity.principal === 'agent';
+}
 
 interface Frame {
   raw: string;
@@ -26,6 +32,7 @@ export class FrameQueue {
   private readonly activeByConnection = new Map<ServerConnection, number>();
   private readonly retained = new Map<ServerConnection, { count: number; bytes: number }>();
   private active = 0;
+  private activeAgents = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private count = 0;
   private bytes = 0;
@@ -90,7 +97,8 @@ export class FrameQueue {
     this.timer = null;
     const deadline = performance.now() + SLICE_MS;
     while (this.pending.size > 0 && this.active < MAX_ACTIVE && performance.now() < deadline) {
-      const available = [...this.pending].find(([connection]) => (this.activeByConnection.get(connection) ?? 0) < MAX_ACTIVE_PER_CONNECTION);
+      const available = [...this.pending].find(([connection]) => (this.activeByConnection.get(connection) ?? 0) < MAX_ACTIVE_PER_CONNECTION
+        && (!fromAgent(connection) || this.activeAgents < MAX_AGENT_ACTIVE));
       if (!available) return;
       const [connection, queue] = available;
       const frame = queue.frames[queue.head++]!;
@@ -103,10 +111,13 @@ export class FrameQueue {
       this.pending.delete(connection);
       if (queue.head < queue.frames.length) this.pending.set(connection, queue);
       this.active++;
+      const agent = fromAgent(connection);
+      if (agent) this.activeAgents++;
       this.activeByConnection.set(connection, (this.activeByConnection.get(connection) ?? 0) + 1);
       const complete = () => {
         this.release(connection, frame);
         this.active--;
+        if (agent) this.activeAgents--;
         const remaining = (this.activeByConnection.get(connection) ?? 1) - 1;
         if (remaining === 0) this.activeByConnection.delete(connection);
         else this.activeByConnection.set(connection, remaining);

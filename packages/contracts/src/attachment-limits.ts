@@ -13,9 +13,11 @@ export const ATTACHMENTS_PER_TURN = 8;
  */
 export const ATTACHMENTS_TOTAL_MAX_BYTES = 10 * 1024 * 1024;
 /**
- * The largest frame the core reads, set as the websocket's `maxPayloadLength`
- * (Bun's own default, named so both ends agree). Bun closes the socket on a
- * larger frame before any handler runs, so the client refuses one before
- * sending it.
+ * The request and RPC response ceiling in serialized UTF-8 bytes, including
+ * the JSON-RPC envelope and all result metadata. Bun's `maxPayloadLength`
+ * closes the socket on a larger request before any handler runs, so the client
+ * refuses one before sending it. The core checks each serialized response and
+ * sends a bounded refusal instead of an oversized result. Streaming event
+ * frames retain their existing transport behavior.
  */
 export const RPC_MAX_FRAME_BYTES = 16 * 1024 * 1024;

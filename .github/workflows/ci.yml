@@ -69,6 +69,9 @@ jobs:
       server: ${{ steps.filter.outputs.server == 'true' && !inputs.skip-server }}
       android: ${{ steps.filter.outputs.android == 'true' && !inputs.skip-android }}
       e2e: ${{ steps.filter.outputs.e2e }}
+      telemetry: ${{ steps.filter.outputs.telemetry }}
+      e2eTypes: ${{ steps.filter.outputs.e2eTypes }}
+      stress: ${{ steps.filter.outputs.stress }}
       portable: ${{ steps.filter.outputs.portable }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -83,6 +86,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           FORCE_CHECKS: ${{ inputs.force || github.ref_type == 'tag' || (github.event_name != 'push' && github.event_name != 'pull_request') }}
         run: bun scripts/ci/changes.ts
+      - run: bun install --frozen-lockfile
+      - name: Audit frozen dependencies
+        run: bun audit
       - run: bun scripts/check-docs.ts
       - run: bun test scripts/ci ./bench ./apps/shell/scripts
       # Missing sentences are warnings here and in the nightly; release.yml refuses them.
@@ -128,15 +134,63 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: node_modules/.vitest-cache
-          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
-          restore-keys: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-
+          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js', 'packages/ui/icon-plugin.ts') }}-${{ github.sha }}
+          restore-keys: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js', 'packages/ui/icon-plugin.ts') }}-
       - run: bun run check
       - run: bun run --cwd packages/ui test --maxWorkers=8
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         if: github.ref == 'refs/heads/main'
         with:
           path: node_modules/.vitest-cache
-          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js') }}-${{ github.sha }}
+          key: vitest-${{ runner.os }}-${{ hashFiles('bun.lock', 'packages/ui/vitest.config.ts', 'packages/ui/svelte.config.js', 'packages/ui/icon-plugin.ts') }}-${{ github.sha }}
+
+  telemetry:
+    needs: changes
+    if: needs.changes.outputs.telemetry == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun test packages/core/test/telemetry.test.ts
+
+  e2e-types:
+    needs: changes
+    if: needs.changes.outputs.e2eTypes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run check:e2e
+
+  stress:
+    needs: changes
+    if: needs.changes.outputs.stress == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      BOITE_E2E_PREBUILT_UI: '1'
+      BOITE_STRESS_ARTIFACTS: tests/e2e/.artifacts/stress
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: bun run build:ui
+      # Fixed protocol, unhealthy-core and echo fixtures use temporary data only.
+      # Preserve all three distinct scenarios and their existing deadlines.
+      - run: bun run test:stress
+      - uses: ./.github/actions/upload-artifact
+        if: always()
+        with:
+          name: stress-fixture-evidence
+          path: tests/e2e/.artifacts/stress/
+          retention-days: 7
 
   desktop:
     needs: changes
@@ -182,6 +236,8 @@ jobs:
       - name: Check bundle size budgets
         run: bun scripts/ci/budgets.ts
       - name: Windows installer regression tests
+        env:
+          BOITE_CI_INSTALLER_REQUIRED: '1'
         run: bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts scripts/ci/stop-core.test.ts
       - run: bun run test:shell --release
       - name: Native shell end-to-end tests
@@ -400,8 +456,7 @@ jobs:
     if: needs.changes.outputs.server == 'true'
     permissions:
       contents: read
-      packages: write
-    uses: ./.github/workflows/server.yml
+    uses: ./.github/workflows/server-verify.yml
 
   android:
     needs: changes
@@ -411,7 +466,7 @@ jobs:
   required:
     name: CI required
     if: always()
-    needs: [changes, core, web, desktop, e2e, desktop-portable, server, android]
+    needs: [changes, core, web, telemetry, e2e-types, stress, desktop, e2e, desktop-portable, server, android]
     runs-on: ubuntu-24.04
     steps:
       - name: Require all applicable checks
@@ -422,8 +477,9 @@ jobs:
           import json, os
           jobs = json.loads(os.environ['RESULTS'])
           assert jobs['changes']['result'] == 'success', jobs
-          for name in ('core', 'web', 'desktop', 'desktop-portable', 'server', 'android'):
-              required = jobs['changes']['outputs']['desktop' if name == 'desktop-portable' else name] == 'true'
+          for name in ('core', 'web', 'telemetry', 'e2e-types', 'stress', 'desktop', 'desktop-portable', 'server', 'android'):
+              output = {'desktop-portable': 'desktop', 'e2e-types': 'e2eTypes'}.get(name, name)
+              required = jobs['changes']['outputs'][output] == 'true'
               assert jobs[name]['result'] == ('success' if required else 'skipped'), jobs
           e2e_required = jobs['changes']['outputs']['desktop'] == 'true' and jobs['changes']['outputs']['e2e'] == 'true'
           assert jobs['e2e']['result'] == ('success' if e2e_required else 'skipped'), jobs

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { secureId } from '../../lib/secure-id';
   import type { AgentRoutine, AgentSchedule } from '@boite/contracts';
   import type { AgentsView } from '../../lib/agents.svelte';
   import { strings } from '../../lib/strings';
@@ -14,6 +15,10 @@
     const schedule: AgentSchedule = kind === 'interval' ? { kind, everyMinutes: minutes } : kind === 'daily' ? { kind, time, timezone } : { kind, at: new Date(at).getTime() };
     const saved = await view.call('agents.routine.save', { value: { agentId, name, prompt, schedule, enabled: true, nextAt: null, lastWorkId: null, lastScheduledAt: null } });
     if (saved) { name = ''; prompt = ''; adding = false; }
+  }
+  async function run(routineId: string) {
+    try { await view.call('agents.routine.run', { routineId, requestId: secureId() }); }
+    catch (error) { view.error = error instanceof Error ? error.message : String(error); }
   }
   async function toggle(routine: AgentRoutine) { await view.call('agents.routine.save', { id: routine.id, expectedRevision: routine.revision, value: { ...routine, enabled: !routine.enabled } }); }
   /** A once routine that ran has nothing left to pause or resume: the core never fires it again at its past date. */
@@ -35,7 +40,7 @@
           <span class="text">{routine.name}<span class="hint">{routine.prompt}</span><span class="hint">{when(routine)}</span></span>
           {#if view.store.owner}
             <span class="agent-form-actions">
-              <button type="button" class="small" disabled={view.pending} onclick={() => void view.call('agents.routine.run', { routineId: routine.id, requestId: crypto.randomUUID() })}>{labels.runNow}</button>
+              <button type="button" class="small" disabled={view.pending} onclick={() => void run(routine.id)}>{labels.runNow}</button>
               {#if !spent(routine)}<button type="button" class="ghost small" disabled={view.pending} onclick={() => void toggle(routine)}>{routine.enabled ? labels.pause : labels.resume}</button>{/if}
             </span>
           {/if}

@@ -41,6 +41,9 @@ export function startTurn(ctx: FakeContext, threadId: ThreadId, prompt: string, 
   if (thread.archived) {
     throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn on an archived thread', data: { threadId } });
   }
+  if (thread.parentThreadId && ctx.thread(thread.parentThreadId).archived) {
+    throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'cannot start a turn while its parent is archived; restore the parent first', data: { threadId } });
+  }
   if ((!queuedTurn && ['queued', 'running', 'waiting'].includes(thread.status)) || (queuedTurn && (thread.status !== 'queued' || queuedTurn.status !== 'queued')) || ctx.inFlight.has(threadId)) {
     const data: TurnInFlightData = { threadId, reason: 'turn-in-flight', thread: structuredClone(toSummary(thread)) };
     throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'this thread already has an in-flight turn', data });

@@ -1,3 +1,4 @@
+import { secureId } from './secure-id';
 import type { Client } from './client';
 import { audioBase64 } from './speech-recorder';
 
@@ -29,7 +30,7 @@ export class SpeechPreview {
     try {
       const audio = await snapshot();
       if (!audio || this.stopped) return;
-      this.requestId = crypto.randomUUID();
+      this.requestId = secureId();
       const result = await this.client.call('speech.transcribe', {
         requestId: this.requestId, revision: this.revision, audio: audioBase64(audio), preview: true,
         ...(this.language ? { language: this.language } : {}),

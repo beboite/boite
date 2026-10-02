@@ -1,8 +1,24 @@
-import { mkdirSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { attachmentError } from '@boite/contracts';
-import type { Attachment, Project, ProviderDescriptor } from '@boite/contracts';
+import type { Attachment, PreviewReference, Project, ProviderDescriptor, ThreadId, Turn } from '@boite/contracts';
 import { messageOf, refused } from '../errors.ts';
+import type { Journal } from '../journal.ts';
+
+/** Validate a prompt's retry key and resolve its durable receipt before accepting new work. */
+export function checkTurnRequest(journal: Journal, threadId: ThreadId, prompt: string, attachments: Attachment[], previewReferences: PreviewReference[], clientRequestId?: string): { fingerprint: string; turn: Turn | null } {
+  if (clientRequestId === undefined) return { fingerprint: '', turn: null };
+  if (typeof clientRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(clientRequestId)) throw refused('clientRequestId must contain 8 to 128 URL-safe characters');
+  const fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
+  const existing = journal.turnRequest(threadId, clientRequestId);
+  if (existing) {
+    if (existing.fingerprint === `start:pending:${fingerprint}`) throw refused('delivery of this message is unconfirmed; it will not be submitted again automatically', { reason: 'delivery-uncertain', threadId });
+    if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
+    return { fingerprint, turn: journal.getTurn(existing.turn_id) };
+  }
+  return { fingerprint, turn: null };
+}
 
 export function titleOf(title: string | undefined): string {
   return title !== undefined && title.length > 0 ? title : 'New thread';
@@ -54,6 +70,7 @@ export function checkCwd(project: Project, cwd: string): string {
   const inside = relative(resolve(project.path), resolved);
   if (inside.startsWith('..') || resolve(inside) === inside) {
     throw refused('the working directory must be inside the project', {
+      field: 'cwd', expected: 'a directory inside the project',
       cwd: resolved,
       projectPath: project.path,
     });
@@ -62,9 +79,24 @@ export function checkCwd(project: Project, cwd: string): string {
   try {
     stat = statSync(resolved);
   } catch (error) {
-    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { cwd: resolved });
+    throw refused(`the working directory cannot be read: ${messageOf(error)}`, { field: 'cwd', cwd: resolved, expected: 'an existing directory inside the project' });
   }
-  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { cwd: resolved });
+  if (!stat.isDirectory()) throw refused('the working directory is not a directory', { field: 'cwd', cwd: resolved, expected: 'a directory inside the project' });
+  let projectRoot: string, directory: string;
+  try {
+    projectRoot = realpathSync(project.path);
+    directory = realpathSync(resolved);
+  } catch (error) {
+    throw refused(`cwd: the working directory filesystem path cannot be read: ${messageOf(error)}`, {
+      field: 'cwd', cwd: resolved, projectPath: project.path, expected: 'an existing directory inside the project filesystem root',
+    });
+  }
+  const actual = relative(projectRoot, directory);
+  if (actual === '..' || actual.startsWith(`..${sep}`) || isAbsolute(actual)) {
+    throw refused('the working directory must resolve inside the project', {
+      field: 'cwd', cwd: resolved, projectPath: project.path, expected: 'a directory inside the project filesystem root',
+    });
+  }
   return resolved;
 }
 

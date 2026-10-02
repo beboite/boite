@@ -1,8 +1,9 @@
 # Windows installer template
 
 `installer.nsi` comes from [Tauri CLI 2.11.4](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi),
-under the MIT license in `LICENSE-tauri`. The version matches
-`@tauri-apps/cli` in `apps/shell/package.json`.
+under the MIT license in `LICENSE-tauri`. This is the template's upstream
+version. The current `@tauri-apps/cli` dependency in `apps/shell/package.json`
+is 2.11.5; updating that dependency does not refresh this vendored file.
 
 Local changes preserve pinned shortcuts during updates:
 
@@ -18,4 +19,6 @@ Local changes preserve pinned shortcuts during updates:
 When updating the Tauri CLI, compare this file with the new upstream template
 and reapply these changes. Keep its MIT notice. Run `bun run build:shell` and
 `bun test scripts/ci/installer-shortcuts.test.ts scripts/ci/installer-hooks.test.ts`
-on Windows. Set `CARGO_TARGET_DIR` when using a shared Cargo target directory.
+on Windows. Set `BOITE_CI_INSTALLER_REQUIRED=1` to fail when NSIS or the
+generated installer fixtures are missing. If Cargo uses a shared target,
+point `CARGO_TARGET_DIR` at that existing target so the tests find its fixtures.

@@ -16,7 +16,7 @@ test('macOS samples only registered live processes and forgets exited ones', () 
   load.add('one', 10);
   load.add('one', 11);
   load.add('two', 20);
-  expect(load.sample('one')).toEqual({ processes: 1, cpuPercent: 0, memoryBytes: 100, workingSets: [{ pid: 10, bytes: 100 }] });
+  expect(load.sample('one')).toEqual({ processes: 1, cpuPercent: 0, cpuMeasured: false, memoryMeasured: true, memoryBytes: 100, workingSets: [{ pid: 10, bytes: 100 }] });
   expect(load.sample('two')?.memoryBytes).toBe(200);
   sizes.set(10, 300);
   expect(load.sample('one')?.memoryBytes).toBe(300);

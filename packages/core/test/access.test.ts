@@ -7,6 +7,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import type { RpcMethodName } from '@boite/contracts';
 import { connect } from '../src/client.ts';
 import { AGENT_METHODS, DEVICE_METHODS, assertAllowed } from '../src/access.ts';
@@ -108,6 +110,7 @@ describe('the access gate', () => {
     const seen: string[] = [];
     phone.onAny(name => seen.push(name));
     try {
+      const scheduler = phone.next('scheduler.updated');
       harness.core.bus.emit('account.login', { accountId: 'other-account', state: 'running', output: 'private login output', url: 'https://example.test/login', exitCode: null });
       harness.core.bus.emit('core.log', { level: 'error', message: 'private diagnostic', at: Date.now() });
       harness.core.bus.emit('process.focusPushed', { threadId: 'private-thread', pid: 123, title: 'private window', restored: true, at: Date.now() });
@@ -119,8 +122,11 @@ describe('the access gate', () => {
       harness.core.bus.emit('settings.updated', harness.core.settings.get());
       harness.core.bus.emit('delegation.changed', { threadId: 'another-thread' });
       harness.core.bus.emit('delegation.changed', { threadId });
+      harness.core.bus.emit('scheduler.updated', harness.core.scheduler.state());
+      expect(await scheduler).toEqual(harness.core.scheduler.state());
       await phone.call('settings.get', {});
-      expect(seen).toEqual(['settings.updated', 'delegation.changed']);
+      // Startup can also deliver a coalesced scheduler snapshot during this fixture.
+      expect(seen.filter(name => name !== 'scheduler.updated')).toEqual(['settings.updated', 'delegation.changed']);
     } finally { phone.close(); }
   });
 
@@ -330,5 +336,43 @@ describe('a working directory outside the project', () => {
       cwd: harness.dataDir,
     });
     expect(thread.cwd).toBe(harness.dataDir);
+    const nested = join(harness.dataDir, 'nested');
+    mkdirSync(nested);
+    const containedLink = join(harness.dataDir, 'contained-link');
+    symlinkSync(nested, containedLink, process.platform === 'win32' ? 'junction' : 'dir');
+    for (const cwd of [nested, containedLink]) {
+      const created = await client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
+      expect(created.cwd).toBe(cwd);
+    }
+
+    const linkedRoot = join(harness.dataDir, 'linked-root');
+    symlinkSync(nested, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const linkedProject = await client.call('projects.add', { path: linkedRoot, name: 'linked project' });
+    const child = join(linkedRoot, 'child');
+    mkdirSync(child);
+    for (const cwd of [linkedRoot, child]) {
+      const created = await client.call('threads.create', { projectId: linkedProject.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
+      expect(created.cwd).toBe(cwd);
+    }
+    await expect(client.call('threads.create', {
+      projectId: linkedProject.id, providerId: 'echo', accountId: account?.id ?? '', cwd: join(nested, 'child'),
+    })).rejects.toThrow('the working directory must be inside the project');
+  });
+
+  test('threads.create refuses a cwd whose directory link escapes the project, and writes no thread', async () => {
+    const client = await harness.connect();
+    const projectRoot = join(harness.dataDir, 'project');
+    const outside = join(harness.dataDir, 'outside');
+    mkdirSync(projectRoot); mkdirSync(outside);
+    const cwd = join(projectRoot, 'escape');
+    symlinkSync(outside, cwd, process.platform === 'win32' ? 'junction' : 'dir');
+    const project = await client.call('projects.add', { path: projectRoot, name: 'contained project' });
+    const account = (await client.call('accounts.list', {})).find(entry => entry.providerId === 'echo');
+    const creation = client.call('threads.create', { projectId: project.id, providerId: 'echo', accountId: account?.id ?? '', cwd });
+    await expect(creation).rejects.toThrow('the working directory must resolve inside the project');
+    await expect(creation).rejects.toMatchObject({ rpc: { data: {
+      field: 'cwd', expected: 'a directory inside the project filesystem root', cwd, projectPath: projectRoot,
+    } } });
+    expect(await client.call('threads.list', {})).toEqual([]);
   });
 });

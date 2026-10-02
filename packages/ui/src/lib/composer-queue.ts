@@ -1,4 +1,6 @@
-import type { Attachment, Message, MessageId, PreviewReference } from '@boite/contracts';
+import { ATTACHMENTS_PER_TURN, ATTACHMENTS_TOTAL_MAX_BYTES, PREVIEW_REFERENCES_PER_TURN, type Attachment, type Message, type MessageId, type PreviewReference } from '@boite/contracts';
+import { isActivityCommand } from './activity-command';
+import { attachedBytes } from './attachments';
 import { promptText } from './message-display';
 import type { Store } from './store.svelte';
 
@@ -6,12 +8,28 @@ import type { Store } from './store.svelte';
 export type ComposerState = NonNullable<Store['composerStates'][string]>;
 
 /**
- * Sends the prompts already queued together, in order. New arrivals wait for
+ * Sends consecutive ordinary prompts together, within turn limits. Activity
+ * commands are submitted individually. New arrivals wait for
  * the following turn. A refusal restores the original entries and pauses them.
  */
 export async function drainQueue(store: Store, threadId: string, state: ComposerState, turnId?: string): Promise<void> {
   if (state.sending || state.queued.length === 0) return;
-  const entries = state.queued.splice(0);
+  let count = 1;
+  let files = state.queued[0]!.attachments.length;
+  let bytes = attachedBytes(state.queued[0]!.attachments);
+  let references = state.queued[0]!.previewReferences?.length ?? 0;
+  if (!isActivityCommand(state.queued[0]!.text)) {
+    for (; count < state.queued.length; count++) {
+      const next = state.queued[count]!;
+      const weight = attachedBytes(next.attachments);
+      const refs = next.previewReferences?.length ?? 0;
+      if (isActivityCommand(next.text) || files + next.attachments.length > ATTACHMENTS_PER_TURN || bytes + weight > ATTACHMENTS_TOTAL_MAX_BYTES || references + refs > PREVIEW_REFERENCES_PER_TURN) break;
+      files += next.attachments.length;
+      bytes += weight;
+      references += refs;
+    }
+  }
+  const entries = state.queued.splice(0, count);
   let text = '';
   const attachments: Attachment[] = [];
   const previewReferences: PreviewReference[] = [];

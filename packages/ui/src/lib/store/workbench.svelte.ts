@@ -14,6 +14,7 @@ import type {
   ThreadResources,
   Todo
 } from '@boite/contracts';
+import { untrack } from 'svelte';
 import { strings } from '../strings';
 import type { FileAnswer } from '../store.svelte';
 import type { StoreContext } from './context';
@@ -83,6 +84,7 @@ export class Workbench {
   /** The thread `trace` belongs to, and whether the trace surface is on screen to read it. */
   tracedThreadId: ThreadId | null = null;
   traceWatched = false;
+  private traceRead = 0;
 
   constructor(private readonly ctx: StoreContext) {}
 
@@ -92,10 +94,17 @@ export class Workbench {
     const open = s.openThread;
     // Owner-only, like the surface it draws.
     if (!client || !open || !s.owner) return;
+    const read = ++this.traceRead;
+    const navigation = this.ctx.threads.openGeneration;
+    const baseline = untrack(() => [...this.trace]);
+    const current = () => read === this.traceRead && this.ctx.currentNavigation(client, navigation) && s.openThread?.id === open.id;
     try {
-      this.trace = await client.call('trace.get', { threadId: open.id });
+      const snapshot = await client.call('trace.get', { threadId: open.id });
+      if (!current()) return;
+      const changed = this.trace.filter(record => baseline.find(previous => sameProcess(previous, record)) !== record);
+      this.trace = [...changed, ...snapshot.filter(record => !changed.some(newer => sameProcess(newer, record)))];
     } catch (error) {
-      this.ctx.fail(error);
+      if (current()) this.ctx.fail(error);
     }
   }
 
@@ -108,31 +117,37 @@ export class Workbench {
 
   async gitStatus(threadId: ThreadId): Promise<GitStatus | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return null;
     try {
-      return await client.call('git.status', { threadId });
+      const result = await client.call('git.status', { threadId });
+      return this.ctx.currentClient(client, clientGeneration) ? result : null;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
     }
   }
 
   async gitDiff(threadId: ThreadId, path: string, ref?: string): Promise<GitDiff | null> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return null;
     try {
-      return await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
+      const result = await client.call('git.diff', { threadId, path, ...(ref === undefined ? {} : { ref }) });
+      return this.ctx.currentClient(client, clientGeneration) ? result : null;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
       return null;
     }
   }
 
   async listFiles(threadId: ThreadId, path?: string): Promise<FileAnswer<FileEntry[]>> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
     try {
       const value = await client.call('files.list', { threadId, ...(path === undefined ? {} : { path }) });
+      if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };
       return { ok: true, value };
     } catch (error) {
       return { ok: false, error: this.ctx.reason(error) };
@@ -141,10 +156,12 @@ export class Workbench {
 
   async readFile(threadId: ThreadId, path: string): Promise<FileAnswer<FileContent>> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     const s = this.ctx.store;
     if (!client || !s.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
     try {
       const value = await client.call('files.read', { threadId, path });
+      if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };
       // The core answers a path on its own HTTP server: the origin is the one
       // this client reached it by, which a core cannot know from where it runs.
       if (value.kind !== 'text' && value.url.startsWith('/') && s.endpointUrl !== null) {
@@ -173,9 +190,11 @@ export class Workbench {
     text: string
   ): Promise<FileAnswer<{ bytes: number; modifiedAt: number }>> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return { ok: false, error: strings.rightPanel.ownerOnly };
     try {
       const value = await client.call('files.write', { threadId, path, text });
+      if (!this.ctx.currentClient(client, clientGeneration)) return { ok: false, error: strings.errors.noEndpoint };
       return { ok: true, value };
     } catch (error) {
       return { ok: false, error: this.ctx.reason(error) };
@@ -186,36 +205,41 @@ export class Workbench {
   async setTasks(threadId: ThreadId, tasks: AgentTask[]): Promise<void> {
     const s = this.ctx.store;
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !s.owner) return;
     try {
       const activity = await client.call('threads.tasks.set', { threadId, tasks });
-      if (s.openThread?.id === threadId) s.openThread.activity = activity;
+      if (this.ctx.currentClient(client, clientGeneration) && s.openThread?.id === threadId) s.openThread.activity = activity;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async loadTodos(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return;
     try {
+      const project = this.#projectOf(threadId);
       const todos = await client.call('todos.list', { threadId });
       // The list keys on the project, which an empty answer does not carry.
-      const projectId = todos[0]?.projectId ?? this.#projectOf(threadId);
+      if (!this.ctx.currentClient(client, clientGeneration)) return;
+      const projectId = todos[0]?.projectId ?? project;
       if (projectId === null) return;
       this.todos = { ...this.todos, [projectId]: todos };
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async addTodo(threadId: ThreadId, text: string): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner || text.trim().length === 0) return;
     try {
       await client.call('todos.add', { threadId, text: text.trim() });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
@@ -225,43 +249,47 @@ export class Workbench {
     patch: { status?: Todo['status']; text?: string }
   ): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return;
     try {
       await client.call('todos.update', { threadId, todoId, ...patch });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async removeTodo(threadId: ThreadId, todoId: string): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return;
     try {
       await client.call('todos.remove', { threadId, todoId });
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async refreshResources(): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client || !this.ctx.store.owner) return;
     try {
       const [resources] = await Promise.all([client.call('resources.list', {}), this.refreshMemory()]);
-      if (client === this.ctx.client) this.resources = resources;
+      if (this.ctx.currentClient(client, clientGeneration)) this.resources = resources;
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 
   async killTree(threadId: ThreadId): Promise<void> {
     const client = this.ctx.client;
+    const clientGeneration = this.ctx.clientGeneration;
     if (!client) return;
     try {
       await client.call('resources.killTree', { threadId });
-      await this.ctx.store.refreshResources();
+      if (this.ctx.currentClient(client, clientGeneration)) await this.ctx.store.refreshResources();
     } catch (error) {
-      this.ctx.fail(error);
+      if (this.ctx.currentClient(client, clientGeneration)) this.ctx.fail(error);
     }
   }
 }

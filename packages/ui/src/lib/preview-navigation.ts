@@ -1,3 +1,4 @@
+import { secureId } from './secure-id';
 import { tick } from 'svelte';
 import { previewReferencesError, type PreviewReference } from '@boite/contracts';
 import { browserBridge, type BrowserEvent } from './browser-bridge';
@@ -55,7 +56,7 @@ export async function showPreviewReference(store: Store, threadId: string, refer
     await awaitBrowser(event => event.id === surfaceId && ((event.type === 'loading' && !event.loading) || event.type === 'failed'), () => {});
     if (!ownsThread()) throw failure('unavailable');
   }
-  const requestId = crypto.randomUUID();
+  const requestId = secureId();
   await awaitBrowser(event => event.id === surfaceId && event.type === 'highlight-result' && event.requestId === requestId,
     () => browserBridge.highlight(surfaceId, requestId, reference));
 }

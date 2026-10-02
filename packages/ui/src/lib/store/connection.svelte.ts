@@ -9,6 +9,7 @@ import { reconcileRows, unlistedPanels } from '../thread-rows';
 import { work } from '../work-prefs.svelte';
 import { installStatesOf } from './accounts.svelte';
 import type { StoreContext } from './context';
+import { retainRows } from './snapshot-reads';
 
 export const UI_VERSION = '2.0.0-beta.1';
 
@@ -63,7 +64,8 @@ export class Connection {
   machineStates = $state<Record<string, { state: ClientState; error?: string }>>({});
   booted = $state(false);
   /** The load in flight and the client it speaks to, so the two callers of `reload()` share one. */
-  reloading: { client: Client; promise: Promise<void> } | null = null;
+  reloading: { client: Client; generation: number; epoch: number; promise: Promise<void>; essential: Promise<void>; release: () => void } | null = null;
+  #readEpoch = 0;
   #localRecovery: ReturnType<typeof setTimeout> | null = null;
   /** The endpoint came with neither a token nor a grant: the page's own origin, asked with nothing. */
   #keyless = false;
@@ -93,7 +95,6 @@ export class Connection {
   /** Stop streaming the hidden conversation while keeping machine summaries live. */
   async suspend(): Promise<void> {
     this.ctx.store.visible = false;
-    this.ctx.threads.openGeneration++;
     await this.ctx.threads.unsubscribe();
   }
 
@@ -341,20 +342,22 @@ export class Connection {
     const s = this.ctx.store;
     const client = this.ctx.client;
     if (!client) return;
+    const generation = this.ctx.clientGeneration;
     // A closed client of the shell's own core: its core may be gone, and the
     // shell starts another on this ask, maybe on a new port.
     if (client.state === 'closed' && await this.#followLocalCore(client) !== 'same') return;
     try {
+      s.error = null;
       const core = await client.connect();
-      if (this.ctx.client !== client) return;
+      if (!this.ctx.currentClient(client, generation)) return;
       this.core = core;
       this.connection = client.state;
       this.principal = client.principal;
       this.pairingRequired = false;
-      s.error = null;
-      await Promise.all([this.ctx.drafts.start(), s.reload()]);
+      void s.reload();
+      await Promise.all([this.ctx.drafts.start(), this.reloading?.essential]);
     } catch (error) {
-      if (this.ctx.client !== client) return;
+      if (!this.ctx.currentClient(client, generation)) return;
       this.connection = client.state;
       if (error instanceof RpcFailure && error.code === RpcErrorCode.Unauthorized && !this.localCore) {
         this.#authenticationFailed(error);
@@ -431,104 +434,98 @@ export class Connection {
     await this.#switchTo(endpoint);
   }
 
-  /**
-   * `connect()` and the `ready` state handler both ask for this on every boot
-   * and on every reconnect, and the second one used to send the same ten calls
-   * again. It joins the load already in flight instead.
-   */
+  /** Retire leases when a connection ends, including a reconnect on the same client. */
+  invalidateReads(): void {
+    this.#readEpoch++;
+    this.reloading?.release();
+    this.ctx.requests.cancelReads();
+    this.ctx.threadReads.clear();
+    this.ctx.projectReads.clear();
+    this.ctx.accountReads.clear();
+  }
+
+  /** The ready handler and explicit callers share a refresh of this connection. */
   reload(): Promise<void> {
     const client = this.ctx.client;
-    if (!client) return this.#load();
-    // The load in flight belongs to the client that started it. A machine
-    // switched under a slow boot used to hand the new client that same
-    // promise, whose result `#load()` then discards for being the old one's,
-    // so the new machine's store stayed empty until something asked again.
-    if (this.reloading?.client === client) return this.reloading.promise;
-    const promise = this.#load().finally(() => {
+    if (!client) return Promise.resolve();
+    const generation = this.ctx.clientGeneration, epoch = this.#readEpoch;
+    if (this.reloading?.client === client && this.reloading.generation === generation && this.reloading.epoch === epoch) return this.reloading.promise;
+    let release!: () => void;
+    const essential = new Promise<void>(resolve => { release = resolve; });
+    const promise = this.#load(client, generation, epoch, release).finally(() => {
+      release();
       if (this.reloading?.promise === promise) this.reloading = null;
     });
-    this.reloading = { client, promise };
+    this.reloading = { client, generation, epoch, promise, essential, release };
     return promise;
   }
 
-  async #load(): Promise<void> {
+  async #load(client: Client, generation: number, epoch: number, ready: () => void): Promise<void> {
     const s = this.ctx.store;
     const { accounts, requests } = this.ctx;
-    const client = this.ctx.client;
-    if (!client) return;
+    const current = () => this.ctx.currentClient(client, generation) && this.#readEpoch === epoch;
     const loginRevision = accounts.loginRevision;
-    // The open thread's catch-up leaves ahead of the lists, so the text missed
-    // during a drop does not wait for the slowest of them.
+    const revisions = { ...this.ctx.metadataRevision };
+    const projectRead = this.ctx.projectReads.begin();
+    const threadRead = this.ctx.threadReads.begin();
+    const accountRead = this.ctx.accountReads.begin();
+    // The global reads also serve the reopen, avoiding duplicate per-thread reads.
+    const permissionRead = requests.permissionRead(client, 'all');
+    const questionRead = requests.questionRead(client, 'all');
     const open = s.openThread;
-    const reopened = open && s.visible ? s.open(open.id, false).catch((error: unknown) => this.ctx.fail(error)) : null;
-    // One rejected call used to take the whole boot down: `Promise.all` jumped
-    // to the catch, which only toasted, and projects, threads, providers and
-    // accounts silently kept their pre-reconnect values under an app that
-    // looked loaded. Each slice lands on its own now, and only what failed is
-    // reported.
-    const results = await Promise.allSettled([
-      client.call('projects.list', {}),
-      client.call('threads.list', {}),
-      client.call('providers.list', {}),
-      client.call('accounts.list', {}),
-      client.call('settings.get', {}),
-      client.call('scheduler.get', {}),
-      client.call('permissions.list', {}),
-      client.call('questions.list', {}),
-      // The one owner-only call of the boot. A device asking for it is refused.
-      s.owner ? client.call('accounts.logins', {}) : Promise.resolve([]),
-      client.call('keybindings.get', {})
-    ]);
-    // A machine switched under a slow boot must not have this one's data
-    // written into it: the store may already be serving another client.
-    if (client !== this.ctx.client) return;
-    const [projects, threads, providers, accountList, settings, scheduler, permissions, questions, logins, keybindings] = results;
-    if (permissions.status === 'fulfilled') requests.mergePermissions(permissions.value, 'all');
-    if (questions.status === 'fulfilled') requests.mergeQuestions(questions.value, 'all');
-    if (projects.status === 'fulfilled') { s.projects = projects.value; this.ctx.projects.bootListAt = Date.now(); }
-    if (threads.status === 'fulfilled') {
-      // Held rows are patched, not replaced, so a reconnect redraws only what changed.
-      s.threads = reconcileRows(s.threads, threads.value);
-      // A list read before the open thread's markRead may answer after it.
-      const read = reopened && s.openThread?.unread === false ? s.threads.find((t) => t.id === s.openThread?.id) : undefined;
-      if (read) read.unread = false;
-      // Archived while this client was away: their layouts would never be shown again.
-      const listed = new Set(threads.value.map((t) => s.threadKey(t.id)));
-      rightPanel.prune(unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null));
-      // A device with no record of how it works: conversations already here, or
-      // a tour already seen, mean an install from before the question.
-      work.settle(threads.value.length > 0 || onboardingSeen());
-    }
-    if (providers.status === 'fulfilled') {
-      s.providers = providers.value.loaded;
-      s.rejectedProviders = providers.value.rejected;
-      s.installStates = installStatesOf(providers.value.loaded);
-    }
-    if (accountList.status === 'fulfilled') {
-      s.accounts = accountList.value;
-      this.ctx.models.restoreModels();
-    }
-    if (logins.status === 'fulfilled') accounts.restoreLogins(logins.value, loginRevision);
-    if (settings.status === 'fulfilled') s.settings = settings.value;
-    if (keybindings.status === 'fulfilled') s.keybindings = keybindings.value;
-    if (scheduler.status === 'fulfilled') s.scheduler = scheduler.value;
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed !== undefined && failed.status === 'rejected') this.ctx.fail(failed.reason);
-    // What `bench/startup.ts` reads: the first moment the app holds its data.
-    if (typeof performance !== 'undefined' && performance.getEntriesByName('boite:ready').length === 0) performance.mark('boite:ready');
-    void s.loadHarnessUpdates();
-    void s.refreshMemory();
-    if (open && reopened) {
-      await reopened;
-      // The socket resubscribed the agent and the team, but what they said
-      // during the gap reached nobody: fetch it, as open() did for the thread.
-      if (client === this.ctx.client && s.openThread?.id === open.id) {
+    const reopened = open && s.visible ? s.open(open.id, false, { requests: false }).catch((error: unknown) => { if (current()) this.ctx.fail(error); }) : null;
+    // Publish each completed slice immediately. A secondary login snapshot must
+    // never hold conversation catch-up or accepted input behind it.
+    const slice = <T>(asked: Promise<T>, apply: (value: T) => void, cancel?: () => void): Promise<void> => asked.then(value => {
+      if (current()) apply(value); else cancel?.();
+    }).catch(error => { cancel?.(); if (current()) this.ctx.fail(error); });
+    const primary = [
+      slice(client.call('projects.list', {}), rows => { s.projects = retainRows(s.projects, projectRead.apply(rows, s.projects)); this.ctx.projects.bootListAt = Date.now(); }, () => projectRead.cancel()),
+      slice(client.call('threads.list', {}), rows => {
+        s.threads = reconcileRows(s.threads, threadRead.apply(rows, s.threads));
+        const read = reopened && s.openThread?.unread === false ? s.threads.find(t => t.id === s.openThread?.id) : undefined;
+        if (read) read.unread = false;
+        const listed = new Set(s.threads.map(t => s.threadKey(t.id)));
+        const stale = unlistedPanels(s.machineId, listed, s.openThread ? s.threadKey(s.openThread.id) : null);
+        rightPanel.prune(key => stale(key) && !rightPanel.drafts.get(key)?.size);
+        work.settle(s.threads.length > 0 || onboardingSeen());
+      }, () => threadRead.cancel()),
+      slice(client.call('providers.list', {}), value => {
+        if (revisions.providers !== this.ctx.metadataRevision.providers) return;
+        s.providers = value.loaded; s.rejectedProviders = value.rejected; s.installStates = installStatesOf(value.loaded);
+      }),
+      slice(client.call('accounts.list', {}), rows => { s.accounts = retainRows(s.accounts, accountRead.apply(rows, s.accounts)); this.ctx.models.restoreModels(); }, () => accountRead.cancel()),
+      slice(client.call('settings.get', {}), value => { if (revisions.settings === this.ctx.metadataRevision.settings) s.settings = value; }),
+      slice(permissionRead.promise, rows => permissionRead.apply(rows), permissionRead.cancel),
+      slice(questionRead.promise, rows => questionRead.apply(rows), questionRead.cancel),
+      ...(reopened ? [reopened] : [])
+    ];
+    const secondary = [
+      slice(client.call('scheduler.get', {}), value => { if (revisions.scheduler === this.ctx.metadataRevision.scheduler) s.scheduler = value; }),
+      slice(s.owner ? client.call('accounts.logins', {}) : Promise.resolve([]), rows => accounts.restoreLogins(rows, loginRevision)),
+      slice(client.call('keybindings.get', {}), value => { if (revisions.keybindings === this.ctx.metadataRevision.keybindings) s.keybindings = value; })
+    ];
+    const essential = Promise.all(primary).then(() => {
+      ready();
+      if (!current()) return;
+      try {
+        if (typeof performance !== 'undefined' && performance.getEntriesByName?.('boite:ready')?.length === 0) performance.mark?.('boite:ready');
+      } catch { /* Diagnostic timing cannot hold a working connection in its loading state. */ }
+    });
+    try {
+      await Promise.all([essential, ...secondary]);
+      if (!current()) return;
+      void s.loadHarnessUpdates();
+      void s.refreshMemory();
+      if (open && reopened && s.openThread?.id === open.id) {
         await this.ctx.delegation.refreshDelegated(client);
+        if (!current() || s.openThread?.id !== open.id) return;
         void s.loadDelegation(open.id);
-        // Also when it was never read for this thread: one opened offline asked nothing.
         const held = s.coordination?.self.threadId === open.id;
         if (held || !s.openThread.agentSessionId) void s.loadCoordination(open.id, held && s.coordinationDirectory !== null);
       }
+    } finally {
+      projectRead.cancel(); threadRead.cancel(); accountRead.cancel(); permissionRead.cancel(); questionRead.cancel();
     }
   }
 }

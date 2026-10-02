@@ -1,6 +1,7 @@
 import { RpcErrorCode } from '@boite/contracts';
 import type { Core } from '../core.ts';
-import { RpcFailure, messageOf } from '../errors.ts';
+import { RpcFailure } from '../errors.ts';
+import { logMessageOf } from '../log-errors.ts';
 import { ServerConnection } from './connection.ts';
 import { hello } from './hello.ts';
 
@@ -50,7 +51,20 @@ export async function handleFrame(core: Core, connection: ServerConnection, raw:
     // An unexpected throw is a bug here, not something the user can act on.
     // SQLite sentences, absolute paths and stack fragments used to reach the
     // screen verbatim. The cause stays in the log, the client gets a sentence.
-    core.log('error', `${method} failed: ${messageOf(error)}`);
+    // Persistent diagnostics bypass core.log here: that event also raises a UI
+    // error toast and would replace the deliberately generic RPC failure.
+    const causes: string[] = [];
+    let cause: unknown = error;
+    const seen = new Set<unknown>();
+    while (cause !== undefined && cause !== null && !seen.has(cause) && causes.length < 4) {
+      seen.add(cause);
+      causes.push(logMessageOf(cause));
+      cause = cause instanceof Error ? cause.cause : undefined;
+    }
+    core.logs.record('error', `${method} failed: ${causes.join('; caused by: ')}`, {
+      source: 'rpc', event: 'rpc.failed', requestId: String(id),
+      ...(connection.identity.threadId === null ? {} : { threadId: connection.identity.threadId }),
+    });
     connection.sendResponse({
       jsonrpc: '2.0',
       id,

@@ -52,3 +52,22 @@ test('a frame decoded after the view closed pairs nothing', async () => {
     delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
   }
 });
+
+
+test('a pairing code is accepted when another native detection precedes it', async () => {
+  const link = 'https://boite.example.com/?grant=accepted';
+  class Detector {
+    async detect() { return [{ rawValue: 'https://example.com/other' }, { rawValue: link }]; }
+  }
+  Object.defineProperty(window, 'BarcodeDetector', { configurable: true, value: Detector });
+  const stop = new AbortController();
+  const deadline = setTimeout(() => stop.abort(), 500);
+  try {
+    const video = { readyState: 4, videoWidth: 640, videoHeight: 480 } as HTMLVideoElement;
+    expect(await scanVideo(video, stop.signal, text => text === link)).toBe(link);
+  } finally {
+    clearTimeout(deadline);
+    stop.abort();
+    delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
+  }
+});

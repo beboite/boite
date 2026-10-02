@@ -52,8 +52,8 @@ export async function titleTurn(ctx: TitleContext): Promise<string | null> {
     },
     // Read-only and `never`: the server has nothing to ask a title call.
     request: (method) => Promise.reject(new Error(`a title call answers no ${method}`)),
-    log: (level, message) => {
-      ctx.log(level, message);
+    log: (level, message, context) => {
+      ctx.log(level, message, context);
     },
   });
 

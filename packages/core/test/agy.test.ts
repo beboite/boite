@@ -9,7 +9,7 @@ import shippedAgy from '../src/providers/shipped/antigravity-cli.json';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { MessagePart, PermissionMode, Settings } from '@boite/contracts';
 import type { CoreClient } from '../src/client.ts';
 import { getDriver } from '../src/drivers/index.ts';
@@ -408,6 +408,45 @@ describe('agy driver', () => {
     const { accountId } = await agyAccount(client);
     process.env['AGY_FAKE_SIGNED_OUT'] = '1';
     await expect(client.call('providers.probe', { providerId: 'agy-fake', accountId })).rejects.toThrow(/not signed in/);
+  });
+
+  test('a complete model listing settles after native exit and drained output when close is missing', async () => {
+    const client = await startCore();
+    const { accountId } = await agyAccount(client);
+    const core = harness!.core;
+    const spawn = core.procs.spawnChild.bind(core.procs);
+    const releases: Array<() => void> = [];
+    const childSpies: Array<{ mockRestore(): void }> = [];
+    const spawnSpy = spyOn(core.procs, 'spawnChild').mockImplementation((...args) => {
+      const child = spawn(...args);
+      const once = child.once.bind(child);
+      childSpies.push(spyOn(child, 'once').mockImplementation((...args: Parameters<typeof child.once>) => {
+        const [event, listener] = args;
+        if (event !== 'close') return once(event, listener);
+        releases.push(() => listener(child.exitCode, child.signalCode));
+        return child;
+      }));
+      return child;
+    });
+    const request = client.call('providers.probe', { providerId: 'agy-fake', accountId });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('the complete model listing remained blocked on a missing close event')), 5000);
+        }),
+      ]);
+      expect(result.models.map(model => model.id)).toEqual(['default', 'gemini-3.8-flash', 'gemini-3.1-pro', 'claude-opus-4-6-thinking', 'gemini-solo-high']);
+      expect(core.procs.liveCount(`probe:agy-fake:${accountId}`)).toBe(0);
+      expect(core.providers.installs.leaseCount('agy-fake')).toBe(0);
+    } finally {
+      clearTimeout(timer);
+      for (const release of releases) release();
+      spawnSpy.mockRestore();
+      for (const spy of childSpies) spy.mockRestore();
+      await Promise.allSettled([request]);
+    }
   });
 
   test('a probe outlives another account changing, and is refused when its own account changes', async () => {

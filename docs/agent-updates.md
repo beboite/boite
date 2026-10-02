@@ -3,21 +3,15 @@
 This page covers agent executables. Updating Boite itself and selecting
 Boite Nightly are described in [Desktop updates](updates.md).
 
-Boite keeps the agents of a machine current. The core of that machine does the
-work: it reads each agent's version, reads the newest one, and runs the update.
-A client only shows what the core found and sends Update or Skip back.
+Each core checks and updates the agent executables on its own machine. Clients
+show those readings and send Update or Skip to that core.
 
-An agent with an updater and no way to name its newest release, the Antigravity
-CLI being one, announces nothing: its version on the Providers row reads
-`Checks by itself` on hover and the row carries `Run its updater`, which runs
-the updater on request and reads the version again.
-An updater that exits cleanly with no newer release known has just named the
-newest release it found, so the core records that version as the newest until
-the next check. The row then reads `Up to date` instead of offering the updater
-again, even when nothing changed. When a newer release was known and the
-version did not move, the run counts as failed, as does one that exits with an
-error: the row keeps the button and shows the failure.
-The automatic switch leaves it alone, such an agent updates itself.
+An agent with an updater but no readable latest-version source, such as the
+Antigravity CLI, shows Checks by itself and Run its updater. A successful run
+records its resulting version as current until the next check. If a newer
+version was known but the installed version stays unchanged, or the command
+fails, the row retains its update action and error. Automatic updates exclude
+agents without a readable latest version.
 
 ## What the user sees
 
@@ -53,8 +47,8 @@ version again.
 | `self` | the user's own install, found on PATH or at a known path | the agent's `--version` | the npm `latest` tag, or the agent's own check | the agent's own updater |
 
 A managed release only moves with a Boite release, because its URL and SHA-256
-are pinned in the descriptor. The self route never downloads anything itself:
-it runs the program the user installed with the arguments its descriptor names.
+are pinned in the descriptor. The self route invokes the installed program with
+its descriptor's updater arguments; the program owns the download.
 
 A profile opts in with an `update` block:
 
@@ -96,9 +90,10 @@ newest release Boite can read. Muse Code has no updater, so it is not listed.
 Every run of an agent goes through the process registry under the synthetic
 thread `update:<provider id>`, so it is traced and capped like any other agent
 process. A version read has 20 seconds, an agent's own updater 15 minutes. At
-the limit the core ends the run's whole process tree, and gives up on its
-output two seconds later even when a descendant it could not reach still holds
-the pipe. Only the last 256 KB of each output stream is kept.
+the limit the registry stops the run with Windows Job Objects or POSIX process
+groups ([trace](trace.md#platform-boundary)). A descendant that leaves its
+POSIX group can survive. Output draining ends two seconds later even if a
+descendant still holds the pipe. Only the last 256 KB of each stream is kept.
 
 A check reads two agents at a time. Its readings land in
 `<dataDir>/harness-versions.json`, so a restart shows the last reading and its
@@ -144,20 +139,16 @@ notice at once, without waiting for the next check.
 
 ## Remote machines
 
-Each core owns its agents, so a client connected to several machines gets one
-list per machine and sends Update to the machine that owns the agent. The
-notice names the machine when more than one is connected.
+A multi-machine client keeps separate update lists and routes each action to
+the owning core ([machines](machines.md)). Notices name the machine when more
+than one is connected.
 
-A server with no window needs no client at all: with
-`autoUpdateHarnesses` on, its core checks ten minutes after start and every six
-hours, and updates each agent whose newest release it can read once none of
-its turns is in flight. Turn it on
-from Settings, Providers while that machine is the selected one. On Linux and
-macOS the shipped agents have no managed release, so they update through the
-self route, as the user the core runs as. An npm install that user cannot write,
-such as one root made under `/usr` or `/opt`, fails without running its
-updater and names the directory. Another updater fails with its own permission
-error, which the notice shows.
+With `autoUpdateHarnesses` enabled, a headless core checks ten minutes after
+startup and every six hours, postponing checks while work is active. Enable it
+in Settings, Providers on that machine. Providers without a managed release
+use the self route as the core user. An unwritable npm prefix fails before the
+updater starts and names the directory; other updater permission failures
+appear in the notice.
 
 To fix that, install the agent under the core user's own prefix. Run these
 commands as that user, then place `$HOME/.local/bin` before the system agent directory in the core service's

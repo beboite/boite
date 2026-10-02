@@ -3,6 +3,50 @@ import { setDriver } from '../src/drivers/index.ts';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { echoThread, startTestCore, waitFor } from './harness.ts';
 
+test('a mode applied after lost-session recovery updates the current execution snapshot', async () => {
+  const h = await startTestCore();
+  const attempts: TurnContext[] = [];
+  const fresh = Promise.withResolvers<TurnResult>();
+  const modes: string[] = [];
+  const restore = setDriver('echo', {
+    protocol: 'echo',
+    startTurn(ctx) {
+      attempts.push(ctx);
+      if (attempts.length === 1) return { stop() {}, done: Promise.resolve({ status: 'done', sessionId: 'old-native', usage: null }) };
+      if (ctx.sessionId === 'old-native') return {
+        stop() {}, done: Promise.resolve({ status: 'error', sessionId: 'old-native', usage: null, error: 'session is gone', sessionLost: true }),
+      };
+      return {
+        done: fresh.promise, stop() { fresh.resolve({ status: 'stopped', sessionId: null, usage: null }); },
+        setPermissionMode(mode) { modes.push(mode); return Promise.resolve(true); },
+      };
+    },
+  });
+  try {
+    const client = await h.connect();
+    const { threadId } = await echoThread(h, client);
+    const first = await client.call('turns.start', { threadId, prompt: 'Remember the task' });
+    await waitFor(() => h.core.journal.getTurn(first.id)?.status === 'done');
+    const selected = h.core.threads.require(threadId);
+    const turn = await client.call('turns.start', { threadId, prompt: 'Continue the task' });
+    await waitFor(() => attempts.length === 3);
+    expect(attempts[2]!.sessionId).toBeNull();
+    expect(attempts[2]!.prompt).toContain('Remember the task');
+    await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.execution?.permissionMode === 'yolo');
+    const execution = { providerId: selected.providerId, accountId: selected.accountId, model: selected.model, sessionId: null, sessionGeneration: 1, permissionMode: 'yolo' };
+    expect(h.core.journal.getTurn(turn.id)?.execution).toMatchObject(execution);
+    expect(attempts[2]!.thread).toMatchObject(execution);
+    expect(modes).toEqual(['yolo']);
+    fresh.resolve({ status: 'done', sessionId: 'fresh-native', usage: null });
+    await waitFor(() => h.core.journal.getTurn(turn.id)?.status === 'done');
+    expect(h.core.journal.getTurn(turn.id)?.execution).toMatchObject(execution);
+    expect(h.core.threads.require(threadId)).toMatchObject({ ...execution, sessionId: 'fresh-native', status: 'idle' });
+    expect(h.core.journal.listTurns(threadId)).toHaveLength(2);
+    expect(h.core.journal.listMessages(threadId).filter(message => message.turnId === turn.id && message.role === 'user')).toHaveLength(1);
+  } finally { await h.stop(); restore(); }
+});
+
 test.each([false, true])('restart coalesces mode changes and respects Stop=%s', async stop => {
   const h = await startTestCore();
   const attempts: TurnContext[] = [];

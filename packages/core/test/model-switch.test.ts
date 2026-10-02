@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { TurnContext, TurnResult } from '../src/drivers/types.ts';
 import { setDriver } from '../src/drivers/index.ts';
+import { echoDriver } from '../src/drivers/echo.ts';
+import { ModelProbes } from '../src/drivers/model-probes.ts';
+import type { ModelInfo } from '@boite/contracts';
 import { continuationInput } from '../src/continuation.ts';
 import { Journal } from '../src/journal.ts';
 import { join } from 'node:path';
@@ -125,6 +128,35 @@ test('a stale model selection is refused before a prompt is journalled', async (
   catch (e) { error = String(e); }
   expect(error).toContain('selection changed');
   expect(h.core.threads.get(threadId).messages).toHaveLength(0);
+});
+
+test('on-demand model discovery cannot overwrite another client selection while its metadata is pending', async () => {
+  const { client, threadId } = await setup();
+  const other = await h.connect();
+  const descriptor = h.core.providers.require('echo');
+  descriptor.protocol = 'acp';
+  const gate = Promise.withResolvers<ModelInfo[]>();
+  let reads = 0;
+  const cache = new ModelProbes(() => { reads++; return gate.promise; });
+  restore = setDriver('acp', {
+    ...echoDriver, protocol: 'acp',
+    probe: ctx => cache.probe(ctx),
+    probedModels: (providerId, accountId) => cache.models(providerId, accountId),
+    forgetProbes: filter => cache.forget(filter),
+  });
+  const pending = client.call('threads.update', { threadId, model: 'discovered', effort: 'high' });
+  const observed = pending.then(() => null, error => error as Error);
+  try {
+    await waitFor(() => reads === 1);
+    const chosen = await other.call('threads.update', { threadId, permissionMode: 'acceptEdits', expectedSelectionVersion: 0 });
+    expect(chosen.selectionVersion).toBe(1);
+    await expect(other.call('threads.update', { threadId, model: 'another', expectedSelectionVersion: 0 })).rejects.toThrow('selection changed');
+    expect(reads).toBe(1);
+    gate.resolve([{ id: 'discovered', name: 'Discovered', effort: { levels: [{ id: 'high', label: 'High' }], default: 'high' } }]);
+    expect(String(await observed)).toContain('selection changed');
+    expect(h.core.threads.require(threadId)).toMatchObject({ model: 'echo', effort: null, permissionMode: 'acceptEdits', selectionVersion: 1 });
+    expect(h.core.threads.get(threadId).messages).toHaveLength(0);
+  } finally { gate.resolve([]); await observed; }
 });
 
 test('continuation reads beyond the UI page, bounds long history and excludes reasoning and old grants', async () => {

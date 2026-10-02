@@ -1,14 +1,13 @@
 # Drafts
 
-Not every conversation belongs to a code project. Someone writing a letter,
-sorting receipts or planning a trip has no folder to open first, so the app
-starts them in the drafts: a project the core makes in the Documents folder of
-the machine it runs on, `Documents/Boite`.
+Drafts use a project in the core machine's Documents folder, `Documents/Boite`.
+Each conversation gets its own working directory without requiring a project
+folder first. The [tour](onboarding.md#the-question) sets the device's starting
+project preference.
 
 ## Where a draft lives
 
-- The first launch opens a draft in the drafts, not a folder picker. Nothing is
-  written to disk until the first send: the client then calls `projects.drafts`,
+- A new device opens a draft there. The first send calls `projects.drafts`,
   which makes the folder and the project once and answers the same project on
   every later call.
 - Each conversation started there gets a folder of its own inside the drafts,
@@ -46,3 +45,16 @@ Documents folder.
   `Work in a folder of mine` opens the same folder dialog.
 - A paired phone may start a draft: `projects.drafts` is on the device list,
   since the core picks the folder and the device names no path.
+
+If the device cannot read its unsent-message journal, it keeps new text in
+memory and the synchronous backup, reports the storage failure and pauses
+automatic PR archival on that machine connection. An empty composer cannot
+delete a durable draft the device has not read. A successful read on the next
+connection restores the text and releases protection for threads without input.
+New text also reaches its synchronous entry backup while a read is still
+pending, so cancelling the connection retains that input. The device waits to
+read older entries before writing a complete durable journal; `flushDrafts`
+reports failure until that read has succeeded.
+If neither IndexedDB nor the synchronous backup can save the input,
+`flushDrafts` returns false and the input remains visible. A completed
+IndexedDB write can succeed even when the synchronous backup is unavailable.

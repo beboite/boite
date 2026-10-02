@@ -1,4 +1,5 @@
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
+import { test as fixtureTest } from './test/fake-client';
 import { flushSync, mount, unmount } from 'svelte';
 import type { RpcMethodName } from '@boite/contracts';
 import App from './App.svelte';
@@ -18,6 +19,13 @@ const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
 
 let running: Record<string, unknown> | null = null;
+
+const test = fixtureTest.extend<{ app: void }>({
+  app: async ({}, use) => {
+    await mountOnFake();
+    await use();
+  },
+});
 
 afterEach(() => {
   if (running) unmount(running, { outro: false });
@@ -132,8 +140,7 @@ async function mountOnFake(search = '/?fake=1'): Promise<void> {
   await waitFor(() => store.booted && (store.openThread !== null || store.draft !== null));
 }
 
-test('the app mounts against the fake core, lists the seeded threads and opens the latest', async () => {
-  await mountOnFake();
+test('the app mounts against the fake core, lists the seeded threads and opens the latest', async ({ app: _app }) => {
   await waitFor(() => store.threads.length === 4);
   await waitFor(() => (document.body.textContent ?? '').includes('Finish the trace tab'));
 
@@ -188,8 +195,7 @@ test('a notification link to a thread that is gone lands on the usual draft', as
   expect(store.draft).not.toBeNull();
 });
 
-test('New thread opens a draft and the first send creates the thread titled from the prompt', async () => {
-  await mountOnFake();
+test('New thread opens a draft and the first send creates the thread titled from the prompt', async ({ app: _app }) => {
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -209,8 +215,7 @@ test('New thread opens a draft and the first send creates the thread titled from
   expect(store.openThread?.messages[0]?.role).toBe('user');
 });
 
-test('the draft worktree chip puts the first send on its own branch, and the header names it', async () => {
-  await mountOnFake();
+test('the draft worktree chip puts the first send on its own branch, and the header names it', async ({ app: _app }) => {
 
   // A thread keeps its directory: no chip while one is open.
   expect(document.querySelector('[data-testid=composer-worktree]')).toBeNull();
@@ -244,8 +249,7 @@ test('the draft worktree chip puts the first send on its own branch, and the hea
   expect(store.openThread?.cwd).toBe(cwd);
 });
 
-test('a draft on a folder that is not a repository offers no worktree switch', async () => {
-  await mountOnFake();
+test('a draft on a folder that is not a repository offers no worktree switch', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => document.querySelector('[data-testid=composer-worktree]') !== null);
   const project = store.projects.find((one) => one.id === store.draft?.projectId);
@@ -321,8 +325,7 @@ test('the keyboard stays in the connect dialog while its steps replace the butto
   await waitFor(() => document.querySelector('[data-testid=connect-dialog]') === null);
 }, 30_000);
 
-test('the sidebar draft row hands the keyboard back to the composer', async () => {
-  await mountOnFake();
+test('the sidebar draft row hands the keyboard back to the composer', async ({ app: _app }) => {
 
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -342,8 +345,7 @@ test('the sidebar draft row hands the keyboard back to the composer', async () =
   store.draft = null;
 });
 
-test('a draft names its project in the heading and the dropdown moves it to another one', async () => {
-  await mountOnFake();
+test('a draft names its project in the heading and the dropdown moves it to another one', async ({ app: _app }) => {
 
   // The one plus left says where it will open the draft, and a project row has none.
   expect(query<HTMLButtonElement>('[data-testid=new-thread]').title).toBe('New thread in notes (Ctrl+N)');
@@ -380,8 +382,7 @@ test('a draft names its project in the heading and the dropdown moves it to anot
   store.draft = null;
 });
 
-test('the picker rails the providers as logos and gives the shown one its accounts and models', async () => {
-  await mountOnFake();
+test('the picker rails the providers as logos and gives the shown one its accounts and models', async ({ app: _app }) => {
   await store.client!.call('accounts.login', { accountId: 'a-claude-side' });
   await store.client!.call('accounts.loginInput', { accountId: 'a-claude-side', text: 'test-code' });
   await waitFor(() => store.accountOf('a-claude-side')?.status === 'ok');
@@ -429,8 +430,7 @@ test('the picker rails the providers as logos and gives the shown one its accoun
   expect(store.openThread?.model).toBe('claude-opus-5');
 });
 
-test('the picker reads an ACP agent models, showing the descriptor and a probing line meanwhile', async () => {
-  await mountOnFake();
+test('the picker reads an ACP agent models, showing the descriptor and a probing line meanwhile', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
@@ -473,8 +473,7 @@ test('the picker reads an ACP agent models, showing the descriptor and a probing
   expect(store.openThread?.model).toBe('openai/gpt-5-codex');
 });
 
-test('past twelve models the column gets a search field, prefix groups and keyboard picking', async () => {
-  await mountOnFake();
+test('past twelve models the column gets a search field, prefix groups and keyboard picking', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
@@ -541,8 +540,7 @@ test('past twelve models the column gets a search field, prefix groups and keybo
   expect(store.openThread?.model).toBe('anthropic/claude-sonnet-5');
 });
 
-test('the reasoning slider sets the effort of the picked model, and the chip follows', async () => {
-  await mountOnFake();
+test('the reasoning slider sets the effort of the picked model, and the chip follows', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
   await waitFor(() => query('[data-testid=composer-picker]').textContent?.includes('Opus 5') === true);
@@ -585,8 +583,7 @@ test('the reasoning slider sets the effort of the picked model, and the chip fol
   expect(store.openThread?.effort).toBe('xhigh');
 });
 
-test('a right click on a thread row opens the context menu, and Archive removes the row', async () => {
-  await mountOnFake();
+test('a right click on a thread row opens the context menu, and Archive removes the row', async ({ app: _app }) => {
   await waitFor(() => document.querySelectorAll('[data-testid=thread-row]').length === 4);
 
   const row = query<HTMLButtonElement>('[data-thread-id="t-bench"]');
@@ -606,8 +603,7 @@ test('a right click on a thread row opens the context menu, and Archive removes 
   expect(document.querySelector('[data-testid=confirm-dialog]')).toBeNull();
 });
 
-test('a permission left pending is read back on connect and answered from its card', async () => {
-  await mountOnFake();
+test('a permission left pending is read back on connect and answered from its card', async ({ app: _app }) => {
   // Nothing streamed here: the request comes from permissions.list, not the event.
   await waitFor(() => store.pendingPermissions.some((p) => p.threadId === 't-bench'));
   await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
@@ -624,8 +620,7 @@ test('a permission left pending is read back on connect and answered from its ca
   expect(query('[data-testid=permission-verdict]').textContent?.trim()).toBe('Allowed');
 });
 
-test('the theme setting stamps the light palette and remembers the choice', async () => {
-  await mountOnFake();
+test('the theme setting stamps the light palette and remembers the choice', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
   // The theme lives on its own tab now, not on General.
   await waitFor(() => document.querySelector('[data-testid=settings-tab-appearance]') !== null);
@@ -648,8 +643,7 @@ test('the theme setting stamps the light palette and remembers the choice', asyn
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
-test('the keybindings file moves a chord, takes one away, and the Keyboard page says so', async () => {
-  await mountOnFake();
+test('the keybindings file moves a chord, takes one away, and the Keyboard page says so', async ({ app: _app }) => {
   await waitFor(() => store.keybindings !== null);
 
   // The fake's file binds the light theme to Ctrl+Shift+L and unbinds the panel.
@@ -684,8 +678,7 @@ test('the keybindings file moves a chord, takes one away, and the Keyboard page 
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
-test('a shortcut is recorded from the keys pressed, a taken one asks first, and reset puts the defaults back', async () => {
-  await mountOnFake();
+test('a shortcut is recorded from the keys pressed, a taken one asks first, and reset puts the defaults back', async ({ app: _app }) => {
   store.showSettings('keyboard');
   await waitFor(() => document.querySelector('[data-testid=keyboard-page]') !== null);
   const row = (id: string) => `[data-testid=keybinding-row][data-command=${id}]`;
@@ -730,8 +723,7 @@ test('a shortcut is recorded from the keys pressed, a taken one asks first, and 
   expect(store.bindings.pin.text).toBe(null);
 });
 
-test('removing a project asks first, and Cancel keeps it', async () => {
-  await mountOnFake();
+test('removing a project asks first, and Cancel keeps it', async ({ app: _app }) => {
   const head = query('[data-project-id="p-notes"][data-testid=project-row]');
   head.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 30 }));
   await waitFor(() => document.querySelector('[data-testid=context-menu]') !== null);
@@ -747,8 +739,7 @@ test('removing a project asks first, and Cancel keeps it', async () => {
   expect(store.projects.length).toBe(2);
 });
 
-test('an isolated account that is not logged in logs in from the Accounts page', async () => {
-  await mountOnFake();
+test('an isolated account that is not logged in logs in from the Accounts page', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
   await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
@@ -782,8 +773,7 @@ test('an isolated account that is not logged in logs in from the Accounts page',
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
-test('Ctrl+J opens the shell of the thread under the chat, hides it again, and its cross ends the shell', async () => {
-  await mountOnFake();
+test('Ctrl+J opens the shell of the thread under the chat, hides it again, and its cross ends the shell', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null);
   const threadId = store.openThread!.id;
   const chord = () => new KeyboardEvent('keydown', { key: 'j', ctrlKey: true, bubbles: true, cancelable: true });
@@ -818,8 +808,7 @@ test('Ctrl+J opens the shell of the thread under the chat, hides it again, and i
   expect(store.terminalShown(threadId)).toBe(false);
 });
 
-test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async () => {
-  await mountOnFake();
+test('OpenCode signs in from a terminal with its login command typed in, and closing it rechecks the account', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=nav-settings]').click();
   await waitFor(() => document.querySelector('[data-testid=settings-tab-accounts]') !== null);
   query<HTMLButtonElement>('[data-testid=settings-tab-accounts]').click();
@@ -846,8 +835,7 @@ test('OpenCode signs in from a terminal with its login command typed in, and clo
   await waitFor(() => document.querySelector('[data-testid=settings]') === null);
 });
 
-test('the guided connection signs OpenCode in from a terminal too, then hands it to the composer', async () => {
-  await mountOnFake();
+test('the guided connection signs OpenCode in from a terminal too, then hands it to the composer', async ({ app: _app }) => {
   // Signed out since: the dialog has a sign-in to offer.
   await waitFor(() => store.accountOf('a-opencode') !== null);
   store.accountOf('a-opencode')!.status = 'unauthenticated';
@@ -872,8 +860,7 @@ test('the guided connection signs OpenCode in from a terminal too, then hands it
   expect(store.accountOf('a-opencode')?.status).toBe('ok');
 });
 
-test('the composer wears the context meter, a compaction is a divider, and a turn moves the meter', async () => {
-  await mountOnFake();
+test('the composer wears the context meter, a compaction is a divider, and a turn moves the meter', async ({ app: _app }) => {
   await waitFor(() => store.openThread?.id === 't-descriptors');
 
   // 31k of 200k, just compacted: the ring reads 16 percent and the divider says what went.
@@ -907,28 +894,38 @@ test('the composer wears the context meter, a compaction is a divider, and a tur
   expect(query('[data-testid=context-popup]').textContent).toContain('No measurement received');
 });
 
-test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async () => {
-  await mountOnFake();
+test('the trace panel shows the I/O a process moved, and none for a record that measured nothing', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
 
-  store.panel.open('trace');
-  await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+  const client = store.client!;
+  const call = client.call.bind(client);
+  let reads = 0;
+  const requests = vi.spyOn(client, 'call').mockImplementation((method, params) => {
+    // Bound a broken feedback loop so the regression fails instead of freezing its worker.
+    if (method === 'trace.get' && ++reads > 3) return Promise.reject(new Error('Trace snapshot triggered another trace read'));
+    return call(method, params);
+  });
+  try {
+    store.panel.open('trace');
+    await waitFor(() => document.querySelectorAll('[data-testid=trace-row]').length === 3);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(reads).toBe(1);
 
-  expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
-  const cellOf = (pid: number): string =>
-    query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
-  // 1_240_000 bytes through the same `bytes()` the memory column uses.
-  expect(cellOf(21_140)).toBe('1 MB');
-  expect(cellOf(21_402)).toBe('80 kB');
-  // Nothing measured reads like an unmeasured peak memory, from the same formatter.
-  expect(cellOf(21_460)).toBe('none');
-  expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+    expect(query('[data-testid=trace-panel]').textContent).toContain('I/O');
+    const cellOf = (pid: number): string =>
+      query(`[data-testid=trace-row][data-pid="${pid}"] [data-testid=trace-io]`).textContent?.trim() ?? '';
+    // 1_240_000 bytes through the same `bytes()` the memory column uses.
+    expect(cellOf(21_140)).toBe('1 MB');
+    expect(cellOf(21_402)).toBe('80 kB');
+    // Nothing measured reads like an unmeasured peak memory, from the same formatter.
+    expect(cellOf(21_460)).toBe('none');
+    expect(query('[data-testid=trace-row][data-pid="21460"]').textContent).toContain('none');
+  } finally { requests.mockRestore(); }
 });
 
-test('trace processes disclose the command, PID and measurements without narrow columns', async () => {
-  await mountOnFake();
+test('trace processes disclose the command, PID and measurements without narrow columns', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -944,8 +941,7 @@ test('trace processes disclose the command, PID and measurements without narrow 
   expect(row.querySelector('.command')?.textContent).toContain('claude');
 });
 
-test('hiding the trace card takes it off the launcher and leaves an open trace tab alone', async () => {
-  await mountOnFake();
+test('hiding the trace card takes it off the launcher and leaves an open trace tab alone', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -965,8 +961,7 @@ test('hiding the trace card takes it off the launcher and leaves an open trace t
   await waitFor(() => document.querySelector('[data-testid=launch-trace]') !== null);
 });
 
-test('a floating panel can dock after leaving or closing its browser tab and changing threads', async () => {
-  await mountOnFake();
+test('a floating panel can dock after leaving or closing its browser tab and changing threads', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -1028,8 +1023,7 @@ test("a header button's right click hides it, and the Appearance page brings it 
   await waitFor(() => !query<HTMLInputElement>('[data-testid="control-header.terminal"]').checked);
 });
 
-test('the header button opens the panel on its launcher, which opens the changes surface', async () => {
-  await mountOnFake();
+test('the header button opens the panel on its launcher, which opens the changes surface', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -1070,8 +1064,7 @@ test('the header button opens the panel on its launcher, which opens the changes
   expect(query('[data-testid=panel-toggle]').getAttribute('aria-pressed')).toBe('false');
 });
 
-test('the tasks surface lists the project todos and adds, claims and drops one', async () => {
-  await mountOnFake();
+test('the tasks surface lists the project todos and adds, claims and drops one', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -1161,8 +1154,7 @@ test('the file tree lists the root, expands a directory on click and opens a fil
   expect(document.querySelectorAll('[data-testid=panel-tab]').length).toBe(2);
 });
 
-test('the tree of one thread is not shown for the next: a thread switch starts it over', async () => {
-  await mountOnFake();
+test('the tree of one thread is not shown for the next: a thread switch starts it over', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-bench"]') !== null);
   // Both threads keep the tree as their active tab, so the surface is never
   // remounted between them and only its own reset can empty it.
@@ -1363,8 +1355,7 @@ test('the panel query switch also names a directory to open the tree on and a fi
   store.panel.closeAll();
 });
 
-test('what the agent asks for through panel.open opens on the thread it named', async () => {
-  await mountOnFake();
+test('what the agent asks for through panel.open opens on the thread it named', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -1392,8 +1383,7 @@ test('what the agent asks for through panel.open opens on the thread it named', 
 
 const SEEDED_THINKING = 'The table wants a row per process';
 
-test('a thinking part is folded, opens on its toggle, and a new turn shows it before the answer', async () => {
-  await mountOnFake();
+test('a thinking part is folded, opens on its toggle, and a new turn shows it before the answer', async ({ app: _app }) => {
   await waitFor(() => document.querySelector('[data-thread-id="t-trace"]') !== null);
   query<HTMLButtonElement>('[data-thread-id="t-trace"]').click();
   await waitFor(() => store.openThread?.id === 't-trace');
@@ -1524,8 +1514,7 @@ async function sendPrompt(text: string): Promise<void> {
   query<HTMLButtonElement>('[data-testid=composer-send]').click();
 }
 
-test('an async question waits in the dock above the composer, stacked, and the timeline keeps a line to it', async () => {
-  await mountOnFake();
+test('an async question waits in the dock above the composer, stacked, and the timeline keeps a line to it', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
 
@@ -1574,8 +1563,7 @@ test('an async question waits in the dock above the composer, stacked, and the t
 
 const STREAMED_TOOL_INPUT = '{"command":"echo streamed","description":"a streamed input"}';
 
-test('a tool card stays folded while its input arrives and reveals parsed details on demand', async () => {
-  await mountOnFake();
+test('a tool card stays folded while its input arrives and reveals parsed details on demand', async ({ app: _app }) => {
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'call [tool-stream] please';
@@ -1607,8 +1595,7 @@ test('a tool card stays folded while its input arrives and reveals parsed detail
   expect(shown).not.toBe(STREAMED_TOOL_INPUT);
 });
 
-test('a finished answer lists the files it changed, and a row opens one in the panel', async () => {
-  await mountOnFake();
+test('a finished answer lists the files it changed, and a row opens one in the panel', async ({ app: _app }) => {
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'fix it [diff]';
@@ -1668,8 +1655,7 @@ test('a finished answer lists the files it changed, and a row opens one in the p
   store.panel.closeAll();
 });
 
-test('a tool card shows the diff, the markdown and the image it produced', async () => {
-  await mountOnFake();
+test('a tool card shows the diff, the markdown and the image it produced', async ({ app: _app }) => {
 
   const input = query<HTMLTextAreaElement>('[data-testid=composer-input]');
   input.value = 'show me [diff] [doc] [image]';
@@ -1719,8 +1705,7 @@ test('a tool card shows the diff, the markdown and the image it produced', async
   expect(image.alt).toBe('one pixel');
 });
 
-test('a provider Boite installs waits in Settings, one tile away, and joins the rail once signed in', async () => {
-  await mountOnFake();
+test('a provider Boite installs waits in Settings, one tile away, and joins the rail once signed in', async ({ app: _app }) => {
   // An open thread locks its provider; a draft is where another one can be picked.
   query<HTMLButtonElement>('[data-testid=new-thread]').click();
   await waitFor(() => store.draft !== null);
@@ -1948,8 +1933,7 @@ test('Add another account names the account itself and goes straight to the sign
   await waitFor(() => document.querySelector(`[data-testid=account-login-row][data-account-id=${added.id}]`) !== null);
 });
 
-test('account lifecycle removal asks first and cancellation keeps the account', async () => {
-  await mountOnFake();
+test('account lifecycle removal asks first and cancellation keeps the account', async ({ app: _app }) => {
   store.showSettings('accounts');
   await waitFor(() => document.querySelector('[data-testid=accounts-page]') !== null);
   await openProviderDetails('claude');
@@ -1967,8 +1951,7 @@ test('account lifecycle removal asks first and cancellation keeps the account', 
   await waitFor(() => !store.accounts.some((a) => a.id === 'a-claude-side'));
 });
 
-test('account lifecycle cancel button stops login and restores retry', async () => {
-  await mountOnFake();
+test('account lifecycle cancel button stops login and restores retry', async ({ app: _app }) => {
   store.showSettings('accounts');
   await openProviderDetails('claude');
   query<HTMLButtonElement>('[data-testid=account-login]').click();
@@ -1980,8 +1963,7 @@ test('account lifecycle cancel button stops login and restores retry', async () 
   expect(document.querySelector('[data-testid=account-login]')).not.toBeNull();
 });
 
-test('a failed account login can be dismissed and removed without restarting', async () => {
-  await mountOnFake();
+test('a failed account login can be dismissed and removed without restarting', async ({ app: _app }) => {
   store.showSettings('accounts');
   await openProviderDetails('claude');
   store.logins['a-claude-side'] = { state: 'failed', output: 'Sign-in failed', url: null, exitCode: 1 };
@@ -1994,8 +1976,7 @@ test('a failed account login can be dismissed and removed without restarting', a
   await waitFor(() => !store.accounts.some(account => account.id === 'a-claude-side'));
 });
 
-test('a pairing link can be closed and a fresh one created', async () => {
-  await mountOnFake();
+test('a pairing link can be closed and a fresh one created', async ({ app: _app }) => {
   store.showSettings('machines');
   await waitFor(() => document.querySelector('[data-testid=pairing-mint]') !== null);
   query<HTMLButtonElement>('[data-testid=pairing-mint]').click();
@@ -2009,8 +1990,7 @@ test('a pairing link can be closed and a fresh one created', async () => {
   expect(store.pairing!.grant).not.toBe(first);
 });
 
-test('a new isolated account is signed out, and a thread on it offers the sign-in', async () => {
-  await mountOnFake();
+test('a new isolated account is signed out, and a thread on it offers the sign-in', async ({ app: _app }) => {
   const client = store.client!;
   const account = await client.call('accounts.add', { providerId: 'claude', label: 'Work', useDefaultLocation: false });
   expect(account.status).toBe('unauthenticated');
@@ -2021,8 +2001,7 @@ test('a new isolated account is signed out, and a thread on it offers the sign-i
   await waitFor(() => document.querySelector('[data-testid=composer-reconnect]') !== null);
 });
 
-test('an error line of the core log shows the error toast, a warning does not', async () => {
-  await mountOnFake();
+test('an error line of the core log shows the error toast, a warning does not', async ({ app: _app }) => {
   const fake = store.client as unknown as FakeClient;
   // Events reach the store as they are sent, so the warning has been handled once this returns.
   fake.emitCoreLog('warn', 'the disk is slow');
@@ -2031,8 +2010,7 @@ test('an error line of the core log shows the error toast, a warning does not', 
   await waitFor(() => document.querySelector('[data-testid=error-toast]')?.textContent?.includes('the scheduler failed') === true);
 });
 
-test('account lifecycle provider metadata gates login and the command-line login', async () => {
-  await mountOnFake();
+test('account lifecycle provider metadata gates login and the command-line login', async ({ app: _app }) => {
   store.showSettings('accounts');
   await openProviderDetails('claude');
   const side = store.accounts.find((a) => a.id === 'a-claude-side')!;
@@ -2053,8 +2031,7 @@ test('account lifecycle provider metadata gates login and the command-line login
   await waitFor(() => document.querySelector('[data-provider-id=claude] [data-testid=account-use-cli]') === null);
 });
 
-test('browser Add project opens a path form and starts a draft in the added folder', async () => {
-  await mountOnFake();
+test('browser Add project opens a path form and starts a draft in the added folder', async ({ app: _app }) => {
   const before = store.projects.length;
   store.sidebarOpen = true;
   query<HTMLButtonElement>('[data-testid=add-project]').click();
@@ -2070,8 +2047,7 @@ test('browser Add project opens a path form and starts a draft in the added fold
   await waitFor(() => document.querySelector('[data-testid=add-project-form]') === null);
 });
 
-test('browser Add project keeps refused paths and Escape returns to its button', async () => {
-  await mountOnFake();
+test('browser Add project keeps refused paths and Escape returns to its button', async ({ app: _app }) => {
   query<HTMLButtonElement>('[data-testid=add-project]').focus();
   query<HTMLButtonElement>('[data-testid=add-project]').click();
   await waitFor(() => document.querySelector('[data-testid=project-path]') !== null);
@@ -2116,8 +2092,7 @@ async function showMobileThreads(): Promise<void> {
   await waitFor(() => document.querySelector('[data-testid=mobile-project]') !== null);
 }
 
-test('the phone cannot manage an unrelated project from a draft without a folder', async () => {
-  await mountOnFake();
+test('the phone cannot manage an unrelated project from a draft without a folder', async ({ app: _app }) => {
   expect(store.projects.length).toBeGreaterThan(0);
   store.startDraft(null);
   await showMobileThreads();
@@ -2134,8 +2109,7 @@ test('the phone cannot manage an unrelated project from a draft without a folder
   expect(document.querySelector('[data-testid=mobile-project-actions]')).toBeNull();
 });
 
-test('the phone cannot archive an already archived project or offer a misleading undo', async () => {
-  await mountOnFake();
+test('the phone cannot archive an already archived project or offer a misleading undo', async ({ app: _app }) => {
   await store.open('t-trace');
   await showMobileThreads();
   const project = store.openProject!;
@@ -2162,8 +2136,7 @@ test('the phone cannot archive an already archived project or offer a misleading
   }
 });
 
-test('first run opens a draft in the drafts, and the first send makes them', async () => {
-  await mountOnFake();
+test('first run opens a draft in the drafts, and the first send makes them', async ({ app: _app }) => {
   await emptyCore();
   await waitFor(() => store.draft !== null);
   expect(store.draft?.projectId).toBeNull();
@@ -2184,8 +2157,7 @@ test('first run opens a draft in the drafts, and the first send makes them', asy
   expect(store.openThread?.cwd).toMatch(/Documents\\Boite\\\d{4}-\d{2}-\d{2} Write a letter to the bank$/);
 });
 
-test('first run keeps opening a folder one click away', async () => {
-  await mountOnFake();
+test('first run keeps opening a folder one click away', async ({ app: _app }) => {
   await emptyCore();
   await waitFor(() => document.querySelector('[data-testid=draft-open-folder]') !== null);
   query<HTMLButtonElement>('[data-testid=draft-open-folder]').click();
@@ -2197,8 +2169,7 @@ test('first run keeps opening a folder one click away', async () => {
   expect(document.querySelector('[data-testid=draft-open-folder]')).toBeNull();
 });
 
-test('not a developer, New thread still follows the project on screen', async () => {
-  await mountOnFake();
+test('not a developer, New thread still follows the project on screen', async ({ app: _app }) => {
   work.choose('everyday');
   // Work in two folders: each New thread stays in the folder on screen.
   await store.open('t-descriptors');
@@ -2216,8 +2187,7 @@ test('not a developer, New thread still follows the project on screen', async ()
   expect(store.draftInDrafts).toBe(true);
 });
 
-test('an ACP login accepts the phone redirect URL through the login input', async () => {
-  await mountOnFake();
+test('an ACP login accepts the phone redirect URL through the login input', async ({ app: _app }) => {
   store.showSettings('accounts');
   await store.installProvider('antigravity');
   await waitFor(() => store.providerOf('antigravity')?.available === true);
@@ -2243,8 +2213,7 @@ test('an ACP login accepts the phone redirect URL through the login input', asyn
   }
 });
 
-test('a dialog waiting for an answer holds the window chords', async () => {
-  await mountOnFake();
+test('a dialog waiting for an answer holds the window chords', async ({ app: _app }) => {
   const open = store.openThread?.id;
   const page = store.page;
 
@@ -2336,8 +2305,7 @@ test('a paired device is offered none of the affordances the core refuses it', a
   expect(store.error).toBeNull();
 });
 
-test('the desktop still has every one of them', async () => {
-  await mountOnFake();
+test('the desktop still has every one of them', async ({ app: _app }) => {
   expect(store.principal).toBe('owner');
   expect(store.owner).toBe(true);
 
@@ -2354,7 +2322,45 @@ test('the desktop still has every one of them', async () => {
   expect(menuValues()).toEqual(['new', 'copy', 'archived', 'manage']);
   query<HTMLButtonElement>('[data-testid=context-menu] [data-value=manage]').click();
   await waitFor(() => document.querySelector('[data-testid=context-menu] [data-value=archive-project]') !== null);
-  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'refresh-icon', 'archive-project', 'remove']);
+  expect(menuValues()).toEqual(['back', 'worktree-default', 'worktrees', 'auto-archive-merged-pr', 'refresh-icon', 'archive-project', 'remove']);
+  const policyProjectId = query('[data-testid=project-row]').getAttribute('data-project-id')!;
+  const policy = query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]');
+  expect(policy.getAttribute('role')).toBe('menuitemcheckbox');
+  expect(policy.getAttribute('aria-checked')).toBe('true');
+  const ownerClient = store.client!, call = ownerClient.call.bind(ownerClient);
+  let release!: () => void;
+  const held = new Promise<void>(done => { release = done; });
+  const policyCalls = vi.spyOn(ownerClient, 'call').mockImplementation(async (method, params) => {
+    if (method === 'projects.setAutoArchiveMergedPr') { await held; throw new Error('The project policy could not be saved'); }
+    return call(method, params);
+  });
+  policy.click();
+  await waitFor(() => store.projectAutoArchiveMergedPrBusy(policyProjectId));
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  expect(query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').disabled).toBe(true);
+  query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').click();
+  expect(policyCalls.mock.calls.filter(([method]) => method === 'projects.setAutoArchiveMergedPr')).toHaveLength(1);
+  release();
+  await waitFor(() => (document.body.textContent ?? '').includes('The project policy could not be saved'));
+  await waitFor(() => !query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').disabled);
+  expect(store.projects.find(project => project.id === policyProjectId)?.autoArchiveMergedPr).toBe(true);
+  policyCalls.mockRestore(); store.error = null;
+  press('Escape');
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  query<HTMLButtonElement>('[data-value=auto-archive-merged-pr]').click();
+  await waitFor(() => store.projects.find(project => project.id === policyProjectId)?.autoArchiveMergedPr === false);
+  expect((await ownerClient.call('projects.list', {})).find(project => project.id === policyProjectId)?.autoArchiveMergedPr).toBe(false);
+  query('[data-testid=project-row]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await waitFor(() => document.querySelector('[data-value=manage]') !== null);
+  query<HTMLButtonElement>('[data-value=manage]').click();
+  await waitFor(() => document.querySelector('[data-value=auto-archive-merged-pr]') !== null);
+  expect(query('[data-value=auto-archive-merged-pr]').getAttribute('aria-checked')).toBe('false');
   const preference = query<HTMLButtonElement>('[data-value=worktree-default]');
   expect(preference.getAttribute('role')).toBe('menuitemcheckbox');
   expect(preference.getAttribute('aria-checked')).toBe('false');
@@ -2490,8 +2496,7 @@ test('a machine filter whose machine goes away lists the remaining machine again
   expect(threads()).toBeGreaterThan(0);
 });
 
-test('an older core names the host that needs goals support and keeps the unsent prompt', async () => {
-  await mountOnFake();
+test('an older core names the host that needs goals support and keeps the unsent prompt', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null);
   store.core!.hostname = 'Older host';
   const client = store.client!;
@@ -2515,8 +2520,7 @@ test('an older core names the host that needs goals support and keeps the unsent
   } finally { spy.mockRestore(); }
 });
 
-test('sending waits for reconnect history to finish loading', async () => {
-  await mountOnFake();
+test('sending waits for reconnect history to finish loading', async ({ app: _app }) => {
   await waitFor(() => store.openThread !== null);
   const client = store.client!;
   const call = client.call.bind(client);
@@ -2538,8 +2542,7 @@ test('sending waits for reconnect history to finish loading', async () => {
   } finally { release(); spy.mockRestore(); }
 });
 
-test('the title counts the threads that wait on the user or finished unread', async () => {
-  await mountOnFake();
+test('the title counts the threads that wait on the user or finished unread', async ({ app: _app }) => {
   await waitFor(() => /^\(\d+\) /.test(document.title));
   const waiting = document.querySelectorAll('[data-testid=sidebar] [data-state=waiting]').length;
   expect(Number(/^\((\d+)\)/.exec(document.title)?.[1])).toBeGreaterThanOrEqual(Math.max(1, waiting));

@@ -514,7 +514,12 @@
 
 <svelte:window {onkeydown} {onkeyup} {onblur} />
 
-<ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
+{#each workspace.machines as machine (machine.id)}
+  <ThreadPreparation store={machine.store} visible={machine.store === store && documentVisible && (inShell || mobileScreen === 'chat')} />
+{/each}
+{#if !workspace.machines.some(machine => machine.store === store)}
+  <ThreadPreparation {store} visible={documentVisible && (inShell || mobileScreen === 'chat')} />
+{/if}
 
 <div class="app" class:shell={inShell} class:ready={store.booted} class:phone-chat={!inShell && !mobileRecovery && store.page === 'chat' && mobileScreen === 'chat'} class:off-chat={!inShell && store.page !== 'chat'} class:quitting bind:this={appRoot}>
   {#if !inShell && store.booted}<MobileNavigation {store} recover={mobileRecovery} bind:screen={mobileScreen} />{/if}
@@ -528,7 +533,7 @@
       <!-- The notice gives way to Settings: the two cards side by side left
            Settings too narrow for its nav and its page. -->
       {#if store.page === 'settings'}
-        {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+        {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
       {:else}
         <div class="notice framed">
           <h1>{strings.app.noEndpointTitle}</h1>
@@ -541,7 +546,7 @@
     {:else if store.page === 'agents' && experimentOn('resident-agents')}
       {#if AgentsPage}{#key store}<AgentsPage {store} />{/key}{:else}<p class="empty">{agentsLoadError || strings.app.loading}</p>{/if}
     {:else if store.page === 'settings'}
-      {#if SettingsShell}<SettingsShell {store} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
+      {#if SettingsShell}<SettingsShell {store} onopenthread={() => { mobileScreen = 'chat'; }} />{:else}<p class="empty">{settingsLoadError || strings.app.loading}</p>{/if}
     {:else}
       <Sidebar {store} />
       {#if scrim.shown}
@@ -562,10 +567,12 @@
           {/key}
         </div>
         {#if terminalSlot.shown && store.openThread}
-          {#key `${store.endpointUrl}:${store.openThread.id}`}
-            <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
-              view={deferred.TerminalView}
-              closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
+          {#key store}
+            {#key store.openThread.id}
+              <TerminalDrawer {store} threadId={store.openThread.id} cwd={store.openThread.cwd}
+                view={deferred.TerminalView}
+                closing={terminalSlot.closing} attach={terminalSlot.attach} onexit={terminalSlot.end} />
+            {/key}
           {/key}
         {/if}
       </main>

@@ -41,24 +41,32 @@ export async function archiveThread(store: Store, threadId: ThreadId): Promise<b
  * none.
  */
 export async function reopenLastArchived(store: Store): Promise<boolean> {
-  let target: { store: Store; threadId: ThreadId } | undefined;
+  let target: { store: Store; threadId: ThreadId; undoId?: number } | undefined;
   while ((target = closed.pop())) {
     const summary = target.store.threads.find((t) => t.id === target!.threadId);
     if (!summary || summary.archived) break;
   }
-  if (!target) {
-    const [newest] = await archivedThreads(store);
-    if (!newest) return false;
-    target = { store, threadId: newest.id };
-  }
+  const owner = target?.store ?? store;
+  const client = owner.client;
+  const clientGeneration = owner.clientGeneration;
+  const current = () => owner.client === client && owner.clientGeneration === clientGeneration;
   try {
+    if (!target) {
+      const [newest] = await archivedThreads(owner);
+      if (!current() || !newest) return false;
+      target = { store: owner, threadId: newest.id };
+    }
     await restoreThread(target.store, target.threadId);
+    if (!current()) return false;
+    await workspace.select(target.store, target.threadId);
+    return true;
   } catch (error) {
-    target.store.error = error instanceof Error ? error.message : String(error);
+    if (current()) {
+      owner.error = error instanceof Error ? error.message : String(error);
+      if (target) closed.push({ ...target, undoId: target.undoId ?? 0 });
+    }
     return false;
   }
-  await workspace.select(target.store, target.threadId);
-  return true;
 }
 
 /** The archived threads of this machine, or of one project, read when asked for and never at startup. */
@@ -72,8 +80,10 @@ export async function archivedThreads(store: Store, projectId?: ProjectId): Prom
 /** Takes a thread out of the archive; its row comes back in the sidebar. */
 export async function restoreThread(store: Store, threadId: ThreadId): Promise<ThreadSummary> {
   const client = store.client;
+  const clientGeneration = store.clientGeneration;
   if (!client) throw new Error(strings.connection.unavailable);
   const summary = await client.call('threads.archive', { threadId, archived: false });
+  if (store.client !== client || store.clientGeneration !== clientGeneration) throw new Error(strings.connection.unavailable);
   const index = store.threads.findIndex((t) => t.id === summary.id);
   if (index >= 0) store.threads[index] = summary;
   else store.threads.push(summary);

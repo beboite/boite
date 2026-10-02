@@ -38,3 +38,32 @@ test('a refused batch restores separate prompts and their files before later arr
   expect(draft.paused).toBe(true);
   expect(draft.sending).toBe(false);
 });
+
+test('goals and loops keep their own queue entries and cannot consume neighboring prompts', async () => {
+  const draft = state();
+  draft.queued.splice(1, 0, { text: '/goal Fix the parser', attachments: [] }, { text: '/loop 2 Check the output', attachments: [] });
+  const send = vi.fn<Store['send']>(async () => true);
+  const store = { send } as unknown as Store;
+  await drainQueue(store, 'thread', draft);
+  expect(send.mock.calls[0]?.[0]).toBe('@Save first');
+  expect(draft.queued.map(entry => entry.text)).toEqual(['/goal Fix the parser', '/loop 2 Check the output', '@Save second', 'third']);
+  await drainQueue(store, 'thread', draft);
+  expect(send.mock.calls[1]?.[0]).toBe('/goal Fix the parser');
+  await drainQueue(store, 'thread', draft);
+  expect(send.mock.calls[2]?.[0]).toBe('/loop 2 Check the output');
+  await drainQueue(store, 'thread', draft);
+  expect(send.mock.calls[3]?.[0]).toBe('@Save second\n\nthird');
+  expect(draft.queued).toEqual([]);
+});
+
+test('individually valid files stay split across turns when their combined count exceeds the turn limit', async () => {
+  const draft = state();
+  draft.queued = Array.from({ length: 9 }, (_, index) => ({ text: `file ${index}`, attachments: [attachment] }));
+  const send = vi.fn<Store['send']>(async () => true);
+  await drainQueue({ send } as unknown as Store, 'thread', draft);
+  expect(send.mock.calls[0]?.[2]).toHaveLength(8);
+  expect(draft.queued.map(entry => entry.text)).toEqual(['file 8']);
+  await drainQueue({ send } as unknown as Store, 'thread', draft);
+  expect(send.mock.calls[1]?.[2]).toHaveLength(1);
+  expect(draft.queued).toEqual([]);
+});

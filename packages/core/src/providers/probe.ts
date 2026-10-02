@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import type { Core } from '../core.ts';
 import { forgetProbes, probeModels } from '../drivers/index.ts';
 import { invalidParams, refused } from '../errors.ts';
+import { logMessageOf } from '../log-errors.ts';
+
+/** After owned processes stop, a missing pipe-close event must not hold the account's probe lane. */
+const PROBE_CLOSE_GRACE_MS = 1000;
 
 /** The synthetic thread a probe process runs under, so the trace shows it like a login. */
 export function probeThreadId(providerId: ProviderId, accountId: AccountId): ThreadId {
@@ -35,6 +39,7 @@ async function probeProvider(
   }
 
   const threadId = probeThreadId(provider.id, account.id);
+  const cleanupContext = { source: provider.id, event: 'provider.probeCleanup', threadId };
   const directory = mkdtempSync(join(tmpdir(), 'boite-probe-'));
   const exits: Promise<void>[] = [];
   try {
@@ -68,20 +73,38 @@ async function probeProvider(
       killTree: () => {
         core.procs.killTree(threadId);
       },
-      log: (level, message) => {
-        core.log(level, message);
+      log: (level, message, context) => {
+        core.log(level, message, { ...context, source: provider.id, event: 'provider.probe', threadId });
       },
     });
     core.accounts.require(account.id);
     if (!isCurrent()) throw refused('the provider or account changed during discovery; refresh models');
     core.bus.emit('providers.probed', { providerId: provider.id, accountId: account.id, models, probedAt });
     return { models, probedAt };
+  } catch (error) {
+    core.logs.record('warn', logMessageOf(error), { source: provider.id, event: 'provider.probeFailed', threadId });
+    throw error;
   } finally {
-    await Promise.all(exits);
     // A descendant can hold the directory after the direct child closed. Neither
     // waiting for it nor removing the directory may replace the models just read.
-    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `probing ${provider.id}: ${error instanceof Error ? error.message : String(error)}`));
-    await removeDir(directory, (message) => core.log('warn', `probing ${provider.id}: ${message}`));
+    await core.procs.stopAndWait(threadId).catch((error: unknown) => core.log('warn', `probing ${provider.id}: ${error instanceof Error ? error.message : String(error)}`, cleanupContext));
+    if (exits.length > 0) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.all(exits),
+          new Promise<void>(resolve => {
+            timer = setTimeout(() => {
+              core.log('warn', `probing ${provider.id}: process pipes did not close within ${PROBE_CLOSE_GRACE_MS} ms`, cleanupContext);
+              resolve();
+            }, PROBE_CLOSE_GRACE_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    await removeDir(directory, (message) => core.log('warn', `probing ${provider.id}: ${message}`, cleanupContext));
   }
 }
 

@@ -91,8 +91,10 @@ export class ClaudeSession {
   private carried: { costUsd: number; tokens: number } | null;
   /** What the query was last told to be: the options it opened on, plus every setter since. */
   private applied: LiveSetup | null = null;
-  /** The setters of one turn run to the end before the next turn's, and before its prompt. */
+  /** The setup setters of one turn finish before the next turn's prompt. */
   private pending: Promise<void> = Promise.resolve();
+  /** An unanswered live control makes the query unsafe to retain for another turn. */
+  private permissionTurn: ClaudeTurn | null = null;
   private readonly ready: Promise<void>;
   private markReady: () => void = () => undefined;
   /** The permission callback and the tool hooks, reading the turn the CLI is on. */
@@ -209,17 +211,28 @@ export class ClaudeSession {
     await this.ready;
     await this.pending;
     if (this.head() !== turn || turn.settled || turn.isStopped || !this.query || !this.applied || this.closing || this.ended) return false;
+    const query = this.query;
+    const applied = this.applied;
+    const current = () => this.head() === turn && !turn.settled && !turn.isStopped &&
+      this.query === query && this.applied === applied && !this.closing && !this.ended;
     const wanted = liveSetup({ ...turn.ctx.thread, permissionMode: mode });
-    if (wanted.disableHooks !== this.applied.disableHooks) {
-      await this.query.applyFlagSettings({ disableAllHooks: wanted.disableHooks ? true : null });
-      this.applied.disableHooks = wanted.disableHooks;
+    this.permissionTurn = turn;
+    try {
+      if (wanted.disableHooks !== applied.disableHooks) {
+        await query.applyFlagSettings({ disableAllHooks: wanted.disableHooks ? true : null });
+        if (!current()) return false;
+        applied.disableHooks = wanted.disableHooks;
+      }
+      if (wanted.permissionMode !== applied.permissionMode) {
+        await query.setPermissionMode(wanted.permissionMode);
+        if (!current()) return false;
+        applied.permissionMode = wanted.permissionMode;
+      }
+      turn.ctx.thread.permissionMode = mode;
+      return true;
+    } finally {
+      if (this.permissionTurn === turn) this.permissionTurn = null;
     }
-    if (wanted.permissionMode !== this.applied.permissionMode) {
-      await this.query.setPermissionMode(wanted.permissionMode);
-      this.applied.permissionMode = wanted.permissionMode;
-    }
-    turn.ctx.thread.permissionMode = mode;
-    return true;
   }
 
   /** Apply the next turn's settings before its prompt enters the warm stream. */
@@ -415,6 +428,8 @@ export class ClaudeSession {
   }
 
   private endTurn(turn: ClaudeTurn): void {
+    // Retire this transport instead of waiting indefinitely for its control reply.
+    if (this.permissionTurn === turn) this.close(null, STOP_GRACE_MS);
     this.waiting.shift();
     turn.settle();
     this.afterTurns();
@@ -615,7 +630,7 @@ export class ClaudeSession {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       const text = chunk.trim();
-      if (text.length > 0) this.ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`);
+      if (text.length > 0) this.ctx.log('warn', `claude cli: ${text.slice(0, STDERR_MAX)}`, { kind: 'provider-output', event: 'provider.output' });
     });
     return child;
   }

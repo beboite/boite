@@ -5,10 +5,8 @@ and two on a phone ([below](#on-a-phone)).
 It waits for a connected core. Animated miniatures with SVG controls explain the features without
 calling live providers, reading quotas or navigating away from the tour.
 
-Nothing in it is a setting of its own. Every control writes through the same
-function the Settings page writes through, so a choice made in the tour and one
-made afterwards are the same choice, and coming back to Settings shows what the
-tour set.
+Tour controls use the same settings functions as the Settings page. Choices
+persist immediately and remain editable there.
 
 ## The screens
 
@@ -22,19 +20,13 @@ tour set.
 | Quiet | Agents work without taking over the screen or speakers | Notifications, close to tray, focus guard, mute |
 | Privacy | The trade offer: anonymous counters, or the deal | Two consent rows that also close the tour, owner only |
 
-The miniatures use the tour's language through the same strings, one markup per
-scene, with the real provider marks and theme tokens. The reach scene draws the
-same conversation as bars on a monitor and a phone rather than text to read.
-Each scene plays in under four seconds, the two conversation demos in under five.
-Three bordered icon buttons select the conversation demonstrations. Dictation
-shows microphone activation, speech, then a draft to review; agent switching
-shows the picker, a follow-up and the next agent's answer. While a scene plays,
-an accent glow outlines it from the inside. Hovering or focusing it shows a strip
-across its top with pause and replay icons, which stays while paused and is always
-shown without a hovering pointer. Animations stop after their demonstration, the
-glow and the pause go with them, and replay stays. Under reduced motion the
-scenes show their completed state without glow or controls. The dots are the only progress
-indicator.
+Localized miniatures use real provider marks and theme tokens. Scenes finish
+within four seconds, conversation demos within five. Their three buttons show
+dictation, agent switching and diffs. Dictation ends with a draft to review;
+switching shows the next provider's answer. While playing, a scene has an inner
+accent glow and hover/focus pause/replay controls; touch always shows controls.
+Pause retains them, completion leaves Replay, and reduced motion shows only the
+completed scene. Step dots provide progress.
 
 The privacy screen is Boite Legacy's: a title that turns red over ten seconds,
 the trade offer clip, and two rows. "NO! Just the basic counters" keeps the
@@ -51,34 +43,24 @@ minimized or closed during the tour.
 
 ## On a phone
 
-A phone runs no agent, so its tour sets nothing up on the computer. A browser
-page that opens under 720 px wide, the width where the phone layout starts, gets
-two screens, for an owner and a paired device alike: Welcome with its language
-and theme, then Reach, retitled "Your computer does the work", which says the
-agents run on the computer and that notifications and the home screen app are in
-Settings. The profile question, the demos, the taskbar limits, the host's focus
-and audio switches and the analytics consent stay in the tour of the computer;
-its preset and its consent are never written from a phone.
+A browser opened below 720 px shows two screens for owners and paired devices:
+Welcome selects language and theme; Reach explains execution on the computer
+and links notifications and installation to Settings. It does not change the
+host's profile, permissions, resource limits, focus, audio or analytics consent.
 
-`onPhone()` in `lib/onboarding.ts` decides once, as the tour opens: a window
-resized halfway keeps the screens it started with. The desktop shell always gets
-the full tour, however narrow its window.
+`onPhone()` in `lib/onboarding.ts` selects the layout when the tour opens.
+Resizing keeps that choice. The desktop shell always shows its full tour.
 
 ## The window it opens in
 
 The shell opens its main window at 1280 x 890, centred in the primary monitor's
 work area, and at 92% of that area on a smaller screen (`centred` in
-`apps/shell/src-tauri/src/window.rs`). 890 is the tallest tour screen, the French
-consent screen at 808 px, plus the scrim's margin and the title bar. A screen
-that grows past it scrolls inside the panel; raise the constant with it. Every
-screen takes that same panel height, or the window's height when it is shorter,
-so Next stays in one place from screen to screen.
+`apps/shell/src-tauri/src/window.rs`). The 890 px height fits the 808 px French consent screen, scrim margin and
+title bar. Taller content scrolls inside the panel. Screens share its height,
+limited by the window, so Next stays in place.
 
-The scrim behind the panel is a flat tint, with no backdrop blur. The scenes
-animate for as long as the tour is open, and a blur the size of the window is
-redrawn under them on every frame. On 2026-09-30, headless Chrome with software
-compositing drew the welcome and agents scenes at 9 to 13 fps with the blur and
-50 to 60 fps without it, at 1280 x 890.
+The scrim uses a flat tint. [Frame measurements](../bench/results/2026-09-30-ui-frames.md)
+record the cost of window-wide blur in the animated scenes.
 
 Escape leaves, the cross leaves, Tab stays inside. The dots at the bottom walk
 the screens and read as steps to a screen reader. Leaving at the first screen
@@ -104,11 +86,9 @@ answer writes it at once, so skipping the rest of the tour keeps it, and picking
 the other one rewrites the whole preset. A draft still empty on screen moves
 to where the answer starts.
 
-Neither answer keeps work in one folder. New thread starts in the project on
-screen with both, a project's own new thread starts there, and a draft's
-project menu lists every project and "Open a folder". The drafts are where a
-conversation waits until it has a folder, not the only folder a non-developer
-gets.
+Both presets create new threads in the selected project. A draft's menu still
+includes every project and Open a folder. [Drafts](drafts.md) owns the default
+Documents directory and conversation-folder rules.
 
 Each piece changes on its own afterwards. Settings, Appearance, Workspace holds
 the starting point and the panel's first surface.
@@ -126,8 +106,7 @@ button added later shows until someone hides it, and a record from before it
 had one reads its old developer switch: off hides the terminal and the Trace
 card. A paired device has no terminal or Add a project to hide.
 
-The answer never hides a
-composer chip: on a computer the reasoning, the permission mode and, on a draft
+Composer chips remain visible: on a computer the reasoning, the permission mode and, on a draft
 in a git project, the worktree are always in the bar, and the model's fast mode
 sits at the top left of the reasoning slider.
 
@@ -145,8 +124,7 @@ Closing it writes `boite.onboarding` in `localStorage`:
 { "version": 7, "at": 1789660000000 }
 ```
 
-The device that stores nothing, a browser refusing storage, sees the tour every
-launch and forgets it every time, which is the right failure of the two.
+A browser that refuses storage shows the tour on every launch.
 
 `version` is the shape of the tour that was seen. Nothing re-opens on an
 upgrade today; the number is what a later build would read to decide otherwise,
@@ -191,5 +169,4 @@ same host settings and shell command as Settings.
 
 The dots, the Back and Next buttons and the keyboard follow
 from `steps()`. A screen that reads the core guards on `store.owner`: a paired
-phone is refused those calls ([phone.md](phone.md)), and a screen offering a
-button that answers nothing teaches the wrong thing.
+phone is refused those calls ([phone.md](phone.md)), and owner-only controls must be hidden.

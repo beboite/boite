@@ -1,5 +1,7 @@
+import { dismissMergedPr } from './merged-pr-archive';
+import { protectedThreadIdsError } from '@boite/contracts';
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { sideQuestionSnapshot, supportsSideQuestions, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, MESSAGE_PAGE_MAX_BYTES, RPC_MAX_FRAME_BYTES, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
@@ -13,24 +15,7 @@ import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
 import { previewToolOutputs } from '@boite/contracts';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
-
-const sideRequests = new WeakMap<FakeContext, Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>>();
-
-interface SideResult { requestId: string; source: Thread; question: string; answer: string; timer: ReturnType<typeof setTimeout> }
-const sideResults = new WeakMap<FakeContext, Map<string, SideResult>>();
-function forgetSide(ctx: FakeContext, threadId: string, requestId?: string): void {
-  const results = sideResults.get(ctx), held = results?.get(threadId);
-  if (held && (requestId === undefined || held.requestId === requestId)) { clearTimeout(held.timer); results!.delete(threadId); }
-}
-
-function cancelSide(ctx: FakeContext, threadId: string, requestId?: string): void {
-  forgetSide(ctx, threadId, requestId);
-  const requests = sideRequests.get(ctx), pending = requests?.get(threadId);
-  if (!pending || (requestId !== undefined && pending.requestId !== requestId)) return;
-  clearTimeout(pending.timer);
-  requests!.delete(threadId);
-  ctx.emit('thread.btw', { threadId, requestId: pending.requestId, answer: null, error: 'side request cancelled' });
-}
+import { cancelFamilySideQuestions, cancelSide, sideQuestionMethods } from './side-questions';
 
 function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed: ReturnType<typeof fakeWorktree> | null = null) {
   const title = `${source.title} (fork)`;
@@ -79,18 +64,50 @@ export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessio
 }
 
 /**
- * The `limit` messages that sit just before `end`, oldest first, with the
- * cursor for what is still behind them. The core reads the same window off
- * rowids; here it is a slice of the array the fake keeps.
+ * Up to `limit` complete messages before `end`, within the serialized byte
+ * budget except for one transportable message, with the cursor above them.
+ * The core iterates rowids; here it is a slice of the array the fake keeps.
  */
 function pageOf(
   messages: Message[],
   end: number,
   limit: number
 ): { messages: Message[]; before: MessageId | null } {
-  const start = Math.max(0, end - limit);
+  let start = end, bytes = 2;
+  while (start > 0 && end - start < limit && bytes < MESSAGE_PAGE_MAX_BYTES) {
+    const message = messages[start - 1]!;
+    const size = new TextEncoder().encode(JSON.stringify(message)).byteLength;
+    const next = bytes + size + (start < end ? 1 : 0);
+    if (start < end && next > MESSAGE_PAGE_MAX_BYTES) break;
+    if (size >= RPC_MAX_FRAME_BYTES) {
+      throw new RpcFailure({ code: RpcErrorCode.Refused,
+        message: `message ${message.id} is ${size} serialized UTF-8 bytes; expected a complete message below ${RPC_MAX_FRAME_BYTES} bytes`,
+        data: { threadId: message.threadId, messageId: message.id, field: 'messages', bytes: size, max: RPC_MAX_FRAME_BYTES, expected: `a complete message below ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
+    }
+    bytes = next;
+    start -= 1;
+  }
   const page = messages.slice(start, end);
   return { messages: page, before: start > 0 ? (page[0]?.id ?? null) : null };
+}
+
+function tailOf(messages: Message[], from: number, limit = MESSAGE_PAGE): Message[] | null {
+  if (messages.length - from > limit) return null;
+  let bytes = 2;
+  for (let at = from; at < messages.length; at += 1) {
+    bytes += new TextEncoder().encode(JSON.stringify(messages[at])).byteLength + (at > from ? 1 : 0);
+    if (bytes > MESSAGE_PAGE_MAX_BYTES) return null;
+  }
+  return messages.slice(from);
+}
+
+/** The fake has no wire; check the same reply envelope before copying a page. */
+function pagingReply<T>(result: T): T {
+  const bytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: 0, result })).byteLength;
+  if (bytes > RPC_MAX_FRAME_BYTES) throw new RpcFailure({ code: RpcErrorCode.Refused,
+    message: `RPC response exceeds ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes; request a smaller result`,
+    data: { field: 'response', bytes, max: RPC_MAX_FRAME_BYTES, expected: `a complete RPC response at most ${RPC_MAX_FRAME_BYTES} serialized UTF-8 bytes` } });
+  return structuredClone(result);
 }
 
 /**
@@ -124,6 +141,8 @@ export function purgeDeletedThreads(ctx: FakeContext): void {
     if (family.deletedAt > before) continue;
     ctx.deletedThreads.delete(id);
     for (const thread of family.threads) {
+      ctx.mergedPrFixtures.delete(thread.id);
+      ctx.mergedPrArchive.delete(thread.id);
       ctx.processes = ctx.processes.filter(p => p.threadId !== thread.id && p.threadId !== `terminal:${thread.id}`);
       ctx.coordination.delete(thread.id);
       ctx.moveNotes.delete(thread.id);
@@ -165,6 +184,7 @@ function checkSelection(ctx: FakeContext, thread: Thread, params: RpcParams<'thr
 export function threadMethods(ctx: FakeContext) {
   const removing = new Set<string>();
   return {
+    ...sideQuestionMethods(ctx, (source, messages) => writeFakeFork(ctx, source, messages)),
     'threads.pullRequest': async (params) => {
       const thread = ctx.threads.get(params.threadId);
       return thread?.branch && thread.branch !== 'HEAD' ? thread.pullRequest ?? null : null;
@@ -243,18 +263,19 @@ export function threadMethods(ctx: FakeContext) {
       if (!Number.isFinite(asked)) throw refusal('threads.get limit must be a finite number');
       const limit = Math.min(Math.max(1, Math.trunc(asked)), MESSAGE_PAGE_MAX);
       // The core's rule: from the named message on, unless it is unknown or
-      // the tail is longer than a page, and then the whole page as before.
+      // the tail exceeds a page's count or bytes, and then a full page.
       const from = params.after === undefined ? -1 : thread.messages.findIndex((message) => message.id === params.after);
-      if (from !== -1 && thread.messages.length - from <= limit) {
-        const messages = params.compactTools ? previewToolOutputs(thread.messages.slice(from)) : thread.messages.slice(from);
+      const tail = from === -1 ? null : tailOf(thread.messages, from, limit);
+      if (tail !== null) {
+        const messages = params.compactTools ? previewToolOutputs(tail) : tail;
         // As the core's `listTurnsFor`: the turns of the messages sent, and whatever is still queued or running.
         const sent = new Set(messages.map((message) => message.turnId));
         const turns = thread.turns.filter((turn) => turn.status === 'queued' || turn.status === 'running' || sent.has(turn.id));
-        return structuredClone({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
+        return pagingReply({ ...thread, messages, turns, messagesBefore: null, messagesFrom: params.after });
       }
       const page = pageOf(thread.messages, thread.messages.length, limit);
       if (params.compactTools) page.messages = previewToolOutputs(page.messages);
-      return structuredClone({ ...thread, messages: page.messages, messagesBefore: page.before });
+      return pagingReply({ ...thread, messages: page.messages, messagesBefore: page.before });
     },
     'messages.list': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -271,7 +292,7 @@ export function threadMethods(ctx: FakeContext) {
       const page = pageOf(thread.messages, at, limit);
       if (params.compactTools) page.messages = previewToolOutputs(page.messages);
       const turns = new Set(page.messages.map((message) => message.turnId));
-      return structuredClone({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
+      return pagingReply({ ...page, turns: thread.turns.filter((turn) => turns.has(turn.id)) });
     },
     'messages.toolOutput': async (params) => {
       const message = ctx.thread(params.threadId).messages.find(message => message.id === params.messageId);
@@ -346,9 +367,33 @@ export function threadMethods(ctx: FakeContext) {
     'threads.archive': async (params) => {
       const thread = ctx.thread(params.threadId);
       if (params.archived === false && removing.has(thread.id)) throw refusal('threadId: this conversation is being deleted', { threadId: thread.id, field: 'threadId', expected: 'a conversation not being deleted' });
+      if (params.archived === false) dismissMergedPr(ctx, thread.id);
       const was = thread.archived;
       thread.archived = params.archived ?? true;
-      if (thread.archived) await putAway(ctx, thread);
+      if (thread.archived) {
+        cancelFamilySideQuestions(ctx, thread.id);
+        const family = [...ctx.threads.values()].filter(member => member.id === thread.id || member.parentThreadId === thread.id);
+        await Promise.all(family.map(member => putAway(ctx, member)));
+        // A restore during the stops keeps processes; new child work keeps its own.
+        if (ctx.threads.get(thread.id) === thread && thread.archived && !removing.has(thread.id)) {
+          for (const member of family) {
+            if (ctx.threads.get(member.id) !== member || ctx.inFlight.has(member.id)
+              || ['queued', 'running', 'waiting'].includes(member.status)) continue;
+            let ended = false;
+            for (const record of ctx.processes) {
+              if (record.threadId !== member.id || record.exitedAt !== null) continue;
+              record.exitedAt = ctx.now();
+              record.exitCode = 1;
+              ended = true;
+              ctx.emitToThread(member.id, 'process.exited', structuredClone(record));
+            }
+            if (ended) {
+              member.load = null;
+              if (member !== thread) ctx.touch(member);
+            }
+          }
+        }
+      }
       const summary = ctx.touch(thread);
       if (was !== thread.archived && !thread.parentThreadId && thread.projectId !== null) announceProject(ctx, thread.projectId);
       return summary;
@@ -361,6 +406,7 @@ export function threadMethods(ctx: FakeContext) {
       const archived = family.map(t => t.archived);
       for (const thread of family) { removing.add(thread.id); thread.archived = true; }
       try {
+        cancelFamilySideQuestions(ctx, threadId);
         ctx.workflows.stopRoot(threadId, 'Conversation deleted');
         for (const thread of family) {
           await putAway(ctx, thread);
@@ -430,7 +476,20 @@ export function threadMethods(ctx: FakeContext) {
       if (params.threadId !== null && (typeof params.threadId !== 'string' || params.threadId.length === 0)) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threadId must be a nonempty thread id or null', data: { field: 'threadId' } });
       }
+      const protectionError = protectedThreadIdsError(params.protectedThreadIds);
+      if (protectionError) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: protectionError, data: { field: 'protectedThreadIds', expected: 'at most 256 nonempty thread ids' } });
+      if (params.protectAllThreads !== undefined && typeof params.protectAllThreads !== 'boolean') {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'protectAllThreads must be a boolean', data: { field: 'protectAllThreads', expected: 'boolean' } });
+      }
       if (params.threadId !== null) ctx.thread(params.threadId);
+      const reportsProtection = params.protectedThreadIds !== undefined || params.protectAllThreads !== undefined;
+      if (!ctx.bus.protectionReported) {
+        if (reportsProtection) ctx.bus.protectAllThreads = false;
+        else ctx.bus.protectAllThreads = true;
+        if (reportsProtection) ctx.bus.protectionReported = true;
+      }
+      if (params.protectedThreadIds !== undefined) ctx.bus.protectedThreadIds = new Set(params.protectedThreadIds);
+      if (params.protectAllThreads !== undefined) ctx.bus.protectAllThreads = params.protectAllThreads;
       ctx.bus.focusedThreadId = params.threadId;
       return { ok: true };
     },
@@ -467,65 +526,11 @@ export function threadMethods(ctx: FakeContext) {
         const config = delegationConfig(ctx, rootId);
         if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       }
+      const messageIndex = thread.messages.length;
       const turn = ctx.startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
-      if (key) ctx.turnRequests.set(key, { content, turn });
+      if (key) ctx.turnRequests.set(key, { content, turn, messageId: thread.messages[messageIndex]!.id });
       return turn;
-    },
-    'threads.btw.cancel': async ({ threadId, requestId }) => {
-      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters' });
-      ctx.thread(threadId); cancelSide(ctx, threadId, requestId); return { ok: true };
-    },
-    'threads.btw.fork': async ({ threadId, requestId }) => {
-      const current = ctx.thread(threadId), held = sideResults.get(ctx)?.get(threadId);
-      requireFakeCwd(ctx, current);
-      if (current.archived || !held || held.requestId !== requestId) throw refusal('threads.btw.fork.requestId: expected an available completed side answer');
-      const source = held.source;
-      if (current.cwd !== source.cwd || current.projectId !== source.projectId) throw refusal('threads.btw.fork.threadId: the conversation moved since the side question');
-      if (source.agentSessionId || source.projectId === null) throw refusal('threads.btw.fork.threadId: expected a conversation thread');
-      if (!ctx.projects.some(project => project.id === source.projectId)) throw ctx.notFound('project', source.projectId);
-      if (!ctx.providers.some(provider => provider.id === source.providerId)) throw ctx.notFound('provider', source.providerId);
-      if (!ctx.accounts.some(account => account.id === source.accountId)) throw ctx.notFound('account', source.accountId);
-      const now = ctx.now(), turnId = `turn-${++ctx.seq}`;
-      const sideTurn: Turn = { id: turnId, threadId, status: 'done', queuedAt: now, startedAt: now, finishedAt: now, usage: null, error: null };
-      const messages: Message[] = [
-        ...source.messages,
-        { id: `m-${++ctx.seq}`, threadId, turnId, role: 'user', parts: [{ type: 'text', text: held.question }], state: 'complete', createdAt: now },
-        { id: `m-${++ctx.seq}`, threadId, turnId, role: 'assistant', parts: [{ type: 'text', text: held.answer }], state: 'complete', createdAt: now },
-      ];
-      const result = writeFakeFork(ctx, { ...source, turns: [...source.turns.map(turn => ({ ...turn, checkpoint: null })), sideTurn] }, messages);
-      forgetSide(ctx, threadId, requestId);
-      return result;
-    },
-    'threads.btw': async ({ threadId, question, requestId }) => {
-      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.requestId: expected 8 to 128 URL-safe characters' });
-      if (typeof question !== 'string' || !question.trim() || question.length > 12_000) {
-        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.question: expected 1 to 12000 characters' });
-      }
-      const thread = ctx.thread(threadId);
-      requireFakeCwd(ctx, thread);
-      if (thread.archived) throw refusal('threads.btw.threadId: expected a thread that is not archived');
-      const provider = ctx.providers.find(entry => entry.id === thread.providerId)!;
-      checkRunnable(provider, ctx.accounts.find(entry => entry.id === thread.accountId)!);
-      if (!supportsSideQuestions(provider.protocol)) throw refusal(`threads.btw: ${provider.name} does not support tool-free side questions`);
-      let requests = sideRequests.get(ctx);
-      if (!requests) { requests = new Map(); sideRequests.set(ctx, requests); }
-      if (requests.has(threadId)) throw refusal('a side question is already being answered for this thread');
-      forgetSide(ctx, threadId);
-      const snapshot = sideQuestionSnapshot(thread.messages), turnIds = new Set(snapshot.map(message => message.turnId));
-      const source = structuredClone({ ...thread, messages: snapshot, turns: thread.turns.filter(turn => turnIds.has(turn.id)) });
-      const timer = setTimeout(() => {
-        requests.delete(threadId);
-        let results = sideResults.get(ctx);
-        if (!results) { results = new Map(); sideResults.set(ctx, results); }
-        if (results.size >= 64) forgetSide(ctx, results.keys().next().value!);
-        const expiry = setTimeout(() => forgetSide(ctx, threadId, requestId), 10 * 60_000);
-        expiry.unref?.();
-        results.set(threadId, { requestId, source, question: question.trim(), answer: `Side answer: ${question.trim()}`, timer: expiry });
-        ctx.emit('thread.btw', { threadId, requestId, answer: `Side answer: ${question.trim()}`, error: null });
-      }, 0);
-      requests.set(threadId, { requestId, timer });
-      return { requestId };
     },
     'threads.compact': async (params) => {
       const thread = ctx.thread(params.threadId);
@@ -559,11 +564,11 @@ export function threadMethods(ctx: FakeContext) {
         if (origin.cwd === here.cwd) ctx.moveNotes.delete(thread.id);
         else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
       }
-      const gone = new Set(removed.map((entry) => entry.turnId));
+      const gone = new Set(removed.map((entry) => entry.id));
       const kept = new Set(thread.messages.map(entry => entry.turnId));
       thread.turns = thread.turns.filter((turn) => kept.has(turn.id));
       for (const [key, request] of ctx.turnRequests) {
-        if (key.startsWith(`${thread.id}:`) && gone.has(request.turn.id)) ctx.turnRequests.delete(key);
+        if (key.startsWith(`${thread.id}:`) && gone.has(request.messageId)) ctx.turnRequests.delete(key);
       }
       thread.sessionId = null;
       thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;
@@ -582,7 +587,7 @@ export function threadMethods(ctx: FakeContext) {
         else if (part.type === 'file') attachments.push({ kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name });
       }
       const page = pageOf(thread.messages, thread.messages.length, MESSAGE_PAGE);
-      return structuredClone({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
+      return pagingReply({ thread: { ...thread, messages: page.messages, messagesBefore: page.before }, prompt, attachments, previewReferences, session: 'seeded' as const, files: { status: 'unchanged' as const, count: 0 } });
     },
     'threads.fork': async (params) => {
       const source = ctx.thread(params.threadId);

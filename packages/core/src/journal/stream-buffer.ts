@@ -55,11 +55,6 @@ export class StreamBuffer {
     this.armDeltaTimer();
   }
 
-  /**
-   * Applies the buffered text. Streamed text is no event of its own: it is
-   * journaled as the message it lands in, between the `message.started`,
-   * `message.part` and `message.completed` events that frame it.
-   */
   flushDeltas(): void {
     if (this.deltaTimer !== null) {
       clearTimeout(this.deltaTimer);
@@ -84,7 +79,6 @@ export class StreamBuffer {
     }
   }
 
-  /** Writes the parts of every streaming message whose row is behind. */
   persistMessages(): void {
     if (this.persistTimer !== null) {
       clearTimeout(this.persistTimer);
@@ -112,10 +106,6 @@ export class StreamBuffer {
     this.persistDelay = Math.min(PERSIST_MAX_MS, Math.max(PERSIST_MS, Math.round(elapsed * PERSIST_SHARE)));
   }
 
-  /**
-   * The turn is over: whatever message its driver left open is written and no
-   * longer held in memory. Its state stays what the driver left.
-   */
   releaseTurn(turnId: string): void {
     this.flushDeltas();
     for (const [id, entry] of this.open) {

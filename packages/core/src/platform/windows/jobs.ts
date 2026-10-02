@@ -22,7 +22,8 @@ import {
 import {
   commandLineOf,
   cpuMsOf,
-  createdAtOf,
+  createdAtOfPid,
+  creationIdentityOf,
   exitCodeOf,
   imageNameOf,
   ioBytesOf,
@@ -54,10 +55,9 @@ const PROCESS_TERMINATE = 0x1;
 const PROCESS_VM_READ = 0x10;
 const PROCESS_SET_QUOTA = 0x100;
 const PROCESS_QUERY_INFORMATION = 0x400;
-/** Enough for GetProcessTimes, and granted on processes the full query right is not. */
-const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 /** What OpenProcess says for a pid no process holds any more. */
 const ERROR_INVALID_PARAMETER = 87;
+const STILL_ACTIVE = 259;
 const KILL_EXIT_CODE = 9;
 
 /** JOBOBJECT_BASIC_ACCOUNTING_INFORMATION.TotalUserTime, in 100 ns units. */
@@ -189,6 +189,7 @@ interface TrackedProcess {
   threadId: string;
   handle: number;
   peakMemoryBytes: number;
+  identity: { startedAt: number; incarnation: string } | null;
 }
 
 interface ThreadJob {
@@ -416,7 +417,7 @@ export function releaseThreadJob(threadId: string): void {
  * on purpose: the question is who wears the pid today.
  */
 export function processStartedAt(pid: number): number | null {
-  return createdAtOfPid(pid, false);
+  return createdAtOfPid(ensureNative, pid, false);
 }
 
 /**
@@ -425,21 +426,7 @@ export function processStartedAt(pid: number): number | null {
  * spawned it for one, so the open alone does not say it runs.
  */
 export function processRunningSince(pid: number): number | null {
-  return createdAtOfPid(pid, true);
-}
-
-function createdAtOfPid(pid: number, runningOnly: boolean): number | null {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  const api = ensureNative();
-  if (api === null) return null;
-  const handle = api.openProcess(PROCESS_QUERY_LIMITED_INFORMATION, pid);
-  if (handle === 0) return null;
-  try {
-    if (runningOnly && exitCodeOf(api, handle) !== null) return null;
-    return createdAtOf(api, handle);
-  } finally {
-    api.close(handle);
-  }
+  return createdAtOfPid(ensureNative, pid, true);
 }
 
 /** How many thread jobs are open. Read by the tests only. */
@@ -460,6 +447,7 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
   const total = view.getBigUint64(OFF_TOTAL_USER_TIME, true) + view.getBigUint64(OFF_TOTAL_KERNEL_TIME, true);
   const now = Date.now();
   const elapsedMs = now - job.lastSampleAt;
+  const cpuMeasured = job.lastSampleAt > 0 && elapsedMs > 0 && total >= job.lastCpu100ns;
   let cpuPercent = 0;
   if (job.lastSampleAt > 0 && elapsedMs > 0 && total >= job.lastCpu100ns) {
     const cpuMs = Number(total - job.lastCpu100ns) / 10_000;
@@ -480,7 +468,8 @@ export function sampleThreadJob(threadId: string): ProcessSample | null {
     if (memory.peak > entry.peakMemoryBytes) tracked.set(pid, { ...entry, peakMemoryBytes: memory.peak });
   }
 
-  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets };
+  return { processes: view.getUint32(OFF_ACTIVE_PROCESSES, true), cpuPercent, memoryBytes, workingSets,
+    cpuMeasured, memoryMeasured: workingSets.length > 0 };
 }
 
 // -- job creation -----------------------------------------------------------
@@ -767,12 +756,13 @@ function onProcessStarted(threadId: string, pid: number, opened = 0): void {
     api.close(handle);
     return;
   }
-  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0 });
+  const identity = creationIdentityOf(api, handle);
+  tracked.set(pid, { threadId, handle, peakMemoryBytes: 0, identity });
   sink?.started(threadId, pid, {
     exe,
     commandLine: commandLineOf(api, handle),
     parentPid: parentPidOf(api, handle),
-    startedAt: createdAtOf(api, handle),
+    ...identity,
   });
 }
 
@@ -787,16 +777,25 @@ function onProcessExited(threadId: string, pid: number): void {
 }
 
 function reportExit(threadId: string, pid: number): void {
+  const entry = tracked.get(pid);
+  if (entry !== undefined && entry.threadId !== threadId) return;
+  const api = ensureNative();
+  if (entry !== undefined && api !== null) {
+    const code = new Uint32Array(1);
+    // A late pid-only exit/empty-job packet cannot retire a replacement whose
+    // captured handle proves it is still running. Failed reads retain the
+    // notification path, with the already captured creation identity.
+    if (api.exitCode(entry.handle, code) && code[0] === STILL_ACTIVE) return;
+  }
   threadJobs.get(threadId)?.pids.delete(pid);
   if (ignored.delete(pid)) return;
-  const entry = tracked.get(pid);
-  const api = ensureNative();
   if (entry === undefined || api === null) {
     sink?.exited(threadId, pid, { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null });
     return;
   }
   tracked.delete(pid);
   const exit: NativeProcessExit = {
+    ...entry.identity,
     exitCode: exitCodeOf(api, entry.handle),
     cpuMs: cpuMsOf(api, entry.handle),
     peakMemoryBytes: peakMemoryOf(api, entry),
