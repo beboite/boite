@@ -296,6 +296,7 @@ const app = agent({ name: 'acp-fake' })
     cancels.get(params.sessionId)?.();
   })
   .onRequest('session/prompt', async ({ params, client }) => {
+    log('session/prompt');
     const sessionId = params.sessionId;
     const text = promptText(params.prompt);
     for (const block of params.prompt) {
@@ -446,6 +447,7 @@ const app = agent({ name: 'acp-fake' })
           }
           break;
         case 'slow':
+          log('waiting for cancel');
           await new Promise<void>((resolve) => {
             cancels.set(sessionId, resolve);
           });

@@ -136,6 +136,7 @@ export function createAcpDriver(deps: AcpDeps): Driver {
       running.attach(turn, warmMs);
       return {
         done: turn.done,
+        ...(isGrok(ctx.provider) ? {} : { setPermissionMode: (mode: TurnContext['thread']['permissionMode']) => running.setPermissionMode(turn, mode) }),
         stop: (): void => {
           running.stopTurn(turn);
         },

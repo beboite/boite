@@ -3,7 +3,16 @@
 The composer picker can select another provider or account in an existing
 thread. The conversation, draft, working directory and worktree stay in place.
 The selection applies to the next prompt accepted by the core. An already
-running or queued turn keeps its account, model, effort and permissions.
+running or queued turn keeps its account, model, effort and speed.
+
+Permission modes apply as soon as the user selects them, including during a
+running turn. Claude and compatible ACP agents receive a native live setter.
+Agents with launch-time permissions, including Codex, are interrupted and
+automatically resumed with the new mode inside the same Boite turn. No new
+user message is added. Changes during a restart use the latest selected mode;
+Stop cancels the resume. A command already running may be interrupted by that
+restart. Pending tool approvals follow a mode applied live; business questions
+still require the user's answer.
 
 A compatible model change on the same account follows the driver's existing
 model-switch path. Changing accounts clears the native session. The next turn

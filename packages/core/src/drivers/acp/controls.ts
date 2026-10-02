@@ -190,29 +190,31 @@ export class SessionControls {
    * that lists none, offers no match or refuses the call is one warning in the
    * core log, never a reason to fail the turn.
    */
-  async applyMode(ctx: TurnContext): Promise<void> {
+  async applyMode(ctx: TurnContext): Promise<boolean> {
     // Grok's mode went on the command line at spawn and it advertises no
     // `availableModes`: there is nothing to match and nothing to warn about.
-    if (isGrok(ctx.provider)) return;
+    if (isGrok(ctx.provider)) return false;
     const { agent, sessionId } = this.target();
-    if (agent === null || sessionId === null) return;
+    if (agent === null || sessionId === null) return false;
     const wanted = ctx.thread.permissionMode;
 
     const modeId = matchMode(wanted, this.modes);
     if (modeId === null) {
-      if (this.modeWarned) return;
+      if (this.modeWarned) return false;
       this.modeWarned = true;
       const offered = this.modes.length === 0 ? 'none' : this.modes.map((mode) => mode.id).join(', ');
       ctx.log('warn', `acp: no session mode matches the permission mode ${wanted}; the agent offers ${offered}`);
-      return;
+      return false;
     }
-    if (this.currentModeId === modeId) return;
+    if (this.currentModeId === modeId) return true;
 
     try {
       await agent.request('session/set_mode', { sessionId, modeId });
       this.currentModeId = modeId;
+      return true;
     } catch (error) {
       ctx.log('warn', `acp: the agent refused the session mode ${modeId}: ${messageOf(error)}`);
+      return false;
     }
   }
 

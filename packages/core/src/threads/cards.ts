@@ -53,6 +53,14 @@ export class ThreadCards {
     return scoped.sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /** A live mode change also settles tool approvals already waiting on the user. */
+  applyPermissionMode(threadId: ThreadId, mode: ThreadSummary['permissionMode']): void {
+    const decision = mode === 'bypassPermissions' || mode === 'yolo' ? 'allow'
+      : mode === 'plan' || mode === 'dontAsk' ? 'deny' : null;
+    if (decision === null) return;
+    for (const request of this.listPermissions(threadId)) this.answerPermission({ requestId: request.id, decision });
+  }
+
   /**
    * Is anything of this thread still waiting on the user? An agent can run two
    * tools at once and raise a card for each, so answering one does not mean the

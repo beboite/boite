@@ -55,6 +55,41 @@ test('coordination steers the current Codex turn without creating a user turn', 
 
 let harness: TestCore | null = null;
 
+test('permission changes restart the active native turn immediately inside the same Boite turn', async () => {
+  const client = await startCore();
+  const threadId = await codexThread(client, 'bypassPermissions');
+  const turn = await client.call('turns.start', { threadId, prompt: '[slow] Keep working' });
+  await waitFor(() => fakeLog().includes('waiting for interrupt'));
+  await client.call('threads.update', { threadId, permissionMode: 'yolo' });
+  await waitFor(() => fakeLog().split('waiting for interrupt').length === 3);
+  expect((await client.call('trace.get', { threadId })).some(process => process.commandLine?.includes('features.hooks=false'))).toBe(true);
+  await client.call('threads.update', { threadId, permissionMode: 'default' });
+  await waitFor(() => /thread\/resume .* approvalPolicy=on-request sandbox=workspace-write/.test(fakeLog()));
+  await waitFor(() => fakeLog().split('waiting for interrupt').length === 4);
+  const snapshot = await client.call('threads.get', { threadId });
+  expect(snapshot.turns).toHaveLength(1);
+  expect(snapshot.turns[0]).toMatchObject({ id: turn.id, status: 'running' });
+  expect(snapshot.messages.filter(message => message.role === 'user')).toHaveLength(1);
+  const finished = client.next('turn.finished', ended => ended.threadId === threadId);
+  await client.call('turns.stop', { threadId });
+  expect((await finished).status).toBe('stopped');
+});
+
+test.each([false, true])('a permission change during Codex startup sends the prompt only under the new mode (lost=%s)', async lost => {
+  process.env['CODEX_FAKE_SLOW_START'] = '300';
+  if (lost) process.env['CODEX_FAKE_LOST'] = '1';
+  const client = await startCore();
+  const threadId = await codexThread(client, 'bypassPermissions');
+  const finished = client.next('turn.finished', turn => turn.threadId === threadId);
+  await client.call('turns.start', { threadId, prompt: 'Keep working' });
+  await waitFor(() => fakeLog().includes('thread/start approvalPolicy=never sandbox=danger-full-access'));
+  await client.call('threads.update', { threadId, permissionMode: 'default' });
+  expect((await finished).status).toBe('done');
+  expect(fakeLog()).toMatch(/thread\/resume .* approvalPolicy=on-request sandbox=workspace-write/);
+  if (lost) expect(fakeLog()).toContain('thread/start approvalPolicy=on-request sandbox=workspace-write');
+  expect(fakeLog().split('turn/start model=').length - 1).toBe(1);
+});
+
 test('Codex reasoning without summaries remains visible through tool completion and reconnect without creating text', async () => {
   const client = await startCore(), threadId = await codexThread(client);
   const thinking = client.next('thread.updated', thread => thread.id === threadId && thread.progress?.phase === 'thinking');

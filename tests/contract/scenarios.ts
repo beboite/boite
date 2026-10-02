@@ -145,6 +145,26 @@ async function unavailable(env: ContractEnv): Promise<{ provider: ProviderSummar
 }
 
 export const SCENARIOS: Record<string, Scenario> = {
+  'a live permission change releases pending approvals without answering business questions': async env => {
+    const setup = await echo(env);
+    const created = await thread(env, setup);
+    await env.call('threads.subscribe', { threadId: created.id });
+    const turn = await env.call('turns.start', { threadId: created.id, prompt: '[permission] [question]' });
+    await until('pending permission', async () => (await env.call('permissions.list', { threadId: created.id })).length === 1);
+    await env.call('threads.update', { threadId: created.id, permissionMode: 'yolo' });
+    await until('business question after approval', async () => (await env.call('questions.list', { threadId: created.id })).length === 1);
+    const current = await env.call('threads.get', { threadId: created.id });
+    same(current.turns.length, 1, 'visible turn count');
+    same(current.messages.filter(message => message.role === 'user').length, 1, 'user message count');
+    same(await env.call('permissions.list', { threadId: created.id }), [], 'pending approvals');
+    const part = current.messages.flatMap(message => message.parts).find(part => part.type === 'permission');
+    check(part?.type === 'permission' && part.decision === 'allow', 'the pending approval was allowed');
+    const question = (await env.call('questions.list', { threadId: created.id }))[0]!;
+    await env.call('threads.update', { threadId: created.id, permissionMode: 'default' });
+    same((await env.call('questions.list', { threadId: created.id }))[0]?.id, question.id, 'business question preserved');
+    await env.call('questions.answer', { threadId: created.id, questionId: question.id, optionIds: [question.options[0]!.id] });
+    await until('turn finish', async () => (await env.call('threads.get', { threadId: created.id })).turns.find(entry => entry.id === turn.id)?.status === 'done');
+  },
   'browser requests require a subscribed host and return its matching reply': async env => {
     const setup = await echo(env);
     const created = await thread(env, setup);
