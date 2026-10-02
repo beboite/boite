@@ -1743,7 +1743,7 @@ export const strings = {
     useReset: 'Use reset',
     resetUsing: 'Using reset',
     resetConfirmTitle: 'Use a reset for {account}?',
-    resetConfirmBody: 'This consumes one banked reset on this {provider} account and clears its current usage limits. It cannot be undone.',
+    resetConfirmBody: 'This consumes the available reset closest to expiring on this {provider} account and clears its current usage limits. It cannot be undone.',
     resetConfirm: 'Use one reset',
     resetApplied: 'Reset applied. Usage limits refreshed.',
     resetNothing: 'Nothing to reset right now. No reset was consumed.',

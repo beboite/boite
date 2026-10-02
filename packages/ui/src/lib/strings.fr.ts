@@ -1678,7 +1678,7 @@ export const fr: Translation = {
     useReset: 'Utiliser un reset',
     resetUsing: 'Reset en cours',
     resetConfirmTitle: 'Utiliser un reset pour {account} ?',
-    resetConfirmBody: 'Cette action consomme un reset en réserve sur ce compte {provider} et réinitialise ses limites actuelles. Elle est irréversible.',
+    resetConfirmBody: 'Cette action consomme le reset disponible le plus proche de son expiration sur ce compte {provider} et réinitialise ses limites actuelles. Elle est irréversible.',
     resetConfirm: 'Utiliser un reset',
     resetApplied: 'Reset appliqué. Limites actualisées.',
     resetNothing: "Aucune limite à réinitialiser. Aucun reset n'a été consommé.",

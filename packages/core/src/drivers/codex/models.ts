@@ -6,7 +6,8 @@ import type { ProbeContext } from '../types.ts';
 import type { CodexModel, CodexModelListResponse, Timer } from './protocol.ts';
 import { AGENT_OWN_MODEL, CLIENT_NAME, PROBE_MAX_PAGES, PROBE_TIMEOUT_MS, STDERR_MAX } from './protocol.ts';
 import { CodexRpc } from './rpc.ts';
-import { quotaResetOutcome } from '../../quota-resets.ts';
+import { QuotaResetError, quotaResetOutcome, type QuotaResetSelection } from '../../quota-resets.ts';
+import { codexNextResetCredit } from '../../quota-details.ts';
 
 // ---------------------------------------------------------------------------
 // The probe: the models the server itself lists
@@ -241,10 +242,24 @@ export function readCodexQuota(ctx: ProbeContext): Promise<unknown> {
   });
 }
 
-/** The app-server selects the next banked credit for this login; no turn is started. */
-export function consumeCodexReset(ctx: ProbeContext, idempotencyKey: string): Promise<QuotaResetOutcome> {
+/** Selects the earliest usable credit in this login; no turn is started. */
+export function consumeCodexReset(ctx: ProbeContext, idempotencyKey: string, selection: QuotaResetSelection): Promise<QuotaResetOutcome> {
   return accountRequest(ctx, async (rpc) => {
-    const result = await rpc.request<{ outcome?: unknown }>('account/rateLimitResetCredit/consume', { idempotencyKey });
+    let creditId = selection.creditId;
+    if (creditId === undefined) {
+      const raw = await rpc.request('account/rateLimits/read', {});
+      let credit;
+      try { credit = codexNextResetCredit(raw); }
+      catch (error) { throw new QuotaResetError(messageOf(error), true); }
+      if (!credit) return 'noCredit';
+      creditId = credit.id;
+      selection.remember(creditId);
+    }
+    const result = await rpc.request<{ outcome?: unknown }>('account/rateLimitResetCredit/consume', { idempotencyKey, creditId });
     return quotaResetOutcome(result?.outcome);
-  }, true);
+  }, true).catch((error: unknown) => {
+    if (error instanceof QuotaResetError) throw error;
+    // Native errors can include the private credit or backend response.
+    throw new QuotaResetError('Codex could not confirm the reset. Refresh the limits before trying again.');
+  });
 }

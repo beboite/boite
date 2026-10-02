@@ -29,7 +29,7 @@ async function claudeFixture() {
   return { core, account };
 }
 
-test('Claude requires confirmation, claims the isolated organization with private grant ids, then broadcasts fresh limits', async () => {
+test('Claude requires confirmation, claims the earliest usable private grant, then broadcasts fresh limits', async () => {
   const { core, account } = await claudeFixture();
   const version = spyOn(core.updates, 'current').mockReturnValue('2.1.286');
   let spent = false;
@@ -39,8 +39,14 @@ test('Claude requires confirmation, claims the isolated organization with privat
     expect(init?.redirect).toBe('error');
     expect(init?.headers).toMatchObject({ Authorization: 'Bearer fixture-token', 'User-Agent': 'claude-cli/2.1.286 (external, cli)' });
     if (init?.method === 'POST') { spent = true; return Response.json({ result: 'reset' }); }
-    return Response.json({ five_hour: { utilization: spent ? 0 : 100 }, cedar_ember: { eligible: true, next_grant_id: 'private-grant',
-      grants: [{ id: 'private-grant', resets_left: spent ? 0 : 1, usable_now: true }] } });
+    return Response.json({ five_hour: { utilization: spent ? 0 : 100 }, cedar_ember: { eligible: true, next_grant_id: 'private-later-grant',
+      grants: [
+        { id: 'private-later-grant', resets_left: 1, usable_now: true, ends_at: new Date(Date.now() + 10 * 86400_000).toISOString() },
+        { id: 'private-no-expiration', resets_left: 1, usable_now: true, ends_at: null },
+        { id: 'private-grant', resets_left: spent ? 0 : 1, usable_now: true, ends_at: new Date(Date.now() + 86400_000).toISOString() },
+        { id: 'private-expired', resets_left: 1, usable_now: true, ends_at: new Date(Date.now() - 86400_000).toISOString() },
+        { id: 'private-paused', resets_left: 1, usable_now: true, paused: true, ends_at: new Date(Date.now() + 1000).toISOString() },
+      ] } });
   }, { preconnect: fetch.preconnect }));
   let broadcast: unknown;
   const off = core.bus.onAny((name, value) => { if (name === 'quotas.updated') broadcast = value; });
@@ -49,7 +55,7 @@ test('Claude requires confirmation, claims the isolated organization with privat
     expect(fetcher).toHaveBeenCalledTimes(0);
     const client = await harness!.connect();
     const result = await client.call('quotas.reset', { accountId: account.id, confirmed: true });
-    expect(result).toMatchObject({ outcome: 'reset', quota: { accountId: account.id, status: 'ready', resetCredits: { availableCount: 0 }, windows: [{ usedPercent: 0 }] } });
+    expect(result).toMatchObject({ outcome: 'reset', quota: { accountId: account.id, status: 'ready', resetCredits: { availableCount: 2 }, windows: [{ usedPercent: 0 }] } });
     expect(requests.map(row => [row.url, row.init?.method ?? 'GET'])).toEqual([
       ['https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1', 'GET'],
       ['https://api.anthropic.com/api/organizations/fixture%2Forganization/reset_rate_limits', 'POST'],
@@ -57,9 +63,36 @@ test('Claude requires confirmation, claims the isolated organization with privat
     ]);
     expect(JSON.parse(String(requests[1]!.init!.body))).toEqual({ program: 'cedar_ember', grant_id: 'private-grant', request_id: expect.any(String) });
     expect(JSON.stringify([result, broadcast])).not.toContain('private-grant');
+    expect(JSON.stringify([result, broadcast])).not.toContain('private-later-grant');
     expect(JSON.stringify([result, broadcast])).not.toContain('fixture-token');
     expect(broadcast).toContainEqual(result.quota);
   } finally { off(); fetcher.mockRestore(); version.mockRestore(); }
+});
+
+test('an unanswered Claude claim retries the same grant and request after reconstruction even when the earliest live grant changes', async () => {
+  const { core, account } = await claudeFixture();
+  const version = spyOn(core.updates, 'current').mockReturnValue('2.1.286');
+  const claims: Record<string, unknown>[] = [];
+  const fetcher = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      claims.push(JSON.parse(String(init.body)));
+      if (claims.length === 1) throw new Error('fixture disconnected after claiming the grant');
+      return Response.json({ result: 'already_used' });
+    }
+    return Response.json({ five_hour: { utilization: claims.length ? 0 : 100 }, cedar_ember: { eligible: true,
+      next_grant_id: claims.length ? 'later' : 'soon', grants: [
+        { id: 'later', resets_left: 1, usable_now: true, ends_at: new Date(Date.now() + 10 * 86400_000).toISOString() },
+        { id: 'soon', resets_left: claims.length ? 0 : 1, usable_now: true, ends_at: new Date(Date.now() + 86400_000).toISOString() },
+      ] } });
+  }, { preconnect: fetch.preconnect }));
+  try {
+    await expect(core.quotas.resets.reset(account.id, true)).rejects.toMatchObject({ settled: false });
+    const reopened = new QuotaStore(core);
+    expect((await reopened.resets.reset(account.id, true)).outcome).toBe('alreadyRedeemed');
+    expect(claims).toHaveLength(2);
+    expect(claims[0]).toMatchObject({ program: 'cedar_ember', grant_id: 'soon' });
+    expect(claims[1]).toEqual(claims[0]);
+  } finally { fetcher.mockRestore(); version.mockRestore(); }
 });
 
 test('Claude maps definitive outcomes and refuses cooldown or unconfirmed replies without claiming success', async () => {
@@ -102,18 +135,24 @@ test('two overlapping confirmations for aliases of one login consume only one re
   } finally { release(); directory.mockRestore(); }
 });
 
-test('an unanswered attempt keeps its key across store reconstruction, and a definitive outcome permits a new key', async () => {
+test('an unanswered attempt keeps its key and credit across store reconstruction, and a definitive outcome permits a new selection', async () => {
   harness = await startTestCore();
   const core = harness.core;
   const account = signedIn(core, 'codex', 'Retry');
   const keys: string[] = [];
-  const first = new QuotaStore(core, async () => reading(), async (_account, key) => { keys.push(key); throw new QuotaResetError('fixture timeout'); });
+  const first = new QuotaStore(core, async () => reading(), async (_account, key, selection) => {
+    keys.push(key); selection.remember('private-codex-credit'); throw new QuotaResetError('fixture timeout');
+  });
   await expect(first.resets.reset(account.id, true)).rejects.toThrow('fixture timeout');
-  const reopened = new QuotaStore(core, async () => reading(), async (_account, key) => { keys.push(key); return 'reset'; });
+  const selections: (string | undefined)[] = [];
+  const reopened = new QuotaStore(core, async () => reading(), async (_account, key, selection) => {
+    keys.push(key); selections.push(selection.creditId); return 'reset';
+  });
   await reopened.resets.reset(account.id, true);
   await reopened.resets.reset(account.id, true);
   expect(keys[1]).toBe(keys[0]);
   expect(keys[2]).not.toBe(keys[0]);
+  expect(selections).toEqual(['private-codex-credit', undefined]);
 });
 
 test('an applied reset with a failed refresh retains a stale reading instead of invented cleared limits', async () => {

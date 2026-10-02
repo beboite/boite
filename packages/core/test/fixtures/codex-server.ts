@@ -526,10 +526,12 @@ function handle(method: string, raw: unknown): unknown {
       log(`account/rateLimits/read ${JSON.stringify(params)}`);
       return { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, windowDurationMins: 300 },
         credits: { hasCredits: true, unlimited: false, balance: '42.5' } },
-        rateLimitResetCredits: { availableCount: 2, credits: null } };
+        rateLimitResetCredits: process.env['CODEX_FAKE_RESET_CREDITS']
+          ? JSON.parse(process.env['CODEX_FAKE_RESET_CREDITS']) : { availableCount: 2, credits: null } };
     case 'account/rateLimitResetCredit/consume':
       if (!experimentalApi) throw new Error('Reset credits require experimentalApi during initialization');
       log(`account/rateLimitResetCredit/consume ${JSON.stringify(params)}`);
+      if (process.env['CODEX_FAKE_RESET_ERROR']) throw new Error(process.env['CODEX_FAKE_RESET_ERROR']);
       return { outcome: 'reset' };
     case 'hooks/list':
       log('hooks/list');

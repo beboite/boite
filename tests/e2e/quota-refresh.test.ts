@@ -224,6 +224,7 @@ for (const width of [1280, 390]) {
     await page.click(reset);
     await page.waitFor(`document.activeElement?.getAttribute('data-testid') === 'confirm-cancel'`);
     expect(await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').textContent`)).toContain('cannot be undone');
+    expect(await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').textContent`)).toContain('closest to expiring');
     expect(await page.evaluate(`document.querySelector('[data-testid="confirm-dialog"]').textContent`)).toContain('Work subscription');
     expect(await page.evaluate('globalThis.resetCalls.length')).toBe(0);
     await capture(`quota-reset-confirm-${width}.png`);

@@ -27,6 +27,31 @@ function liveExpiration(value: unknown, now: number): boolean {
   return day! <= days && at !== null && at > now;
 }
 
+function codexResetCreditRows(raw: unknown, now: number): { id: string; expiresAt: number | null }[] {
+  const resets = object(object(raw)['rateLimitResetCredits']);
+  return (Array.isArray(resets['credits']) ? resets['credits'] : []).flatMap((value) => {
+    const row = object(value);
+    const id = row['id'];
+    const expiration = row['expiresAt'];
+    const at = typeof expiration === 'number' && Number.isSafeInteger(expiration) ? expires(expiration) : null;
+    if (typeof id !== 'string' || !id.trim() || row['status'] !== 'available' || row['resetType'] !== 'codexRateLimits') return [];
+    if (expiration !== null && (at === null || at <= now)) return [];
+    return [{ id, expiresAt: at }];
+  });
+}
+
+/** No provider-selected fallback: partial details cannot prove which credit expires first. */
+export function codexNextResetCredit(raw: unknown, now = Date.now()): { id: string; expiresAt: number | null } | null {
+  const resets = object(object(raw)['rateLimitResetCredits']);
+  const count = number(resets['availableCount']);
+  const credits = codexResetCreditRows(raw, now);
+  if (count === 0) return null;
+  if (count === null || !Number.isSafeInteger(count) || new Set(credits.map(credit => credit.id)).size !== count) {
+    throw new Error('Codex did not report all available reset details. Refresh the limits or update Codex before using a reset.');
+  }
+  return credits.reduce((next, credit) => (credit.expiresAt ?? Infinity) < (next.expiresAt ?? Infinity) ? credit : next);
+}
+
 export function codexQuotaDetails(raw: unknown): Pick<QuotaReading, 'resetCredits' | 'credits'> {
   const root = object(raw);
   const bucket = object(object(root['rateLimitsByLimitId'])['codex'] ?? root['rateLimits']);
@@ -34,11 +59,7 @@ export function codexQuotaDetails(raw: unknown): Pick<QuotaReading, 'resetCredit
   const resets = object(root['rateLimitResetCredits']);
   const count = number(resets['availableCount']);
   if (count !== null && Number.isSafeInteger(count)) {
-    const times = (Array.isArray(resets['credits']) ? resets['credits'] : []).flatMap((value) => {
-      const row = object(value);
-      const at = expires(row['expiresAt']);
-      return row['status'] === 'available' && at !== null ? [at] : [];
-    });
+    const times = codexResetCreditRows(raw, Date.now()).flatMap(row => row.expiresAt === null ? [] : [row.expiresAt]);
     result.resetCredits = { availableCount: count, nextExpiresAt: count > 0 && times.length ? Math.min(...times) : null };
   }
   if (!bucket['limitId'] || bucket['limitId'] === 'codex') {
@@ -54,21 +75,31 @@ export function codexQuotaDetails(raw: unknown): Pick<QuotaReading, 'resetCredit
   return result;
 }
 
+/** Private to the core: expiring usable grants precede grants without an expiration. */
+export function claudeNextResetGrant(raw: unknown, now = Date.now()): { id: string; expiresAt: number | null; availableCount: number } | null {
+  const ember = object(object(raw)['cedar_ember']);
+  if (ember['eligible'] !== true || !Array.isArray(ember['grants'])) return null;
+  const grants = ember['grants'].map(object).filter((row) => {
+    const left = number(row['resets_left']);
+    return typeof row['id'] === 'string' && /^[a-z0-9_-]{1,40}$/.test(row['id']) &&
+      (row['paused'] === undefined || row['paused'] === false) && row['usable_now'] === true &&
+      left !== null && Number.isSafeInteger(left) && left > 0 && liveExpiration(row['ends_at'], now);
+  });
+  let next: Record<string, unknown> | undefined;
+  for (const grant of grants) {
+    if (!next || (expires(grant['ends_at']) ?? Infinity) < (expires(next['ends_at']) ?? Infinity)) next = grant;
+  }
+  return next ? { id: next['id'] as string, expiresAt: expires(next['ends_at']),
+    availableCount: grants.reduce((sum, grant) => sum + (grant['resets_left'] as number), 0) } : null;
+}
+
 export function claudeQuotaDetails(raw: unknown, now = Date.now()): Pick<QuotaReading, 'resetCredits' | 'credits'> {
   const root = object(raw);
   const result: Pick<QuotaReading, 'resetCredits' | 'credits'> = {};
   const ember = object(root['cedar_ember']);
   if (typeof ember['eligible'] === 'boolean' && Array.isArray(ember['grants'])) {
-    const grants = ember['grants'].map(object).filter((row) => {
-      const left = number(row['resets_left']);
-      return ember['eligible'] === true && typeof row['id'] === 'string' && row['id'].length > 0 &&
-        (row['paused'] === undefined || row['paused'] === false) && row['usable_now'] === true &&
-        left !== null && Number.isSafeInteger(left) && left > 0 &&
-        liveExpiration(row['ends_at'], now);
-    });
-    const next = grants.find((row) => typeof row['id'] === 'string' && row['id'] === ember['next_grant_id']);
-    result.resetCredits = { availableCount: next ? grants.reduce((sum, row) => sum + (row['resets_left'] as number), 0) : 0,
-      nextExpiresAt: next ? expires(next['ends_at']) : null };
+    const next = claudeNextResetGrant(raw, now);
+    result.resetCredits = { availableCount: next?.availableCount ?? 0, nextExpiresAt: next?.expiresAt ?? null };
   }
   const extra = object(root['extra_usage']);
   if (typeof extra['is_enabled'] === 'boolean') {

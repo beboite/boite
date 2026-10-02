@@ -44,7 +44,7 @@ test('Codex trusts the total reset count when details are partial and never infe
   const response = { rateLimits: { limitId: 'spark', credits: { hasCredits: true, balance: '999' } },
     rateLimitsByLimitId: { codex: { credits: { hasCredits: true, unlimited: false, balance: '42.5' } } },
     rateLimitResetCredits: { availableCount: 5, credits: [
-      { id: 'private-id', status: 'available', expiresAt: 1900000000 },
+      { id: 'private-id', status: 'available', resetType: 'codexRateLimits', expiresAt: 1900000000 },
       { status: 'consumed', expiresAt: 1800000000 },
     ] } };
   expect(codexQuotaDetails(response)).toEqual({ resetCredits: { availableCount: 5, nextExpiresAt: 1900000000000 },
@@ -54,7 +54,7 @@ test('Codex trusts the total reset count when details are partial and never infe
   expect(codexQuotaDetails({ rateLimits: { credits: { hasCredits: true, balance: 'bad' } } }).credits?.remaining).toBeNull();
 });
 
-test('Claude counts only usable grants with a live next grant and keeps spending caps separate from wallets', () => {
+test('Claude reports the earliest usable expiration and keeps spending caps separate from wallets', () => {
   const now = Date.parse('2026-01-01T00:00:00Z');
   const grant = { id: 'next', resets_left: 2, usable_now: true, ends_at: '2026-03-01T00:00:00Z' };
   const raw = { cedar_ember: { eligible: true, next_grant_id: 'next', grants: [grant,
@@ -62,10 +62,11 @@ test('Claude counts only usable grants with a live next grant and keeps spending
     { ...grant, id: 'expired', ends_at: '2025-01-01T00:00:00Z' },
     { ...grant, id: 'invalid-date', ends_at: '2026-02-30T00:00:00Z' },
     { ...grant, id: 'later', resets_left: 1, ends_at: null },
+    { ...grant, id: 'sooner', resets_left: 1, ends_at: '2026-02-01T00:00:00Z' },
   ] }, extra_usage: { is_enabled: true, monthly_limit: 2000, used_credits: 500 } };
-  expect(claudeQuotaDetails(raw, now)).toEqual({ resetCredits: { availableCount: 3, nextExpiresAt: Date.parse(grant.ends_at) },
+  expect(claudeQuotaDetails(raw, now)).toEqual({ resetCredits: { availableCount: 4, nextExpiresAt: Date.parse('2026-02-01T00:00:00Z') },
     credits: { kind: 'budget', enabled: true, remaining: 1500, limit: 2000, unlimited: false } });
-  expect(claudeQuotaDetails({ ...raw, cedar_ember: { ...raw.cedar_ember, next_grant_id: 'missing' } }, now).resetCredits?.availableCount).toBe(0);
+  expect(claudeQuotaDetails({ ...raw, cedar_ember: { ...raw.cedar_ember, next_grant_id: 'missing' } }, now).resetCredits?.availableCount).toBe(4);
   expect(claudeQuotaDetails({ extra_usage: { is_enabled: false, monthly_limit: 20, used_credits: 5 } }).credits?.enabled).toBe(false);
   expect(claudeQuotaDetails({ extra_usage: { is_enabled: true, monthly_limit: null, used_credits: 5 } }).credits?.remaining).toBeNull();
   expect(claudeQuotaDetails({})).toEqual({});
