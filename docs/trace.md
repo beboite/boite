@@ -160,7 +160,12 @@ exits inside those ten seconds, and a background command it started (a dev
 server, a watcher) is an orphan by then. A process is an orphan when the job reported it, it is
 at least ten seconds old, and its parent pid is not a live process of the
 thread, or belongs to one that started after it (a pid Windows gave to someone
-else). Each orphan is stopped with everything under it, through the process
+else). Before it stops one, the registry asks the system whether a process
+runs under the parent pid since before the child was created: that process is
+the parent, whatever the registry missed, and its child stays. Processes are
+dated by their creation time and told apart by pid and creation time together,
+so a process that takes a pid the thread already saw is followed like any
+other. Each orphan is stopped with everything under it, through the process
 handle the job listener opened when the process started, never through a fresh
 open by pid. Each stop is a `core.log` line naming the thread, the pid and the
 executable.
