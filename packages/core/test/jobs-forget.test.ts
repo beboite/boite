@@ -108,10 +108,16 @@ describeWindows('thread jobs of forgotten threads', () => {
     // Bun owns a process handle until the exited subprocess is collected.
     // Collect those wrappers before comparing kernel counts; a leaked native
     // Job Object cannot be reclaimed by Bun's garbage collector.
-    await waitFor(() => {
-      Bun.gc(true);
-      return handleCount() - handlesBefore < SPAWNS / 2;
-    }, 5000);
+    // A loaded runner finalizes those wrappers late: 5 s expired on Windows CI
+    // with no job left, so the wait is longer and its failure says the count.
+    try {
+      await waitFor(() => {
+        Bun.gc(true);
+        return handleCount() - handlesBefore < SPAWNS / 2;
+      }, 20000);
+    } catch (cause) {
+      throw new Error(`${handleCount() - handlesBefore} handles above the baseline after ${SPAWNS} spawns; ${threadJobCount()} thread jobs`, { cause });
+    }
     // Preserve the kernel assertion: one leaked Job Object per id still fails.
     expect(handleCount() - handlesBefore).toBeLessThan(SPAWNS / 2);
   }, 30000);
