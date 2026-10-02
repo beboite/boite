@@ -35,6 +35,8 @@
     void tick().then(() => {
       const el = root;
       if (!el) return;
+      // Match anchored menus: the top layer stays above the whip and its control.
+      if (el.showPopover && !el.matches(':popover-open')) el.showPopover();
       left = Math.max(GAP, Math.min(current.x, window.innerWidth - el.offsetWidth - GAP));
       top = Math.max(GAP, Math.min(current.y, window.innerHeight - el.offsetHeight - GAP));
       rows()[0]?.focus({ preventScroll: true });
@@ -112,6 +114,7 @@
     class="context-menu"
     class:closing={popover.closing}
     role="menu"
+    popover="manual"
     tabindex="-1"
     bind:this={root}
     use:popover.attach
@@ -154,6 +157,8 @@
 <style>
   .context-menu {
     position: fixed;
+    margin: 0;
+    inset: auto;
     z-index: 70;
     min-width: 200px;
     max-width: min(320px, calc(100vw - 12px));

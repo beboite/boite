@@ -744,3 +744,19 @@ test('a press holds the pinned list, and a release the window never saw still fr
   live.detach();
   client.close();
 });
+
+test('the timeline watches the wheel passively, so a notch never waits for the main thread', async () => {
+  const messages = thread(30);
+  stubLayout(messages.length * ESTIMATE);
+  const listen = vi.spyOn(EventTarget.prototype, 'addEventListener');
+  try {
+    running = mount(MessageList, { target: document.body, props: { store, threadId: 't-short', messages } });
+    await settle();
+    const timeline = document.querySelector<HTMLElement>('[data-testid=timeline]')!;
+    const wheels = listen.mock.calls.filter((call, index) => listen.mock.contexts[index] === timeline && call[0] === 'wheel');
+    // One listener, and it cannot cancel the scroll: a cancellable one makes the compositor ask this thread first.
+    expect(wheels.map((call) => call[2])).toEqual([expect.objectContaining({ passive: true })]);
+  } finally {
+    listen.mockRestore();
+  }
+});

@@ -24,6 +24,7 @@
   import { experimentOn } from './lib/experiments.svelte';
   import { rightPanel } from './lib/right-panel.svelte';
   import { workspace } from './lib/workspace.svelte';
+  import type { Store } from './lib/store.svelte';
   import { tourRequested, tourSeen } from './lib/onboarding.svelte';
   import { prefetchAllowed, prefetchNames, whenIdle } from './lib/prefetch';
   import { startTheme } from './lib/theme';
@@ -194,6 +195,21 @@
   const terminalSlot = new Closing();
   /** The error is cleared the moment Dismiss is pressed, so the exit plays on a copy. */
   let toastText = $state('');
+  let toastThreadId = $state<string | null>(null);
+  let toastStore = $state<Store | null>(null);
+
+  function dismissError(): void {
+    if (toastStore) toastStore.error = null;
+  }
+
+  function openErrorThread(): void {
+    const owner = toastStore;
+    const threadId = toastThreadId;
+    if (!owner || !threadId) return;
+    owner.error = null;
+    void workspace.select(owner, threadId);
+    mobileScreen = 'chat';
+  }
 
   // Ctrl+Q quits the shell after a hold or a double press, never on one slip:
   // the hint shows for as long as the key is down. Only the shell has a
@@ -220,6 +236,8 @@
       return;
     }
     toastText = error;
+    toastThreadId = store.errorThreadId;
+    toastStore = store;
     toast.show();
   });
 
@@ -572,7 +590,12 @@
       onanimationend={toast.end}
       data-testid="error-toast"
     >
-      <NotificationCard title={strings.errors.prefix} message={toastText} dismiss={() => (store.error = null)} />
+      <NotificationCard
+        title={toastThreadId ? strings.notify.failed : strings.errors.prefix}
+        message={toastText}
+        dismiss={dismissError}
+        action={toastThreadId ? { label: strings.notify.openThread, run: openErrorThread } : undefined}
+      />
     </div>
   {/if}
   <UndoToast onerror={(error) => (store.error = error instanceof Error ? error.message : String(error))} />

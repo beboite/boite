@@ -811,7 +811,7 @@
     padding: 0 20px;
   }
 
-  /* A translucent surface with a top reflection; focus only changes its hairline. */
+  /* A translucent surface with a top reflection. */
   .composer {
     position: relative;
     display: flex;
@@ -825,13 +825,13 @@
     border: 1px solid var(--color-border);
     border-top-color: var(--color-edge);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-composer);
-    transition: border-color var(--dur-2) var(--ease-out-quint);
+    --composer-rest: var(--shadow-composer);
+    box-shadow: var(--composer-rest), 0 0 0 3px transparent;
+    transition: border-color var(--dur-3) var(--ease-out-quint), box-shadow var(--dur-3) var(--ease-out-quint);
   }
 
-  .composer:focus-within {
-    border-color: var(--color-composer-focus);
-  }
+  /* Focus tints the hairline with the accent and lays a faint halo of it around the box. */
+  .composer:focus-within { border-color: var(--color-composer-focus); box-shadow: var(--composer-rest), 0 0 0 3px var(--color-composer-halo); }
 
   /* Editing a sent message: one quiet line above the box, the way out on its right. */
   .editing {
@@ -860,7 +860,7 @@
     color: var(--color-foreground);
   }
 
-  textarea.highlighted { color: transparent; caret-color: var(--color-foreground); }
+  textarea.highlighted { color: transparent; caret-color: var(--color-accent); }
   textarea.highlighted::selection { background: var(--color-accent-soft); }
 
   textarea, .input-paint {
@@ -870,8 +870,8 @@
     padding: 12px 14px 6px;
     border: none;
     background: transparent;
-    font-size: var(--text-base);
-    line-height: 1.5;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
   }
 
   textarea { display: block; }
@@ -884,7 +884,7 @@
   }
 
   @media (max-width: 720px) {
-    .composer { box-shadow: var(--shadow-e1); border-radius: var(--radius-xl); }
+    .composer { --composer-rest: var(--shadow-e1); border-radius: var(--radius-xl); }
     .speech-preview { padding: 0 16px 8px; }
     .speech-status { color: var(--color-accent); }
     textarea, .input-mirror { font-size: var(--text-md); }

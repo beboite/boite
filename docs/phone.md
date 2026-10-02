@@ -10,6 +10,12 @@ App & notifications, Appearance, and Machines. The back button or browser Back
 returns to that list. Theme and accent belong to the current device; the
 notification screen names the connected machine that will send its alerts.
 Machines lets the phone pair, switch, reconnect, or remove saved connections.
+"Scan a QR code" reads a pairing link through the camera; "Paste a pairing
+link" accepts text. Chrome uses `BarcodeDetector` when available; the fallback
+loads jsQR on the first scan. Decoding stays on the device. Other QR content
+leaves the scanner open. The camera requires HTTPS and closing the view stops
+its tracks. A new machine takes the hostname reported by its core; its card
+can rename it.
 Voice shows the connected core's dictation readiness. Engine installation and
 API credentials stay in desktop Voice settings, including for owner sessions.
 Usage shows the connected core's tokens and API cost per day, provider and

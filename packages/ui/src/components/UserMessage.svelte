@@ -128,6 +128,8 @@
   .user-text {
     white-space: pre-wrap;
     word-break: break-word;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
   }
 
   /* The images sent with the prompt, in a row that wraps under the text. */

@@ -484,6 +484,12 @@ policy that prevents a later backdrop from drawing.
 
 ## Chat readability
 
+Conversation text uses `--text-reading` and `--leading-reading`: 15 px with
+24 px line spacing on desktop, 16 px on phones. Answers, sent prompts,
+the composer, plans and delegated transcripts share these tokens. Headings
+scale from 1.3 em to body size; code, tables and tool cards retain their
+own sizes. `tests/e2e/readability.test.ts` checks both viewport widths.
+
 Tool cards retain full input/output on expansion. Consecutive successful calls
 fold into a count-based summary in first-seen kind order; failed and denied calls
 keep a diagnostic preview. A diff-producing call stands alone and opens its diff.

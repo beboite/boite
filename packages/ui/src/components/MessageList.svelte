@@ -24,7 +24,7 @@
   import WorkflowActivity from './WorkflowActivity.svelte';
   import { dockRoom } from '../lib/question-dock.svelte';
   import { glides } from '../lib/motion';
-  import { BottomGlide, PointerHold, typingKey, wheelsUp } from '../lib/timeline-follow';
+  import { BottomGlide, PointerHold, typingKey, watchWheel, wheelsUp } from '../lib/timeline-follow';
   import { workspace } from '../lib/workspace.svelte';
 
   let {
@@ -758,7 +758,7 @@
     hasOlder={store.messagesBefore !== null} loading={store.loadingOlder} loadOlder={() => { if (viewport) { releaseNavigation(); viewport.scrollTop = 0; pinned = false; pullOlder(viewport); } }} />
   <!-- Input releases restored and navigation anchors; programmatic corrections keep them. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="timeline" bind:this={viewport} {onscroll} {onwheel} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} data-testid="timeline">
+  <div class="timeline" bind:this={viewport} use:watchWheel={onwheel} {onscroll} ontouchstart={press} onpointerdown={press} onkeydown={releaseNavigation} data-testid="timeline">
     <div class="column">
       <!-- paging: the one line the top of the list shows while a page is in flight. -->
       {#if store.loadingOlder}

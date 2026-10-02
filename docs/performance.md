@@ -265,6 +265,9 @@ limits expensive work while streaming, typing and scrolling:
 - The outline rail updates once per frame and animates transforms. Message
   heights come from `ResizeObserver`; reading anchors are captured after the
   scroll render so immediate navigation restores the same message.
+- Wheel listeners are passive: they release bottom following without
+  cancelling browser scrolling. `MessageList.test.ts` guards the listener
+  options.
 - Icon shapes and locale date formatters are reused. Finished Markdown markup
   has a four-million-character cache bound.
 - The composer uses `field-sizing: content` where supported; IndexedDB draft

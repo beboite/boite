@@ -56,3 +56,9 @@ test('seven screens explain the app, the second asking who is using it', () => {
   expect(steps()).not.toBe(shown);
   expect(steps(false)).not.toContain('privacy');
 });
+
+test('a phone gets two screens, whoever holds it, and none that sets up the computer', () => {
+  expect(steps(true, true)).toEqual(['welcome', 'reach']);
+  expect(steps(false, true)).toEqual(['welcome', 'reach']);
+  expect(steps(true, true)).not.toBe(steps(true, true));
+});
