@@ -214,6 +214,7 @@
   onDestroy(stopLift);
   const activePrompt = $derived.by(() => {
     void measured;
+    if (!pinned && promptTarget && timeline.some(message => message.id === promptTarget)) return promptTarget;
     const total = totals(timeline);
     const at = pinned ? timeline.length - 1 : atOrBefore(total, timeline.length, scrollTop + 24);
     for (let index = Math.min(at, timeline.length - 1); index >= 0; index--) {

@@ -116,9 +116,10 @@ for (const phone of [false, true]) {
         const inset = Math.min(96, Math.max(48, box.clientHeight * 0.12));
         return row ? Math.abs(row.getBoundingClientRect().top - box.getBoundingClientRect().top - inset) : Infinity;
       })()`;
-      if (history !== 'empty') expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
       await page.waitFor(`${offset} < 2 && document.querySelector('[data-testid=permission-card]')`);
       expect(await page.evaluate<number>(offset)).toBeLessThan(2);
+      if (history !== 'empty') expect(await page.evaluate(`document.querySelector('[data-testid=message-marker][aria-current=location]')?.dataset.messageId === window.__boiteTest.workspace.active.openThread.messages.findLast(message => message.role === 'user').id`)).toBe(true);
+      if (history !== 'empty') expect(new Set(positions.map(position => Math.round(position))).size).toBeGreaterThan(3);
       expect(await page.evaluate(`document.querySelector('${jump}') === null`)).toBe(true);
       await page.screenshot(join(artifacts, `prompt-top-${name}-${history}.png`));
 
