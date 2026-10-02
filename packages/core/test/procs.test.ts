@@ -82,7 +82,7 @@ describe('procs', () => {
     // The three maps the load tick walks. Without the timer they held every
     // thread the core ever ran, and the plugin store mints an id per call.
     const registry = harness.core.procs as unknown as {
-      known: Map<string, Set<number>>;
+      known: Map<string, Map<number, number | null>>;
       forgetTimers: Map<string, ReturnType<typeof setTimeout>>;
     };
     const first = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', ''], { cwd: harness.dataDir });
@@ -91,9 +91,11 @@ describe('procs', () => {
     await new Promise<void>((resolve, reject) => { first.once('exit', () => resolve()); first.once('error', reject); });
     await waitFor(() => harness.core.procs.liveCount(threadId) === 0, 5000);
 
-    // The history outlives the process on purpose: a job event for that pid is
-    // a repeat, not a grandchild, and `known` is what tells the two apart.
-    expect(registry.known.get(threadId)?.has(pid)).toBe(true);
+    // The history outlives the process on purpose: a late job event for that
+    // pid is a repeat, not a grandchild, and `known` is what tells the two
+    // apart. Where a job reports the process, its own events spend the entry.
+    expect(registry.known.has(threadId)).toBe(true);
+    if (process.platform !== 'win32') expect(registry.known.get(threadId)?.has(pid)).toBe(true);
     expect(registry.forgetTimers.has(threadId)).toBe(true);
 
     const second = harness.core.procs.spawnChild(threadId, process.execPath, ['-e', ''], { cwd: harness.dataDir });

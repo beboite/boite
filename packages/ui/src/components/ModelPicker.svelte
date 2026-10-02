@@ -315,9 +315,7 @@
       onanimationend={popover.end}
       {onkeydown}
     >
-      {#if store.owner}
-        <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
-      {/if}
+      <button class="refresh" type="button" data-testid="picker-refresh" aria-label={strings.composer.refreshModels} title={strings.composer.refreshModels} disabled={probing || needsInstall} onclick={() => void refreshModels()}><RefreshCw size={14} class={probing ? 'spin' : ''} /></button>
       {#if !single}
         <div class="column rail">
           <ProviderTiles {store} {choice} {locked} current={shown?.id ?? null} {favoritesOpen} onfavorites={() => { favoritesOpen = true; modelQuery = ''; }} onpick={pickTile} onmore={openInstall} />
@@ -413,8 +411,8 @@
               {@render modelRow(model)}
             {/each}
           {/if}
-          {#if !pinnedModel && filteredCurrent.length === 0 && modelQuery.trim() !== ''}
-            <p class="none subtle" data-testid="picker-no-models">{strings.composer.noModels}</p>
+          {#if !pinnedModel && filteredCurrent.length === 0 && (modelQuery.trim() !== '' || (shownModels.length === 0 && !probing))}
+            <p class="none subtle" data-testid="picker-no-models">{shownModels.length === 0 ? strings.composer.noModelsAvailable : strings.composer.noModels}</p>
           {/if}
 
           {#if filteredLegacy.length > 0}
@@ -429,9 +427,6 @@
               <span class="name muted">{strings.composer.legacyModels}</span>
               <ChevronRight size={14} strokeWidth={2} />
             </button>
-          {/if}
-          {#if shown && shownModels.length === 0 && !probing}
-            <p class="none subtle">{strings.composer.noModels}</p>
           {/if}
           {#if probing}
             <p class="none subtle probing" data-testid="picker-probing">{strings.composer.probing}</p>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import InfoTip from './InfoTip.svelte';
-  import { Plus, ArrowUpRight, RefreshCw, Settings2, Trash2, X } from '@lucide/svelte';
+  import { Plus, ArrowUpRight, RefreshCw, ScanLine, Settings2, Trash2, X } from '@lucide/svelte';
   import { workspace, machineIcons, type Machine } from '../lib/workspace.svelte';
   import { store as primary } from '../lib/store.svelte';
   import { confirm } from '../lib/confirm.svelte';
@@ -11,9 +11,9 @@
   import PhoneSettings from './PhoneSettings.svelte';
   import MachineSettings from './MachineSettings.svelte';
   import ServerUpdateCard from './ServerUpdateCard.svelte';
+  import { parsePairingLink } from '../lib/endpoint';
   let { mobile = false }: { mobile?: boolean } = $props();
-  let label = $state(''),
-    link = $state(''),
+  let link = $state(''),
     url = $state(''),
     token = $state('');
   let busy = $state(false);
@@ -25,6 +25,21 @@
   let settingsId = $state<string | null>(null);
   const settingsMachine = $derived(workspace.machines.find(machine => machine.id === settingsId && machine.store.owner));
   let linkInput = $state<HTMLInputElement | null>(null);
+  /** The camera view, loaded on the first scan: a phone that never scans never downloads it. */
+  let QrScanner = $state<typeof import('./QrScanner.svelte').default>();
+  let scanning = $state(false);
+  async function startScanning() {
+    workspace.error = null;
+    try { QrScanner ??= (await import('./QrScanner.svelte')).default; scanning = true; }
+    catch { workspace.error = strings.phone.dialogOffline; adding = true; }
+  }
+  /** A code that reads as a pairing link connects at once; the machine names itself and the card renames it. */
+  async function scanned(text: string) {
+    scanning = false;
+    link = text;
+    adding = true;
+    await add();
+  }
   /** Said before connecting: the link decides the machine, the name only labels it. */
   let target = $derived(workspace.linkTarget(link));
   let source = $derived(workspace.machines.find(machine => machine.store === workspace.active) ?? null);
@@ -59,15 +74,14 @@
     link = '';
     token = '';
     url = '';
-    label = '';
   }
   async function add(manual = false) {
     if (busy) return;
     busy = true;
     try {
       const ok = manual
-        ? await workspace.add({ url: url.trim(), token }, label)
-        : await workspace.pair(link.trim(), label);
+        ? await workspace.add({ url: url.trim(), token })
+        : await workspace.pair(link.trim(), '');
       if (ok) stopAdding();
     } finally {
       busy = false;
@@ -85,8 +99,12 @@
     <div>
       <h1>{mobile ? strings.machines.heading : strings.settings.tabs.machines}<InfoTip topic={strings.machines.heading} text={strings.machines.intro} /></h1>
     </div>
-    {#if !open}
-      <button class="primary add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{strings.machines.add}</button>
+    {#if mobile || !open}
+      <div class="head-actions">
+        <!-- A phone has a camera and the other machine draws a code: no link to copy across. -->
+        {#if mobile}<button class="primary add-open" data-testid="machine-scan" disabled={busy} onclick={() => void startScanning()}><ScanLine size={15} />{strings.machines.scan}</button>{/if}
+        {#if !open}<button class:primary={!mobile} class="add-open" data-testid="machine-add-open" onclick={startAdding}><Plus size={15} />{mobile ? strings.machines.pasteLink : strings.machines.add}</button>{/if}
+      </div>
     {/if}
   </header>
 
@@ -118,7 +136,6 @@
               ? fill(target.machine.store.connection === 'ready' ? strings.machines.linkConnected : strings.machines.linkReplaces, { host: target.host, machine: target.machine.label })
               : fill(strings.machines.linkReaches, { host: target.host })}</p>
           {/if}
-          <label>{strings.machines.labelOptional}<input bind:value={label} data-testid="machine-name" autocomplete="off" placeholder={strings.machines.labelPlaceholder} /></label>
           <button type="submit" class="primary" data-testid="machine-add" disabled={busy || !link.trim()}
             ><Plus size={14} />{busy ? strings.machines.adding : strings.machines.connect}</button
           >
@@ -225,6 +242,10 @@
     <RemoteCoordination />
   {/if}
 
+  {#if scanning && QrScanner}
+    <QrScanner accept={(text) => parsePairingLink(text) !== null} onresult={(text) => void scanned(text)} onclose={() => (scanning = false)} />
+  {/if}
+
   {#if !mobile}
     <!-- A phone pairs from the computer, never from itself: both cards are the desktop's. -->
     <PairingCard store={workspace.active} />
@@ -255,6 +276,7 @@
     font-size: var(--text-base);
     margin: 0;
   }
+  .head-actions { display: flex; gap: 8px; flex: none; }
   .add-open {
     flex: none;
     margin-top: 2px;
@@ -471,6 +493,7 @@
       align-items: stretch;
       gap: 12px;
     }
+    .head-actions { flex-direction: column; width: 100%; }
     .add-open {
       width: 100%;
       min-height: var(--touch-target);

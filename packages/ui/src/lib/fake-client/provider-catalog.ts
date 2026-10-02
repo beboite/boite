@@ -1,6 +1,7 @@
 /** The provider list, its reload and dry run, and the model catalog a probe reads. */
 import { RpcErrorCode, type Account, type ModelInfo, type RpcResult } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { CLAUDE_MODELS } from './accounts-seed';
 import { MUSE_EFFORT, PROBE_MS, PROBED_MODELS, UPDATABLE_ID } from './providers';
 import { DATA_DIR } from './shared';
 import type { FakeContext, FakeMethods } from './context';
@@ -37,13 +38,13 @@ async function probe(ctx: FakeContext, providerId: string, accountId: string): P
   if (account.providerId !== providerId) {
     throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'the account belongs to another provider' });
   }
-  const dynamic = ['acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
+  const dynamic = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'].includes(provider.protocol);
   if (dynamic && !provider.available) {
     throw new RpcFailure({ code: RpcErrorCode.Unavailable, message: `${provider.name} is not available on this machine` });
   }
   let models = structuredClone(provider.models);
   if (dynamic) {
-    models = provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
+    models = provider.protocol === 'claude-sdk' ? structuredClone(CLAUDE_MODELS) : provider.id === UPDATABLE_ID ? structuredClone(PROBED_MODELS) : [
       ...models,
       { id: `${provider.id}-demo`, name: `${provider.name} demo model`, default: false, ...(provider.protocol === 'codex-appserver' ? { effort: { levels: [{ id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], default: 'high' }, speeds: [{ id: 'fast', label: 'Fast' }, { id: 'ultrafast', label: 'Ultrafast' }] } : provider.protocol === 'muse' ? { effort: MUSE_EFFORT } : {}) }
     ];

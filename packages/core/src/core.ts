@@ -316,8 +316,8 @@ export class Core {
     };
   }
 
-  log(level: 'info' | 'warn' | 'error', message: string): void {
-    this.bus.emit('core.log', { level, message, at: Date.now() });
+  log(level: 'info' | 'warn' | 'error', message: string, threadId?: ThreadId): void {
+    this.bus.emit('core.log', { level, message, at: Date.now(), ...(threadId ? { threadId } : {}) });
   }
 
   /**
@@ -350,6 +350,7 @@ export class Core {
   async close(): Promise<void> {
     this.browser.close();
     this.artifactPreviews.stop();
+    this.threads.sideQuestions.close();
     this.threads.titles.close();
     this.threads.autoCompact.close();
     await this.agentRuntime.close();

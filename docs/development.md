@@ -476,6 +476,14 @@ test harness, the end to end suite, `bun run bench` and `bench/idle-rss.ts` set
 it; an opt-in live test (`BOITE_E2E_*=1` or `BOITE_BENCH_*=1`) turns it back
 off.
 
+The side-question path is covered by
+`bun test packages/core/test/side-questions.test.ts packages/core/test/claude.side-question.test.ts`
+and the composer suite. `bun test tests/e2e/side-questions.test.ts` uses a real
+temporary echo core to check desktop and paired-phone `/btw` answers during a
+waiting main turn, dismissal and unchanged history. Its captures land in
+`tests/e2e/.artifacts/btw-desktop.png` and `btw-phone.png`; no provider tokens
+are spent. See [context](context.md#side-questions) for provider support.
+
 ## Checks and tests
 
 ```bash
@@ -851,6 +859,16 @@ panel end-to-end tests cover card spacing, folded drafts and phone controls.
 panel, paragraph buffering, reasoning replacement, goal display and command
 highlighting, compact tool calls and answered questions through the fake client.
 It writes desktop, phone and light-theme captures under `tests/e2e/.artifacts/`.
+
+A conversation is read and written in one size, the `--text-reading` and
+`--leading-reading` tokens of `app.css`: 15 px on a 24 px line on the wide
+layout, 16 px on a phone, where a field already types at 16 px. Answers, sent
+prompts, the composer, plans and delegated transcripts use them; the chrome,
+tool cards, tables and code blocks keep `--text-base` and `--text-sm`. In an
+answer, `#` to `####` step down from 1.3 em to the body size, and a heading
+sits 22 px under what precedes it and 8 px above what it names. The same test
+checks that the answer, the sent prompt and the composer share one size at
+both widths. The composer's caret and its focus hairline wear the accent.
 
 An accepted prompt from this client glides to the top of the timeline. Reserved
 space below it shrinks as the answer grows; once the answer fills the viewport,

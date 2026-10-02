@@ -70,3 +70,51 @@ export function removeImageReferences(store: Store, key: string, at: number) {
     store.editComposerText(key, state.text.slice(0, match.index) + replacement + state.text.slice(end), false, { start: match.index, end });
   }
 }
+
+/**
+ * A reference is one object in the box: an edit that cuts into it takes it
+ * whole, and its image with it once no other reference names that image.
+ * `edit` is the range of the old text the edit replaced. True when it did so.
+ */
+export function editAcrossImageReferences(store: Store, key: string, value: string, edit: { start: number; end: number } | undefined): boolean {
+  const state = store.composerStates[key];
+  if (!state || !edit || edit.end <= edit.start) return false;
+  const old = state.text;
+  const count = state.attachments.filter(item => item.kind === 'image').length;
+  const cut = [...old.matchAll(/\[Image ([1-9]\d*)\]/g)].filter(match =>
+    Number(match[1]) <= count && match.index < edit.end && match.index + match[0].length > edit.start);
+  if (cut.length === 0) return false;
+  const start = Math.min(edit.start, cut[0]!.index);
+  const last = cut.at(-1)!;
+  const end = Math.max(edit.end, last.index + last[0].length);
+  const typed = value.slice(edit.start, Math.max(edit.start, value.length - (old.length - edit.end)));
+  store.editComposerText(key, old.slice(0, start) + typed + old.slice(end), false, { start, end });
+  // Highest first: removing an image renumbers the references above it.
+  for (const number of [...new Set(cut.map(match => Number(match[1])))].sort((a, b) => b - a)) {
+    if (state.text.includes(`[Image ${number}]`)) continue;
+    let seen = 0;
+    const at = state.attachments.findIndex(item => item.kind === 'image' && ++seen === number);
+    removeImageReferences(store, key, at);
+    state.attachments = state.attachments.filter((_, index) => index !== at);
+  }
+  state.selection = { start: start + typed.length, end: start + typed.length };
+  state.mentionInsertion = (state.mentionInsertion ?? 0) + 1;
+  return true;
+}
+
+/**
+ * What the box's input event writes to the draft. Cutting into `[Image 2]`
+ * takes the reference and its image, not one letter: the box is rewritten and
+ * the caret it should show comes back. Null when the edit went in as typed.
+ */
+export function editComposerInput(store: Store, key: string, box: HTMLTextAreaElement, undo: boolean, edit: { start: number; end: number } | undefined): number | null {
+  if (undo || !editAcrossImageReferences(store, key, box.value, edit)) {
+    store.editComposerText(key, box.value, undo, edit);
+    return null;
+  }
+  const state = store.composerStates[key]!;
+  const caret = state.selection?.end ?? state.text.length;
+  box.value = state.text;
+  box.setSelectionRange(caret, caret);
+  return caret;
+}

@@ -81,6 +81,9 @@ const ORPHAN_GRACE_MS = 10_000;
  */
 const OWN_GROUP = process.platform !== 'win32';
 
+/** An exit nobody measured: the process was found gone, its pid already on another. */
+const NO_EXIT_READING: NativeProcessExit = { exitCode: null, cpuMs: null, peakMemoryBytes: null, ioBytes: null };
+
 export interface ProcRegistryOptions {
   orphanGraceMs?: number;
   /** How long an idle thread is kept before it is forgotten. Tests shorten it. */
@@ -105,8 +108,14 @@ export class ProcRegistry {
   private readonly startups = new Map<ThreadId, { pid: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly exitTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly live = new Map<ThreadId, Map<number, Entry>>();
-  /** Every pid this thread ever registered. A job event for one of them is a repeat, not a grandchild. */
-  private readonly known = new Map<ThreadId, Set<number>>();
+  /**
+   * The processes the core spawned whose start the job has yet to report: pid
+   * to creation time, null when the system gave none. The job's event for one
+   * of them is a repeat, not a grandchild. What the job reports by itself never
+   * comes in here: the job names each process once, and a pid the thread
+   * already saw is handed to new processes all day on Windows.
+   */
+  private readonly known = new Map<ThreadId, Map<number, number | null>>();
   /** Forgetting a thread whose last process exited, once a late job event can no longer arrive. */
   private readonly forgetTimers = new Map<ThreadId, ReturnType<typeof setTimeout>>();
   private readonly lastLoad = new Map<ThreadId, ThreadLoad>();
@@ -253,7 +262,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onOwnExit(threadId, record, code);
       return code;
     });
 
@@ -290,7 +299,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onOwnExit(threadId, record, code);
       return code;
     });
 
@@ -351,7 +360,7 @@ export class ProcRegistry {
     });
 
     const exited = proc.exited.then((code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onOwnExit(threadId, record, code);
       terminal.close();
       return code;
     });
@@ -387,12 +396,12 @@ export class ProcRegistry {
     });
 
     child.once('exit', (code) => {
-      this.onExit(threadId, record.pid, code);
+      this.onOwnExit(threadId, record, code);
     });
     // A child that never starts emits 'error' and no 'exit'; without this it
     // would stay in the live registry for the rest of the session.
     child.once('error', () => {
-      this.onExit(threadId, record.pid, null);
+      this.onOwnExit(threadId, record, null);
     });
 
     return child;
@@ -405,13 +414,17 @@ export class ProcRegistry {
     args: string[],
     control: Omit<Entry, 'record'>,
   ): ProcessRecord {
+    const attached = this.platform.attach(threadId, pid);
+    const created = pid > 0 ? this.platform.startedAt(pid) : null;
     const record: ProcessRecord = {
       pid,
       parentPid: process.pid,
       threadId,
       exe: cmd,
       commandLine: [cmd, ...args].join(' '),
-      startedAt: Date.now(),
+      // In a job, what this process starts is dated by the system: it has to be
+      // dated the same way, or a child could read as older than its parent.
+      startedAt: attached && created !== null ? created : Date.now(),
       exitedAt: null,
       exitCode: null,
       cpuMs: null,
@@ -419,8 +432,13 @@ export class ProcRegistry {
       ioBytes: null,
     };
 
-    const attached = this.platform.attach(threadId, pid);
     if (!attached) this.unassigned.add(pid);
+    let known = this.known.get(threadId);
+    if (known === undefined) {
+      known = new Map();
+      this.known.set(threadId, known);
+    }
+    known.set(pid, created);
     if (control.startup && attached && this.platform.startup) {
       this.finishStartup(threadId);
       this.platform.startup(threadId, true);
@@ -448,13 +466,6 @@ export class ProcRegistry {
     // the one place the guard learns a pid whose windows it has to push back.
     this.platform.pidAdded(threadId, record.pid);
 
-    let seen = this.known.get(threadId);
-    if (seen === undefined) {
-      seen = new Set();
-      this.known.set(threadId, seen);
-    }
-    seen.add(record.pid);
-
     // The trace row only: a copy in the event log would be read by nothing.
     this.journal.putProcess(record);
     this.bus.emit('process.started', { ...record });
@@ -462,10 +473,23 @@ export class ProcRegistry {
 
   /** A process the job reported that this registry never spawned: a grandchild. */
   private onJobStarted(threadId: ThreadId, pid: number, info: NativeProcessInfo): void {
-    // A short child can be gone from `live` before its job event is handled, so
-    // the guard is on what was ever registered, never on what is still running.
-    if (this.known.get(threadId)?.has(pid) === true) return;
+    const created = info.startedAt ?? null;
+    // A short child the core spawned can be gone from `live` before its job
+    // event is handled, so the guard is on what the core registered, never on
+    // what is still running. One process has one start event: the entry is
+    // spent here, and the next process to take that pid is followed.
+    const known = this.known.get(threadId);
+    if (known?.has(pid) === true) {
+      const spawned = known.get(pid) ?? null;
+      known.delete(pid);
+      // The same pid with another creation time is another process, whose pid
+      // the child gave back. With either time unknown it stays a repeat.
+      if (spawned === null || created === null || spawned === created) return;
+    }
     if (this.journal.isClosed()) return;
+    // Still listed under this pid is a process whose exit has not arrived: the
+    // system only gives a pid out again once its process ended.
+    if (this.live.get(threadId)?.has(pid) === true) this.onExit(threadId, pid, null, NO_EXIT_READING);
     this.track(
       threadId,
       {
@@ -474,7 +498,7 @@ export class ProcRegistry {
         threadId,
         exe: info.exe,
         commandLine: info.commandLine,
-        startedAt: Date.now(),
+        startedAt: created ?? Date.now(),
         exitedAt: null,
         exitCode: null,
         cpuMs: null,
@@ -576,7 +600,8 @@ export class ProcRegistry {
   /**
    * Stops what the thread left running with nobody above it: a process the job
    * reported whose parent exited, or whose parent pid now names a younger
-   * process, with everything under it. That is what an interrupted or refused
+   * process, with everything under it. A parent missing from the registry is
+   * looked up in the system first, and one found running there keeps its child. That is what an interrupted or refused
    * command leaves, since stopping a shell does not stop what it started. The
    * agent itself and anything the core spawned have the core as their parent
    * and are never taken. Returns the pids stopped.
@@ -592,6 +617,11 @@ export class ProcRegistry {
       if (now - record.startedAt < this.orphanGraceMs) continue;
       const parent = byPid.get(parentPid)?.record;
       if (parent !== undefined && parent.startedAt <= record.startedAt) continue;
+      // The registry is a copy, and a missed event leaves it short of a parent.
+      // A process running under the parent pid since before this one was
+      // created is the parent itself: a pid changes hands only after an exit.
+      const running = this.platform.runningSince(parentPid);
+      if (running !== null && running <= record.startedAt) continue;
       stopping.set(record.pid, record);
     }
     if (stopping.size === 0) return [];
@@ -654,6 +684,11 @@ export class ProcRegistry {
     this.sweepTimers.delete(threadId);
   }
 
+  /** The exit of a process the core spawned, unless its pid already names a later process. */
+  private onOwnExit(threadId: ThreadId, record: ProcessRecord, code: number | null): void {
+    if (this.live.get(threadId)?.get(record.pid)?.record === record) this.onExit(threadId, record.pid, code);
+  }
+
   private onExit(threadId: ThreadId, pid: number, code: number | null, fromJob?: NativeProcessExit): void {
     if (this.startups.get(threadId)?.pid === pid) this.finishStartup(threadId);
     const entry = this.live.get(threadId)?.get(pid);
@@ -662,7 +697,9 @@ export class ProcRegistry {
     // retaining a bounded fallback if the worker missed a short-lived process.
     if (fromJob === undefined && !this.unassigned.has(pid) && this.capability().mode === 'events'
       && !this.exitTimers.has(pid)) {
-      const timer = setTimeout(() => this.onExit(threadId, pid, code), 1000);
+      const timer = setTimeout(() => {
+        if (this.live.get(threadId)?.get(pid) === entry) this.onExit(threadId, pid, code);
+      }, 1000);
       timer.unref();
       this.exitTimers.set(pid, timer);
       return;
@@ -672,6 +709,8 @@ export class ProcRegistry {
     this.exitTimers.delete(pid);
     this.unassigned.delete(pid);
     this.live.get(threadId)?.delete(pid);
+    // The job reports a start before the exit, so no late start is left to come.
+    if (fromJob !== undefined) this.known.get(threadId)?.delete(pid);
     this.forgetWhenIdle(threadId);
     this.platform.pidRemoved(threadId, pid);
     if (this.journal.isClosed()) return;

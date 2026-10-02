@@ -285,6 +285,8 @@ export interface ProbeFilter {
 export interface Driver {
   protocol: Protocol;
   startTurn(ctx: TurnContext): TurnHandle;
+  /** A separate, tool-free request. No native session or chat transcript is changed. */
+  sideQuestion?(ctx: SideQuestionContext): Promise<string>;
   /** Initialize or resume a session without submitting a prompt. Unsupported protocols remain cold. */
   prepare?(ctx: SessionContext): Promise<void>;
   /** Keep a viewed session resident; releasing the last viewer starts its idle grace. */
@@ -309,4 +311,15 @@ export interface Driver {
   releaseThread?(threadId: ThreadId): void;
   /** Core shutdown: drop what every thread keeps alive between turns. */
   shutdown?(): void;
+}
+
+export interface SideQuestionContext {
+  thread: ThreadSummary;
+  provider: ProviderDescriptor;
+  accountEnv: Record<string, string>;
+  prompt: string;
+  question: string;
+  signal: AbortSignal;
+  spawnChild: TitleContext['spawnChild'];
+  log: TitleContext['log'];
 }

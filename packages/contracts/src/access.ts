@@ -9,8 +9,8 @@ import type { RpcEventName, RpcMethodName } from './index.ts';
 /**
  * What a paired device reaches. Read this as the phone's screen: the sidebar,
  * a thread, the composer, the cards an agent raises, and the settings it only
- * displays. Nothing here writes outside a thread, names a path, starts a
- * process of its own or changes what the core trusts.
+ * displays. Model discovery may start the configured agent without a prompt.
+ * Nothing here names a path or changes what the core trusts.
  */
 export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>([
   // A paired phone follows persistent work, talks to agents and answers its owner's decisions.
@@ -48,6 +48,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'projects.archive',
   // What a thread needs to name its agent.
   'providers.list',
+  // Read or refresh the configured account's native catalog, including ACP
+  // effort metadata. No prompt, executable, path or credential is supplied.
+  'providers.probe',
   'accounts.list',
   // The threads themselves.
   'threads.list',
@@ -62,6 +65,9 @@ export const DEVICE_METHODS: ReadonlySet<RpcMethodName> = new Set<RpcMethodName>
   'threads.update',
   'threads.retitle',
   'threads.compact', // A paired device can request the same session maintenance as the desktop.
+  'threads.btw.cancel', // Dismissal cancels only the named temporary request.
+  'threads.btw', // A phone asks the same temporary side questions as the owner's composer.
+  'threads.btw.fork', // Paired devices can turn their temporary answer into a conversation.
   // Editing a sent prompt and branching a conversation are the composer's own
   // moves. A fork in a worktree writes no more than `threads.create` with one,
   // which a device already reaches, and names no path either.
@@ -112,7 +118,7 @@ export const DEVICE_EVENTS: ReadonlySet<RpcEventName> = new Set<RpcEventName>([
   'workflows.changed',
   'collaboration.changed', 'thread.activity',
   'project.added', 'project.removed', 'project.updated',
-  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background',
+  'thread.created', 'thread.updated', 'thread.removed', 'thread.commands', 'thread.background', 'thread.btw',
   'turn.started', 'turn.finished',
   'turn.toolCompleted',
   'message.started', 'message.delta', 'message.part', 'message.completed', 'message.truncated',

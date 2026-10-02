@@ -583,6 +583,22 @@ test('a refusal reaches the surface without its JSON-RPC code', async () => {
   } finally { store.detach(); client.close(); }
 });
 
+test('a failed turn notification names its thread and a later ordinary error clears the link', async () => {
+  const { store, client } = await ready();
+  try {
+    const message = 'turn trn-cyber failed: This content was flagged for possible cybersecurity risk.';
+    client.emitCoreLog('error', message, 't-trace');
+    expect(store.error).toBe('Finish the trace tab');
+    expect(store.errorThreadId).toBe('t-trace');
+    store.error = null;
+    expect(store.errorThreadId).toBeNull();
+    client.emitCoreLog('error', message, 't-trace');
+    client.emitCoreLog('error', 'The connection failed.');
+    expect(store.error).toBe('The connection failed.');
+    expect(store.errorThreadId).toBeNull();
+  } finally { store.detach(); client.close(); }
+});
+
 test('one failed boot call leaves every other slice loaded', async () => {
   const client = new FakeClient({ delayMs: 0 });
   const store = new Store();

@@ -46,6 +46,21 @@ async function pairedDevice(): Promise<Awaited<ReturnType<typeof connect>>> {
 }
 
 describe('the access gate', () => {
+  test('paired phones discover and refresh account models without opening owner settings', async () => {
+    const owner = await harness.connect();
+    const account = (await owner.call('accounts.list', {})).find(account => account.providerId === 'echo')!;
+    const phone = await pairedDevice();
+    try {
+      const params = { providerId: 'echo', accountId: account.id };
+      const expected = await owner.call('providers.probe', params);
+      expect((await phone.call('providers.probe', params)).models).toEqual(expected.models);
+      expect((await phone.call('providers.probe', { ...params, refresh: true })).models).toEqual(expected.models);
+      await expect(phone.call('providers.probe', { ...params, accountId: 'missing' })).rejects.toThrow('account');
+      await expect(phone.call('providers.reload', {})).rejects.toThrow('owner only');
+      await expect(phone.call('accounts.add', { providerId: 'echo', label: 'Phone' })).rejects.toThrow('owner only');
+    } finally { phone.close(); }
+  });
+
   test('paired phones can focus a conversation, but agent sockets cannot', async () => {
     const owner = await harness.connect();
     const { threadId } = await echoThread(harness, owner);

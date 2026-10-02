@@ -3,7 +3,7 @@ import { probedModelsOf } from '../drivers/index.ts';
 import { refused } from '../errors.ts';
 
 /** The protocols whose models come from the agent, not from the descriptor. */
-const PROBED_PROTOCOLS: readonly Protocol[] = ['acp', 'codex-appserver', 'muse', 'pi', 'agy'];
+const PROBED_PROTOCOLS: readonly Protocol[] = ['claude-sdk', 'acp', 'codex-appserver', 'muse', 'pi', 'agy'];
 
 /**
  * What this account may run: the descriptor's models, plus the ones the last

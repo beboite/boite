@@ -46,6 +46,7 @@ import { SYSTEM_LABEL, nativeCommandPrompt, systemOperation } from './threads/op
 import { saveThread, setThreadStatus, withLoad } from './threads/records.ts';
 import { ThreadRecovery } from './threads/recovery.ts';
 import { ThreadTitles } from './threads/retitle.ts';
+import { SideQuestions } from './threads/side-questions.ts';
 import { readMemoryEvents } from './threads/memory-read.ts';
 import { checkEffort, checkModel, checkSpeed, checkStoredEffort, defaultModel } from './threads/selection.ts';
 import { TurnContexts } from './threads/turn-context.ts';
@@ -89,6 +90,7 @@ export class ThreadStore {
   /** Commands, background tasks and context the agent reported. */
   readonly agentState: AgentState;
   readonly titles: ThreadTitles;
+  readonly sideQuestions: SideQuestions;
   /** `threads.rewind` and `threads.fork`. */
   readonly branching: ThreadBranching;
   readonly codeCheckpoints: CodeCheckpoints;
@@ -112,6 +114,7 @@ export class ThreadStore {
     this.deferred = new DeferredInput(core, this);
     this.agentState = new AgentState(core);
     this.titles = new ThreadTitles(core, this);
+    this.sideQuestions = new SideQuestions(core, this);
     this.branching = new ThreadBranching(core, this);
     this.codeCheckpoints = new CodeCheckpoints(core);
     this.moves = new ThreadMove(core, this);
@@ -286,6 +289,8 @@ export class ThreadStore {
     params: CreateParams,
     history: {
       sessionId: string;
+      /** The transcript's last model is historical state, independent of a fresh catalog. */
+      model: string | null;
       titleSource: ThreadSummary['titleSource'];
       turns: {
         prompt: string;
@@ -301,7 +306,7 @@ export class ThreadStore {
     const now = Date.now();
     const first = history.turns[0];
     const last = history.turns[history.turns.length - 1];
-    const model = checkModel(provider, account.id, params.model ?? defaultModel(provider));
+    const model = history.model ?? checkModel(provider, account.id, params.model ?? defaultModel(provider));
     const thread: ThreadSummary = {
       id: newId('thr_'),
       projectId: project.id,
@@ -455,6 +460,7 @@ export class ThreadStore {
   }
 
   archive(threadId: ThreadId, archived: boolean): ThreadSummary {
+    if (archived) this.sideQuestions.cancel(threadId);
     this.require(threadId);
     if (!archived && this.removing.has(threadId)) throw refused('threadId: this conversation is being deleted', { threadId, field: 'threadId', expected: 'a conversation not being deleted' });
     // An archived thread is not coming back this minute: its warm process goes

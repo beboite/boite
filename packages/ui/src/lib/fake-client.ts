@@ -218,8 +218,8 @@ export class FakeClient implements ObservableClient {
   }
 
   /** A line of the core's own log, as `core.log` carries it: a failed scheduler, a guard at work. */
-  emitCoreLog(level: RpcEvents['core.log']['level'], message: string): void {
-    this.#ctx.emit('core.log', { level, message, at: this.#ctx.now() });
+  emitCoreLog(level: RpcEvents['core.log']['level'], message: string, threadId?: ThreadId): void {
+    this.#ctx.emit('core.log', { level, message, at: this.#ctx.now(), ...(threadId ? { threadId } : {}) });
   }
 
   emitMemory(event: MemoryEvent): void {

@@ -1,5 +1,5 @@
 /** Threads and their messages: create, read, select, archive, and the turn entry points. */
-import { DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
+import { sideQuestionSnapshot, supportsSideQuestions, DEFAULT_THREAD_DELETION_RETENTION_DAYS, attachmentError, previewReferencesError, MESSAGE_PAGE, MESSAGE_PAGE_MAX, RpcErrorCode, type AgentProfile, type AgentWork, type AgentWhere, type Attachment, type Message, type MessageId, type MoveEnd, type PreviewReference, type RpcParams, type Thread, type Turn } from '@boite/contracts';
 import { steerUser } from './user-steering';
 import { RpcFailure } from '../client';
 import { checkCwd, checkEffort, checkModel, checkRunnable, defaultModel } from './checks';
@@ -12,6 +12,55 @@ import { delegationConfig, stopDelegation } from './delegation';
 import type { FakeContext, FakeMethods } from './context';
 import { registerFakeWorktree, requireFakeCwd } from './worktrees';
 import { dropWaitingMove, fakeMoveNote } from './thread-move';
+
+const sideRequests = new WeakMap<FakeContext, Map<string, { requestId: string; timer: ReturnType<typeof setTimeout> }>>();
+
+interface SideResult { requestId: string; source: Thread; question: string; answer: string; timer: ReturnType<typeof setTimeout> }
+const sideResults = new WeakMap<FakeContext, Map<string, SideResult>>();
+function forgetSide(ctx: FakeContext, threadId: string, requestId?: string): void {
+  const results = sideResults.get(ctx), held = results?.get(threadId);
+  if (held && (requestId === undefined || held.requestId === requestId)) { clearTimeout(held.timer); results!.delete(threadId); }
+}
+
+function cancelSide(ctx: FakeContext, threadId: string, requestId?: string): void {
+  forgetSide(ctx, threadId, requestId);
+  const requests = sideRequests.get(ctx), pending = requests?.get(threadId);
+  if (!pending || (requestId !== undefined && pending.requestId !== requestId)) return;
+  clearTimeout(pending.timer);
+  requests!.delete(threadId);
+  ctx.emit('thread.btw', { threadId, requestId: pending.requestId, answer: null, error: 'side request cancelled' });
+}
+
+function writeFakeFork(ctx: FakeContext, source: Thread, kept: Message[], placed: ReturnType<typeof fakeWorktree> | null = null) {
+  const title = `${source.title} (fork)`;
+  const now = ctx.now();
+  const id = `t-${++ctx.seq}`;
+  const turnIds = new Map<string, string>();
+  const messages: Message[] = kept.map((message) => {
+    if (!turnIds.has(message.turnId)) turnIds.set(message.turnId, `turn-${++ctx.seq}`);
+    return { ...structuredClone(message), id: `m-${++ctx.seq}`, threadId: id, turnId: turnIds.get(message.turnId) ?? message.turnId, state: message.state === 'streaming' ? 'complete' : message.state };
+  });
+  const turns: Turn[] = source.turns.filter((turn) => turnIds.has(turn.id)).map((turn) => ({
+    ...structuredClone(turn),
+    id: turnIds.get(turn.id) ?? turn.id,
+    threadId: id,
+    status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
+    startedAt: turn.startedAt ?? turn.queuedAt,
+    finishedAt: turn.finishedAt ?? now,
+    usage: null,
+  }));
+  const thread: Thread = {
+    id, projectId: source.projectId, title, titleSource: source.titleSource,
+    providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
+    cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
+    status: 'idle', unread: false, archived: false, pinned: false,
+    sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
+    createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
+  };
+  ctx.threads.set(id, thread);
+  ctx.emit('thread.created', structuredClone(toSummary(thread)));
+  return structuredClone(toSummary(thread));
+}
 
 export function createAgentSession(ctx: FakeContext, agent: AgentProfile, sessionId: string, work: AgentWork): string {
   const mission = work.scope.kind === 'mission' ? ctx.agents.snapshot().missions.find(m => m.id === work.scope.id) : null;
@@ -50,6 +99,7 @@ function pageOf(
  * closes `terminal:<id>`.
  */
 export async function putAway(ctx: FakeContext, thread: Thread): Promise<void> {
+  cancelSide(ctx, thread.id);
   // A waiting move goes with the thread, before its turn ends and would apply it.
   dropWaitingMove(ctx, thread);
   await ctx.stopTurn(thread.id);
@@ -385,6 +435,61 @@ export function threadMethods(ctx: FakeContext) {
       if (key) ctx.turnRequests.set(key, { content, turn });
       return turn;
     },
+    'threads.btw.cancel': async ({ threadId, requestId }) => {
+      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.cancel.requestId: expected 8 to 128 URL-safe characters' });
+      ctx.thread(threadId); cancelSide(ctx, threadId, requestId); return { ok: true };
+    },
+    'threads.btw.fork': async ({ threadId, requestId }) => {
+      const current = ctx.thread(threadId), held = sideResults.get(ctx)?.get(threadId);
+      requireFakeCwd(ctx, current);
+      if (current.archived || !held || held.requestId !== requestId) throw refusal('threads.btw.fork.requestId: expected an available completed side answer');
+      const source = held.source;
+      if (current.cwd !== source.cwd || current.projectId !== source.projectId) throw refusal('threads.btw.fork.threadId: the conversation moved since the side question');
+      if (source.agentSessionId || source.projectId === null) throw refusal('threads.btw.fork.threadId: expected a conversation thread');
+      if (!ctx.projects.some(project => project.id === source.projectId)) throw ctx.notFound('project', source.projectId);
+      if (!ctx.providers.some(provider => provider.id === source.providerId)) throw ctx.notFound('provider', source.providerId);
+      if (!ctx.accounts.some(account => account.id === source.accountId)) throw ctx.notFound('account', source.accountId);
+      const now = ctx.now(), turnId = `turn-${++ctx.seq}`;
+      const sideTurn: Turn = { id: turnId, threadId, status: 'done', queuedAt: now, startedAt: now, finishedAt: now, usage: null, error: null };
+      const messages: Message[] = [
+        ...source.messages,
+        { id: `m-${++ctx.seq}`, threadId, turnId, role: 'user', parts: [{ type: 'text', text: held.question }], state: 'complete', createdAt: now },
+        { id: `m-${++ctx.seq}`, threadId, turnId, role: 'assistant', parts: [{ type: 'text', text: held.answer }], state: 'complete', createdAt: now },
+      ];
+      const result = writeFakeFork(ctx, { ...source, turns: [...source.turns.map(turn => ({ ...turn, checkpoint: null })), sideTurn] }, messages);
+      forgetSide(ctx, threadId, requestId);
+      return result;
+    },
+    'threads.btw': async ({ threadId, question, requestId }) => {
+      if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(requestId)) throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.requestId: expected 8 to 128 URL-safe characters' });
+      if (typeof question !== 'string' || !question.trim() || question.length > 12_000) {
+        throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'threads.btw.question: expected 1 to 12000 characters' });
+      }
+      const thread = ctx.thread(threadId);
+      requireFakeCwd(ctx, thread);
+      if (thread.archived) throw refusal('threads.btw.threadId: expected a thread that is not archived');
+      const provider = ctx.providers.find(entry => entry.id === thread.providerId)!;
+      checkRunnable(provider, ctx.accounts.find(entry => entry.id === thread.accountId)!);
+      if (!supportsSideQuestions(provider.protocol)) throw refusal(`threads.btw: ${provider.name} does not support tool-free side questions`);
+      let requests = sideRequests.get(ctx);
+      if (!requests) { requests = new Map(); sideRequests.set(ctx, requests); }
+      if (requests.has(threadId)) throw refusal('a side question is already being answered for this thread');
+      forgetSide(ctx, threadId);
+      const snapshot = sideQuestionSnapshot(thread.messages), turnIds = new Set(snapshot.map(message => message.turnId));
+      const source = structuredClone({ ...thread, messages: snapshot, turns: thread.turns.filter(turn => turnIds.has(turn.id)) });
+      const timer = setTimeout(() => {
+        requests.delete(threadId);
+        let results = sideResults.get(ctx);
+        if (!results) { results = new Map(); sideResults.set(ctx, results); }
+        if (results.size >= 64) forgetSide(ctx, results.keys().next().value!);
+        const expiry = setTimeout(() => forgetSide(ctx, threadId, requestId), 10 * 60_000);
+        expiry.unref?.();
+        results.set(threadId, { requestId, source, question: question.trim(), answer: `Side answer: ${question.trim()}`, timer: expiry });
+        ctx.emit('thread.btw', { threadId, requestId, answer: `Side answer: ${question.trim()}`, error: null });
+      }, 0);
+      requests.set(threadId, { requestId, timer });
+      return { requestId };
+    },
     'threads.compact': async (params) => {
       const thread = ctx.thread(params.threadId);
       requireFakeCwd(ctx, thread);
@@ -455,33 +560,7 @@ export function threadMethods(ctx: FakeContext) {
       const title = `${source.title} (fork)`;
       const placed = params.worktree === true ? fakeWorktree(project.path, title, undefined, ctx.settings.worktreeStorage, project.id) : null;
       if (placed) registerFakeWorktree(ctx, project.id, placed);
-      const now = ctx.now();
-      const id = `t-${++ctx.seq}`;
-      const turnIds = new Map<string, string>();
-      const messages: Message[] = source.messages.slice(0, at + 1).map((message) => {
-        if (!turnIds.has(message.turnId)) turnIds.set(message.turnId, `turn-${++ctx.seq}`);
-        return { ...structuredClone(message), id: `m-${++ctx.seq}`, threadId: id, turnId: turnIds.get(message.turnId) ?? message.turnId, state: message.state === 'streaming' ? 'complete' : message.state };
-      });
-      const turns: Turn[] = source.turns.filter((turn) => turnIds.has(turn.id)).map((turn) => ({
-        ...structuredClone(turn),
-        id: turnIds.get(turn.id) ?? turn.id,
-        threadId: id,
-        status: turn.status === 'queued' || turn.status === 'running' ? 'stopped' : turn.status,
-        startedAt: turn.startedAt ?? turn.queuedAt,
-        finishedAt: turn.finishedAt ?? now,
-        usage: null,
-      }));
-      const thread: Thread = {
-        id, projectId: source.projectId, title, titleSource: source.titleSource,
-        providerId: source.providerId, accountId: source.accountId, model: source.model, effort: source.effort, speed: source.speed ?? null,
-        cwd: placed?.path ?? source.cwd, branch: placed?.branch ?? source.branch, branchNamingPending: placed?.namingPending ?? false, permissionMode: source.permissionMode,
-        status: 'idle', unread: false, archived: false, pinned: false,
-        sessionId: null, sessionGeneration: 1, selectionVersion: 0, load: null, context: null,
-        createdAt: now, updatedAt: now, messages, turns, commands: [], messagesBefore: null,
-      };
-      ctx.threads.set(id, thread);
-      ctx.emit('thread.created', structuredClone(toSummary(thread)));
-      return structuredClone(toSummary(thread));
+      return writeFakeFork(ctx, source, source.messages.slice(0, at + 1), placed);
     },
     'turns.stop': async (params) => {
       const thread = ctx.thread(params.threadId);

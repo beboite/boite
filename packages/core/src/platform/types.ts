@@ -5,6 +5,12 @@ export interface NativeProcessInfo {
   exe: string;
   commandLine: string | null;
   parentPid: number | null;
+  /**
+   * When the OS created the process, in ms since the epoch, read through the
+   * handle taken at its start. Absent or null when the platform cannot say.
+   * With the pid it names one process: a pid alone is handed out again.
+   */
+  startedAt?: number | null;
 }
 
 export interface NativeProcessExit {
@@ -93,4 +99,10 @@ export interface ProcessPlatform {
    * wearing it today.
    */
   startedAt(pid: number): number | null;
+  /**
+   * The same reading for a process that is still running: null too once it has
+   * exited, even while something keeps a handle on it. The orphan sweep asks
+   * this before it stops a process whose parent the registry does not hold.
+   */
+  runningSince(pid: number): number | null;
 }

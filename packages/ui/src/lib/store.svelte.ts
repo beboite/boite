@@ -85,7 +85,14 @@ export class Store {
   readonly #ctx = new StoreContext(this);
   machineId = '';
   visible = true;
-  error = $state<string | null>(null);
+  #error = $state<string | null>(null);
+  errorThreadId = $state<string | null>(null);
+
+  get error(): string | null { return this.#error; }
+  set error(value: string | null) {
+    this.#error = value;
+    this.errorThreadId = null;
+  }
 
   threadKey(id: string): string { return this.machineId ? JSON.stringify([this.machineId, id]) : id; }
 
@@ -425,6 +432,7 @@ export class Store {
   threadsOf(...args: Parameters<Threads['threadsOf']>) { return this.#ctx.threads.threadsOf(...args); }
   compact(...args: Parameters<Threads['compact']>) { return this.#ctx.threads.compact(...args); }
   rewind(...args: Parameters<Threads['rewind']>) { return this.#ctx.threads.rewind(...args); }
+  forkSideQuestion(...args: Parameters<Threads['forkSideQuestion']>) { return this.#ctx.threads.forkSideQuestion(...args); }
   fork(...args: Parameters<Threads['fork']>) { return this.#ctx.threads.fork(...args); }
   open(...args: Parameters<Threads['open']>) { return this.#ctx.threads.open(...args); }
   loadOlder(...args: Parameters<Threads['loadOlder']>) { return this.#ctx.threads.loadOlder(...args); }

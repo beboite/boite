@@ -113,6 +113,9 @@ test('paragraphs arrive whole, keep previous nodes and flush when stopped; reaso
 test('goal prompts and markers stay readable and recognized commands are accented while typing', async () => {
   await update(`thread.messages[0].parts = [{type:'text',text:'Internal instructions for the agent',displayText:'/goal Verify two tasks'}]; thread.messages.at(-1).parts = [{type:'text',text:'Two tasks verified.\\n\\n[BOITE_GOAL_COMPLETE]'}]; thread.turns[0].status = 'done';`);
   await page.waitFor(`document.querySelector('.user-text .command')?.textContent === '/goal'`);
+  // A conversation is read and written in one size: the answer, the sent prompt and the composer.
+  const reading = () => page.evaluate<string[]>(`['.prose', '.user-text', '${id('composer-input')}'].map(selector => { const style = getComputedStyle(document.querySelector(selector)); return style.fontSize + '/' + style.lineHeight; })`);
+  expect(await reading()).toEqual(['15px/24px', '15px/24px', '15px/24px']);
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('Internal instructions')`)).toBe(false);
   expect(await page.evaluate(`document.querySelector('${id('timeline')}').textContent.includes('[BOITE_GOAL_COMPLETE]')`)).toBe(false);
   for (const command of ['/goal', '/loop', '/model', '/effort']) {
@@ -145,6 +148,7 @@ test('goal prompts and markers stay readable and recognized commands are accente
     return { inputFont: typography(input), mirrorFont: typography(mirror), inputHeight: input.scrollHeight, mirrorHeight: mirror.scrollHeight };
   })()`);
   expect(phoneText.mirrorFont).toEqual(phoneText.inputFont);
+  expect(await reading()).toEqual(['16px/25.6px', '16px/25.6px', '16px/25.6px']);
   expect(Math.abs(phoneText.mirrorHeight - phoneText.inputHeight)).toBeLessThan(2);
   await capture('readability-composer-phone');
   await page.evaluate(`document.documentElement.dataset.theme = 'light'`);

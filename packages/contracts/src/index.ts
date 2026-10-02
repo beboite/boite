@@ -322,6 +322,7 @@ export interface ProviderDescriptor {
   hookSources?: ProviderHookSource[];
   /** Dialect fixes the driver of this protocol applies for this agent only. */
   quirks?: ProviderQuirk[];
+  /** Native protocols may leave this empty; providers.probe supplies the account's catalog. */
   models: ModelInfo[];
   capabilities: ProviderCapabilities;
 }
@@ -2653,6 +2654,11 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
    */
   'threads.retitle': { params: { threadId: ThreadId }; result: ThreadSummary };
   'threads.compact': { params: { threadId: ThreadId; expectedSelectionVersion?: number }; result: Turn };
+  /** An ephemeral answer from a snapshot of the chat, without starting or steering its main turn. */
+  'threads.btw': { params: { threadId: ThreadId; question: string; requestId: string }; result: { requestId: string } };
+  'threads.btw.cancel': { params: { threadId: ThreadId; requestId: string }; result: { ok: true } };
+  /** Persist a completed side answer and its frozen context in a fresh conversation. */
+  'threads.btw.fork': { params: { threadId: ThreadId; requestId: string }; result: ThreadSummary };
   /**
    * Edit a sent message: `messageId`, a user message of the thread, and every
    * message and turn after it leave the conversation, and the next turn
@@ -2865,6 +2871,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
   /** The agent's `/name` commands, whole, each time the list it reports changes. */
   'thread.commands': { threadId: ThreadId; commands: AgentCommand[] };
   /** What the agent still runs in the background, whole, each time it changes. */
+  'thread.btw': { threadId: ThreadId; requestId: string; answer: string | null; error: string | null };
   'thread.background': { threadId: ThreadId; tasks: BackgroundTask[] };
 
   'turn.started': Turn;
@@ -2956,7 +2963,7 @@ export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserR
     url: string | null;
     exitCode: number | null;
   };
-  'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp };
+  'core.log': { level: 'info' | 'warn' | 'error'; message: string; at: Timestamp; threadId?: ThreadId };
   'core.updateChanged': ServerUpdateStatus;
   /** What a shell printed, as it printed it. */
   'terminal.output': { id: string; data: string; sequence?: number };
@@ -3057,3 +3064,10 @@ export { TITLE_MODEL_DEFAULTS, defaultTitleModel } from './title-models.ts';
 export { DEVICE_METHODS, DEVICE_EVENTS, AGENT_EVENTS } from './access.ts';
 export { SPEECH_CATALOGUE, SPEECH_CUSTOM_ID, SPEECH_DEFAULT_MODEL, isSpeechModelId, speechUrlProblem, type SpeechCatalogueModel, type SpeechModelTier } from './speech-models.ts';
 import type { SpeechModelTier } from './speech-models.ts';
+
+/** Protocols that can answer a side question with tools disabled. */
+export function supportsSideQuestions(protocol: Protocol): boolean {
+  return protocol === 'claude-sdk' || protocol === 'echo';
+}
+
+export { sideQuestionSnapshot } from './side-question-snapshot.ts';
