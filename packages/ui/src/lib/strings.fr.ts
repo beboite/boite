@@ -12,6 +12,17 @@
 import type { Translation } from './i18n.svelte';
 
 export const fr: Translation = {
+  remoteBrowser: {
+    display: 'Affichage', resolution: 'Résolution de la page', fitPhone: 'Adapter à cet écran', phone: 'Téléphone', tablet: 'Tablette', rotate: 'Pivoter', width: 'Largeur', height: 'Hauteur', apply: 'Appliquer', sharedSize: 'La résolution change aussi l’onglet partagé sur le PC.', restoreSize: 'Reprendre la taille du panneau PC', previewZoom: 'Zoom de l’aperçu (cet appareil seulement)', fit: 'Ajuster', panHint: 'Glissez pour déplacer l’aperçu. Utilisez les flèches pour défiler dans la page.',
+    open: 'Ouvrir le navigateur en direct', experimental: 'Partage du navigateur expérimental', enable: 'Activer sur cet appareil',
+    hint: 'Affichez et contrôlez l’onglet navigateur partagé par votre PC, dans Boite.',
+    hostMissing: 'Le PC ne partage pas encore de navigateur pour cette conversation. Ouvrez la même conversation et un onglet navigateur dans Boite sur le PC, avec les deux expérimentations du navigateur activées.',
+    title: 'Navigateur du PC en direct', waiting: 'En attente du PC', live: 'En direct', paused: 'En pause', reconnecting: 'Reconnexion', pause: 'Pause', resume: 'Reprendre',
+    help: 'Sur le PC, activez Contrôle du navigateur par les agents et Navigateur en direct à distance dans Expérimentations, puis ouvrez cette conversation et un onglet navigateur. Le PC doit rester éveillé.',
+    interact: 'Toucher ou faire défiler la page partagée', image: 'Vue en direct du navigateur du PC', scrollUp: 'Défiler vers le haut', scrollDown: 'Défiler vers le bas',
+    text: 'Touchez un champ de la page, puis écrivez ici', send: 'Envoyer le texte à la page', gesture: 'Touchez pour cliquer. Glissez pour défiler. Pause arrête le direct.'
+  },
+  prReview: { open: 'Lire dans Boite', back: 'PR liées', files: 'Fichiers', comments: 'Commentaires', checks: 'Tests', overview: 'Aperçu', loading: 'Chargement de la revue…', empty: 'Rien à afficher.', more: 'Charger d’autres fichiers', unavailable: 'GitHub ne fournit pas de différence texte pour ce fichier.', truncated: 'Une partie du contenu a été raccourcie. Ouvrez GitHub pour la lire en entier.', github: 'Ouvrir sur GitHub', refresh: 'Actualiser la revue', viewed: 'Lu', changed: 'Modifié', fileCount: '{count} fichiers chargés', readOnly: 'La lecture ne publie aucun commentaire et ne fusionne pas la PR.' },
   agents: {
     runtime: "Modèles et limites",
     brain: "Cerveau",
@@ -167,6 +178,19 @@ export const fr: Translation = {
     "retry": "Réessayer la suppression"
   },
   speech: {
+    enabled: 'Dictée vocale',
+    enabledHint: "Activez la dictée sur cet appareil. La désactiver retire le micro de la barre de saisie, même si un modèle est installé.",
+    microphone: 'Microphone',
+    microphoneHint: 'Le micro utilisé pour dicter sur cet appareil.',
+    defaultMicrophone: 'Micro par défaut du système',
+    microphoneNumber: 'Microphone {number}',
+    microphoneUnavailable: 'Le micro choisi est indisponible. Choisissez un autre micro.',
+    microphoneDisconnected: 'Le micro a été débranché. Choisissez un autre micro et réessayez.',
+    testMicrophone: 'Tester le micro',
+    stopMicrophoneTest: 'Arrêter le test',
+    inputLevel: 'Niveau sonore du micro',
+    microphoneTestHint: 'Parlez pour vérifier le niveau. Ce test reste sur votre appareil.',
+    microphoneIdleHint: 'Lancez un test pour vérifier que votre micro capte le son.',
     heading: 'Voix', description: 'Le micro à côté d\'Envoyer, deux minutes au plus à la fois. Le texte attend dans la zone de saisie jusqu\'à l\'envoi.',
     start: 'Dicter', stop: 'Terminer la dictée', listening: 'Écoute', opening: 'Attente du micro', transcribing: 'Transcription',
     private: 'Sur ce cœur uniquement', cloud: 'Transcrit par votre fournisseur d\'API', retry: 'Relancer la transcription',
@@ -222,6 +246,20 @@ export const fr: Translation = {
     subscriptionFailed: "Le navigateur n'a pas renvoyé un abonnement push complet."
   },
   mobile: {
+    clearSearch: 'Effacer la recherche', draftTitle: 'Que voulez-vous faire ?', draftHint: 'Lancez une tâche, posez une question ou reprenez votre travail.',
+    pairTitle: 'Votre Boite, sur votre téléphone',
+    pairBody: 'Connectez votre ordinateur pour retrouver ici vos projets, vos conversations et vos agents.',
+    pairStep: 'Sur votre ordinateur, ouvrez Réglages → Machines et appareils et créez un code d’appairage.',
+    pairInstalled: 'Vous venez d’installer Boite ? Associez-la ici aussi : sur iPhone, l’application garde sa connexion séparément du navigateur.',
+    pairPrivacy: 'Scannez depuis cette application. Le code est à usage unique et expire après 10 minutes.',
+    pairingRequired: 'Associer cette application',
+    offlineTitle: 'En attente de votre ordinateur',
+    offlineBody: 'Gardez Boite ouverte sur votre ordinateur et vérifiez votre connexion. Si vous utilisez Tailscale, gardez-le connecté sur les deux appareils.',
+    emptyTitle: 'Commencez une conversation',
+    emptyBody: 'Confiez une tâche à un agent. Vos conversations apparaîtront ici.',
+    emptyActivity: 'Tout est à jour',
+    computer: 'Ordinateur connecté',
+    pairAgain: 'Associer à nouveau',
     settingsDevice: 'Ce téléphone',
     settingsPhone: 'Application et notifications',
     settingsBack: 'Retour aux réglages',
@@ -732,7 +770,6 @@ export const fr: Translation = {
     providerSignal: 'Signal du fournisseur il y a {time}',
     lastActivity: 'Dernière activité il y a {time}',
     noActivity: 'Aucune nouvelle activité depuis {time}',
-    activityTrace: 'Voir la trace',
     newMessage: '1 nouveau message',
     newMessages: '{count} nouveaux messages',
     findPlaceholder: 'Chercher dans la conversation',
@@ -1157,6 +1194,21 @@ export const fr: Translation = {
     binary: 'Rien ici ne se lit comme du texte.'
   },
 
+  pullRequests: {
+    title: 'PR de la conversation', hint: 'Les PR liées sont affichées dans leur ordre de dépendance. Le rattachement ne modifie rien sur GitHub.',
+    refresh: 'Actualiser', empty: 'Aucune PR rattachée pour le moment.', url: 'Adresse de la PR', link: 'Rattacher', unlink: 'Détacher la PR n°{number}',
+    dependsOn: 'Dépend de la PR n°{number}', stale: 'Actualisation impossible. Dernier état connu affiché.',
+    OPEN: 'Ouverte', CLOSED: 'Fermée', MERGED: 'Fusionnée', draft: 'Brouillon',
+  },
+  browserTools: {
+    title: 'Outils de test du navigateur', desktop: 'Ordinateur', laptop: 'Portable', portrait: 'Portrait', landscape: 'Paysage',
+    system: 'Apparence du système', light: 'Page claire', dark: 'Page sombre', diagnostics: 'Diagnostics et actions de la page',
+    startRecording: 'Enregistrer cet onglet', stopRecording: 'Arrêter la vidéo', reviewRecording: 'Vidéo enregistrée',
+    refresh: 'Actualiser', clear: 'Effacer', pageEvents: 'Événements de la page', actions: 'Actions', noEvents: 'Aucun événement capturé.', noActions: 'Aucune action enregistrée pour le moment.',
+    omitted: '{count} événements anciens ou trop volumineux omis.', recorded: '{seconds} secondes · {mb} Mo · WebM sans son',
+    recordingError: 'Enregistrement arrêté après une erreur.', recordingLimit: 'Enregistrement arrêté à la limite de durée ou de taille.',
+    download: 'Télécharger la vidéo', discard: 'Supprimer la vidéo',
+  },
   browser: {
     resetViewport: 'Adapter la page à la fenêtre',
     enlarge: 'Agrandir le navigateur',
@@ -1641,6 +1693,9 @@ export const fr: Translation = {
   },
 
   experiments: {
+    remoteBrowser: { title: 'Navigateur en direct à distance', hint: 'Sur le PC, partager le navigateur de la conversation ouverte avec les appareils associés. Sur le téléphone, voir et piloter cette page. Activez cette option sur les deux appareils et le contrôle du navigateur par les agents sur le PC.' },
+    prReview: { title: 'Revue des pull requests', hint: 'Lire les PR GitHub liées, les modifications, les commentaires et les résultats des tests dans Boite, y compris sur téléphone.' },
+    recordingIndicators: { title: 'Actions visibles dans les vidéos', hint: 'Ajouter des repères de clics et les touches de navigation aux enregistrements. Le texte saisi et les mots de passe ne sont jamais affichés comme libellés de touches.' },
     openChatLinks: { title: 'Ouvrir les liens du chat dans leurs applications', hint: 'Sur ce bureau, un clic sur un fichier ou dossier local ouvre son application, y compris les raccourcis et les fichiers hors du projet. Seuls les liens de cet ordinateur sont ouverts.' },
     whip: {
       title: 'Fouet',

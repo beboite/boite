@@ -16,7 +16,6 @@
 <TurnSummary
   {turn}
   progress={store.openThread?.id === threadId ? store.openThread.progress : undefined}
-  trace={() => store.panel.open('trace')}
   activeTool={message.parts.some(part => part.type === 'tool' && part.status === 'running')}
   waiting={store.openThread?.status === 'waiting' && turn.status === 'running'}
   background={store.openThread?.turns.at(-1)?.id === turn.id ? store.openThread?.background ?? [] : []}

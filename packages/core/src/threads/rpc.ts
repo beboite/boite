@@ -5,6 +5,7 @@ import { invalidParams, refused } from '../errors.ts';
 import { PullRequests } from '../pull-requests.ts';
 import type { ProviderProbe } from '../providers/probe.ts';
 import { defaultModel, needsModelDiscovery } from './selection.ts';
+import { LinkedPullRequests } from '../linked-pull-requests.ts';
 import { steerUser } from './user-steering.ts';
 
 /**
@@ -51,6 +52,18 @@ export function registerThreadMethods(core: Core, probe: ProviderProbe): void {
     return { ok: true };
   });
   const pullRequests = new PullRequests(core);
+  const linked = new LinkedPullRequests(core, (threadId, url) => pullRequests.detail(threadId, url));
+  core.router.register('threads.pullRequestReview', async p => {
+    const url = linked.requireLink(p.threadId, p.url), result = await pullRequests.reviews.review(p.threadId, url);
+    linked.requireLink(p.threadId, url); return result;
+  });
+  core.router.register('threads.pullRequestFiles', async p => {
+    const url = linked.requireLink(p.threadId, p.url), result = await pullRequests.reviews.files(p.threadId, url, p.page);
+    linked.requireLink(p.threadId, url); return result;
+  });
+  core.router.register('threads.pullRequests', p => linked.list(p.threadId, p.refresh === true));
+  core.router.register('threads.linkPullRequest', p => linked.link(p.threadId, p.url));
+  core.router.register('threads.unlinkPullRequest', p => linked.unlink(p.threadId, p.url));
   core.router.register('threads.pullRequest', params => pullRequests.read(params.threadId, params.refresh === true));
   core.router.register('threads.compact', async (params) => {
     await requireCwd(core, params.threadId);

@@ -152,6 +152,7 @@ export function accountMethods(ctx: FakeContext) {
       account.status = sessionStatus(provider, account, false);
       account.identity = account.status === 'ok' ? 'you@example.com' : null;
       ctx.accounts.push(account);
+      if (account.isolationDir === null) ctx.removedDefaultProviders.delete(account.providerId);
       ctx.emit('accounts.updated', structuredClone(account));
       return structuredClone(account);
     },
@@ -166,12 +167,14 @@ export function accountMethods(ctx: FakeContext) {
       return structuredClone(account);
     },
     'accounts.remove': async (params) => {
-      if (!ctx.accounts.some((a) => a.id === params.accountId)) throw ctx.notFound('account', params.accountId);
+      const account = ctx.accounts.find(a => a.id === params.accountId);
+      if (!account) throw ctx.notFound('account', params.accountId);
       const referenced = [...ctx.threads.values()].find((t) => t.accountId === params.accountId);
       if (referenced) {
         throw new RpcFailure({ code: RpcErrorCode.Refused, message: `account ${params.accountId} is used by thread ${referenced.id}` });
       }
       cancelLogin(ctx, params.accountId);
+      if (account.isolationDir === null) ctx.removedDefaultProviders.add(account.providerId);
       ctx.accounts = ctx.accounts.filter((a) => a.id !== params.accountId);
       ctx.emit('accounts.removed', { accountId: params.accountId });
       return { ok: true };

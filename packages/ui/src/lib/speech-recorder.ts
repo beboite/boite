@@ -1,5 +1,5 @@
 import { SPEECH_MAX_SECONDS } from '@boite/contracts';
-import { linuxShell } from './shell-platform';
+import { microphoneConstraints, microphoneContext } from './microphone';
 import { strings } from './strings';
 import workletUrl from './speech-worklet.js?url';
 
@@ -24,6 +24,7 @@ export function microphoneError(error: unknown): string {
     if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return strings.speech.denied;
     if (error.name === 'NotFoundError') return strings.speech.noMicrophone;
     if (error.name === 'NotReadableError') return strings.speech.microphoneBusy;
+    if (error.name === 'OverconstrainedError') return strings.speech.microphoneUnavailable;
   }
   return error instanceof Error ? error.message : strings.speech.failed;
 }
@@ -42,19 +43,13 @@ export class SpeechRecorder {
   private flush: (() => void) | null = null;
   private deadline: ReturnType<typeof setTimeout> | null = null;
 
-  async start(level: (value: number, seconds: number) => void, ended: () => void): Promise<void> {
-    // WebKitGTK ships with media capture off and denies every request Tauri leaves unanswered.
-    if (linuxShell()) throw new Error(strings.speech.linux);
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error(strings.speech.https);
+  async start(level: (value: number, seconds: number) => void, ended: () => void, deviceId = ''): Promise<void> {
     try {
       // Create/resume inside the gesture, including Safari's user activation window.
-      // Dictation needs an audio clock, not a working speaker or headset output.
-      const options: AudioContextOptions & { sinkId?: { type: 'none' } } =
-        'setSinkId' in AudioContext.prototype ? { sinkId: { type: 'none' } } : {};
-      this.context = new AudioContext(options);
+      this.context = microphoneContext();
       const resumed = this.context.resume();
       void resumed.catch(() => {});
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(deviceId));
       if (this.disposed) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
       await resumed;

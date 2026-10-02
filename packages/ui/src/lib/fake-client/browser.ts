@@ -1,12 +1,14 @@
-import { browserActionError, type BrowserReply } from '@boite/contracts';
+import { browserActionError, remoteBrowserInputError, type RemoteBrowserFrame, type BrowserReply } from '@boite/contracts';
 import { refusal } from './shared';
 import type { FakeContext, FakeMethods } from './context';
 
-export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.host' | 'browser.command' | 'browser.complete'> {
+export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.host' | 'browser.command' | 'browser.complete' | 'browser.remoteFrame' | 'browser.remoteInput'> {
   const hosts = new Map<string, number>();
-  const pending = new Map<string, { threadId: string; resolve(value: BrowserReply): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  const shared = new Set<string>(), frames = new Map<string, RemoteBrowserFrame[]>();
+  const requestedAt = new Map<string, number>();
+  const pending = new Map<string, { threadId: string; capture: boolean; resolve(value: BrowserReply): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
   const release = (threadId?: string) => {
-    if (threadId) hosts.delete(threadId); else hosts.clear();
+    if (threadId) { hosts.delete(threadId); shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); } else { hosts.clear(); shared.clear(); frames.clear(); requestedAt.clear(); }
     for (const [id, item] of pending) if (!threadId || item.threadId === threadId) {
       clearTimeout(item.timer); pending.delete(id); item.reject(refusal('the browser host left this conversation'));
     }
@@ -14,8 +16,37 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
   ctx.bus.onState(state => { if (state !== 'ready') release(); });
   ctx.bus.on('thread.updated', thread => { if (thread.archived) release(thread.id); });
   ctx.bus.on('thread.removed', ({ threadId }) => release(threadId));
-  return {
-    'browser.host': async ({ threadId, enabled, allowAgentControl }) => {
+  const allowed = (threadId: string) => {
+    if (ctx.thread(threadId).archived || !ctx.bus.subscribed.has(threadId)) throw refusal('subscribe to the active conversation before watching its browser');
+    if ((hosts.get(threadId) ?? 0) < Date.now()) throw refusal('Open this conversation in the Boite desktop app to share its browser.');
+    if (!shared.has(threadId)) throw refusal('Enable the remote-browser experiment on the hosting desktop first.');
+  };
+  const methods: ReturnType<typeof browserMethods> = {
+    'browser.remoteFrame': async ({ threadId }) => {
+      allowed(threadId);
+      if (Date.now() - (requestedAt.get(threadId) ?? 0) < 220) throw refusal('wait before requesting another browser frame');
+      requestedAt.set(threadId, Date.now());
+      const state = frames.get(threadId) ?? [];
+      frames.set(threadId, state);
+      const reply = await methods['browser.command']({ threadId, action: { kind: 'remote-frame' } }); allowed(threadId);
+      if (frames.get(threadId) !== state) throw refusal('the shared browser changed');
+      const frame = reply.frame;
+      if (!frame || typeof frame.id !== 'string' || frame.id.length > 80 || !/^browser:[a-zA-Z0-9:-]{1,100}$/.test(frame.tabId) ||
+        typeof frame.base64 !== 'string' || frame.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64) ||
+        ![frame.width, frame.height].every(n => Number.isInteger(n) && n > 0 && n <= 16384)) throw refusal('the desktop returned an invalid browser frame');
+      frame.title = String(frame.title ?? '').slice(0, 200); frame.at = Date.now();
+      state.push({ ...frame, base64: '' });
+      frames.set(threadId, state.filter(f => Date.now() - f.at < 5000).slice(-8)); return frame;
+    },
+    'browser.remoteInput': async ({ threadId, frameId, input }) => {
+      allowed(threadId); const problem = remoteBrowserInputError(input); if (problem) throw refusal(problem);
+      const frame = frames.get(threadId)?.find(f => f.id === frameId && Date.now() - f.at < 5000);
+      if (!frame) throw refusal('refresh the live browser before interacting');
+      if (input.kind === 'tap' && (input.width !== frame.width || input.height !== frame.height)) throw refusal('the browser viewport changed; refresh before tapping');
+      await methods['browser.command']({ threadId, tabId: frame.tabId, action: { kind: 'remote-input', frameId, input } }); return { ok: true };
+    },
+    'browser.host': async ({ threadId, enabled, allowAgentControl, remote = false }) => {
+      if (typeof enabled !== 'boolean' || typeof remote !== 'boolean') throw refusal('browser.host enabled and remote must be booleans');
       const thread = ctx.thread(threadId);
       if (enabled && (thread.archived || !ctx.bus.subscribed.has(threadId))) throw refusal('browser.host needs a subscribed, active conversation');
       if (enabled && allowAgentControl !== true) {
@@ -23,6 +54,7 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
         throw refusal('browser.host requires explicit consent: enable Agent browser control in Settings > Experiments on the hosting desktop');
       }
       if (enabled) hosts.set(threadId, Date.now() + 35000); else release(threadId);
+      if (enabled && remote) shared.add(threadId); else { shared.delete(threadId); frames.delete(threadId); requestedAt.delete(threadId); }
       return { ok: true };
     },
     'browser.command': async params => {
@@ -34,11 +66,12 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
         release(params.threadId);
         throw refusal('Open this conversation in the Boite desktop app and enable Agent browser control in Settings > Experiments.');
       }
-      if (pending.size >= 16 || [...pending.values()].some(p => p.threadId === params.threadId)) throw refusal('the browser is busy; wait for the previous command');
+      const capture = params.action.kind === 'remote-frame';
+      if (pending.size >= 16 || [...pending.values()].some(p => p.threadId === params.threadId && p.capture === capture)) throw refusal('the browser is busy; wait for the previous command');
       const requestId = crypto.randomUUID();
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { pending.delete(requestId); reject(refusal('the desktop browser did not answer within 20 seconds')); }, 20000);
-        pending.set(requestId, { threadId: params.threadId, resolve, reject, timer });
+        pending.set(requestId, { threadId: params.threadId, capture, resolve, reject, timer });
         ctx.bus.deliver('browser.requested', { ...params, requestId });
       });
     },
@@ -52,4 +85,5 @@ export function browserMethods(ctx: FakeContext): Pick<FakeMethods, 'browser.hos
       return { ok: true };
     },
   };
+  return methods;
 }

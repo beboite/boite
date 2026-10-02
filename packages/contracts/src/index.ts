@@ -1,7 +1,10 @@
 import type { AgentsRpcMethods, AgentsRpcEvents } from './agents';
 import type { WorkflowsRpcMethods, WorkflowsRpcEvents } from './workflows';
 import type { BrowserRpcMethods, BrowserRpcEvents } from './browser';
+import type { PullRequestsRpcMethods, PullRequestsRpcEvents } from './pull-requests';
+export * from './pull-requests';
 export * from './browser';
+export * from './browser-remote';
 export * from './agents';
 export * from './workflows';
 export * from './workflow-plan';
@@ -2212,7 +2215,7 @@ export interface ServerUpdateStatus {
   error: string | null;
 }
 
-export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods {
+export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, BrowserRpcMethods, PullRequestsRpcMethods {
   'core.shutdown': { params: Record<string, never>; result: { ok: true } };
   'core.updateStatus': { params: { refresh?: boolean }; result: ServerUpdateStatus };
   /** Confirm the version shown to the owner so a stale dialog cannot install another release. */
@@ -2569,6 +2572,7 @@ export interface RpcMethods extends AgentsRpcMethods, WorkflowsRpcMethods, Brows
     params: { providerId: ProviderId; label: string; useDefaultLocation?: boolean };
     result: Account;
   };
+  /** Removing a default CLI account prevents automatic adoption; an explicit add can restore it. */
   'accounts.remove': { params: { accountId: AccountId }; result: { ok: true } };
   'accounts.rename': { params: { accountId: AccountId; label: string }; result: Account };
   /** Refresh the provider's login when requested; never uses a model catalogue as authentication. */
@@ -2870,7 +2874,7 @@ export type RpcMethodName = keyof RpcMethods;
 export type RpcParams<M extends RpcMethodName> = RpcMethods[M]['params'];
 export type RpcResult<M extends RpcMethodName> = RpcMethods[M]['result'];
 
-export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents {
+export interface RpcEvents extends AgentsRpcEvents, WorkflowsRpcEvents, BrowserRpcEvents, PullRequestsRpcEvents {
   'resources.memory': MemoryEvent;
   'thread.memory': MemoryEvent & { threadId: string };
   'delegation.changed': { threadId: ThreadId };

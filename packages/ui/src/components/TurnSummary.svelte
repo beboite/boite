@@ -7,10 +7,9 @@
   import { formatLocale } from '../lib/i18n.svelte';
   import { backgroundLabel } from '../lib/background';
   import type { Snippet } from 'svelte';
-  let { turn, progress, trace, waiting = false, activeTool = false, background = [], stop, actions }: {
+  let { turn, progress, waiting = false, activeTool = false, background = [], stop, actions }: {
     turn: Turn;
     progress?: ThreadProgress | null;
-    trace?: () => void;
     waiting?: boolean;
     /** The message already shows the running tool's activity row. */
     activeTool?: boolean;
@@ -64,7 +63,6 @@
         <span class="dot" aria-hidden="true">·</span>
         <span data-testid="turn-provider-signal">{fill(strings.chat.providerSignal, { time: elapsed(providerAge) })}</span>
       {/if}
-      {#if trace}<button type="button" class="activity-trace" data-testid="turn-activity-trace" onclick={trace}>{strings.chat.activityTrace}</button>{/if}
     {/if}
     {#if turn.finishedAt !== null}
       <span class="dot" aria-hidden="true">·</span>
@@ -96,8 +94,6 @@
   .dot { opacity: .6; }
   [data-testid='turn-progress'] { min-width: 0; overflow-wrap: anywhere; }
   .quiet { color: var(--color-muted-foreground); }
-  .activity-trace { border: 0; padding: 2px 4px; border-radius: var(--radius-sm); background: transparent; color: var(--color-accent); font: inherit; cursor: pointer; }
-  .activity-trace:hover { text-decoration: underline; }
   .background { display: inline-flex; align-items: center; gap: 6px; color: var(--color-accent); }
   .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.6s var(--ease-out-quint) infinite; }
   .paused .pulse { animation-play-state: paused; }

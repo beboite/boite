@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -24,7 +25,7 @@ test.each([1440, 390])('paired devices discover, refresh and select native model
   await page.waitFor(`globalThis.__boiteTest.workspace.active.booted`);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.owner`)).toBe(false);
   expect(await page.evaluate(`globalThis.__boiteTest.workspace.active.providerOf('claude').models.length`)).toBe(0);
-  await page.click(width < 720 ? '[data-testid=mobile-new]' : '[data-testid=new-thread]');
+  if (width < 720) await mobileAction(page, 'mobile-menu-new'); else await page.click('[data-testid=new-thread]');
   await page.click('[data-testid=composer-picker]');
   for (const provider of ['claude', 'codex', 'opencode']) {
     await page.click(`[data-provider="${provider}"]`);
@@ -52,7 +53,7 @@ test.each([1440, 390])('paired devices discover, refresh and select native model
 test.each([1440, 390])('search finds legacy and OpenCode models without changing provider defaults at %ipx', async width => {
   await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 720 });
   await page.navigate(url);
-  await page.click(width < 720 ? '[data-testid=mobile-new]' : '[data-testid=new-thread]');
+  if (width < 720) await mobileAction(page, 'mobile-menu-new'); else await page.click('[data-testid=new-thread]');
   const defaults = await page.evaluate(`JSON.stringify(globalThis.__boiteTest.workspace.active.modelDefaults)`);
   await page.click('[data-testid=composer-picker]');
   await page.click('[data-provider=claude]');

@@ -9,11 +9,13 @@ test('capture cancellation releases a microphone granted after the component was
   let grant!: (stream: MediaStream) => void;
   const stop = vi.fn();
   const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream;
-  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => new Promise<MediaStream>(resolve => { grant = resolve; }) } });
+  const getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { grant = resolve; }));
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
   const close = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('AudioContext', class { state = 'running'; resume = () => Promise.resolve(); close = close; });
   const recorder = new SpeechRecorder();
-  const started = recorder.start(vi.fn(), vi.fn());
+  const started = recorder.start(vi.fn(), vi.fn(), 'usb-microphone');
+  expect(getUserMedia).toHaveBeenCalledWith({ audio: expect.objectContaining({ deviceId: { exact: 'usb-microphone' } }) });
   recorder.dispose(); grant(stream); await started;
   expect(stop).toHaveBeenCalledTimes(1);
   expect(close).toHaveBeenCalledTimes(1);

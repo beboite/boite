@@ -7,6 +7,11 @@ the shell uses.
 
 ## Settings on a phone
 
+The top-right menu opens Conversations, Activity and Settings. There is no
+bottom navigation bar. A conversation uses one compact header; Back returns
+to the thread list, which includes a search field. The composer stays at the
+bottom of the available viewport, above the keyboard when it is open.
+
 At phone widths, Settings opens a vertical list with separate screens for
 App & notifications, Appearance, and Machines. The back button or browser Back
 returns to that list. Theme and accent belong to the current device; the
@@ -78,6 +83,9 @@ other devices", drawn beside a QR code the phone's camera opens:
 ```
 http://192.168.1.20:53421/?grant=<32 random bytes, hex>
 ```
+
+Close hides the link and QR code, and New pairing link creates another one.
+Closing leaves an already issued link valid until it is used or expires.
 
 Asking is the only way to get one. The core used to print a live grant on its
 ready line at every start, which put a working session key in every log file and
@@ -178,8 +186,15 @@ finger, the outline rail beside the conversation gives each prompt a 44 px row
 and scrolls, and the text starts past the rail. A switch sits in a label that
 covers its whole row, so the row is its target. The end-to-end sweep in
 `tests/e2e/mobile.test.ts` measures this with touch emulation on.
-`visualViewport` keeps the composer above the keyboard, and the bottom
-navigation hides while the keyboard is open.
+CSS `100dvh` sets the app height in a browser tab. An installed iPhone app uses
+`100vh` when its top safe-area inset shows that the page extends behind the
+status bar. WebKit can under-report `dvh` as well as `visualViewport.height`
+on launch ([WebKit 254868](https://bugs.webkit.org/show_bug.cgi?id=254868)).
+The root containers use the same height as the app. While a text field is focused and the keyboard
+reduces the visible viewport, `visualViewport` keeps the composer above it and
+the bottom navigation hides. Closing the keyboard restores the mode's height;
+a shorter viewport reported during an iPhone app launch does not leave a gap
+below the navigation.
 Safe-area insets keep controls clear of the home indicator and screen cutouts:
 the chat header, the full-screen right panel, and the Agents and Settings pages
 all start below the status bar of an installed app on a notched iPhone.
@@ -256,8 +271,19 @@ forwarded header is trusted.
 On iPhone, open the pairing link in Safari, choose Share, then Add to Home Screen.
 On Android, use Install Boite in Phone app or the browser's installation menu,
 or install the nightly APK ([android.md](android.md)).
-Open the installed icon and pair there if the browser did not carry the session
-across. Installing a PWA and using Web Push require no Apple Developer account.
+Open the installed icon and pair from inside Boite. On iPhone, installation
+does not copy the browser's localStorage, where Boite keeps its session key.
+The installed app therefore needs its own pairing even if Chrome or Safari
+was already connected. Its welcome screen offers **Scan a QR code** and
+**Paste a pairing link**. Create a fresh code on the computer and scan it with
+that button; using the iPhone Camera app opens the browser instead.
+
+A missing or revoked key opens that recovery screen. A network outage offers
+reconnection without discarding the saved key. The pairing form stays open
+while a replacement key is being exchanged, and a rejected link can be replaced
+without leaving the screen. After pairing, the saved session is reused on
+subsequent opens. Installing a PWA and using Web Push require no Apple Developer
+account.
 
 `packages/ui/public/sw.js` caches the files for later opens. It is plain
 JavaScript that Vite copies to `dist/sw.js` with one change, the build id in
@@ -346,6 +372,46 @@ Disabling removes the server subscription and unsubscribes the browser.
 Revocation deletes the subscription with the pairing. Push services returning
 404 or 410 retire the destination. Other delivery failures leave it subscribed
 and write a generic diagnostic without the provider's credential-bearing body.
+
+## Experimental desktop browser control
+
+Enable **Remote browser** and **Agent browser control** in Settings, Experiments
+on the Windows desktop to register it as the conversation's browser host.
+Open the same conversation on both devices and leave its browser tab active
+on the desktop. On the phone, choose **Browser** in the conversation's header
+or panel, then **Enable on this device** if prompted. This experiment is saved
+separately on each device. Opening its setup screen does not start sharing;
+frame requests start after activation. If the desktop is not sharing the
+conversation, the viewer explains what to open there.
+The dialog shows that desktop tab. Tap to click, swipe to scroll, or tap a page
+field and send text from the input below the preview. Navigation keys and
+scroll buttons remain available without a hardware keyboard.
+
+The phone requests JPEG frames while the dialog is open and visible. Pause,
+closing the dialog, switching off the experiment or hiding the app stops those
+requests. This is a periodically refreshed preview, not a video stream with
+audio. The desktop must stay awake, with Boite and that conversation open.
+
+**Display** offers phone, tablet and PC resolutions, custom dimensions from
+240 to 3840 pixels, rotation and a fit-to-screen action. Resolution changes the
+shared desktop tab too; **Use the PC panel size** removes the override.
+Preview zoom stays on the viewing device. At 100, 150 or 200 percent, drag to
+pan the enlarged image and use the arrow buttons to scroll the web page.
+Changing resolution waits for a new frame before accepting more input.
+
+The core permits the paired device's `browser.remoteFrame` and
+`browser.remoteInput` only for a subscribed conversation whose owner desktop
+has opted in. Inputs must refer to a recent frame issued to that connection.
+The desktop refuses an input after the page navigates or its viewport changes.
+Turning off desktop sharing invalidates frames, including captures in flight.
+The phone cannot use `browser.command`, execute JavaScript or register itself
+as the desktop host. It can interact with the visible web page, so pair only
+devices you intend to give that control.
+
+On iPhone, use the HTTPS web app in Safari or install it on the Home Screen.
+The preview uses JPEG and ordinary touch controls. Layout checks at iPhone
+width run in Chromium; they do not establish behavior on a physical iPhone or
+Safari, including keyboard, backgrounding and network handover.
 
 ## The limits
 

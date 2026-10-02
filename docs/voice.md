@@ -41,6 +41,11 @@ single click is the whole setup. The microphone beside Send links to this page
 when the engine is not ready. Explanations sit behind the (i) beside each
 label.
 
+Voice dictation can be turned off on each device from this page, even when the
+core has an installed model. Turning it off removes the microphone from the
+message bar and cancels any capture or transcription running on that device.
+The model and engine configuration remain available for turning it back on.
+
 The engine, the API provider, the fallback, the language and the model apply as
 soon as they change. API keys and local paths have their own Save button, so a
 half-typed key is never sent. The Save keys button shows only once a key is
@@ -148,8 +153,15 @@ service is used.
 Browsers require a secure context for microphone access. On a phone, open the
 core through the trusted HTTPS origin described in [phone.md](phone.md). A LAN
 HTTP address does not qualify; localhost does for development. Permission is
-requested only after pressing Dictate. A denial explains how to retry. Silent
+requested only after pressing Dictate or Test microphone. A denial explains how to retry. Silent
 or very short recordings are refused before uploading.
+
+Settings > Voice also selects the microphone on the current device, including
+paired phones. System default follows the OS input; an explicit choice uses
+that input for dictation and the test. An unavailable selected input reports an
+error instead of silently recording a different one. The input level meter
+reads local audio without recording, uploading or transcribing it. Stop test,
+turning off Voice, leaving the page or hiding the app releases capture.
 
 ## Lifecycle and limits
 

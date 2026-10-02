@@ -70,7 +70,7 @@ test('a failed destroy reports its error and lets the same id be created again',
   bridge.destroy('same');
   bridge.create('same', 'https://example.invalid/second');
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(3));
-  expect(events).toEqual([{ type: 'failed', id: 'same', reason: 'native destroy refused' }]);
+  expect(events).toEqual([{ type: 'destroyed', id: 'same' }, { type: 'failed', id: 'same', reason: 'native destroy refused' }]);
   expect(invoke.mock.calls.map(([command]) => command)).toEqual([
     'browser_create', 'browser_destroy', 'browser_create'
   ]);

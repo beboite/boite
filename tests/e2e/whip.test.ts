@@ -1,3 +1,4 @@
+import { mobileAction } from './lib/mobile.ts';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { BrowserPage, freePort } from './lib/cdp.ts';
@@ -150,7 +151,7 @@ beforeAll(async () => {
 
 afterAll(async () => { await page?.close(); await server?.close(); }, 15_000);
 
-test('the Whip experiment uses footer controls, animates a rope and turns off immediately', async () => {
+test('the Whip experiment uses desktop footer and phone menu controls, animates a rope and turns off immediately', async () => {
   expect(await page.evaluate(`document.querySelector('${button}') === null`)).toBe(true);
   await page.click('[data-testid=nav-settings]');
   await page.click('[data-testid=settings-tab-experiments]');
@@ -185,41 +186,45 @@ test('the Whip experiment uses footer controls, animates a rope and turns off im
   await page.waitFor(`document.querySelector('${button}')`);
   button = '[data-testid=whip-button-mobile]';
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-  await page.waitFor('document.querySelector("[data-testid=mobile-tabs]")');
+  await page.click('[data-testid=mobile-menu]');
+  await page.waitFor('document.querySelector("[data-testid=whip-button-mobile]")');
   await settled();
   expect(await page.evaluate(`(() => {
     const rect = document.querySelector('${button}').getBoundingClientRect();
-    const tabs = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect();
-    const composer = document.querySelector('[data-testid=composer]').getBoundingClientRect();
-    return document.querySelector('${button}').closest('.mobile-navigation') !== null && rect.right <= tabs.left && rect.top >= tabs.top && composer.bottom <= rect.top && rect.width >= 44 && rect.height >= 44;
+    const menu = document.querySelector('[data-testid=mobile-menu-dialog]').getBoundingClientRect();
+    return rect.left >= menu.left && rect.right <= menu.right && rect.top >= menu.top && rect.bottom <= menu.bottom && rect.width >= 44 && rect.height >= 44;
   })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-phone.png'));
-  await menuAboveWhip('whip-menu-phone.png');
-  await page.click('[data-testid=mobile-settings]');
+  // The phone control lives in a modal menu rather than beside bottom tabs.
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-tabs]') === null`)).toBe(true);
+  await mobileAction(page, 'mobile-settings');
   await page.click('[data-testid=settings-tab-experiments]');
   await page.click('[data-testid=experiment-resident-agents]');
   await page.navigate(url);
+  await page.click('[data-testid=mobile-menu]');
   await page.waitFor('document.querySelector("[data-testid=mobile-agents]")');
   await settled();
   expect(await page.evaluate(`(() => {
     const whip = document.querySelector('${button}').getBoundingClientRect();
     const agents = document.querySelector('[data-testid=mobile-agents]');
-    const tabs = document.querySelector('[data-testid=mobile-tabs]').getBoundingClientRect();
-    const composer = document.querySelector('[data-testid=composer]').getBoundingClientRect();
-    return whip.right <= agents.getBoundingClientRect().left && whip.right <= tabs.left && composer.bottom <= whip.top && agents.closest('nav') === null;
+    const menu = document.querySelector('[data-testid=mobile-menu-dialog]');
+    return menu.contains(agents) && whip.width >= 44 && whip.height >= 44;
   })()`)).toBe(true);
   await page.screenshot(join(import.meta.dir, '.artifacts', 'whip-agents-phone.png'));
   expect(await shake()).toBe(true);
   await verifyRope('whip-rope-phone.png', true);
-  await rethrowFromControl();
+  // Throwing closes the phone menu so the touch gesture reaches the canvas.
+  expect(await page.evaluate(`document.querySelector('[data-testid=mobile-menu-dialog]') === null`)).toBe(true);
+  await page.click('[data-testid=mobile-menu]');
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await page.click(button);
   expect(await page.evaluate(`document.getElementById('app').getAnimations().length`)).toBe(0);
   expect(await page.evaluate(`document.querySelector('[data-testid=whip-canvas]') === null`)).toBe(true);
-  await page.click('[data-testid=mobile-settings]');
+  await mobileAction(page, 'mobile-settings');
   await page.click('[data-testid=settings-tab-experiments]');
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   // Switching the experiment off mid-hit stops the shake with the rope.
+  await page.click('[data-testid=mobile-menu]');
   expect(await page.evaluate(`(async () => {
     const running = await ${crack()};
     if (!running) return 'no shake';

@@ -43,7 +43,10 @@ export function controlGroups(owner: boolean): ControlGroup[] {
   const panel: ControlEntry[] = CARDS.map((card) => ({ id: `panel.${card.kind}` as ControlId, label: kindName(card.kind), icon: null, kind: card.kind }));
   return [
     { id: 'header', label: strings.controls.header, entries: header },
-    { id: 'composer', label: strings.controls.composer, entries: [{ id: 'header.context', label: strings.controls.context, icon: ChartPie }] },
+    { id: 'composer', label: strings.controls.composer, entries: [
+      { id: 'header.context', label: strings.controls.context, icon: ChartPie },
+      { id: 'composer.worktree', label: strings.composer.worktree, icon: GitBranch }
+    ] },
     { id: 'sidebar', label: strings.controls.sidebar, entries: sidebar },
     { id: 'panel', label: strings.controls.panel, entries: panel }
   ];

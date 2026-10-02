@@ -20,6 +20,35 @@ import {
 useClaudeHarness();
 
 describe('claude driver', () => {
+  test('a rejected Claude login updates the account and passive checks do not restore it', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const accountId = harness.core.threads.require(threadId).accountId;
+    scripted(fake => {
+      fake.emit(sdk({ ...(assistant('sess-expired', []) as object), error: 'authentication_failed' }));
+      fake.emit(sdk({ ...(failure('sess-expired') as object), errors: ['Failed to authenticate: OAuth session expired and could not be refreshed'] }));
+      fake.end();
+    });
+    expect(await runTurn(client, threadId, 'test')).toBe('error');
+    expect(harness.core.accounts.require(accountId).status).toBe('unauthenticated');
+    expect((await client.call('accounts.check', { accountId })).status).toBe('unauthenticated');
+    expect((await client.call('accounts.list', {})).find(account => account.id === accountId)?.status).toBe('unauthenticated');
+  });
+
+  test('an OAuth failure before the first prompt marks the focused account signed out', async () => {
+    const client = await harness.connect();
+    const threadId = await claudeThread(client);
+    const accountId = harness.core.threads.require(threadId).accountId;
+    scripted(fake => {
+      fake.emit(sdk({ ...(failure('') as object), errors: ['Failed to authenticate: OAuth session expired and could not be refreshed'] }));
+      fake.end();
+    });
+    const updated = client.next('accounts.updated', account => account.id === accountId && account.status === 'unauthenticated', 5000);
+    await client.call('threads.focus', { threadId });
+    expect((await updated).status).toBe('unauthenticated');
+    expect(harness.core.journal.listTurns(threadId)).toHaveLength(0);
+  });
+
   test('stop interrupts the query and the turn ends stopped', async () => {
     const client = await harness.connect();
     const threadId = await claudeThread(client);

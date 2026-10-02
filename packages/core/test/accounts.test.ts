@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { CoreClient } from '../src/client.ts';
+import { Core } from '../src/core.ts';
+import { setDriver } from '../src/drivers/index.ts';
 import { startTestCore, waitFor } from './harness.ts';
 import type { TestCore } from './harness.ts';
 
@@ -65,6 +67,32 @@ afterEach(async () => {
 });
 
 describe('accounts', () => {
+  test('removing an account stops discovery processes that still use its directory', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const account = await client.call('accounts.add', { providerId, label: 'Failed account' });
+    const restore = setDriver('echo', {
+      protocol: 'echo',
+      startTurn: () => { throw new Error('not a turn'); },
+      probe: async ctx => {
+        const child = ctx.spawnChild(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: account.isolationDir! });
+        await new Promise<void>(resolve => child.once('close', () => resolve()));
+        return { models: [], probedAt: Date.now() };
+      },
+    });
+    const probing = client.call('providers.probe', { providerId, accountId: account.id }).then(() => 'completed', () => 'refused');
+    try {
+      await waitFor(() => harness.core.procs.liveCount(`probe:${providerId}:${account.id}`) === 1);
+      await client.call('accounts.remove', { accountId: account.id });
+      expect(harness.core.procs.liveCount(`probe:${providerId}:${account.id}`)).toBe(0);
+      expect(await probing).toBe('refused');
+      expect(existsSync(account.isolationDir!)).toBe(false);
+    } finally {
+      await harness.core.procs.stopAndWait(`probe:${providerId}:${account.id}`);
+      restore();
+    }
+  });
+
   test('piped sign-in links and output contain no terminal control sequences', async () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
@@ -75,6 +103,29 @@ describe('accounts', () => {
     const line = client.next('account.login', event => event.accountId === account.id && event.url !== null);
     await client.call('accounts.login', { accountId: account.id });
     expect(await line).toMatchObject({ url: 'https://example.invalid/device', output: 'https://example.invalid/device' });
+  });
+
+  test('a refused Claude sign-in releases the account without waiting for an auth check', async () => {
+    const client = await harness.connect();
+    const providerId = await addLoginProvider(harness, client);
+    const descriptor = harness.core.providers.require(providerId);
+    descriptor.protocol = 'claude-sdk';
+    const login = join(harness.dataDir, 'refused-login.ts');
+    const status = join(harness.dataDir, 'waiting-status.ts');
+    writeFileSync(login, "console.error('Sign-in denied'); process.exit(1);");
+    writeFileSync(status, 'setInterval(() => {}, 1000);');
+    descriptor.login = { command: [process.execPath, login] };
+    for (const profile of Object.values(descriptor.profiles)) {
+      if (profile) { profile.executable = [{ kind: 'file', value: process.execPath }]; profile.launch = { args: [status] }; }
+    }
+    const account = await client.call('accounts.add', { providerId, label: 'Refused login' });
+    const finished = client.next('account.login', event => event.accountId === account.id && event.state === 'failed', 5000);
+    await client.call('accounts.login', { accountId: account.id });
+    expect(await finished).toMatchObject({ output: 'Sign-in denied', exitCode: 1 });
+    expect(await client.call('accounts.logins', {})).toEqual([]);
+    await client.call('accounts.remove', { accountId: account.id });
+    expect(existsSync(account.isolationDir!)).toBe(false);
+    expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
   });
 
   test('a fresh Claude check reads the CLI login and email instead of trusting a session file', async () => {
@@ -90,6 +141,12 @@ describe('accounts', () => {
     const account = await client.call('accounts.add', { providerId, label: 'Claude check' });
     expect(account.status).toBe('unauthenticated');
     expect(await client.call('accounts.check', { accountId: account.id, refresh: true })).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+    harness.core.accounts.authenticationFailed(account.id);
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('unauthenticated');
+    expect(await client.call('accounts.check', { accountId: account.id, refresh: true })).toMatchObject({ status: 'ok', identity: 'work@example.com' });
+    // The fresh CLI answer also clears the persisted refusal for later passive reads.
+    writeFileSync(join(account.isolationDir!, '.credentials.json'), '{}');
+    expect((await client.call('accounts.check', { accountId: account.id })).status).toBe('ok');
     expect(harness.core.procs.liveCount(`check:${account.id}`)).toBe(0);
     expect(harness.core.providers.installs.leaseCount(providerId)).toBe(0);
   });
@@ -114,7 +171,7 @@ describe('accounts', () => {
     expect(echo?.status).toBe('ok');
   });
 
-  test('reload adopts an existing CLI login while terminal sign-in keeps its default account', async () => {
+  test('a removed terminal default stays removed even when its CLI signs in later', async () => {
     const client = await harness.connect();
     const providerId = await addLoginProvider(harness, client);
     const provider = harness.core.providers.require(providerId);
@@ -136,9 +193,45 @@ describe('accounts', () => {
     writeFileSync(join(own, '.credentials.json'), '{}');
     harness.core.accounts.ensureDefaults();
     harness.core.accounts.ensureDefaults();
-    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([
-      expect.objectContaining({ label: 'Default', isolationDir: null, status: 'ok' })
-    ]);
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([]);
+    expect(readFileSync(join(own, '.credentials.json'), 'utf8')).toBe('{}');
+    const isolated = await client.call('accounts.add', { providerId, label: 'New sign-in' });
+    expect(isolated.isolationDir).not.toBeNull();
+    await client.call('accounts.remove', { accountId: isolated.id });
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([]);
+    const restored = await client.call('accounts.add', { providerId, label: 'My CLI', useDefaultLocation: true });
+    expect(restored).toMatchObject({ isolationDir: null, status: 'ok' });
+    harness.core.accounts.ensureDefaults();
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === providerId)).toEqual([restored]);
+  });
+
+  test('removing a default survives provider reloads and core restart without disabling other providers', async () => {
+    const client = await harness.connect();
+    const account = harness.core.accounts.list().find(entry => entry.providerId === 'echo')!;
+    await client.call('accounts.remove', { accountId: account.id });
+    for (let i = 0; i < 2; i++) await client.call('providers.reload', {});
+    expect(harness.core.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([]);
+    expect(harness.core.providers.available().some(provider => provider.id === 'echo')).toBe(true);
+    const providerId = await addLoginProvider(harness, client);
+    const provider = harness.core.providers.require(providerId);
+    provider.auth = { kind: 'none' };
+    for (const profile of Object.values(provider.profiles)) {
+      if (profile) profile.executable = [{ kind: 'file', value: process.execPath }];
+    }
+    harness.core.accounts.ensureDefaults();
+    const other = harness.core.accounts.list().find(entry => entry.providerId === providerId)!;
+    expect(other).toMatchObject({ label: 'Default', isolationDir: null, status: 'ok' });
+
+    await harness.core.close();
+    const restarted = new Core({ dataDir: harness.dataDir, token: harness.token });
+    try {
+      expect(restarted.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([]);
+      const restored = restarted.accounts.add({ providerId: 'echo', label: 'Use echo again', useDefaultLocation: true });
+      restarted.accounts.ensureDefaults();
+      expect(restarted.accounts.list().filter(entry => entry.providerId === 'echo')).toEqual([restored]);
+      expect(restarted.accounts.require(other.id)).toEqual(other);
+    } finally { await restarted.close(); }
   });
 
   test('the default opencode account reads its own login, an isolated one reads unauthenticated', async () => {

@@ -353,6 +353,36 @@ surfaces or on any `inset: 0` rule, on an endless animation of anything else,
 on a `:has()` on `html`, `body`, `#app`, `.app` or `.body`, and on an outline
 bar that eases its width.
 
+## Browser tools and review bundle size
+
+Measured on Windows with Bun 1.4.2 on 2026-10-02, using `bun run build:ui`
+for both `83ae9b4` and the browser tools, recording, linked PR review and remote
+preview changes. Totals exclude precompressed `.br` and `.gz` copies, as
+`bun scripts/ci/budgets.ts` does.
+
+| Build | UI entry | Complete UI |
+| --- | ---: | ---: |
+| `83ae9b4` | 407,290 bytes | 3,751,358 bytes |
+| Browser tools and remote review | 478,371 bytes | 3,835,773 bytes |
+
+The added dialogs, browser controls, recording encoder support and translations
+add 84,415 bytes (2.25%) to the complete UI. The WebM duration parser loads only
+when finalizing a recording. The total UI budget increases by 84,000 bytes to
+3,880,000, leaving about 44 KB of headroom; entry and core budgets are unchanged.
+
+### Phone navigation and remote viewport controls
+
+After integrating `main` (`1bc9d2d`), `bun run build:ui` on Windows with
+Bun 1.4.2 on 2026-10-02 measured 3,883,595 bytes for the complete UI.
+The desktop CI build at `2cd9f84` measured the same total. Main's desktop CI
+reported 3,761.8 KiB; this mobile follow-up reports 3,792.6 KiB, about 30.8 KiB
+more for the top navigation, pairing recovery, viewport controls and their
+translations. These totals exclude precompressed copies.
+
+The total UI budget increases from 3,880,000 to 3,920,000 bytes, leaving
+36,405 bytes of headroom. The entry and core limits stay unchanged. This
+records the feature cost; it does not claim a size or startup improvement.
+
 ## Benches
 
 ```sh
