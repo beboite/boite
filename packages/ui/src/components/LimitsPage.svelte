@@ -5,6 +5,7 @@
   import ProviderLogo from './ProviderLogo.svelte';
   import UsageLimits from './UsageLimits.svelte';
   import AccountRename from './AccountRename.svelte';
+  import QuotaMachineScope from './QuotaMachineScope.svelte';
   import { namedQuotas, quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
@@ -54,6 +55,8 @@
       </button>
     {/if}
   </header>
+
+  <QuotaMachineScope {store} />
 
   {#if store.owner && reader.error}
     <div class="card failed" role="alert" data-testid="limits-error">

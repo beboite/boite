@@ -7,6 +7,7 @@
   import type { Store } from '../lib/store.svelte';
   import { fill, strings } from '../lib/strings';
   import QuotaOverview from './QuotaOverview.svelte';
+  import QuotaMachineScope from './QuotaMachineScope.svelte';
 
   /**
    * The sidebar's gauge: the tray's glance at every account's subscription
@@ -83,6 +84,7 @@
       {/if}
     </header>
     <div class="body">
+      <QuotaMachineScope {store} />
       {#if !store.owner}
         <p class="muted">{strings.usage.limitsOwner}</p>
       {:else}

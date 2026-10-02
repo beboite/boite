@@ -19,6 +19,63 @@ async function capture(name: string) {
   await page.screenshot(join(process.env.BOITE_CAPTURE_DIR ?? join(import.meta.dir, '.artifacts'), name));
 }
 
+test('limits identify the owning machine in the desktop glance and desktop and phone pages', async () => {
+  for (const width of [1280, 390]) {
+    await page.send('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: width === 390 });
+    await page.navigate(`${origin}/?fake=1&open=recent&machines=1`);
+    await page.waitFor('globalThis.__boiteTest?.workspace.machines.length === 2');
+    await page.evaluate(`(async () => {
+      const workspace = globalThis.__boiteTest.workspace;
+      const local = workspace.machines[0].store;
+      const remote = workspace.machines[1];
+      local.localCore = true;
+      globalThis.quotaScopeCalls = [];
+      for (const machine of workspace.machines) {
+        const call = machine.store.client.call.bind(machine.store.client);
+        machine.store.client.call = (method, params) => {
+          if (method === 'quotas.list') globalThis.quotaScopeCalls.push(machine.id);
+          return call(method, params);
+        };
+      }
+      await workspace.select(remote.store, 't-trace');
+    })()`);
+    const scope = '[data-testid="quota-machine-scope"]';
+    if (width === 1280) await page.click('[data-testid="nav-limits"]');
+    else {
+      await page.click('[data-testid="nav-settings"]');
+      await page.click('[data-testid="settings-tab-limits"]');
+    }
+    await page.waitFor(`document.querySelector('${scope}')?.dataset.remote === 'true'`);
+    expect(await page.text(scope)).toContain('Remote machine');
+    expect(await page.text(scope)).toContain('Accounts on Builder');
+    const refresh = width === 1280 ? 'limits-glance-refresh' : 'limits-refresh';
+    await page.click(`[data-testid="${refresh}"]`);
+    await page.waitFor(`document.querySelector('[data-testid="${refresh}"]')?.getAttribute('aria-busy') === 'false'`);
+    expect(await page.evaluate('globalThis.quotaScopeCalls.every(id => id === "http://builder.test") && globalThis.quotaScopeCalls.length > 0')).toBe(true);
+    if (width === 1280) {
+      await capture(`quota-remote-glance-${width}.png`);
+      await page.click('[data-testid="limits-glance-page"]');
+    }
+    await page.waitFor(`document.querySelector('[data-testid="limits-page"] ${scope}')`);
+    expect(await page.text(`[data-testid="limits-page"] ${scope}`)).toContain('Accounts on Builder');
+    // A renamed machine remains identifiable even on a narrow phone.
+    await page.evaluate(`globalThis.__boiteTest.workspace.customize('http://builder.test', 'Build server for shared development projects')`);
+    await page.waitFor(`document.querySelector('${scope}')?.textContent.includes('Build server for shared development projects')`);
+    expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+    await capture(`quota-remote-page-${width}.png`);
+    await page.evaluate(`(async () => {
+      const workspace = globalThis.__boiteTest.workspace;
+      await workspace.select(workspace.machines[0].store);
+      workspace.active.showSettings('limits');
+    })()`);
+    await page.waitFor(`document.querySelector('[data-testid="limits-page"] ${scope}')?.dataset.remote === 'false'`);
+    expect(await page.text(scope)).not.toContain('Remote machine');
+    expect(await page.text(scope)).not.toContain('Build server');
+    expect(page.errors()).toEqual([]);
+    await page.evaluate(`localStorage.removeItem('boite.machine-profiles')`);
+  }
+}, 60_000);
+
 for (const view of ['tray', 'desktop', 'phone', 'sidebar']) {
   test(`${view} restores each quota bar as its account answers`, async () => {
     // Windows runners may request reduced motion at the OS level.
