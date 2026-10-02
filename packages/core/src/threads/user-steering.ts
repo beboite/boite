@@ -55,7 +55,7 @@ export async function steerUser(core: Core, threads: ThreadStore, params: RpcPar
     core.bus.afterCommit(() => core.journal.db.transaction(() => {
       core.journal.append({ type: 'message.started', threadId, version: 1, payload: message }, () => {
         core.journal.putMessage(message);
-        core.journal.db.query('UPDATE turn_requests SET fingerprint = ? WHERE thread_id = ? AND request_id = ?').run(`steer:accepted:${fingerprint}`, threadId, clientRequestId);
+        core.journal.db.query('UPDATE turn_requests SET fingerprint = ?, message_id = ? WHERE thread_id = ? AND request_id = ?').run(`steer:accepted:${fingerprint}`, message.id, threadId, clientRequestId);
       });
       core.bus.emit('message.started', message);
       core.bus.emit('message.completed', { threadId, messageId: message.id, state: 'complete' });

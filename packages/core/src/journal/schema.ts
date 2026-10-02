@@ -1,6 +1,9 @@
 import type { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
+import type { MessagePart } from '@boite/contracts';
+import { parseJson } from './rows.ts';
 
-export const SCHEMA_VERSION = 26;
+export const SCHEMA_VERSION = 27;
 
 /** Raised when the journal was written by a newer core than this one. */
 export class JournalTooNewError extends Error {
@@ -353,9 +356,46 @@ export function migrate(db: Database, file: string): void {
     db.exec('ALTER TABLE threads ADD COLUMN branch_naming_pending INTEGER NOT NULL DEFAULT 0');
     version = 26;
   }
-  version = Math.max(version, SCHEMA_VERSION);
   ensureIndexes(db);
+  if (!hasColumn('turn_requests', 'message_id')) {
+    db.exec('ALTER TABLE turn_requests ADD COLUMN message_id TEXT');
+    bindLegacyTurnRequests(db);
+    version = 27;
+  }
+  version = Math.max(version, SCHEMA_VERSION);
   if (row?.user_version !== version) db.exec(`PRAGMA user_version = ${version}`);
+}
+
+/** Old receipts lacked input identity. A hash match must name exactly one stored input. */
+function bindLegacyTurnRequests(db: Database): void {
+  const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const receipts = db.query('SELECT thread_id, request_id, turn_id, fingerprint FROM turn_requests').all() as {
+    thread_id: string; request_id: string; turn_id: string; fingerprint: string;
+  }[];
+  const messages = db.query("SELECT id, parts FROM messages WHERE thread_id = ? AND turn_id = ? AND role IN ('user', 'system')");
+  const bind = db.query('UPDATE turn_requests SET message_id = ? WHERE thread_id = ? AND request_id = ?');
+  for (const receipt of receipts) {
+    if (receipt.fingerprint.startsWith('steer:pending:') || receipt.fingerprint.startsWith('start:pending:')) continue;
+    const matches: string[] = [];
+    for (const row of messages.all(receipt.thread_id, receipt.turn_id) as { id: string; parts: string }[]) {
+      const parts = parseJson<MessagePart[]>(row.parts, `messages.parts row ${row.id}`);
+      const text = parts[0];
+      if (text?.type !== 'text' || parts.slice(1).some(part => part.type !== 'image' && part.type !== 'file')) continue;
+      const references = text.previewReferences ?? [];
+      const prompt = references.length ? text.displayText : text.text;
+      if (typeof prompt !== 'string') continue;
+      const attachments = parts.slice(1).map(part => {
+        if (part.type === 'file') return { kind: 'file', mimeType: part.mimeType, data: part.data, name: part.name };
+        if (part.type === 'image') return { kind: 'image', mimeType: part.mimeType, data: part.data, name: part.alt };
+        throw new Error('unexpected input attachment');
+      });
+      const fingerprint = receipt.fingerprint.startsWith('steer:accepted:')
+        ? `steer:accepted:${hash([receipt.turn_id, prompt, attachments, references])}`
+        : hash([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(references.length ? [references] : [])]);
+      if (fingerprint === receipt.fingerprint) matches.push(row.id);
+    }
+    if (matches.length === 1) bind.run(matches[0]!, receipt.thread_id, receipt.request_id);
+  }
 }
 
 /** Maintain lookup indexes in the same transaction as the schema they serve. */

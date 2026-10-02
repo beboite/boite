@@ -10,7 +10,7 @@ let h: TestCore;
 let restore: (() => void) | undefined;
 afterEach(async () => { await h?.stop(); restore?.(); });
 
-async function running() {
+async function running(clientRequestId?: string) {
   h = await startTestCore();
   const owner = await h.connect();
   const { threadId } = await echoThread(h, owner);
@@ -23,7 +23,7 @@ async function running() {
       async steer(text, images) { inputs.push({ text, images }); return true; } };
   } });
   const started = owner.next('turn.started', turn => turn.threadId === threadId);
-  const turn = await owner.call('turns.start', { threadId, prompt: 'Keep working' });
+  const turn = await owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId });
   await started;
   await waitFor(() => h.core.threads.runner.handles.has(threadId));
   return { owner, threadId, turn, inputs, context: () => ctx, finish: () => finish({ status: 'done', sessionId: 'native-session', usage: null, checkpoint: { sessionId: 'native-session', entry: 'after-follow-up' } }) };
@@ -125,6 +125,55 @@ test('uncertain provider submissions are never retried', async () => {
   const repeated = await owner.call('turns.steer', params).catch(error => error);
   expect(repeated.message).toContain('unconfirmed');
   expect(inputs).toHaveLength(1);
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  await owner.call('turns.stop', { threadId }); await completed;
+  await owner.call('threads.rewind', { threadId, messageId: h.core.journal.listMessages(threadId)[0]!.id });
+  await expect(owner.call('turns.steer', params)).rejects.toThrow('unconfirmed');
+  expect(inputs).toHaveLength(1);
+});
+
+test('rewinding a later follow-up preserves receipts for kept inputs and removes only cut inputs', async () => {
+  const { owner, threadId, turn, inputs, finish } = await running('original_request');
+  const kept = { threadId, turnId: turn.id, prompt: 'Keep this follow-up', clientRequestId: 'kept_request' };
+  const removed = { threadId, turnId: turn.id, prompt: 'Remove this follow-up', clientRequestId: 'removed_request' };
+  expect(await owner.call('turns.steer', kept)).toEqual({ accepted: true });
+  expect(await owner.call('turns.steer', removed)).toEqual({ accepted: true });
+  const messages = h.core.journal.listMessages(threadId);
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await completed;
+  await owner.call('threads.rewind', { threadId, messageId: messages.at(-1)!.id });
+  expect(h.core.journal.turnRequest(threadId, 'original_request')).not.toBeNull();
+  expect(h.core.journal.turnRequest(threadId, 'kept_request')).not.toBeNull();
+  expect(h.core.journal.turnRequest(threadId, 'removed_request')).toBeNull();
+  expect((await owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId: 'original_request' })).id).toBe(turn.id);
+  expect(await owner.call('turns.steer', kept)).toEqual({ accepted: true });
+  expect(await owner.call('turns.steer', removed)).toEqual({ accepted: false });
+  expect(inputs).toHaveLength(2);
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(h.core.journal.listMessages(threadId).map(message => message.id)).toEqual(messages.slice(0, -1).map(message => message.id));
+  await owner.call('threads.rewind', { threadId, messageId: messages[0]!.id });
+  expect(h.core.journal.turnRequest(threadId, 'original_request')).toBeNull();
+  expect(h.core.journal.turnRequest(threadId, 'kept_request')).toBeNull();
+  const retry = await owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId: 'original_request' });
+  expect(retry.id).not.toBe(turn.id);
+});
+
+test('cutting unbound legacy inputs returns delivery uncertainty instead of acknowledging or replaying them', async () => {
+  const { owner, threadId, turn, inputs, finish } = await running('legacy_original');
+  const kept = { threadId, turnId: turn.id, prompt: 'Keep working', clientRequestId: 'legacy_kept' };
+  const removed = { ...kept, clientRequestId: 'legacy_removed' };
+  expect(await owner.call('turns.steer', kept)).toEqual({ accepted: true });
+  expect(await owner.call('turns.steer', removed)).toEqual({ accepted: true });
+  // Duplicate input content cannot identify these old receipts unambiguously during migration.
+  h.core.journal.db.query('UPDATE turn_requests SET message_id = NULL WHERE thread_id = ? AND request_id IN (?, ?)').run(threadId, 'legacy_original', 'legacy_removed');
+  const completed = owner.next('turn.finished', item => item.id === turn.id);
+  finish(); await completed;
+  await owner.call('threads.rewind', { threadId, messageId: h.core.journal.listMessages(threadId).at(-1)!.id });
+  await expect(owner.call('turns.start', { threadId, prompt: 'Keep working', clientRequestId: 'legacy_original' })).rejects.toThrow('unconfirmed');
+  await expect(owner.call('turns.steer', removed)).rejects.toThrow('unconfirmed');
+  expect(await owner.call('turns.steer', kept)).toEqual({ accepted: true });
+  expect(h.core.journal.listTurns(threadId)).toHaveLength(1);
+  expect(inputs).toHaveLength(2);
 });
 
 test('forking or editing a follow-up cannot resume a checkpoint beyond its message', async () => {

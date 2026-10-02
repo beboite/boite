@@ -417,8 +417,8 @@ export class Journal {
     return this.db.query('SELECT fingerprint, turn_id FROM turn_requests WHERE thread_id = ? AND request_id = ?').get(threadId, requestId) as { fingerprint: string; turn_id: string } | null;
   }
 
-  putTurnRequest(threadId: string, requestId: string, fingerprint: string, turnId: string): void {
-    this.db.query('INSERT INTO turn_requests (thread_id, request_id, fingerprint, turn_id) VALUES (?, ?, ?, ?)').run(threadId, requestId, fingerprint, turnId);
+  putTurnRequest(threadId: string, requestId: string, fingerprint: string, turnId: string, messageId: string | null = null): void {
+    this.db.query('INSERT INTO turn_requests (thread_id, request_id, fingerprint, turn_id, message_id) VALUES (?, ?, ?, ?, ?)').run(threadId, requestId, fingerprint, turnId, messageId);
   }
 
   listTurns(threadId?: string): Turn[] {
@@ -636,14 +636,22 @@ export class Journal {
 
   /**
    * Deletes the message at `fromRowid` and every later one of the thread, and
-   * the request keys of their turns, so a retried `clientRequestId` cannot
-   * hand back a turn that left the conversation. The turn rows stay: their
+   * the request keys bound to removed inputs. Kept inputs retain their retry
+   * receipts; unidentifiable legacy inputs retain replay protection without
+   * acknowledging delivery. The turn rows stay: their
    * usage was spent. Returns what went, oldest first. Run inside `append`.
    */
   truncateMessages(threadId: string, fromRowid: number): { messageIds: string[]; turnIds: string[] } {
     const removed = this.messageIdsFrom(threadId, fromRowid);
+    this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND message_id IN (SELECT id FROM messages WHERE thread_id = ? AND rowid >= ?)').run(threadId, threadId, fromRowid);
     this.db.query('DELETE FROM messages WHERE thread_id = ? AND rowid >= ?').run(threadId, fromRowid);
-    for (const turnId of removed.turnIds) this.db.query('DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ?').run(threadId, turnId);
+    for (const turnId of removed.turnIds) {
+      // An unknown accepted follow-up might be the removed input. Never acknowledge it again.
+      this.db.query("UPDATE turn_requests SET fingerprint = replace(fingerprint, 'steer:accepted:', 'steer:pending:') WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint LIKE 'steer:accepted:%'").run(threadId, turnId);
+      // Pending native submissions have no journaled message and remain unsafe to replay even after a full cut.
+      this.db.query("DELETE FROM turn_requests WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint NOT LIKE 'steer:%' AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ? AND turn_id = ? AND role IN ('user', 'system'))").run(threadId, turnId, threadId, turnId);
+      this.db.query("UPDATE turn_requests SET fingerprint = 'start:pending:' || fingerprint WHERE thread_id = ? AND turn_id = ? AND message_id IS NULL AND fingerprint NOT LIKE 'steer:%' AND fingerprint NOT LIKE 'start:pending:%'").run(threadId, turnId);
+    }
     return removed;
   }
 

@@ -676,6 +676,7 @@ export class ThreadStore {
       fingerprint = createHash('sha256').update(JSON.stringify([prompt, attachments.map(a => [a.kind, a.mimeType, a.data, a.name]), ...(previewReferences.length ? [previewReferences] : [])])).digest('hex');
       const existing = this.core.journal.turnRequest(threadId, clientRequestId);
       if (existing) {
+        if (existing.fingerprint === `start:pending:${fingerprint}`) throw refused('delivery of this message is unconfirmed; it will not be submitted again automatically', { reason: 'delivery-uncertain', threadId });
         if (existing.fingerprint !== fingerprint) throw refused('clientRequestId was already used for different content');
         const accepted = this.core.journal.getTurn(existing.turn_id);
         if (accepted) return accepted;
@@ -754,7 +755,7 @@ export class ThreadStore {
           if (!operation && !nativeCommandPrompt(prompt)) this.deferred.recordHeldBeforePrompt(threadId, turn.id, now);
           this.core.journal.putMessage(message);
           if (moved) this.core.journal.deleteSetting(`${MOVE_NOTE_PREFIX}${threadId}`);
-          if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id);
+          if (clientRequestId) this.core.journal.putTurnRequest(threadId, clientRequestId, fingerprint, turn.id, message.id);
         });
         const dismissal = !activity && !operation ? this.core.activity.prepareUserPrompt(threadId) : undefined;
         this.core.bus.emit('message.started', message);

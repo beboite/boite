@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import type { Message } from '@boite/contracts';
@@ -38,6 +39,49 @@ afterEach(() => {
 });
 
 describe('journal', () => {
+  test('legacy input receipts bind only exact unique messages and ambiguous cuts retain replay protection after reopen', () => {
+    const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const input = (id: string, text: string): Message => ({ ...sampleMessage(id), role: 'user', state: 'complete', parts: [{ type: 'text', text }] });
+    journal.putMessage(input('held-answer', 'An earlier held answer'));
+    journal.putMessage(input('original', 'Original prompt'));
+    journal.putMessage(input('kept-steer', 'Kept follow-up'));
+    journal.putMessage(input('unique-cut-steer', 'Removed follow-up'));
+    journal.putMessage(input('cut-steer', 'Ambiguous follow-up'));
+    journal.putMessage(input('other-cut-steer', 'Ambiguous follow-up'));
+    journal.putTurnRequest('thr_test', 'original_request', hash(['Original prompt', []]), 'trn_test');
+    journal.putTurnRequest('thr_test', 'kept_request', `steer:accepted:${hash(['trn_test', 'Kept follow-up', [], []])}`, 'trn_test');
+    journal.putTurnRequest('thr_test', 'removed_request', `steer:accepted:${hash(['trn_test', 'Removed follow-up', [], []])}`, 'trn_test');
+    const ambiguous = hash(['trn_test', 'Ambiguous follow-up', [], []]);
+    journal.putTurnRequest('thr_test', 'ambiguous_request', `steer:accepted:${ambiguous}`, 'trn_test');
+    journal.putTurnRequest('thr_test', 'uncertain_request', 'steer:pending:uncertain', 'trn_test');
+    journal.putTurnRequest('thr_test', 'unknown_start', 'unrecoverable-start-fingerprint', 'trn_test');
+    if (journal.db.query("SELECT name FROM pragma_table_info('turn_requests') WHERE name = 'message_id'").get()) journal.db.exec('ALTER TABLE turn_requests DROP COLUMN message_id');
+    journal.db.exec('PRAGMA user_version = 26');
+    journal.close(); journal = new Journal(file);
+    const bindings = journal.db.query('SELECT request_id, message_id FROM turn_requests ORDER BY request_id').all();
+    expect(bindings).toEqual([
+      { request_id: 'ambiguous_request', message_id: null }, { request_id: 'kept_request', message_id: 'kept-steer' },
+      { request_id: 'original_request', message_id: 'original' }, { request_id: 'removed_request', message_id: 'unique-cut-steer' },
+      { request_id: 'uncertain_request', message_id: null },
+      { request_id: 'unknown_start', message_id: null },
+    ]);
+    const cut = journal.db.query('SELECT rowid FROM messages WHERE id = ?').get('unique-cut-steer') as { rowid: number };
+    journal.append({ type: 'thread.rewound', threadId: 'thr_test', version: 1, payload: {} }, () => journal.truncateMessages('thr_test', cut.rowid));
+    journal.close(); journal = new Journal(file);
+    expect(journal.turnRequest('thr_test', 'original_request')?.fingerprint).toBe(hash(['Original prompt', []]));
+    expect(journal.turnRequest('thr_test', 'kept_request')?.fingerprint).toBe(`steer:accepted:${hash(['trn_test', 'Kept follow-up', [], []])}`);
+    expect(journal.turnRequest('thr_test', 'removed_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'ambiguous_request')?.fingerprint).toBe(`steer:pending:${ambiguous}`);
+    expect(journal.turnRequest('thr_test', 'uncertain_request')?.fingerprint).toBe('steer:pending:uncertain');
+    expect(journal.turnRequest('thr_test', 'unknown_start')?.fingerprint).toBe('start:pending:unrecoverable-start-fingerprint');
+    journal.append({ type: 'thread.rewound', threadId: 'thr_test', version: 1, payload: {} }, () => journal.truncateMessages('thr_test', 0));
+    expect(journal.turnRequest('thr_test', 'original_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'kept_request')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'unknown_start')).toBeNull();
+    expect(journal.turnRequest('thr_test', 'ambiguous_request')?.fingerprint).toBe(`steer:pending:${ambiguous}`);
+    expect(journal.turnRequest('thr_test', 'uncertain_request')?.fingerprint).toBe('steer:pending:uncertain');
+  });
+
   test.each([0, 25])('index failure rolls back schema %i and a later open retries the entire migration', (version) => {
     const target = join(dir, 'index-failure.db');
     const indexes = ['thread_deletions_by_date', 'processes_by_started', 'turns_by_status', 'messages_by_turn', 'turns_by_finished'];

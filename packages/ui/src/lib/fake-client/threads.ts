@@ -526,9 +526,10 @@ export function threadMethods(ctx: FakeContext) {
         const config = delegationConfig(ctx, rootId);
         if (!config.enabled || config.paused) throw new RpcFailure({ code: RpcErrorCode.Refused, message: 'delegation is disabled or paused' });
       }
+      const messageIndex = thread.messages.length;
       const turn = ctx.startTurn(params.threadId, params.prompt, params.attachments ?? [], rootId ? 'delegation' : undefined, undefined, undefined, params.previewReferences ?? []);
       if (rootId) ctx.delegationTurns.set(rootId, (ctx.delegationTurns.get(rootId) ?? 0) + 1);
-      if (key) ctx.turnRequests.set(key, { content, turn });
+      if (key) ctx.turnRequests.set(key, { content, turn, messageId: thread.messages[messageIndex]!.id });
       return turn;
     },
     'threads.compact': async (params) => {
@@ -563,11 +564,11 @@ export function threadMethods(ctx: FakeContext) {
         if (origin.cwd === here.cwd) ctx.moveNotes.delete(thread.id);
         else ctx.moveNotes.set(thread.id, { from: origin, to: here, note: fakeMoveNote(origin, here, thread.branch), at: ctx.now() });
       }
-      const gone = new Set(removed.map((entry) => entry.turnId));
+      const gone = new Set(removed.map((entry) => entry.id));
       const kept = new Set(thread.messages.map(entry => entry.turnId));
       thread.turns = thread.turns.filter((turn) => kept.has(turn.id));
       for (const [key, request] of ctx.turnRequests) {
-        if (key.startsWith(`${thread.id}:`) && gone.has(request.turn.id)) ctx.turnRequests.delete(key);
+        if (key.startsWith(`${thread.id}:`) && gone.has(request.messageId)) ctx.turnRequests.delete(key);
       }
       thread.sessionId = null;
       thread.sessionGeneration = (thread.sessionGeneration ?? 0) + 1;

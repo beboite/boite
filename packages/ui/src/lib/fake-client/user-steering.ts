@@ -38,7 +38,7 @@ export async function steerUser(ctx: FakeContext, params: RpcParams<'turns.steer
   ] };
   thread.messages.push(message);
   (running.steered ??= []).push({ prompt: previewPrompt(params.prompt, references), attachments });
-  ctx.turnRequests.set(key, { content, turn });
+  ctx.turnRequests.set(key, { content, turn, messageId: message.id });
   ctx.emitToThread(thread.id, 'message.started', structuredClone(message));
   ctx.emitToThread(thread.id, 'message.completed', { threadId: thread.id, messageId: message.id, state: 'complete' });
   thread.lastUserMessageAt = message.createdAt;

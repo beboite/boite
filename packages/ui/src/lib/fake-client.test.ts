@@ -122,16 +122,29 @@ test('moving a fake thread drops PR metadata from its previous branch', async ({
 
 test('rewinding a live follow-up keeps the turn belonging to earlier messages', async ({ createClient }) => {
   const client = await createClient({ delayMs: 5 });
-  const turn = await client.call('turns.start', { threadId: 't-trace', prompt: '[tools] Keep reading' });
+  const original = { threadId: 't-trace', prompt: '[tools] Keep reading', clientRequestId: 'rewind_original' };
+  const turn = await client.call('turns.start', original);
+  const kept = { threadId: 't-trace', turnId: turn.id, prompt: 'Keep this instruction', clientRequestId: 'rewind_kept_input' };
+  expect(await client.call('turns.steer', kept)).toEqual({ accepted: true });
   const params = { threadId: 't-trace', turnId: turn.id, prompt: 'Change direction', clientRequestId: 'rewind_follow_up' };
   expect(await client.call('turns.steer', params)).toEqual({ accepted: true });
   await client.settled();
   const target = (await client.call('threads.get', { threadId: 't-trace' })).messages.at(-1)!;
   const rewound = await client.call('threads.rewind', { threadId: 't-trace', messageId: target.id });
   expect(rewound.thread.turns.some(item => item.id === turn.id)).toBe(true);
-  expect(rewound.thread.messages.filter(message => message.role === 'user' && message.turnId === turn.id)).toHaveLength(1);
+  expect(rewound.thread.messages.filter(message => message.role === 'user' && message.turnId === turn.id)).toHaveLength(2);
+  expect((await client.call('turns.start', original)).id).toBe(turn.id);
+  expect(await client.call('turns.steer', kept)).toEqual({ accepted: true });
+  await expect(client.call('turns.start', { ...original, prompt: 'Different input' })).rejects.toThrow('different content');
+  const retained = await client.call('threads.get', { threadId: 't-trace' });
+  expect(retained.turns.filter(item => item.id === turn.id)).toHaveLength(1);
+  expect(retained.messages.filter(message => message.role === 'user' && message.turnId === turn.id)).toHaveLength(2);
   // As on the core, the receipt for the removed input no longer acknowledges it.
   expect(await client.call('turns.steer', params)).toEqual({ accepted: false });
+  const prompt = retained.messages.find(message => message.role === 'user' && message.turnId === turn.id)!;
+  await client.call('threads.rewind', { threadId: 't-trace', messageId: prompt.id });
+  expect((await client.call('turns.start', original)).id).not.toBe(turn.id);
+  await client.settled();
 });
 
 test('fake agent receives selected element context while the visible prompt stays compact', async ({ createClient }) => {

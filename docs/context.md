@@ -233,6 +233,10 @@ messages, so `threads.get` and `messages.list` no longer return them. The turn
 rows stay, so the usage history still counts what they spent. Every subscribed
 client gets `message.truncated` and drops the message and what follows it.
 
+Retry receipts follow individual input messages: an edit preserves receipts for
+kept prompts and invalidates those for removed prompts. An older receipt whose
+input cannot be identified reports uncertain delivery instead of replaying it.
+
 The composer keeps an edit if a turn starts before it is sent: the rewind
 refusal leaves its text intact instead of queuing a duplicate. Navigating while
 the rewind is pending still sends the replacement to the original thread on
