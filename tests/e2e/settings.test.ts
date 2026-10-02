@@ -203,7 +203,13 @@ test('the compact quota page shows limits and reset times', async () => {
   const listed = await page.evaluate<string[]>(`Array.from(document.querySelectorAll('${id('quota-provider')}')).map(el => el.dataset.provider)`);
   expect(listed).toEqual(expect.arrayContaining(['claude', 'codex', 'grok', 'opencode']));
   for (const absent of ['antigravity', 'echo', 'pi']) expect(listed).not.toContain(absent);
-  expect(await page.evaluate(`document.querySelector('${id('quota-popup')}').textContent`)).toContain('Resets');
+  const resets = await page.evaluate<{ text: string; title: string; icon: boolean }[]>(`[...document.querySelectorAll('${id('quota-popup')} .summary .reset')].map(el => ({ text: el.textContent.trim(), title: el.title, icon: !!el.querySelector('svg[aria-hidden="true"]') }))`);
+  expect(resets.length).toBeGreaterThan(0);
+  for (const reset of resets) {
+    expect(reset.text).toMatch(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d{1,2}:\d{2}(?:\s*[AP]M)?$/);
+    expect(reset.title).toMatch(/^Resets /);
+    expect(reset.icon).toBe(true);
+  }
   expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
   // Unfolded, an account lists each window with its own bar; there is nothing to set here.
   await page.click('[data-provider="claude"] .summary');

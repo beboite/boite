@@ -48,9 +48,19 @@ export function namedQuotas(rows: AccountQuota[], accounts?: Account[]): Account
   });
 }
 
-/** Older default CLI accounts predate provider-named account labels. */
+/** Keep the associated profile's chosen name, including a profile named Default. */
 export function quotaAccountName(row: AccountQuota): string {
-  return row.label === 'Default' || !row.label.trim() ? row.providerName : row.label;
+  return row.label.trim() ? row.label : row.providerName;
+}
+
+/** A reported wallet, or an enabled budget after this subscription ran out. */
+export function quotaCredits(row: AccountQuota) {
+  const credits = row.credits;
+  if (!row.enabled || row.status !== 'ready' || !credits || credits.remaining === null ||
+    !Number.isFinite(credits.remaining) || credits.remaining <= 0) return null;
+  if (credits.kind === 'balance') return credits.enabled === false ? null : credits;
+  return row.windows.some((window) => window.usedPercent >= 100) && credits.enabled === true &&
+    credits.limit !== null && Number.isFinite(credits.limit) && credits.limit > 0 ? credits : null;
 }
 
 export class QuotaReader {

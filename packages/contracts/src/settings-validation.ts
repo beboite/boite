@@ -83,6 +83,13 @@ export function checkSettingsPatch(patch: Partial<Settings>): SettingsPatchCheck
   // Older clients and saved settings may still carry the retired launch limits.
   Reflect.deleteProperty(next, 'maxConcurrentTurns');
   Reflect.deleteProperty(next, 'perAccountConcurrency');
+  if (patch.quotaOrder !== undefined) {
+    const order = patch.quotaOrder;
+    if (!Array.isArray(order) || order.length > 512 || order.some((id) => typeof id !== 'string' || !id.trim() || id.length > 200)) {
+      return { ok: false, field: 'quotaOrder', message: 'quotaOrder must contain at most 512 non-empty account ids of at most 200 characters' };
+    }
+    next.quotaOrder = [...new Set(order)];
+  }
   if (patch.worktreeStorage !== undefined) {
     const storage = patch.worktreeStorage;
     if (!storage || typeof storage !== 'object' || !['project', 'shared'].includes(storage.mode)) {

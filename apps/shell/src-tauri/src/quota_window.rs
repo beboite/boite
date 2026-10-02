@@ -391,12 +391,13 @@ pub async fn quota_window(app: AppHandle, webview: Webview, action: String) -> R
             if let Some(window) = app.get_webview_window(LABEL) { hide(&app, &window).map_err(|e| e.to_string())?; }
             Ok(())
         }
-        "providers" => {
+        "providers" | "limits" => {
             if let Some(window) = app.get_webview_window(LABEL) { let _ = hide(&app, &window); }
             crate::window::show_main(&app);
-            app.emit_to(crate::browser::MAIN_LABEL, "tray://providers", ()).map_err(|e| e.to_string())
+            let event = if action == "limits" { "tray://limits" } else { "tray://providers" };
+            app.emit_to(crate::browser::MAIN_LABEL, event, ()).map_err(|e| e.to_string())
         }
-        _ => Err("quota window action must be show, hide or providers".into()),
+        _ => Err("quota window action must be show, hide, providers or limits".into()),
     }
 }
 

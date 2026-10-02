@@ -59,6 +59,7 @@ const waitingApproval = new Map<string, (choiceId: string) => void>();
 const waitingInput = new Map<string, (answers: unknown[] | null) => void>();
 /** The `[steer]` turn waiting for a `turn/steer` that names it. */
 const waitingSteer = new Map<string, (text: string) => void>();
+let outputBatch: string[] | null = null;
 
 function log(line: string): void {
   const file = process.env['MUSE_FAKE_LOG'];
@@ -67,7 +68,21 @@ function log(line: string): void {
 }
 
 function send(payload: Record<string, unknown>): void {
-  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...payload })}\n`);
+  const line = `${JSON.stringify({ jsonrpc: '2.0', ...payload })}\n`;
+  if (outputBatch !== null) outputBatch.push(line);
+  else process.stdout.write(line);
+}
+
+/** A host may write its acknowledgement and the following item in one pipe chunk. */
+function batchSteerOutput(): void {
+  if (outputBatch !== null) return;
+  outputBatch = [];
+  setImmediate(() => {
+    const lines = outputBatch ?? [];
+    outputBatch = null;
+    process.stdout.write(lines.join(''));
+    log('steer response and output batched');
+  });
 }
 
 function notify(method: string, params: Record<string, unknown>): void {
@@ -428,9 +443,10 @@ function handle(method: string, raw: unknown): unknown {
       // The real host refuses a turn that is no longer active.
       const waiter = waitingSteer.get(expected);
       if (waiter === undefined) throw new Error(`turn ${expected} is not active`);
-      setTimeout(() => {
+      batchSteerOutput();
+      queueMicrotask(() => {
         waiter(text);
-      }, 0);
+      });
       return { turnId: expected };
     }
     case 'approval/decide': {

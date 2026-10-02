@@ -1,12 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowRight, Gauge, RefreshCw } from '@lucide/svelte';
+  import { Gauge } from '@lucide/svelte';
   import { Closing } from '../lib/closing.svelte';
   import { floating } from '../lib/floating';
   import { quotaReader, shownQuotas } from '../lib/quota-reader.svelte';
   import type { Store } from '../lib/store.svelte';
-  import { fill, strings } from '../lib/strings';
-  import QuotaOverview from './QuotaOverview.svelte';
+  import { strings } from '../lib/strings';
+  import QuotaPopup from './QuotaPopup.svelte';
 
   /**
    * The sidebar's gauge: the tray's glance at every account's subscription
@@ -75,49 +75,15 @@
 
 {#if popover.shown}
   <div class="glance" class:closing={popover.closing} bind:this={content} role="dialog" tabindex="-1" aria-label={strings.quotas.glance} data-testid="limits-glance" {onkeydown}
-    use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close }}>
-    <header>
-      <h2>{strings.quotas.glance}</h2>
-      {#if store.owner}
-        <button type="button" class="ghost icon" aria-label={strings.quotas.refresh} title={strings.quotas.refresh} aria-busy={reader.loading} data-testid="limits-glance-refresh" onclick={() => read(true)}><RefreshCw size={14} class={reader.loading ? 'spinning' : ''} /></button>
-      {/if}
-    </header>
-    <div class="body">
-      {#if !store.owner}
-        <p class="muted">{strings.usage.limitsOwner}</p>
-      {:else}
-        <!-- A failed read says so; rows read before it stay below, and no reading at all never passes for "no provider". -->
-        {#if failed}
-          <div class="failed" role="alert" data-testid="limits-glance-error">
-            <p>{fill(strings.quotas.readFailed, { error: failed })}</p>
-            <button type="button" class="ghost small" disabled={reader.loading} data-testid="limits-glance-retry" onclick={() => read(true)}>{strings.quotas.retry}</button>
-          </div>
-        {/if}
-        {#if rows === null}
-          <p class="muted" role="status">{strings.quotas.loading}</p>
-        {:else if !(failed && rows.length === 0)}
-          <QuotaOverview {rows} loading={reader.loading} completed={reader.completed} connect={() => page('accounts')} />
-        {/if}
-      {/if}
-    </div>
-    <footer>
-      <button type="button" class="ghost small" data-testid="limits-glance-page" onclick={() => page('limits')}>{strings.quotas.allLimits}<ArrowRight size={13} /></button>
-    </footer>
+    use:popover.attach onanimationend={popover.end} use:floating={{ anchor: () => trigger ?? null, dismiss: close, cap: 460 }}>
+    <QuotaPopup {rows} loading={reader.loading} completed={reader.completed} error={failed} owner={store.owner}
+      order={store.settings?.quotaOrder ?? []} reorder={(quotaOrder) => store.saveSettings({ quotaOrder })}
+      refresh={() => read(true)} connect={() => page('accounts')} settings={() => page('limits')} {close} testPrefix="limits-glance" />
   </div>
 {/if}
 
 <style>
-  .glance { display: flex; flex-direction: column; width: 320px; padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
+  .glance { display: flex; flex-direction: column; width: 360px; padding: 0; color: var(--color-foreground); background: var(--color-surface-2); border: 1px solid var(--color-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow-e2); overflow: hidden; animation: pop var(--dur-2) var(--ease-out-quint); }
   .glance.closing { animation-name: pop-out; pointer-events: none; }
-  header, footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 14px; }
-  header { border-bottom: 1px solid var(--color-border); }
-  footer { justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--color-border); }
-  h2 { margin: 0; font-size: var(--text-sm); font-weight: 600; }
-  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 5px 10px; }
-  .failed { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 4px; color: var(--color-danger); font-size: var(--text-sm); }
-  .failed p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-  .muted { margin: 0; padding: 14px 4px; color: var(--color-muted-foreground); font-size: var(--text-sm); }
-  header :global(.spinning) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { header :global(.spinning) { animation: none; } }
+  .glance :global(.quota-popup) { flex: 1; }
 </style>

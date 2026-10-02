@@ -80,6 +80,7 @@ export class MspError extends Error {
 
 interface Pending {
   method: string;
+  onAccepted?(): void;
   resolve(value: unknown): void;
   reject(error: Error): void;
 }
@@ -108,7 +109,7 @@ export class MuseRpc {
     child.stdin.on('error', () => undefined);
   }
 
-  request<T>(method: string, params: unknown): Promise<T> {
+  request<T>(method: string, params: unknown, onAccepted?: () => void): Promise<T> {
     const id = this.nextId;
     this.nextId += 1;
     return new Promise<T>((resolve, reject) => {
@@ -116,14 +117,14 @@ export class MuseRpc {
         reject(new Error(`the muse host is gone, ${method} was not sent`));
         return;
       }
-      this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject });
+      this.pending.set(id, { method, onAccepted, resolve: resolve as (value: unknown) => void, reject });
       this.write({ jsonrpc: '2.0', id, method, params });
     });
   }
 
   /** A command: a request whose params carry a fresh `commandId`. */
-  command<T>(method: string, params: Record<string, unknown>): Promise<T> {
-    return this.request<T>(method, { commandId: mintUuidV7(), ...params });
+  command<T>(method: string, params: Record<string, unknown>, onAccepted?: () => void): Promise<T> {
+    return this.request<T>(method, { commandId: mintUuidV7(), ...params }, onAccepted);
   }
 
   notify(method: string, params: unknown): void {
@@ -190,7 +191,13 @@ export class MuseRpc {
       entry.reject(mspErrorOf(entry.method, error));
       return;
     }
-    entry.resolve(message['result']);
+    try {
+      // Promise continuations run after every notification in this pipe chunk.
+      entry.onAccepted?.();
+      entry.resolve(message['result']);
+    } catch (error) {
+      entry.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
 
