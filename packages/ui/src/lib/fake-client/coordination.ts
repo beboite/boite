@@ -1,6 +1,7 @@
 /** Coordination between threads, on this core and on the other fake cores it trusts. */
 import { defaultCoordinationConfig, RpcErrorCode, type AgentContact, type AgentLetter, type AgentMatch, type CoordinationConfig, type CoordinationView, type Thread, type ThreadId } from '@boite/contracts';
 import { RpcFailure } from '../client';
+import { archiveProject } from './project-archive';
 import type { FakeContext, FakeMethods } from './context';
 
 /** Every fake core of this page by id, what a remote letter or directory reaches. */
@@ -39,7 +40,9 @@ function contactOf(ctx: FakeContext, thread: Thread, coreId: string, machine: st
   const project = ctx.projects.find(entry => entry.id === thread.projectId);
   return {
     coreId, threadId: thread.id, title: thread.title, machine, resources: config.resources, status: thread.status, mode: config.mode,
-    ...(project ? { project: project.name } : {}), agent: `${thread.providerId}${thread.model ? ` ${thread.model}` : ''}`, branch: thread.branch, activeAt: thread.updatedAt
+    ...(project ? { project: project.name } : {}), agent: `${thread.providerId}${thread.model ? ` ${thread.model}` : ''}`, branch: thread.branch, activeAt: thread.updatedAt,
+    lastCompletedAt: thread.turns.findLast(turn => turn.status === 'done' && turn.finishedAt !== null)?.finishedAt ?? null,
+    projectArchived: project?.archived === true, paused: config.paused
   };
 }
 
@@ -70,6 +73,29 @@ function reachable(ctx: FakeContext, threadId: ThreadId): { contact: AgentContac
   return found;
 }
 
+/** Fake delivery is immediate, but it still respects pauses and restores the owning project. */
+function deliverPending(ctx: FakeContext, threadId: ThreadId): void {
+  const thread = ctx.thread(threadId);
+  const config = coordinationConfig(ctx, threadId);
+  if (thread.archived || config.mode === 'off' || config.paused || ['error', 'waiting', 'queued'].includes(thread.status)) return;
+  for (const letter of ctx.letters.get(threadId) ?? []) {
+    if (letter.status !== 'received' || letter.to.coreId !== ctx.identity.coreId || letter.to.threadId !== threadId) continue;
+    if (letter.expiresAt <= ctx.now()) { letter.status = 'expired'; continue; }
+    const sender = cores.get(letter.from.coreId);
+    const source = sender?.threads.get(letter.from.threadId);
+    if (!sender || !source) continue;
+    const sourceConfig = coordinationConfig(sender, source.id);
+    if (sourceConfig.mode === 'off') continue;
+    const sameProject = sender === ctx && source.projectId === thread.projectId;
+    if (!sameProject && !(config.remote && sourceConfig.remote)) continue;
+    if (sender !== ctx && !(ctx.peers.has(sender.identity.coreId) && sender.peers.has(ctx.identity.coreId))) continue;
+    if (thread.projectId !== null && ctx.projects.find(project => project.id === thread.projectId)?.archived) archiveProject(ctx, thread.projectId, false);
+    letter.status = 'delivered';
+    sender.emit('collaboration.changed', { threadId: source.id });
+    ctx.emit('collaboration.changed', { threadId });
+  }
+}
+
 export function coordinationMethods(ctx: FakeContext) {
   return {
     'collaboration.get': async (params) => {
@@ -85,6 +111,7 @@ export function coordinationMethods(ctx: FakeContext) {
         throw new RpcFailure({ code: RpcErrorCode.InvalidParams, message: 'config: expected mode, resources, remote and paused' });
       }
       ctx.coordination.set(threadId, { ...config, resources: config.resources.trim() });
+      deliverPending(ctx, threadId);
       ctx.emit('collaboration.changed', { threadId });
       return coordinationView(ctx, threadId);
     },
@@ -135,16 +162,7 @@ export function coordinationMethods(ctx: FakeContext) {
       }
       const letter: AgentLetter = {
         id: params.requestId,
-        from: {
-          coreId: ctx.identity.coreId,
-          threadId: source.id,
-          title: source.title,
-          project: ctx.projects.find(project => project.id === source.projectId)?.name,
-          machine: ctx.identity.name,
-          resources: config.resources,
-          status: source.status,
-          mode: config.mode
-        },
+        from: contactOf(ctx, source, ctx.identity.coreId, ctx.identity.name),
         to: params.to,
         toTitle: target?.title ?? ctx.peers.get(params.to.coreId)?.name ?? params.to.threadId,
         toProject: destination!.projects.find(project => project.id === target.projectId)?.name,
@@ -153,13 +171,14 @@ export function coordinationMethods(ctx: FakeContext) {
         replyTo: params.replyTo ?? null,
         createdAt: ctx.now(),
         expiresAt: ctx.now() + 15 * 60_000,
-        status: 'delivered',
+        status: 'received',
         error: null
       };
       ctx.letters.set(source.id, [...(ctx.letters.get(source.id) ?? []), letter]);
       ctx.emit('collaboration.changed', { threadId: source.id });
       destination!.letters.set(target.id, [...(destination!.letters.get(target.id) ?? []), letter]);
       destination!.emit('collaboration.changed', { threadId: target.id });
+      deliverPending(destination!, target.id);
       return structuredClone(letter);
     },
     'collaboration.search': async (params) => {
